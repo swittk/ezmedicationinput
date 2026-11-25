@@ -61,6 +61,7 @@ export interface InstructionActionLocaleAdapter {
   sequenceSeparator(): string;
   continuationText(text: string, understood: boolean): string;
   withAuthoredDirections?(current: string, source: string): string;
+  directTime?(time: string): string;
 }
 
 const ADAPTERS = new Map<string, InstructionActionLocaleAdapter>();
@@ -452,6 +453,7 @@ function renderThaiRelationDuration(c: InstructionActionRealizationInput): strin
 }
 
 function thaiDirectTime(time: string): string {
+  if (/^[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?$/.test(time)) return ` เวลา ${time}`;
   return time === "กลางคืน" ? "ตอนกลางคืน"
     : time === "นอน" || time === "bedtime" ? "ก่อนนอน" : time;
 }
@@ -604,6 +606,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
 
 const EN_ADAPTER: InstructionActionLocaleAdapter = {
   locale: "en",
+  directTime: englishDirectTime,
   withAuthoredDirections: ENGLISH_COURSE.withAuthoredDirections,
   selectLexicalRealization(input) {
     if (!input.time || (input.frame.predicate.realizer ?? input.definition?.realizer) !== "amount-material-destination")
@@ -673,6 +676,7 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
 
 const TH_ADAPTER: InstructionActionLocaleAdapter = {
   locale: "th",
+  directTime: thaiDirectTime,
   withAuthoredDirections: THAI_COURSE.withAuthoredDirections,
   selectLexicalRealization(input) {
     if (input.time && (input.frame.predicate.realizer ?? input.definition?.realizer) === "amount-material-destination") {

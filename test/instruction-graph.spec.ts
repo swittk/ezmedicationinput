@@ -8206,3 +8206,124 @@ describe("round74 event daughters beside an oral procedure duration", () => {
     }
   });
 });
+
+
+describe("round75 coordinated Time daughters", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const afterBreakfast = ["CM", AdviceRelation.After, "after breakfast", "หลังอาหารเช้า"] as const;
+  const afterDinner = ["CV", AdviceRelation.After, "after dinner", "หลังอาหารเย็น"] as const;
+  const bedtime = ["HS", AdviceRelation.On, "at bedtime", "ก่อนนอน"] as const;
+  it.each([
+    ["Rinse mouth 15 mL for 30 seconds after breakfast and after dinner", "en", 15, 30, [afterBreakfast, afterDinner]],
+    ["Rinse mouth 15 mL for 30 seconds after breakfast and at bedtime", "en", 15, 30, [afterBreakfast, bedtime]],
+    ["บ้วนปาก 15 มล. นาน 30 วินาที หลังอาหารเช้า และ ก่อนนอน", "th", 15, 30,
+      [afterBreakfast, ["HS", AdviceRelation.Before, "before sleep", "ก่อนนอน"]]],
+    ["Swish 10 mL for 30 seconds after breakfast and dinner", "en", 10, 30, [afterBreakfast, afterDinner]],
+    ["Rinse mouth 15 mL for 30 seconds before breakfast, after lunch and dinner", "en", 15, 30,
+      [["CM", AdviceRelation.Before, "before breakfast", "ก่อนอาหารเช้า"],
+        ["CD", AdviceRelation.After, "after lunch", "หลังอาหารกลางวัน"], afterDinner]],
+    ["Rinse mouth 15 mL after breakfast and after dinner", "en", 15, undefined, [afterBreakfast, afterDinner]],
+    ["Rinse mouth 15 mL for 30 seconds at 08:00 and 20:00", "en", 15, 30,
+      [["08:00:00", AdviceRelation.On, "at 08:00:00", "เวลา 08:00:00"],
+        ["20:00:00", AdviceRelation.On, "at 20:00:00", "เวลา 20:00:00"]]],
+    ["Rinse mouth 15 mL for 30 seconds after breakfast", "en", 15, 30, [afterBreakfast]]
+  ] as const)("keeps each typed Time and its nearest relation: %s", (source, sourceLocale, amount, duration, expected) => {
+    const parsed = parsePublicSig(source, { locale: sourceLocale });
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.actions).toHaveLength(1);
+    const frame = graph.actions[0], times = frame.args.filter(arg => arg.role === AdviceArgumentRole.Time);
+    expect(times.map(arg => [arg.normalized, arg.relation])).toEqual(expected.map(([event, relation]) => [event, relation]));
+    for (const time of times) expect(source.slice(time.span!.start, time.span!.end)).toBe(time.text);
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity).toEqual({ value: amount, unit: "mL" });
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Duration)?.quantity)
+      .toEqual(duration === undefined ? undefined : { value: duration, unit: "s" });
+    const note = { url: "urn:round75:time-annotation", valueString: "retain each clinical time" };
+    const rows = fresh(parsed.fhir);
+    (rows[0].extension ??= []).push(note);
+    const before = JSON.stringify(rows), r6 = fresh(toDosageDetails(rows)), saved = fresh(toFhirR5Dosages(r6));
+    for (const input of [rows, parsed.meta.canonical.course!, fresh(parsed.fhirNext), r6, saved]) {
+      for (const locale of ["en", "th"]) {
+        const current = formatSig(input, "long", { locale, realizationMode: "normalized" })
+          .split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0];
+        for (const [, , english, thai] of expected)
+          expect(current.split(locale === "en" ? english : thai), current).toHaveLength(2);
+        expect(current).toContain(locale === "en" ? amount + " mL" : amount + " มิลลิลิตร");
+        if (duration !== undefined) expect(current).toContain(locale === "en" ? "30 seconds" : "30 วินาที");
+      }
+    }
+    expect(formatSig(parsed.fhir, "long", { locale: sourceLocale, realizationMode: "roundtrip" })).toBe(source);
+    const reopened = parseInstructionGraphExtension(saved[0].extension)!;
+    expect(reopened.sourceText).toBe(source);
+    expect(reopened.actions[0].args.filter(arg => arg.role === AdviceArgumentRole.Time)
+      .map(arg => [arg.normalized, arg.relation])).toEqual(expected.map(([event, relation]) => [event, relation]));
+    expect(saved[0].extension).toContainEqual(note);
+    expect(JSON.stringify(rows)).toBe(before);
+  });
+
+  it("projects the complete current primary event list once after a fresh structured edit", () => {
+    const source = "Gargle 15 mL for 30 seconds after breakfast and after dinner";
+    const parsed = parsePublicSig(source), changed = fresh(parsed.fhir);
+    expect(parsed.meta.canonical.clauses[0].schedule?.when).toEqual([EventTiming["After Breakfast"], EventTiming["After Dinner"]]);
+    expect(parsed.meta.canonical.clauses[0].instructionGraph!.actions[0].args
+      .filter(arg => arg.role === AdviceArgumentRole.Time).map(arg => arg.normalized)).toEqual(["CM", "CV"]);
+    for (const rows of [parsed.fhir, changed]) {
+      const edited = rows === changed;
+      if (edited) rows[0].timing!.repeat!.when = [EventTiming["Before Breakfast"], EventTiming["Before Dinner"]];
+      const before = JSON.stringify(rows), r6 = fresh(toDosageDetails(rows)), saved = fresh(toFhirR5Dosages(r6));
+      for (const input of [rows, importCanonicalCourse(rows), r6, saved]) for (const locale of ["en", "th"]) {
+        const current = formatSig(input, "long", { locale, realizationMode: "normalized" })
+          .split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0];
+        for (const meal of locale === "en" ? ["breakfast", "dinner"] : ["อาหารเช้า", "อาหารเย็น"])
+          expect(current.split((locale === "en" ? edited ? "before " : "after " : edited ? "ก่อน" : "หลัง") + meal)).toHaveLength(2);
+        expect(current).toContain(locale === "en" ? "15 mL for 30 seconds" : "15 มิลลิลิตร นาน 30 วินาที");
+        if (edited) expect(current).not.toMatch(locale === "en" ? /after breakfast|after dinner/u : /หลังอาหารเช้า|หลังอาหารเย็น/u);
+      }
+      expect(parseInstructionGraphExtension(saved[0].extension)?.sourceText).toBe(source);
+      expect(JSON.stringify(rows)).toBe(before);
+    }
+  });
+
+  it("keeps a separately owned preparation clock and both material quantities during an event-list edit", () => {
+    const source = "Dilute 15 mL with 100 mL water at 08:00 then Gargle for 30 seconds after breakfast and after dinner";
+    const parsed = parsePublicSig(source), changed = fresh(parsed.fhir);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.actions.map(frame => frame.predicate.lemma)).toEqual(["dilute", "gargle"]);
+    expect(graph.actions[0].args).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: { value: 15, unit: "mL" } }),
+      expect.objectContaining({ role: AdviceArgumentRole.Destination, quantity: { value: 100, unit: "mL" } }),
+      expect.objectContaining({ role: AdviceArgumentRole.Time, normalized: "08:00:00" })
+    ]));
+    changed[0].timing!.repeat!.when = [EventTiming["Before Breakfast"], EventTiming["Before Dinner"]];
+    const before = JSON.stringify(changed), r6 = fresh(toDosageDetails(changed)), saved = fresh(toFhirR5Dosages(r6));
+    for (const input of [changed, importCanonicalCourse(changed), r6, saved]) for (const locale of ["en", "th"]) {
+      const current = formatSig(input, "long", { locale, realizationMode: "normalized" })
+        .split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0];
+      expect(current.split("08:00")).toHaveLength(2);
+      expect(current).toContain(locale === "en" ? "15 mL" : "15 มิลลิลิตร");
+      expect(current).toContain(locale === "en" ? "100 mL" : "100 มิลลิลิตร");
+      expect(current).toContain(locale === "en" ? "30 seconds" : "30 วินาที");
+      for (const event of locale === "en" ? ["before breakfast", "before dinner"] : ["ก่อนอาหารเช้า", "ก่อนอาหารเย็น"])
+        expect(current.split(event)).toHaveLength(2);
+      expect(current).not.toMatch(locale === "en" ? /after breakfast|after dinner/u : /หลังอาหารเช้า|หลังอาหารเย็น/u);
+    }
+    expect(parseInstructionGraphExtension(saved[0].extension)?.sourceText).toBe(source);
+    expect(JSON.stringify(changed)).toBe(before);
+  });
+
+  it("retains independently owned local Times when a fresh repeat adds multiple events", () => {
+    const source = "Rinse mouth 15 mL for 30 seconds after breakfast and after dinner";
+    const parsed = parsePublicSig(source), changed = fresh(parsed.fhir);
+    expect(parsed.meta.canonical.clauses[0].schedule?.when).toBeUndefined();
+    changed[0].timing = { repeat: { when: [EventTiming.Morning, EventTiming.Evening] } };
+    const r6 = fresh(toDosageDetails(changed)), saved = fresh(toFhirR5Dosages(r6));
+    for (const input of [changed, importCanonicalCourse(changed), r6, saved]) for (const locale of ["en", "th"]) {
+      const current = formatSig(input, "long", { locale, realizationMode: "normalized" })
+        .split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0];
+      for (const event of locale === "en" ? ["after breakfast", "after dinner", "morning", "evening"]
+        : ["หลังอาหารเช้า", "หลังอาหารเย็น", "ตอนเช้า", "ตอนเย็น"])
+        expect(current.split(event), current).toHaveLength(2);
+    }
+    expect(parseInstructionGraphExtension(saved[0].extension)?.sourceText).toBe(source);
+  });
+
+});

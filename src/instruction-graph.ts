@@ -416,18 +416,24 @@ function clockArgumentFromParts(
 }
 
 function timeArgumentFromParts(
-  parts: Lexeme[], start: number, endExclusive: number, input: string
+  parts: Lexeme[], start: number, endExclusive: number, input: string, complete = false
 ): AdviceArgument | undefined {
+  ({ start, endExclusive } = semanticArgumentBounds(parts, start, endExclusive));
   const clock = clockArgumentFromParts(parts, start, endExclusive, input);
   if (clock) return clock;
   const canonicalParts = parts.slice(start, endExclusive).map((part) => key(part));
+  // A coordinated nominal must consume its complete daughter; the bounded
+  // single-complement path retains its existing event search.
+  let first = 0;
+  if (complete) while (EVENT_ARTICLE_TOKENS.has(canonicalParts[first])) first++;
   let event: EventTiming | undefined;
-  for (let index = 0; index < canonicalParts.length; index += 1) {
+  for (let index = first; index < canonicalParts.length; index += 1) {
     const candidate = resolveEventTimingExpression(canonicalParts, index);
-    if (candidate) {
+    if (candidate && (!complete || index + candidate.length === canonicalParts.length)) {
       event = candidate.timing;
       break;
     }
+    if (complete) break;
   }
   if (!event) return undefined;
   const text = trimSemanticText(sourceFor(parts, start, endExclusive, input));
@@ -573,6 +579,48 @@ function argumentFromParts(
   };
 }
 
+function argumentCoordinationMembers(parts: Lexeme[], start: number, endExclusive: number):
+  Array<{ start: number; end: number; connector: string }> {
+  const members: Array<{ start: number; end: number; connector: string }> = [];
+  let memberStart = start, connector = "";
+  for (let index = start; index < endExclusive; index++) {
+    const token = key(parts[index]);
+    if (token !== "," && token !== "and" && token !== "or") continue;
+    if (index > memberStart) members.push({ start: memberStart, end: index, connector });
+    connector = token;
+    memberStart = index + 1;
+  }
+  if (memberStart < endExclusive) members.push({ start: memberStart, end: endExclusive, connector });
+  return members;
+}
+
+function timeArgumentsFromParts(
+  parts: Lexeme[], start: number, endExclusive: number, input: string,
+  offset: number, relation: AdviceRelation | undefined, singleEnd = endExclusive
+): AdviceArgument[] | undefined {
+  const members = argumentCoordinationMembers(parts, start, endExclusive);
+  if (members.length > 1 && members.every(member => member.connector !== "or")) {
+    const times: AdviceArgument[] = [];
+    let inheritedRelation = relation;
+    for (const member of members) {
+      let begin = member.start;
+      const overt = resolveActionRelationSurfaceByGrammarFeature(key(parts[begin]), "timeComplement");
+      if (overt) { inheritedRelation = overt; begin++; }
+      const bounds = semanticArgumentBounds(parts, begin, member.end);
+      const time = timeArgumentFromParts(parts, bounds.start, bounds.endExclusive, input, true);
+      if (!time) break;
+      times.push({ ...time, relation: inheritedRelation,
+        span: { start: offset + parts[bounds.start].sourceStart,
+          end: offset + parts[bounds.endExclusive - 1].sourceEnd } });
+    }
+    // Only complete conjunctive Time daughters share this relation scope.
+    // Other complements retain their existing bounded single-argument path.
+    if (times.length === members.length) return times;
+  }
+  const single = timeArgumentFromParts(parts, start, singleEnd, input);
+  return single ? [single] : undefined;
+}
+
 function coordinatedTypedArgumentFromParts(
   parts: Lexeme[],
   start: number,
@@ -582,21 +630,7 @@ function coordinatedTypedArgumentFromParts(
 ): AdviceArgument | undefined {
   // A typed coordination is a list of nominal daughters, not a series of
   // new imperatives. Commas and the final and/or preserve their own scope.
-  const members: Array<{ start: number; end: number; connector: string }> = [];
-  let memberStart = start;
-  let connector = "";
-  for (let index = start; index < endExclusive; index += 1) {
-    const token = key(parts[index]);
-    if (token !== "," && token !== "and" && token !== "or") continue;
-    if (index > memberStart) {
-      members.push({ start: memberStart, end: index, connector });
-    }
-    connector = token;
-    memberStart = index + 1;
-  }
-  if (memberStart < endExclusive) members.push({
-    start: memberStart, end: endExclusive, connector
-  });
+  const members = argumentCoordinationMembers(parts, start, endExclusive);
   // Thai may juxtapose two complete substance nouns without a conjunction.
   // License that construction only with adjacent source characters AND typed
   // substance atoms; arbitrary Thai compounds must stay opaque.
@@ -657,7 +691,8 @@ function coordinatedTypedArgumentFromParts(
 function pushArgument(args: AdviceArgument[], argument: AdviceArgument | undefined): void {
   if (!argument) return;
   if (!args.some((candidate) =>
-    candidate.role === argument.role && candidate.text === argument.text && candidate.conceptId === argument.conceptId
+    candidate.role === argument.role && candidate.text === argument.text && candidate.conceptId === argument.conceptId &&
+    candidate.relation === argument.relation
   )) args.push(argument);
 }
 
@@ -1035,7 +1070,7 @@ interface ActionArgumentParseContext {
   relIndex: number;
   relationTargetEnd: number;
   conditionalTail: boolean;
-  relationTime?: AdviceArgument;
+  relationTimes?: AdviceArgument[];
   amount?: AdviceArgument;
   duration?: AdviceArgument;
   separableParticleIndex?: number;
@@ -1102,17 +1137,21 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   if (typedLocalTime && duration) pushArgument(args, duration);
   else if (relationHasGrammarFeature(relation, "includeDuration") && duration) pushArgument(args, duration);
   else if (relIndex >= 0 && !conditionalTail) {
-    const time = c.relationTime;
+    const times = c.relationTimes;
+    if (times) {
+      for (const time of times) pushArgument(args, time);
+      return { args };
+    }
     const relationDuration = relationHasGrammarFeature(relation, "durationComplement")
       ? parseAnyDurationArgument(parts, relIndex + 1, relationTargetEnd, input, offset)
       : undefined;
     const fallbackRole = relationHasGrammarFeature(relation, "activityFallback")
       ? AdviceArgumentRole.Activity : undefined;
-    const complement = time ?? relationDuration ?? argumentFromParts(
+    const complement = relationDuration ?? argumentFromParts(
       parts, relIndex + 1, relationTargetEnd, input, fallbackRole, options
     );
     const accompaniment = relationHasGrammarFeature(relation, "accompanimentComplement");
-    const accompanyingQuantity = !time && !relationDuration && accompaniment
+    const accompanyingQuantity = !relationDuration && accompaniment
       ? quantifiedEntityArgument(parts, relIndex + 1, relationTargetEnd, input, offset,
           AdviceArgumentRole.Substance, options) : undefined;
     const argument = accompanyingQuantity?.quantity ? accompanyingQuantity : complement;
@@ -1235,12 +1274,12 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   return { args, tailRelationIndex };
 };
 const AMOUNT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
-  const activity = c.relIndex >= 0 && relationHasGrammarFeature(c.relation, "activityFallback")
+  const activity = !c.relationTimes && c.relIndex >= 0 && relationHasGrammarFeature(c.relation, "activityFallback")
       ? argumentFromParts(
           c.parts, c.relIndex + 1, c.relationTargetEnd, c.input, AdviceArgumentRole.Activity, c.options
         )
       : undefined;
-  return { args: parsedArgs(c.amount, c.duration, activity) };
+  return { args: parsedArgs(c.amount, c.duration, activity, ...(c.relationTimes ?? [])) };
 };
 const OBJECT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, duration } = c;
@@ -1723,10 +1762,10 @@ function buildActionFrame(
   // Resolve the typed event daughter once, before deciding which complement
   // owns a quantity. WITH breakfast is temporal; WITH 200 mL water owns its
   // own amount. The default argument parser reuses this same daughter.
-  const relationTime = directObjectValence && relIndex >= 0 && !conditionalTail &&
-    relationHasGrammarFeature(relation, "timeComplement")
-    ? timeArgumentFromParts(parts, relIndex + 1, relationTargetEnd, input) : undefined;
-  const headOwnsAmount = directObjectValence && !relationTime &&
+  const relationTimes = (directObjectValence || definition.argumentParser === "amount-duration") &&
+    relIndex >= 0 && !conditionalTail && relationHasGrammarFeature(relation, "timeComplement")
+    ? timeArgumentsFromParts(parts, relIndex + 1, semanticEnd, input, offset, relation, relationTargetEnd) : undefined;
+  const headOwnsAmount = directObjectValence && !relationTimes &&
       relationHasGrammarFeature(relation, "accompanimentComplement") ||
     (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
       !relationHasSemanticClass(relation, "temporal");
@@ -1736,7 +1775,7 @@ function buildActionFrame(
   // material/destination quantity to the head. Follow the same typed valence
   // through later relations while retaining post-temporal head amounts.
   if (!headOwnsAmount && definition.acceptsAmount && relIndex >= argumentStart &&
-      (relationTime || relationHasSemanticClass(relation, "temporal"))) {
+      (relationTimes || relationHasSemanticClass(relation, "temporal"))) {
     let index = nextRelationIndex, current = nextRelation;
     while (index >= 0 && index < semanticEnd) {
       const following = relationIndex(parts, index + 1, semanticEnd);
@@ -1772,7 +1811,7 @@ function buildActionFrame(
     definition, parts, actionIndex, argumentStart,
     segmentEnd: definition.argumentParser === "mix-substance" ? semanticEnd : segmentEnd,
     input, offset, options,
-    relation, relIndex, relationTargetEnd, conditionalTail, relationTime, amount, duration,
+    relation, relIndex, relationTargetEnd, conditionalTail, relationTimes, amount, duration,
     separableParticleIndex: actionMatch.separableParticleIndex
   });
   const args = parsed.args;
@@ -1798,13 +1837,14 @@ function buildActionFrame(
       ? temporalRelation : undefined;
   // The shared time grammar licenses clock and event daughters after an
   // earlier complement, including a material amount or procedure duration.
-  const nextTime = temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "timeComplement")
-    ? timeArgumentFromParts(parts, temporalIndex + 1, semanticEnd, input) : undefined;
-  if (nextTime) {
+  const nextTimes = relationTimes && relationTimes.length > 1 ? relationTimes
+    : temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "timeComplement")
+      ? timeArgumentsFromParts(parts, temporalIndex + 1, semanticEnd, input, offset, temporalRelation) : undefined;
+  if (nextTimes) {
     const bounds = semanticArgumentBounds(parts, temporalIndex + 1, semanticEnd);
     const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
-    pushArgument(args, { ...nextTime, relation: temporalRelation,
-      ...(first && last ? { span: { start: offset + first.sourceStart, end: offset + last.sourceEnd } } : {})
+    for (const time of nextTimes) pushArgument(args, { ...time, relation: time.relation ?? temporalRelation,
+      span: time.span ?? (first && last ? { start: offset + first.sourceStart, end: offset + last.sourceEnd } : undefined)
     });
   } else if (temporalIndex >= 0 && temporalRelation === AdviceRelation.Until) {
     const result = argumentFromParts(parts, temporalIndex + 1, segmentEnd, input, AdviceArgumentRole.Result, options);
@@ -2116,26 +2156,14 @@ function attachPreposedActionRelation(
 ): void {
   if (frame.relation !== undefined) return;
   frame.relation = attachment.relation;
-  const time = timeArgumentFromParts(
-    parts,
-    attachment.targetStart,
-    attachment.targetEnd,
-    sourceText
-  );
+  const times = timeArgumentsFromParts(parts, attachment.targetStart, attachment.targetEnd,
+    sourceText, baseOffset, attachment.relation);
   const fallbackRole = relationHasGrammarFeature(attachment.relation, "activityFallback")
     ? AdviceArgumentRole.Activity
     : undefined;
-  pushArgument(
-    frame.args,
-    time ?? argumentFromParts(
-      parts,
-      attachment.targetStart,
-      attachment.targetEnd,
-      sourceText,
-      fallbackRole,
-      options
-    )
-  );
+  if (times) for (const time of times) pushArgument(frame.args, time);
+  else pushArgument(frame.args, argumentFromParts(parts, attachment.targetStart,
+    attachment.targetEnd, sourceText, fallbackRole, options));
   const first = parts[attachment.relationIndex];
   if (!first) return;
   frame.span.start = baseOffset + first.sourceStart;
@@ -4066,7 +4094,9 @@ function realizeAction(
         temporalRelation &&
         (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time ||
           arg.role === AdviceArgumentRole.Result) &&
-        relationHasSemanticClass(temporalRelation, "temporal")) {
+        (relationHasSemanticClass(temporalRelation, "temporal") ||
+          additionalTime && arg.role === AdviceArgumentRole.Time &&
+          relationHasGrammarFeature(temporalRelation, "timeComplement"))) {
       (temporalAdjuncts ??= []).push(arg.relation ? arg : { ...arg, relation: temporalRelation });
     } else firstArguments[arg.role] ??= arg;
   }
@@ -4137,9 +4167,11 @@ function realizeAction(
     }
     for (const adjunct of temporalAdjuncts) {
       if (entailed?.has(adjunct.role + "\0" + adjunct.conceptId + "\0" + adjunct.relation)) continue;
-      const temporalPhrase = joinLocalizedTokens(locale, [
-        localizeAdviceRelation(adjunct.relation!, locale) ?? adjunct.relation,
-        translatedArgument(adjunct, locale)
+      const value = translatedArgument(adjunct, locale);
+      const direct = adjunct.role === AdviceArgumentRole.Time &&
+        relationHasGrammarFeature(adjunct.relation, "directTimeRealization");
+      const temporalPhrase = (direct && adapter.directTime?.(value)) || joinLocalizedTokens(locale, [
+        localizeAdviceRelation(adjunct.relation!, locale) ?? adjunct.relation, value
       ]);
       if (!temporalPhrase) continue;
       complete = joinLocalizedTokens(locale, [complete, temporalPhrase]);
@@ -4607,8 +4639,10 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
       const mirrorsClock = directClock && hasClocks && schedule!.timeOfDay!.some(time =>
         (time.length === 5 ? time + ":00" : time.replace(/\.0+$/u, "")) ===
         (arg.normalized!.length === 5 ? arg.normalized + ":00" : arg.normalized!.replace(/\.0+$/u, "")));
+      // A positively owned multi-event schedule renders its complete current
+      // list once. Other Time kinds and independently scoped actions remain.
       if (directClock && (ownsClocks || mirrorsClock) || event &&
-          (hasOffset || !timeArgumentCoveredBySchedule(frame, arg, clause, event))) {
+          (hasOffset || (schedule?.when?.length ?? 0) > 1 || !timeArgumentCoveredBySchedule(frame, arg, clause, event))) {
         changed = true;
         continue;
       }
