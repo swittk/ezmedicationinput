@@ -16,7 +16,7 @@ import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionC
 import { medicationInstructionActionCodings, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod, resolveMedicationInstructionActionByMethod } from "../src/instruction-action-terminology";
 import { medicationInstructionConceptCodings, getMedicationInstructionConcept as getInternalInstructionConcept } from "../src/instruction-concept-terminology";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
-import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits, importCanonicalCourse, projectCanonicalCourse } from "../src/index";
+import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits, importCanonicalCourse, projectCanonicalCourse, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL } from "../src/index";
 
 describe("procedural instruction graph", () => {
   it.each([
@@ -609,7 +609,9 @@ describe("procedural instruction graph", () => {
     expect(realizeInstructionGraph(graph!, "en")).toBe("if irritation occurs, stop use");
 
     const restored = fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph;
-    expect(restored?.relations).toEqual(graph?.relations);
+    expect(restored?.relations).toEqual(graph?.relations?.map(relation => ({ ...relation,
+      sourceKindCoding: { system: "http://snomed.info/sct", code: "421803000", display: "If - dosing instruction fragment" }
+    })));
     expect(restored?.coverage).toEqual(graph?.coverage);
   });
 
@@ -1830,7 +1832,9 @@ describe("standards-first instruction relationships and event referents", () => 
     expect(kind).toMatchObject({
       system: "http://hl7.org/fhir/action-relationship-type", code: relation
     });
-    expect(parseInstructionGraphExtension([extension])?.relations).toEqual(graph.relations);
+    expect(parseInstructionGraphExtension([extension])?.relations).toEqual(
+      graph.relations.map(entry => ({ ...entry, sourceKindCoding: kind }))
+    );
 
     const independent = buildInstructionGraphExtension({
       actions: [{ ...action, relation }]
@@ -5740,14 +5744,16 @@ describe("round 49 saved instruction ownership", () => {
         const before = JSON.stringify(input);
         for (const realizationMode of ["normalized", "roundtrip"] as const) {
           const text = formatSig(input, "long", { ...options, locale: "en", realizationMode });
-          expect(text.match(unit === "tab" ? /3 tablets/gu : /3 mg/gu)).toHaveLength(1);
+          const amountPattern = unit === "tab" ? /(?:^|[^0-9.,+-])3 tablets(?![\p{L}\p{N}])/gu
+            : /(?:^|[^0-9.,+-])3 mg(?![\p{L}\p{N}])/gu;
+          expect(text.match(amountPattern)).toHaveLength(1);
           expect(text).toMatch(new RegExp("^" + source.split(" ")[0]));
           const amount = unit === "tab" ? "3 tablets" : "3 mg";
           const preparation = text.split(/[.;]/u)[0];
           const administration = text.slice(preparation.length);
           const action = source.startsWith("Dissolve") ? /\bdrink\b/iu
             : source.startsWith("Draw up") ? /\binject\b/iu : /\bswallow\b/iu;
-          expect(preparation).toContain(amount);
+          expect(preparation).toMatch(amountPattern);
           expect(administration).toMatch(action);
           expect(administration).not.toContain(amount);
           expect(text).not.toMatch(/(?:^|[^0-9.])2 tablets?(?![a-z])/u);
@@ -7381,5 +7387,146 @@ describe("round66 persisted primary action and amount ownership", () => {
         expect(text.indexOf("8:00")).toBeLessThan(text.indexOf("10:00"));
         expect(text).toContain(locale === "en" ? "100 mL" : "100 มิลลิลิตร");
       }
+  });
+});
+
+
+describe("round67 review timing and graph preservation", () => {
+  const fresh = <T>(input: T): T => JSON.parse(JSON.stringify(input));
+  const graphMarker = (frame: AdviceFrame) => buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!;
+  const savedViews = (row: FhirDosage) => [fresh([row]), fresh(toDosageDetails([row]))];
+
+  it.each([EventTiming.Morning, EventTiming.Night])("keeps the offset range beside alternate %s cadence", when => {
+    const input: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat: {
+        period: 2, periodUnit: "d", when: [when], extension: [
+          { url: TIMING_OFFSET_MIN_EXTENSION_URL, valueDecimal: 15 },
+          { url: TIMING_OFFSET_MAX_EXTENSION_URL, valueDecimal: 30 }
+        ]
+      } }
+    }] }] };
+    const before = fresh(input);
+    for (const wire of [input, fresh(toFhirR5Dosages(input))]) {
+      const en = formatSig(wire, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(wire, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("every other day"); expect(en).toContain("15–30 minutes");
+      expect(en).toContain(when === EventTiming.Morning ? "morning" : "night");
+      expect(th).toContain("วันเว้นวัน"); expect(th).toContain("15–30 นาที");
+      expect(th).toContain(when === EventTiming.Morning ? "เช้า" : "กลางคืน");
+    }
+    expect(input).toEqual(before);
+  });
+
+  it.each([AdviceRelation.Before, AdviceRelation.After])("keeps a complete %s clock before a dilution destination", relation => {
+    const source = "Dilute 1 mL with saline " + relation + " 08:00 to 10 mL";
+    const frame = parseInstructionActions(source)[0];
+    expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Time, relation, normalized: "08:00:00" }));
+    expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Destination, relation: AdviceRelation.To,
+      quantity: { value: 10, unit: "mL" } }));
+    expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Amount)).toEqual([
+      expect.objectContaining({ quantity: { value: 1, unit: "mL" } })
+    ]);
+    const marker = graphMarker(frame), before = fresh(marker);
+    for (const wire of savedViews({ extension: [marker] })) {
+      const text = formatSig(wire, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toContain("to 10 mL"); expect(text).toContain(relation + " 08:00");
+      expect(text.match(/08:00/gu)).toHaveLength(1);
+    }
+    expect(marker).toEqual(before);
+  });
+
+  it.each([false, true])("retains an explicit material translation without normalized (named=%s)", named => {
+    const frame: AdviceFrame = { ...fresh(parseInstructionActions("Dilute with water")[0]), sourceText: "",
+      relation: named ? AdviceRelation.With : AdviceRelation.To, args: [{
+        role: named ? AdviceArgumentRole.Material : AdviceArgumentRole.Destination,
+        relation: named ? AdviceRelation.With : AdviceRelation.To,
+        text: named ? "100 mL sterile water" : "100 mL", quantity: { value: 100, unit: "mL" },
+        ...(named ? { i18n: { th: "น้ำปราศจากเชื้อ" } } : {})
+      }] };
+    const row: FhirDosage = { extension: [graphMarker(frame)] }, before = fresh(row);
+    for (const wire of savedViews(row)) {
+      const th = formatSig(wire, "long", { locale: "th", realizationMode: "normalized" });
+      expect(th.match(/100 มิลลิลิตร/gu)).toHaveLength(1);
+      if (named) expect(th).toContain("น้ำปราศจากเชื้อ");
+      else expect(th).not.toContain("น้ำ");
+    }
+    expect(row).toEqual(before);
+  });
+
+  it.each(["quantity", "named", "partial"] as const)("renders an additional mixing material once: %s", variant => {
+    const frame = fresh(parseInstructionActions("Mix the medication with water")[0]);
+    frame.sourceText = "";
+    frame.args.push({ role: AdviceArgumentRole.Material, relation: AdviceRelation.With,
+      text: variant === "quantity" ? "5 mL" : variant === "named" ? "5 mL syrup" : "some syrup",
+      quantity: { unit: "mL", ...(variant === "partial" ? {} : { value: 5 }) },
+      ...(variant === "named" ? { normalized: "syrup", i18n: { th: "น้ำเชื่อม" } } : {})
+    });
+    for (const wire of savedViews({ extension: [graphMarker(frame)] })) for (const locale of ["en", "th"] as const) {
+      const text = formatSig(wire, "long", { locale, realizationMode: "normalized" });
+      if (variant === "partial") expect(text).toContain("some syrup");
+      else {
+        expect(text.match(locale === "en" ? /5 mL/gu : /5 มิลลิลิตร/gu)).toHaveLength(1);
+        if (locale === "th") expect(text).not.toContain("5 mL");
+        if (variant === "named") expect(text).toContain(locale === "en" ? "syrup" : "น้ำเชื่อม");
+      }
+    }
+  });
+
+  it("retains an annotated relation Coding through the public graph codec", () => {
+    const actions = parseInstructionActions("Wash hands then apply cream");
+    const marker = buildInstructionGraphExtension({ sourceText: "", actions, relations: [{
+      kind: AdviceRelation.Before, fromActionIndex: 0, toActionIndex: 1
+    }] })!;
+    const relation = marker.extension!.find(field => field.url === "graphRelation")!;
+    const coding = relation.extension!.find(field => field.url === "kindCoding")!.valueCoding!;
+    coding.id = "ordered-relation";
+    coding.extension = [{ url: "https://example.org/relation-note", valueString: "retain note" }];
+    const before = fresh(marker), decoded = parseInstructionGraphExtension([marker])!;
+    const rebuilt = buildInstructionGraphExtension(decoded)!;
+    expect(rebuilt).toEqual(before);
+    const changed = fresh(decoded);
+    changed.relations![0].kind = AdviceRelation.After;
+    const replacement = buildInstructionGraphExtension(changed)!;
+    const saved = replacement.extension!.find(field => field.url === "graphRelation")!.extension!;
+    expect(saved.find(field => field.url === "kindCoding")!.valueCoding?.code).toBe("after");
+    expect(saved.find(field => field.url === "sourceKindCoding")!.valueCoding).toEqual(coding);
+    expect(parseInstructionGraphExtension([replacement])!.relations![0].kind).toBe(AdviceRelation.After);
+    expect(marker).toEqual(before);
+  });
+
+  it("keeps a cleared annotated graph quantity valid without restoring its old value", () => {
+    const marker = graphMarker(parseInstructionActions("Swallow 2 tablets whole")[0]);
+    const amount = marker.extension!.find(field => field.url === "action")!.extension!
+      .find(field => field.url === "argument" && field.extension!.some(child => child.url === "role" && child.valueCode === "amount"))!;
+    const quantity = amount.extension!.find(field => field.url === "quantity")!;
+    const value = quantity.extension!.find(field => field.url === "value")!;
+    value.id = "measured-amount";
+    value._valueDecimal = { extension: [{ url: "https://example.org/decimal-note", valueString: "retain decimal note" }] };
+    quantity.extension!.push({ url: "https://example.org/quantity-note", valueString: "retain quantity note" });
+    const original = fresh(marker), decoded = parseInstructionGraphExtension([marker])!;
+    expect(buildInstructionGraphExtension(decoded)).toEqual(original);
+    const changed = fresh(decoded);
+    changed.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Amount)!.quantity!.value = undefined;
+    const rebuilt = buildInstructionGraphExtension(changed)!;
+    const rebuiltQuantity = rebuilt.extension!.find(field => field.url === "action")!.extension!
+      .find(field => field.url === "argument" && field.extension!.some(child => child.url === "role" && child.valueCode === "amount"))!
+      .extension!.find(field => field.url === "quantity")!;
+    expect(rebuiltQuantity.extension!.some(field => field.url === "value")).toBe(false);
+    expect(rebuiltQuantity.extension).toContainEqual({ url: "sourceQuantityField", id: "measured-amount", extension: [
+      { url: "field", valueCode: "value", _valueCode: value._valueDecimal }
+    ] });
+    expect(rebuiltQuantity.extension).toContainEqual({ url: "https://example.org/quantity-note", valueString: "retain quantity note" });
+    const pending = [rebuilt];
+    while (pending.length) {
+      const field = pending.pop()!;
+      const hasValue = Object.keys(field).some(key => key.startsWith("value") && field[key as keyof FhirExtension] !== undefined);
+      const hasChildren = Boolean(field.extension?.length);
+      expect(hasValue !== hasChildren).toBe(true);
+      if (field.extension) pending.push(...field.extension);
+    }
+    const reopened = parseInstructionGraphExtension([rebuilt])!;
+    expect(reopened.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Amount)!.quantity?.value).toBeUndefined();
+    expect(buildInstructionGraphExtension(reopened)).toEqual(rebuilt);
+    expect(marker).toEqual(original);
   });
 });

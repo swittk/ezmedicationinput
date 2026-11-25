@@ -1216,7 +1216,8 @@ function describeAlternateEventCadenceThai(
   if (
     schedule?.period !== 2 || schedule.periodUnit !== FhirPeriodUnit.Day ||
     (schedule.periodMax !== undefined && schedule.periodMax !== 2) ||
-    schedule.when?.length !== 1 || schedule.frequency !== undefined || schedule.frequencyMax !== undefined
+    schedule.when?.length !== 1 || schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
+    schedule.offset !== undefined || schedule.offsetMin !== undefined || schedule.offsetMax !== undefined
   ) return undefined;
   if (schedule.when[0] === EventTiming.Night) return "วันเว้นคืน";
   if (schedule.when[0] === EventTiming.Morning) return "เช้าเว้นเช้า";

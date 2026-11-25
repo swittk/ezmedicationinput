@@ -137,7 +137,9 @@ function renderEnglishRelationDuration(c: InstructionActionRealizationInput): st
 function additionalMixCompanion(c: InstructionActionRealizationInput, arg: AdviceArgument) {
   const amount = arg.quantity ? c.translateQuantity(arg.quantity) : undefined;
   const quantityOnly = arg.quantity && !arg.conceptId && !arg.coding && !arg.codings?.length &&
-    arg.normalized === arg.quantity.unit;
+    (arg.normalized !== undefined && arg.normalized === arg.quantity.unit ||
+      arg.normalized === undefined && !arg.i18n && arg.quantity.value !== undefined &&
+      arg.text.replace(/\s+/gu, "") === `${arg.quantity.value}${arg.quantity.unit ?? ""}`);
   const text = !quantityOnly || !amount
     ? arg.quantity && !amount ? arg.text || arg.normalized : c.translateArgumentConcept(arg)
     : undefined;

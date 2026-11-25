@@ -1473,7 +1473,11 @@ describe("round65 selected procedural comma ownership", () => {
       expect(plan.segments).toEqual([{ text: source, start: 0, end: source.length }]);
       const parsed = parseSig(source, supplied);
       expect(parsed.meta.canonical.clauses).toHaveLength(1);
-      expect(parsed.meta.canonical.clauses[0].instructionGraph?.actions.some(action => action.predicate.lemma === "drink")).toBe(false);
+      const actions = parsed.meta.canonical.clauses[0].instructionGraph?.actions;
+      expect(actions?.some(action => action.predicate.lemma === "drink")).toBe(false);
+      const wait = actions?.find(action => action.predicate.lemma === "wait");
+      expect(wait?.args).toContainEqual(expect.objectContaining({ role: "duration", quantity: { value: 30, unit: "min" } }));
+      expect(parsed.longText).toMatch(/wait 30 minutes before food, drink or other medicines/iu);
     }
   });
 });

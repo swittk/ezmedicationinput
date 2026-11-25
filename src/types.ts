@@ -32,6 +32,7 @@ export interface FhirExtension {
   valueCode?: string;
   _valueCode?: FhirPrimitiveElement;
   valueString?: string;
+  _valueString?: FhirPrimitiveElement;
   valueDate?: string;
   valueBoolean?: boolean;
   valueInteger?: number;
@@ -1922,6 +1923,8 @@ export interface CanonicalInstructionRelation {
   /** Retained wire annotations are source data, never relationship semantics. */
   sourceId?: string;
   sourceExtensions?: FhirExtension[];
+  /** Retained Coding annotations; the current typed kind owns meaning. */
+  sourceKindCoding?: FhirCoding;
   kind: AdviceRelation;
   fromActionIndex?: number;
   toActionIndex: number;

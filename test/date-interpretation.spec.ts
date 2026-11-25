@@ -1629,6 +1629,7 @@ it.each([
   expect(sign.synsem.head.schedule?.frequency).toBeUndefined();
   const parsed = parseBatch(source, { locale: "th" });
   expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject(expected);
+  expect(parsed.meta.canonical.clauses[0].schedule?.frequency).toBeUndefined();
   expect(parsed.meta.leftoverText).toBeUndefined();
   for (const row of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]]) {
     expect(row.timing?.repeat).toMatchObject(expected);

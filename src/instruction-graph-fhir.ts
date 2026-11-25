@@ -42,6 +42,11 @@ function getAdviceRelationByCoding(coding: FhirCoding | undefined): AdviceRelati
     ? RELATION_KIND_BY_CODE.get(`${coding.system}|${coding.code}`)
     : undefined;
 }
+function getGraphRelationByCoding(coding: FhirCoding | undefined): AdviceRelation | undefined {
+  return coding?.system === "http://hl7.org/fhir/action-relationship-type" &&
+    (coding.code === "before" || coding.code === "after")
+    ? coding.code as AdviceRelation : getAdviceRelationByCoding(coding);
+}
 
 export const MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph";
@@ -152,18 +157,29 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   }
   if (argument.quantity) {
     const quantity: FhirExtension[] = [];
+    let displacedFields: FhirExtension[] | undefined;
     if (argument.quantity.fieldMetadata) {
       for (const [name, value] of [
         ["value", argument.quantity.value], ["low", argument.quantity.range?.low],
         ["high", argument.quantity.range?.high], ["unit", argument.quantity.unit]
       ] as const) {
         const metadata = argument.quantity.fieldMetadata[name];
-        if (value === undefined && !metadata) continue;
-        const field: FhirExtension = { ...metadata, url: name };
-        if (value !== undefined) {
-          if (name === "unit") field.valueString = value;
-          else field.valueDecimal = value;
+        if (value === undefined) {
+          if (metadata) {
+            const { _valueDecimal, _valueString, extension, ...annotations } = metadata;
+            const primitive = name === "unit" ? _valueString : _valueDecimal;
+            // A cleared active field cannot be an id-only Extension. Retain
+            // its annotations on a valid, inert source field identifier.
+            (displacedFields ??= []).push({ ...annotations, url: "sourceQuantityField", extension: [
+              { url: "field", valueCode: name, ...(primitive ? { _valueCode: primitive } : {}) },
+              ...(extension ?? [])
+            ] });
+          }
+          continue;
         }
+        const field: FhirExtension = { ...metadata, url: name };
+        if (name === "unit") field.valueString = value;
+        else field.valueDecimal = value;
         quantity.push(field);
       }
     } else {
@@ -172,6 +188,7 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
       add(quantity, valueDecimal("high", argument.quantity.range?.high));
       add(quantity, valueString("unit", argument.quantity.unit));
     }
+    if (displacedFields) quantity.push(...displacedFields);
     // Use the published EMA Coding for an operator, not a private graph code.
     // Exact graph quantities keep their existing wire shape.
     if (argument.quantity.comparator || argument.quantity.comparatorElement || argument.quantity.comparatorExtensions?.length) {
@@ -283,9 +300,12 @@ export function buildInstructionGraphExtension(
   for (const action of graph.actions) nested.push(buildActionExtension(action));
   for (const relation of graph.relations ?? []) {
     const relationNested: FhirExtension[] = [];
+    const sourceCoding = relation.sourceKindCoding;
+    const currentCoding = sourceCoding && getGraphRelationByCoding(sourceCoding) === relation.kind;
     // Formal before/after codes apply to explicitly linked actions, not
     // "before food", "after a symptom", or other unlinked textual adjuncts.
-    if ((relation.kind === AdviceRelation.Before || relation.kind === AdviceRelation.After) &&
+    if (currentCoding) add(relationNested, valueCoding("kindCoding", sourceCoding));
+    else if ((relation.kind === AdviceRelation.Before || relation.kind === AdviceRelation.After) &&
         relation.fromActionIndex !== undefined) {
       add(relationNested, valueCoding("kindCoding", {
         system: "http://hl7.org/fhir/action-relationship-type",
@@ -302,6 +322,7 @@ export function buildInstructionGraphExtension(
       add(relationNested, valueInteger("spanStart", relation.span.start));
       add(relationNested, valueInteger("spanEnd", relation.span.end));
     }
+    if (sourceCoding && !currentCoding) add(relationNested, valueCoding("sourceKindCoding", sourceCoding));
     if (relation.sourceExtensions) relationNested.push(...relation.sourceExtensions);
     nested.push({ url: "graphRelation", ...(relation.sourceId !== undefined ? { id: relation.sourceId } : {}),
       extension: relationNested });
@@ -527,10 +548,9 @@ function parseGraphRelation(extension:FhirExtension):CanonicalInstructionRelatio
     default:(sourceExtensions??=[]).push(field);break;
   }
   const value=coding?.valueCoding;
-  const relation=value?.system==="http://hl7.org/fhir/action-relationship-type"&&(value.code==="before"||value.code==="after")
-    ? value.code as AdviceRelation:firstRelation(value,kind?.valueCode);
+  const relation=getGraphRelationByCoding(value)??firstRelation(undefined,kind?.valueCode);
   if(!relation||to?.valueInteger===undefined)return undefined;
-  return {kind:relation,fromActionIndex:from?.valueInteger,toActionIndex:to.valueInteger,text:text?.valueString,
+  return {kind:relation,...(value ? {sourceKindCoding:readCoding(value)} : {}),fromActionIndex:from?.valueInteger,toActionIndex:to.valueInteger,text:text?.valueString,
     ...(extension.id !== undefined ? {sourceId:extension.id} : {}),
     ...(sourceExtensions ? {sourceExtensions} : {}),
     span:start?.valueInteger!==undefined&&end?.valueInteger!==undefined?{start:start.valueInteger,end:end.valueInteger}:undefined};

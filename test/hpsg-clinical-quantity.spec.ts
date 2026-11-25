@@ -3867,3 +3867,16 @@ describe("round65 preparation and application sites", () => {
     expect(shared.longText).toBe("Wash affected area; then apply a thin layer twice daily to the affected area.");
   });
 });
+
+
+it.each(["tablet/2 nights", "tablet / 2 nights"])("round67 retains the complete night maximum advice: %s", denominator => {
+  const source = "Take 1 tablet daily, maximum 1 " + denominator;
+  const parsed = parsePublicSig(source), clause = parsed.meta.canonical.clauses[0];
+  expect(clause.additionalInstructions).toContainEqual(expect.objectContaining({ text: "maximum 1 " + denominator }));
+  expect(clause.schedule?.maxDosePerPeriod).toBeUndefined();
+  expect(clause.schedule?.when).toBeUndefined();
+  for (const row of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]]) {
+    expect(row.maxDosePerPeriod).toBeUndefined();
+    expect(row.additionalInstruction?.map(value => value.text).join(" ")).toContain("maximum 1 " + denominator);
+  }
+});

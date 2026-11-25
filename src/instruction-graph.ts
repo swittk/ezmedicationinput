@@ -1191,7 +1191,14 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
     // The first complement can already be a complete clock daughter.
     const clock = relationHasGrammarFeature(targetRelation, "timeComplement")
       ? clockArgumentFromParts(parts, targetIndex + 1, targetEnd, input) : undefined;
+    if (!clock && targetIndex !== relIndex && relationHasSemanticClass(targetRelation, "temporal")) {
+      tailRelationIndex = targetIndex;
+      break;
+    }
     if (clock) {
+      // This bounded clock is already owned here; later complements remain
+      // available to the same valence instead of joining a temporal tail.
+      tailRelationIndex = -1;
       const bounds = semanticArgumentBounds(parts, targetIndex + 1, targetEnd);
       const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
       pushArgument(args, { ...clock, relation: targetRelation,
@@ -1211,9 +1218,9 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
     if (targetEnd >= segmentEnd) break;
     targetIndex = targetEnd;
     targetRelation = actionArgumentRelation(key(parts[targetIndex]));
-    // Temporal and conditional daughters are composed by the shared frame parser.
-    if (!targetRelation || relationHasSemanticClass(targetRelation, "temporal") ||
-        relationHasGrammarFeature(targetRelation, "conditionalTail")) {
+    // Conditions still hand off immediately. A temporal daughter first gets
+    // its own relation-bounded clock probe at the top of this loop.
+    if (!targetRelation || relationHasGrammarFeature(targetRelation, "conditionalTail")) {
       tailRelationIndex = targetIndex;
       break;
     }
@@ -3667,7 +3674,7 @@ function translatedArgument(arg: AdviceArgument, locale: string): string {
       const amount = translatedQuantity(arg.quantity, locale);
       // A measured nominal keeps its entity; a bare quantity's normalized
       // unit is already part of the amount realization.
-      const nominal = arg.normalized;
+      const nominal = arg.normalized ?? localizedValue(arg.i18n, locale);
       const entity = arg.role === AdviceArgumentRole.Destination || arg.role === AdviceArgumentRole.Substance ||
         arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme ||
         arg.role === AdviceArgumentRole.Material;

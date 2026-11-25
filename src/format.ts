@@ -395,7 +395,8 @@ function describeAlternateEventCadenceEnglish(
   if (
     schedule?.period !== 2 || schedule.periodUnit !== FhirPeriodUnit.Day ||
     (schedule.periodMax !== undefined && schedule.periodMax !== 2) ||
-    schedule.when?.length !== 1 || schedule.frequency !== undefined || schedule.frequencyMax !== undefined
+    schedule.when?.length !== 1 || schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
+    schedule.offset !== undefined || schedule.offsetMin !== undefined || schedule.offsetMax !== undefined
   ) return undefined;
   if (schedule.when[0] === EventTiming.Night) return "every other night";
   if (schedule.when[0] === EventTiming.Morning) return "every other morning";

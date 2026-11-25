@@ -2775,7 +2775,7 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
 
     const compactPeriod: MaximumDosePeriod | undefined = compactPeriodUnit
       ? DAYPART_INTERVAL_TOKENS.has(compactPeriodSurface!)
-        ? { tokens: [], daypart: true }
+        ? { tokens: hybridUnit ? [followingUnit!] : [], daypart: true }
         : { tokens: hybridUnit ? [followingUnit!] : [], period: compactAmount?.value ?? (hybridUnit ? hybridValue! : 1), periodUnit: compactPeriodUnit }
       : undefined;
     const period = periodFirst ?? compactPeriod ?? maximumDosePeriodAt(context, cursor);
