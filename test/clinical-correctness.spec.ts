@@ -3750,7 +3750,8 @@ describe("round79 current clinical preview ownership", () => {
     const expression = { id: "unavailable-dose", language: "text/fhirpath",
       _expression: { extension: [{ url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown" }] } };
     const raw: FhirR6DosageInstruction = { step: [{ component: [{
-      text: "Take 5 mg daily", doseAndRate: [{ [field]: expression }]
+      text: "Take 5 mg daily", doseAndRate: [{ [field]: expression }],
+      ...(field === "rateExpression" ? { timing: { repeat: { duration: 1, durationUnit: "h" } } } : {})
     }] }] };
     for (const input of [fresh(raw), fresh(toFhirR5Dosages(raw))]) for (const locale of ["en", "th"] as const)
       expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toContain("Take 5 mg daily");
