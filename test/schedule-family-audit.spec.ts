@@ -5153,9 +5153,10 @@ describe("round66 reviewed execution families", () => {
   });
 
   it.each([undefined, "12:30"])("keeps noon alongside fixed clocks (override %s)", noon => {
-    const row = dailyDose({ doseAndRate: [{ doseQuantity: { value: 0.5, unit: "tab" } }],
-      timing: { repeat: { when: [EventTiming.Noon], timeOfDay: ["07:00:00", "19:00:00"],
-        frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Day } } });
+    const row = parseSig("Take half a tablet at 07:00, noon and 19:00 for 7 days").fhir[0];
+    expect(row.timing?.repeat?.when).toEqual([EventTiming.Noon]);
+    expect(row.timing?.repeat?.timeOfDay).toBeUndefined();
+    expect(getTimingClocks(row.timing?.repeat)).toEqual(["07:00:00", "19:00:00"]);
     const options = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC",
       eventClock: noon ? { NOON: noon } : undefined, limit: 3 };
     for (const dosage of versions(row)) {
