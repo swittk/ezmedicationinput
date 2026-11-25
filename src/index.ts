@@ -1143,7 +1143,6 @@ function defaultFormatOptions(options?: FormatBatchOptions, separator?: string):
   if (options?.realizationMode !== undefined && separator === undefined) return options;
   if (!options) return { realizationMode: "normalized", ...(separator !== undefined ? { separator } : {}) };
   return {
-    ...options,
     locale: options.locale,
     i18n: options.i18n,
     groupMealTimingsByRelation: options.groupMealTimingsByRelation,
