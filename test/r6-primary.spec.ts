@@ -150,7 +150,7 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
 
   it("preserves unknown local metadata and reconciles conflicting phase copies without copying components", () => {
     const expected = parseSig("1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid").fhirNext;
-    const r5 = toFhirR5Dosages(expected);
+    let r5 = JSON.parse(JSON.stringify(toFhirR5Dosages(expected))) as FhirDosage[];
     const marker = (index: number) => r5[index].modifierExtension!.find(ext => ext.url.includes("course-details"))!;
     marker(0).extension!.push({ url: "externalAudit", valueBoolean: false });
     const unknown = cloneStructuredValue(marker(0));
@@ -160,6 +160,7 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
     expect(recovered.extension?.some(extension =>
       extension.extension?.some(child => equalStructuredValues(child, unknown)))).toBe(true);
 
+    r5 = JSON.parse(JSON.stringify(r5)) as FhirDosage[];
     const phase = marker(1).extension!.find(child => child.url === "step")!;
     const end = phase.extension!.find(child => child.url === "end")!;
     end.extension!.find(child => child.url === "offsetDuration")!.valueQuantity!.value = 8;
@@ -2560,13 +2561,14 @@ describe("conflicting executable phase metadata", () => {
   });
 
   it("does not confirm another phase or erase unrelated missing course context", () => {
-    const rows = toFhirR5Dosages(parseSig(input).fhirNext);
+    const rows = JSON.parse(JSON.stringify(toFhirR5Dosages(parseSig(input).fhirNext))) as FhirDosage[];
     start(rows[2]).value = 8;
-    const saved = toFhirR5Dosages(toDosageDetails(rows));
+    let saved = JSON.parse(JSON.stringify(toFhirR5Dosages(toDosageDetails(rows)))) as FhirDosage[];
     for (const row of saved) if (row.sequence === 2) start(row).value = 7;
     expect(() => nextDueDoses(
       toDosageDetails(saved, undefined, undefined, { resolvedPhaseSequences: [1] }), options
     )).toThrow(/conflicting course phase metadata/i);
+    saved = JSON.parse(JSON.stringify(saved)) as FhirDosage[];
     saved[2].modifierExtension!.find(extension => extension.url.endsWith("medication-r6-course-details"))!
       .extension!.push({ url: "missingContext", valueString: "unresolved-shared-owner" });
     const resolved = toDosageDetails(saved, undefined, undefined, { resolvedPhaseSequences: [2] });

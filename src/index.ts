@@ -144,6 +144,7 @@ import {
 import {
   BodySiteCode,
   FhirDosage,
+  FhirExtension,
   FhirQuantity,
   EzDosage,
   FhirR6DosageInstruction,
@@ -543,21 +544,37 @@ function hasMaximumDoseForDisplay(dosage: FhirDosage): boolean {
   );
 }
 
-/** Detach a structured R5 modifier marker without emitting non-JSON optional
+/** Normalize a structured R5 modifier marker without emitting non-JSON optional
  * fields. A missing optional property and an explicit undefined are identical
  * in FHIR, but in-memory consumers cannot validate the latter as JSON.
  * Recurses only for emitted course/activity markers, not ordinary single dosages.
  * @param value Source FHIR marker or nested datatype value.
  */
-function cloneDefinedExtensionValue<T>(value: T): T {
-  if (Array.isArray(value)) return value.map(part => cloneDefinedExtensionValue(part)) as T;
-  if (value === null || typeof value !== "object") return value;
-  const result = { ...value };
-  for (const key of Object.keys(result) as (keyof T)[]) {
-    if (result[key] === undefined) delete result[key];
-    else result[key] = cloneDefinedExtensionValue(result[key]);
+function normalizeDefinedExtensionValue<T>(value: T): T {
+  if (Array.isArray(value)) {
+    let result: unknown[] | undefined;
+    for (let index = 0; index < value.length; index++) {
+      const normalized = normalizeDefinedExtensionValue(value[index]);
+      if (normalized !== value[index]) (result ??= value.slice())[index] = normalized;
+    }
+    return (result ?? value) as T;
   }
-  return result;
+  if (value === null || typeof value !== "object") return value;
+  let result: T | undefined;
+  for (const key of Object.keys(value) as (keyof T)[]) {
+    const part = value[key];
+    if (part === undefined) {
+      result ??= { ...value };
+      delete result[key];
+    } else {
+      const normalized = normalizeDefinedExtensionValue(part);
+      if (normalized !== part) {
+        result ??= { ...value };
+        result[key] = normalized;
+      }
+    }
+  }
+  return result ?? value;
 }
 
 /** Normalize emitted course and activity-timing markers without touching
@@ -569,32 +586,33 @@ function normalizeEmittedSemanticMarkers(rows: FhirDosage[], keepExtendedSource 
   let output = rows;
   for (let index = 0; index < rows.length; index++) {
     const source = rows[index];
-    const course = source.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL);
-    const activity = source.timing?.repeat?.extension?.some(extension =>
-      extension.url === TIMING_ACTIVITY_WINDOW_EXTENSION_URL);
-    if (!course && !activity) continue;
-    // Only known emitted markers need JSON-normalized copies. The extended
-    // preview may retain its original source annotations, so detach just
-    // those rows rather than deep-cloning an entire returned course.
+    let modifierExtension: FhirExtension[] | undefined;
+    for (let marker = 0; marker < (source.modifierExtension?.length ?? 0); marker++) {
+      const extension = source.modifierExtension![marker];
+      if (extension.url !== DOSAGE_DETAILS_R5_URL) continue;
+      const normalized = normalizeDefinedExtensionValue(extension);
+      if (normalized !== extension)
+        (modifierExtension ??= source.modifierExtension!.slice())[marker] = normalized;
+    }
+    const repeat = source.timing?.repeat;
+    let activityExtension: FhirExtension[] | undefined;
+    for (let marker = 0; marker < (repeat?.extension?.length ?? 0); marker++) {
+      const extension = repeat!.extension![marker];
+      if (extension.url !== TIMING_ACTIVITY_WINDOW_EXTENSION_URL) continue;
+      const normalized = normalizeDefinedExtensionValue(extension);
+      if (normalized !== extension)
+        (activityExtension ??= repeat!.extension!.slice())[marker] = normalized;
+    }
+    if (!modifierExtension && !activityExtension) continue;
+    // Keep the original extended view only when normalization changes a marker.
     if (keepExtendedSource) {
       if (output === rows) output = rows.slice();
       output[index] = { ...source };
     }
     const row = output[index];
-    if (course) {
-      row.modifierExtension = row.modifierExtension?.map(extension =>
-        extension.url === DOSAGE_DETAILS_R5_URL
-          ? cloneDefinedExtensionValue(extension) : extension
-      );
-    }
-    const repeat = row.timing?.repeat;
-    if (activity && repeat) {
-      row.timing = { ...row.timing, repeat: {
-        ...repeat,
-        extension: repeat.extension?.map(extension =>
-          extension.url === TIMING_ACTIVITY_WINDOW_EXTENSION_URL
-            ? cloneDefinedExtensionValue(extension) : extension)
-      } };
+    if (modifierExtension) row.modifierExtension = modifierExtension;
+    if (activityExtension) {
+      row.timing = { ...source.timing, repeat: { ...repeat, extension: activityExtension } };
     }
   }
   return output;
