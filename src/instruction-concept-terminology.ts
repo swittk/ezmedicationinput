@@ -125,23 +125,6 @@ export function cloneMedicationInstructionConceptComponents(
   }));
 }
 
-function cloneDefinition(
-  definition: MedicationInstructionConceptDefinition
-): MedicationInstructionConceptDefinition {
-  return {
-    code: definition.code,
-    role: definition.role,
-    impliedArgument: definition.impliedArgument ? { ...definition.impliedArgument } : undefined,
-    display: definition.display,
-    i18n: definition.i18n ? { ...definition.i18n } : undefined,
-    aliases: definition.aliases ? [...definition.aliases] : undefined,
-    localeAliases: cloneLocaleAliases(definition.localeAliases),
-    coding: cloneCatalogCoding(definition.coding),
-    components: cloneCatalogComponents(definition.components),
-    externalCodings: definition.externalCodings?.map((coding) => cloneCatalogCoding(coding)!)
-  };
-}
-
 function normalizeDefinition(sourceDefinition: ConceptSource): MedicationInstructionConceptDefinition {
   return {
     code: sourceDefinition.code,
@@ -220,27 +203,6 @@ export function getMedicationInstructionConcept(
 
 export function listMedicationInstructionConcepts(): MedicationInstructionConceptDefinition[] {
   return DEFAULT_CONCEPTS;
-}
-
-/** Public vocabulary values are detached; lexical resolution stays shared. */
-export function getMedicationInstructionConceptCopy(
-  code: string, system?: string
-): MedicationInstructionConceptDefinition | undefined {
-  const definition = getMedicationInstructionConcept(code, system);
-  return definition ? cloneDefinition(definition) : undefined;
-}
-
-export function listMedicationInstructionConceptCopies(): MedicationInstructionConceptDefinition[] {
-  return DEFAULT_CONCEPTS.map(cloneDefinition);
-}
-
-export function resolveMedicationInstructionConceptCopy(
-  surface: string, options?: ParseOptions
-): MedicationInstructionConceptDefinition | undefined {
-  const custom = customDefinitionForSurface(surface, options);
-  if (custom) return custom;
-  const definition = DEFAULT_BY_ALIAS.get(normalizeConceptSurface(surface));
-  return definition ? cloneDefinition(definition) : undefined;
 }
 
 /** The public CodeSystem is freshly returned, but its published concepts

@@ -1580,7 +1580,6 @@ describe("composed instruction concepts", () => {
     const first = getInternalInstructionConcept("new_patch")!;
     expect(getInternalInstructionConcept("new_patch")).toBe(first);
     const publicValue = getMedicationInstructionConcept("new_patch");
-    expect(publicValue).not.toBe(first);
     expect(publicValue).toEqual(first);
     expect(Object.isFrozen(first)).toBe(false);
     expect(getMedicationInstructionConcept("new_patch")?.components?.[0].coding?.code).toBe("733005001");

@@ -310,52 +310,6 @@ function cloneContinuationLicenses(
   }));
 }
 
-export function cloneMedicationInstructionActionDefinition(
-  definition: MedicationInstructionActionDefinition
-): MedicationInstructionActionDefinition {
-  return {
-    code: definition.code,
-    semanticClass: definition.semanticClass,
-    display: definition.display,
-    i18n: definition.i18n ? { ...definition.i18n } : undefined,
-    roundtripI18n: definition.roundtripI18n ? { ...definition.roundtripI18n } : undefined,
-    aliases: definition.aliases ? [...definition.aliases] : undefined,
-    directiveOnlyAliases: definition.directiveOnlyAliases ? [...definition.directiveOnlyAliases] : undefined,
-    sequenceAliases: definition.sequenceAliases ? [...definition.sequenceAliases] : undefined,
-    localeAliases: cloneLocaleAliases(definition.localeAliases),
-    separableAliases: definition.separableAliases?.map((alias) => ({ ...alias })),
-    procedural: definition.procedural,
-    argumentParser: definition.argumentParser,
-    realizer: definition.realizer,
-    argumentParserConfig: definition.argumentParserConfig ? {
-      ...definition.argumentParserConfig,
-      primaryConcepts: definition.argumentParserConfig.primaryConcepts ? [...definition.argumentParserConfig.primaryConcepts] : undefined,
-      secondaryConcepts: definition.argumentParserConfig.secondaryConcepts ? [...definition.argumentParserConfig.secondaryConcepts] : undefined
-    } : undefined,
-    realizerConfig: cloneMedicationInstructionActionRealizerConfig(definition.realizerConfig),
-    methodBoundMannerConcepts: definition.methodBoundMannerConcepts ? [...definition.methodBoundMannerConcepts] : undefined,
-    continuationLicenses: cloneContinuationLicenses(definition.continuationLicenses),
-    continuationAfterRelations: definition.continuationAfterRelations ? [...definition.continuationAfterRelations] : undefined,
-    administrationDurationIntroducers: definition.administrationDurationIntroducers ? [...definition.administrationDurationIntroducers] : undefined,
-    preferredRelationSemanticClasses: definition.preferredRelationSemanticClasses ? [...definition.preferredRelationSemanticClasses] : undefined,
-    contextualCodings: cloneContextualCodings(definition.contextualCodings),
-    contextualSemanticComponents: cloneContextualSemanticComponents(definition.contextualSemanticComponents),
-    administrationMethod: cloneCoding(definition.administrationMethod),
-    verbRouteHint: definition.verbRouteHint,
-    methodRouteOverride: definition.methodRouteOverride,
-    suppressMethodRouteHint: definition.suppressMethodRouteHint,
-    applicationVerb: definition.applicationVerb,
-    primaryAdministrationHead: definition.primaryAdministrationHead,
-    supportVerb: definition.supportVerb,
-    safetyScopeTarget: definition.safetyScopeTarget,
-    acceptsAmount: definition.acceptsAmount,
-    definesDose: definition.definesDose,
-    coding: cloneCoding(definition.coding),
-    externalCodings: definition.externalCodings?.map((coding) => cloneCoding(coding)!),
-    semanticComponents: cloneMedicationInstructionActionSemanticComponents(definition.semanticComponents)
-  };
-}
-
 function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstructionActionDefinition {
   return {
     code: sourceDefinition.code,
@@ -550,8 +504,7 @@ export function resolveMedicationInstructionActionWithCodeFallback(
   options?: ParseOptions,
   includeCode = true
 ): MedicationInstructionActionDefinition | undefined {
-  const definition = resolveMedicationInstructionAction(surface, options, includeCode);
-  return definition ? cloneMedicationInstructionActionDefinition(definition) : undefined;
+  return resolveMedicationInstructionAction(surface, options, includeCode);
 }
 
 /** Resolve a declared administration method by exact code identity. Known
@@ -681,26 +634,6 @@ export function getMedicationInstructionAction(
 
 export function listMedicationInstructionActions(): MedicationInstructionActionDefinition[] {
   return DEFAULT_ACTIONS;
-}
-
-/** Package vocabulary values can be customized without changing parser indexes.
- * Internal lexical lookups above keep their shared, allocation-free entries. */
-export function getMedicationInstructionActionCopy(
-  code: string, options?: ParseOptions
-): MedicationInstructionActionDefinition | undefined {
-  const definition = getMedicationInstructionAction(code, options);
-  return definition ? cloneMedicationInstructionActionDefinition(definition) : undefined;
-}
-
-export function listMedicationInstructionActionCopies(): MedicationInstructionActionDefinition[] {
-  return DEFAULT_ACTIONS.map(cloneMedicationInstructionActionDefinition);
-}
-
-export function resolveMedicationInstructionSequenceActionCopy(
-  surface: string, options?: ParseOptions
-): MedicationInstructionActionDefinition | undefined {
-  const definition = resolveMedicationInstructionSequenceAction(surface, options);
-  return definition ? cloneMedicationInstructionActionDefinition(definition) : undefined;
 }
 
 /** A CodeSystem snapshot is a public value, not mutable global schema.

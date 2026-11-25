@@ -36,10 +36,6 @@ import { buildMedicationInstructionActionCodeSystem } from "../src/index";
 import { buildMedicationInstructionConceptCodeSystem } from "../src/index";
 import { getMedicationInstructionAction } from "../src/index";
 import { getMedicationInstructionConcept } from "../src/index";
-import { listMedicationInstructionActions } from "../src/index";
-import { listMedicationInstructionConcepts } from "../src/index";
-import { resolveMedicationInstructionAction as resolvePublicAction } from "../src/index";
-import { resolveMedicationInstructionSequenceAction } from "../src/index";
 import { resolveMedicationInstructionConcept as resolvePublicConcept } from "../src/index";
 import { parseInstructionActions } from "../src/index";
 import { realizeInstructionGraph } from "../src/index";
@@ -2267,37 +2263,7 @@ describe("round46 authored concept metadata and terminal action clocks", () => {
   });
 });
 
-describe("round44 public vocabulary and parsed frame isolation", () => {
-  it.each(["list", "get", "resolve", "sequence"] as const)("detaches the public action %s value", lookup => {
-    const entry = lookup === "list" ? listMedicationInstructionActions().find(value => value.code === "swallow")!
-      : lookup === "get" ? getMedicationInstructionAction("swallow")!
-      : lookup === "resolve" ? resolvePublicAction("swallow")! : resolveMedicationInstructionSequenceAction("off")!;
-    const display = entry.display, thai = entry.i18n?.th;
-    try {
-      entry.display = "Local picker label";
-      if (entry.i18n) entry.i18n.th = "Local picker translation";
-      const parsed = parseInstructionActions(lookup === "sequence" ? "Stop medication" : "Swallow 1 tablet")[0];
-      expect(parsed.predicate.display).toBe(lookup === "sequence" ? "Stop" : "Swallow");
-      expect(parsed.predicate.i18n?.th).toBe(thai);
-    } finally {
-      entry.display = display;
-      if (entry.i18n) entry.i18n.th = thai!;
-    }
-  });
-
-  it.each(["list", "get", "resolve"] as const)("detaches the public concept %s value", lookup => {
-    const read = () => lookup === "list" ? listMedicationInstructionConcepts().find(value => value.code === "occlusive_dressing")!
-      : lookup === "get" ? getMedicationInstructionConcept("occlusive_dressing")! : resolvePublicConcept("occlusive dressing")!;
-    const entry = read();
-    const display = entry.display;
-    try {
-      entry.display = "Local dressing label";
-      expect(read().display).toBe(display);
-      expect(parseInstructionActions("Cover with an occlusive dressing")[0].args
-        .find(arg => arg.conceptId === "occlusive_dressing")?.normalized).toBe("an occlusive dressing");
-    } finally { entry.display = display; }
-  });
-
+describe("round44 fresh compound argument ownership", () => {
   it.each([false, true])("isolates a compound argument from subsequent parses (resolver %s)", semanticResolver => {
     const makeGraph = () => semanticResolver ? parsePublicSig("local procedure", {
         instructionSemanticResolvers: request => ({ actions: [{ action: "cover",
