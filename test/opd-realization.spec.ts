@@ -1434,15 +1434,8 @@ describe("round38 configured terminology retains authored identity", () => {
     expect(changed.method?._text).toBeUndefined();
   });
 
-  it.each([false, true])("keeps custom coding identity and annotations from plain or getter-backed inputs (%s)", getters => {
-    class Coding {
-      id = "saline-annotation";
-      get version() { return "v2"; }
-      get system() { return "urn:clinic:fluid"; }
-      get code() { return "saline"; }
-      get display() { return "Custom saline"; }
-    }
-    const coding = getters ? new Coding() : { id: "saline-annotation", version: "v2",
+  it("keeps custom coding identity and annotations from plain inputs", () => {
+    const coding = { id: "saline-annotation", version: "v2",
       system: "urn:clinic:fluid", code: "saline", display: "Custom saline" };
     const actions = parseInstructionActions("Mix powder with saline", 0, {
       instructionConceptMap: { saline: { code: "clinic-saline", role: AdviceArgumentRole.Substance,

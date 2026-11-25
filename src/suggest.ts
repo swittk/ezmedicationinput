@@ -579,7 +579,7 @@ function directLocalePrnReasonSuggestions(
   const adapter = getSuggestLocaleAdapter(locale);
   return adapter.directPrnCompletion(
     normalizeSpacing(input),
-    buildPrnReasons({ ...options, locale }).slice(),
+    buildPrnReasons({ ...options, locale }),
     limit
   );
 }
@@ -992,7 +992,7 @@ function defaultDirectionSuggestions(
     pairs,
     limit,
     (canonical, preferred) => localeLexemeByCanonical(locale, canonical, preferred),
-    () => buildPrnReasons({ ...options, locale }).slice()
+    () => buildPrnReasons({ ...options, locale })
   );
 }
 

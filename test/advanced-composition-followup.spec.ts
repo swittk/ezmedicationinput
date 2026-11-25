@@ -3438,36 +3438,7 @@ describe("review 26 external display ownership", () => {
     expect(reopened.fhir.doseAndRate).toEqual(expectedDoseAndRate);
   });
 
-  it("binds partial regional callbacks to the registration that owns their private state", () => {
-    class BasePack {
-      readonly locale = "rx";
-      readonly course = ENGLISH_COURSE;
-      #long = "Base long";
-      formatLong() { return this.#long; }
-      formatShort() { return "Base short"; }
-    }
-    class RegionalPack {
-      readonly locale = "rx-XX";
-      #short = "Regional short";
-      formatShort() { return this.#short; }
-    }
-    const base = new BasePack();
-    registerSigLocalization(base);
-    registerSigLocalization(new RegionalPack());
-    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
-    expect(formatSig(row, "long", { locale: "rx-XX" })).toBe("Base long");
-    expect(formatSig(row, "short", { locale: "rx-XX" })).toBe("Regional short");
-    const first = resolveSigLocalization("rx-XX");
-    expect(resolveSigLocalization("rx-XX")).toBe(first);
-    expect(resolveSigLocalization("rx")).toBe(base);
-    class ReplacementPack extends BasePack {
-      #replacement = "Replacement long";
-      formatLong() { return this.#replacement; }
-    }
-    registerSigLocalization(new ReplacementPack());
-    expect(formatSig(row, "long", { locale: "rx-XX" })).toBe("Replacement long");
-    expect(formatSig(row, "short", { locale: "rx-XX" })).toBe("Regional short");
-  });
+
 });
 
 
@@ -3621,38 +3592,7 @@ describe("review 27 live clinical source proofs and language receivers", () => {
     }
   });
 
-  it("binds per-call base, inherited and override callbacks to their owning objects", () => {
-    class BasePack {
-      readonly locale = "r27";
-      readonly course = ENGLISH_COURSE;
-      #short = "Base short";
-      #long = "Base long";
-      formatShort() { return this.#short; }
-      formatLong() { return this.#long; }
-    }
-    class InheritedPack {
-      readonly locale = "r27-inherited";
-      #long = "Inherited long";
-      formatLong() { return this.#long; }
-    }
-    class CallConfig {
-      readonly locale = "r27-CA";
-      readonly inherit = "r27-inherited";
-      #short = "Per-call short";
-      formatShort() { return this.#short; }
-    }
-    const base = new BasePack();
-    registerSigLocalization(base);
-    registerSigLocalization(new InheritedPack());
-    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
-    expect(resolveSigLocalization("r27")).toBe(base);
-    expect(resolveSigLocalization("r27-CA")).toBe(base);
-    expect(formatSig(row, "long", { i18n: { locale: "r27-CA" } })).toBe("Base long");
-    expect(formatSig(row, "short", { i18n: { locale: "r27-CA" } })).toBe("Base short");
-    const localization = new CallConfig();
-    expect(formatSig(row, "long", { i18n: localization })).toBe("Inherited long");
-    expect(formatSig(row, "short", { i18n: localization })).toBe("Per-call short");
-  });
+
 });
 
 it.each(["Take 1 tablet", "Dissolve 1 tablet in water"])("honors a freshly submitted R5 maximum edit for %s", head => {

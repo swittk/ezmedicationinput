@@ -1144,20 +1144,14 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
     (range.high.unit ?? getDoseQuantityUnit(range.high))));
 }
 
-/** Apply public defaults through declared fields so prototype/getter options
- * retain the same values as direct reads. Explicit modes need no copy. */
+/** Apply display defaults without changing the supplied plain options. */
 function defaultFormatOptions(options?: FormatBatchOptions, separator?: string): FormatBatchOptions {
   if (options?.realizationMode !== undefined && separator === undefined) return options;
-  if (!options) return { realizationMode: "normalized", ...(separator !== undefined ? { separator } : {}) };
-  return Object.assign({}, options, {
-    locale: options.locale,
-    i18n: options.i18n,
-    groupMealTimingsByRelation: options.groupMealTimingsByRelation,
-    includeTimesPerDaySummary: options.includeTimesPerDaySummary,
-    sitePlacement: options.sitePlacement,
-    separator: separator ?? options.separator,
-    realizationMode: options.realizationMode ?? "normalized",
-  });
+  return {
+    ...options,
+    realizationMode: options?.realizationMode ?? "normalized",
+    ...(separator !== undefined ? { separator } : {}),
+  };
 }
 
 export function formatSig(

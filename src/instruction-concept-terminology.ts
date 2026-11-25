@@ -84,12 +84,7 @@ export function normalizeConceptSurface(value: string): string {
 
 function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   if (!coding) return undefined;
-  // Preserve authored Coding metadata without descriptor-based spread overrides.
   const copy = Object.assign({}, coding);
-  copy.system = coding.system;
-  copy.version = coding.version;
-  copy.code = coding.code;
-  copy.display = coding.display;
   copy.extension = cloneStructuredValue(coding.extension);
   copy._code = cloneStructuredValue(coding._code);
   copy._userSelected = cloneStructuredValue(coding._userSelected);

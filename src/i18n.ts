@@ -192,15 +192,9 @@ const THAI_ADMINISTRATION_WINDOW_TRANSLATIONS = new Map(
 type SigFormatter = NonNullable<SigLocalization["formatShort"] | SigLocalization["formatLong"]>;
 const BUILTIN_SIG_FORMATTERS = new WeakSet<SigFormatter>();
 
-/** Custom callbacks receive detached vocabulary; bundled callbacks only read it. */
+/** Bundled formatters own the built-in clinical condition placement. */
 export function isBuiltinSigFormatter(formatter: SigFormatter): boolean {
   return BUILTIN_SIG_FORMATTERS.has(formatter);
-}
-
-function bindSigFormatter<T extends SigFormatter>(formatter: T, owner: object): T {
-  const bound = formatter.bind(owner) as T;
-  if (isBuiltinSigFormatter(formatter)) BUILTIN_SIG_FORMATTERS.add(bound);
-  return bound;
 }
 
 function registerBuiltinSigLocalization(localization: SigLocalization): void {
@@ -242,11 +236,9 @@ function registeredLocalization(key: string | undefined): SigLocalization | unde
   if (cached?.exact === exact && cached.base === base) return cached.localization;
   const resolved: SigLocalization = {
     locale: exact.locale,
-    formatDose: exact.formatDose?.bind(exact) ?? base.formatDose?.bind(base),
-    formatShort: exact.formatShort ? bindSigFormatter(exact.formatShort, exact)
-      : base.formatShort ? bindSigFormatter(base.formatShort, base) : undefined,
-    formatLong: exact.formatLong ? bindSigFormatter(exact.formatLong, exact)
-      : base.formatLong ? bindSigFormatter(base.formatLong, base) : undefined,
+    formatDose: exact.formatDose ?? base.formatDose,
+    formatShort: exact.formatShort ?? base.formatShort,
+    formatLong: exact.formatLong ?? base.formatLong,
     course: exact.course ?? base.course,
   };
   RESOLVED_REGIONAL_LOCALIZATIONS.set(key, {
@@ -286,18 +278,9 @@ export function resolveSigLocalization(
       ? {course:config?.course ?? inherited?.course ?? base?.course} : {})
   };
 
-  // Select each winning facet once, then preserve the receiver that owns it.
-  // Only configured compositions allocate bindings; the registered fast path
-  // above still returns the original object.
-  const doseOwner = config.formatDose !== undefined ? config
-    : inherited?.formatDose ? inherited : base;
-  if (doseOwner?.formatDose) result.formatDose = doseOwner.formatDose.bind(doseOwner);
-  const shortOwner = config.formatShort !== undefined ? config
-    : inherited?.formatShort ? inherited : base;
-  const longOwner = config.formatLong !== undefined ? config
-    : inherited?.formatLong ? inherited : base;
-  if (shortOwner?.formatShort) result.formatShort = bindSigFormatter(shortOwner.formatShort, shortOwner);
-  if (longOwner?.formatLong) result.formatLong = bindSigFormatter(longOwner.formatLong, longOwner);
+  result.formatDose = config.formatDose ?? inherited?.formatDose ?? base?.formatDose;
+  result.formatShort = config.formatShort ?? inherited?.formatShort ?? base?.formatShort;
+  result.formatLong = config.formatLong ?? inherited?.formatLong ?? base?.formatLong;
 
   if (!result.formatDose && !result.formatShort && !result.formatLong && !result.course) {
     return base ?? inherited ?? result;

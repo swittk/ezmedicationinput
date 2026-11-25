@@ -16,7 +16,6 @@ import { EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM, QU
 import { PRN_TRIGGER_PHASE_EXTENSION_URL, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, canonicalFromFhir, canonicalToFhir, getAnchoredCourseDuration, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL, getTimingClocks } from "../src/fhir";
 import { courseToR6, boundaryToWire, R5_SOURCE_ONLY_MAXIMUM_URL } from "../src/adapters/canonical-course";
 import { courseFromR5 } from "../src/adapters/r5-import";
-import type { SigFormatContext } from "../src/i18n";
 import { R6_DRAFT_STEPS_SOURCE_URL, R6_SINGLE_STEP_SAFETY_SOURCE_URL, R6_SCOPED_SAFETY_MODIFIER_URL } from "../src/adapters/r6-editable-metadata";
 import { type FhirR6DosageSafety, type FormatOptions, type FhirR6DoseLimit, type ParseOptions } from "../src/types";
 
@@ -4912,37 +4911,7 @@ describe("round46 public display and pause ownership", () => {
     id, doseAndRate: [{ doseQuantity: q(value) }], timing: { repeat: persist(repeat) },
   });
 
-  it.each([
-    { style: "short", registered: false }, { style: "long", registered: false },
-    { style: "short", registered: true }, { style: "long", registered: true },
-  ] as const)("isolates $style callback vocabulary (registered=$registered)", ({ style, registered }) => {
-    const before = getMedicationInstructionAction("take")!;
-    const thai = parseSig("Take 1 tablet daily", { locale: "th" }).longText;
-    const exposed: Array<NonNullable<SigFormatContext["resolvedMethod"]>> = [];
-    const callback = (context: SigFormatContext) => {
-      if (context.resolvedMethod) {
-        exposed.push(context.resolvedMethod);
-        context.resolvedMethod.i18n!.th = "Local display only";
-      }
-      return context.defaultText;
-    };
-    const localization = { locale: "round46-callback-" + style + "-" + registered,
-      ...(style === "short" ? { formatShort: callback } : { formatLong: callback }) };
-    try {
-      if (registered) registerSigLocalization(localization);
-      parseSig("Take 1 tablet daily", { instructionActionMap: {},
-        ...(registered ? { locale: localization.locale } : { i18n: localization }) });
-      expect(exposed.length).toBeGreaterThan(0);
-      expect(exposed[0].i18n!.th).toBe("Local display only");
-      expect(getMedicationInstructionAction("take")).toEqual(before);
-      expect(parseSig("Take 1 tablet daily", { locale: "th" }).longText).toBe(thai);
-      expect(parseSig("Take 1 tablet daily", {
-        instructionActionMap: {}, i18n: { inherit: "th" },
-      }).longText).toBe(thai);
-    } finally {
-      for (const definition of exposed) definition.i18n!.th = before.i18n!.th;
-    }
-  });
+
 
   it.each(["unchanged", "last-start", "first-duration", "middle-duration"] as const)("retains independently owned pauses after a %s edit", edit => {
     const note = { url: "urn:test:pause-note", id: "authored-pause-note", valueString: "second planned pause" };

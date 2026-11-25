@@ -10,11 +10,11 @@ import {
   type LocalizedTimingGrammar
 } from "./localized-timing";
 import { ParserState } from "./parser-state";
-import { isBuiltinSigFormatter, appendClinicalConditionText, canFormatConditionInPrimary, type SigLocalization, type SigLongContext, type SigShortContext, type SigDoseScope } from "./i18n";
+import { appendClinicalConditionText, canFormatConditionInPrimary, type SigLocalization, type SigLongContext, type SigShortContext, type SigDoseScope } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { composedCodedWarningActionSources } from "./advice";
-import { cloneMedicationInstructionActionDefinition, medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "./instruction-action-terminology";
+import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "./instruction-action-terminology";
 import { baseLanguageTag, quantityComparatorText } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
 import {
@@ -2208,8 +2208,7 @@ export function formatCanonicalClause(
         (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
       formatDefault,
       instructionActionMap: options?.instructionActionMap,
-      resolvedMethod: resolvedMethod && !isBuiltinSigFormatter(localization.formatShort)
-        ? cloneMedicationInstructionActionDefinition(resolvedMethod) : resolvedMethod
+      resolvedMethod
     };
     return localization.formatShort(context);
   }
@@ -2227,8 +2226,7 @@ export function formatCanonicalClause(
         (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
       formatDefault,
       instructionActionMap: options?.instructionActionMap,
-      resolvedMethod: resolvedMethod && !isBuiltinSigFormatter(localization.formatLong)
-        ? cloneMedicationInstructionActionDefinition(resolvedMethod) : resolvedMethod
+      resolvedMethod
     };
     const rendered = localization.formatLong(context);
     const condition = clause.clinicalAdjuncts?.condition;

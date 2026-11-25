@@ -37,13 +37,11 @@ import {
 } from "../src/fhir";
 import { courseToR6, courseFromR6, courseToR5, administrationFromR5, boundaryToWire, R5_SOURCE_ONLY_MAXIMUM_URL } from "../src/adapters/canonical-course";
 import { courseFromR5 } from "../src/adapters/r5-import";
-import type { SigFormatContext } from "../src/i18n";
 import { R6_DRAFT_STEPS_SOURCE_URL, R6_SINGLE_STEP_SAFETY_SOURCE_URL, R6_SCOPED_SAFETY_MODIFIER_URL } from "../src/adapters/r6-editable-metadata";
 
 import { getPrimitiveTranslation, getPrimitiveTranslations, FHIR_TRANSLATION_EXTENSION_URL } from "../src/fhir-translations";
 import { numericAdministrationLimits, type CanonicalCourse } from "../src/canonical/course";
 import { type EzCourseMetadata, type FhirR6DosageSafety, type FormatOptions, type FhirR6DoseLimit, type ParseOptions } from "../src/types";
-import { getSuggestLocaleAdapter, registerSuggestLocaleAdapter } from "../src/suggest-locale-adapter";
 
 const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const q = (value: number) => ({ value, unit: "tab" });
@@ -706,28 +704,7 @@ describe("round 23 public boundary corrections", () => {
     if (withDose) expect(text).toMatch(/2 mg; /u);
   });
 
-  it("keeps cached PRN defaults intact across mutable extension callbacks", () => {
-    const original = getSuggestLocaleAdapter("en");
-    const direct: string[][] = [], defaults: string[][] = [];
-    registerSuggestLocaleAdapter({ ...original, directPrnCompletion(_input, reasons) {
-      direct.push([...reasons]);
-      reasons.splice(0, reasons.length);
-      return ["custom direction"];
-    }, defaultDirections(_pairs, _limit, _lexeme, reasons) {
-      const first = reasons(); defaults.push([...first]); first.splice(0, first.length);
-      const second = reasons(); defaults.push([...second]);
-      return ["custom direction"];
-    } });
-    try {
-      suggestSig("prn", { locale: "en" }); suggestSig("prn", { locale: "en" });
-      suggestSig("", { locale: "en" }); suggestSig("", { locale: "en" });
-      expect(direct).toHaveLength(2);
-      expect(direct[0].length).toBeGreaterThan(0);
-      expect(direct[1]).toEqual(direct[0]);
-      expect(defaults).toHaveLength(4);
-      for (const reasons of defaults) expect(reasons).toEqual(direct[0]);
-    } finally { registerSuggestLocaleAdapter(original); }
-  });
+
 });
 
 const integerWithMetadata: FhirR6DoseLimit = { scope: "lifetime", valueInteger: 2, _valueInteger: { id: "count" } };
@@ -3095,25 +3072,6 @@ describe("round64 preserved R5 list and replacement ownership", () => {
 });
 
 
-describe("round64 declared format options", () => {
-  it.each([undefined, "roundtrip"] as const)("preserves a prototype locale getter while defaulting mode %s", realizationMode => {
-    class ThaiOptions implements FormatOptions {
-      #locale = "th";
-      constructor(public realizationMode?: "roundtrip") {}
-      get locale() { return this.#locale; }
-    }
-    const options = new ThaiOptions(realizationMode);
-    const expected = { locale: "th", realizationMode: realizationMode ?? "normalized" as const };
-    const row: FhirDosage = { doseAndRate: [{ doseQuantity: q(2) }],
-      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } } };
-    expect(formatSig(row, "long", options)).toBe(formatSig(row, "long", expected));
-    expect(fromFhirDosage(row, options).longText).toBe(fromFhirDosage(row, expected).longText);
-    const rows = [{ ...row, sequence: 1 }, { ...row, sequence: 2 }];
-    expect(formatSigBatch(rows, "long", options)).toBe(formatSigBatch(rows, "long", expected));
-  });
-});
-
-
 describe("round66 interchange review corrections", () => {
   const contextCode = { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] };
   const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] };
@@ -3975,22 +3933,7 @@ describe("round74 shared source owners", () => {
     expect(marker).toEqual(before);
   });
 
-  it("retains getter-backed configured Coding identity and declared annotations", () => {
-    class Coding {
-      [key: string]: unknown;
-      get system() { return "https://example.org/clinic/actions"; }
-      get code() { return "coat-lightly"; }
-      get display() { return "Coat lightly"; }
-      get extension() { return [note]; }
-      id = "authored-action";
-    }
-    const coding = new Coding();
-    const parsed = parseSig("coat lightly", { instructionActionMap: { "coat lightly": {
-      code: "coat-lightly", display: "Coat lightly", semanticClass: "procedure", procedural: true, coding,
-    } } });
-    expect(parsed.meta.canonical.clauses[0].instructionGraph!.actions[0].predicate.codings).toContainEqual(
-      expect.objectContaining({ system: coding.system, code: coding.code, display: coding.display, id: coding.id, extension: [note] }));
-  });
+
 
   it("merges current same-locale translations for graph Coding and PRN projection", () => {
     const oldThai = { id: "authored-translation", url: FHIR_TRANSLATION_EXTENSION_URL, extension: [
@@ -5004,16 +4947,9 @@ describe("round78 interchange owner contracts", () => {
 });
 
 describe("round78 configured spatial Coding", () => {
-  it.each([false, true])("keeps declared target identity with a default system (getters=%s)", getters => {
+  it("keeps declared target identity with a default system", () => {
     const note = { url: "urn:clinic:target-note", valueString: "retain" };
-    class Target {
-      id = "spatial-target";
-      extension = [note];
-      get code() { return "181299001"; }
-      get display() { return "Entire nose"; }
-    }
-    const targetCoding = getters ? new Target()
-      : { id: "spatial-target", extension: [note], code: "181299001", display: "Entire nose" };
+    const targetCoding = { id: "spatial-target", extension: [note], code: "181299001", display: "Entire nose" };
     const marker = buildBodySiteSpatialRelationExtension({ relationText: "below", targetCoding })!;
     const target = marker.extension!.find(item => item.url === "target")!.valueCodeableConcept!;
     expect(target.coding).toEqual([{ id: "spatial-target", extension: [note],
