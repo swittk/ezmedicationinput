@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, fromFhirDosage, nextDueDoses, RouteCode } from "../src";
+import { formatSig, fromFhirDosage, importCanonicalCourse, nextDueDoses, projectCanonicalCourse, RouteCode } from "../src";
 import { parseSig } from "./helpers/r5-parser";
 
 describe("OPD clinician dogfood grammar", () => {
@@ -33,12 +33,14 @@ describe("OPD clinician dogfood grammar", () => {
       url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
     }] });
     expect(parsed.longText).toContain("for up to 3 doses");
-    const reopened = fromFhirDosage(parsed.fhir);
+    const persisted = JSON.parse(JSON.stringify(parsed.fhir));
+    const reopened = fromFhirDosage(persisted);
     expect(reopened.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
     expect(reopened.meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 3 });
-    expect(reopened.fhir.timing?.repeat?.count).toBeUndefined();
-    expect(reopened.fhir.timing?.repeat?.countMax).toBe(3);
-    expect(reopened.fhir.timing?.repeat?._count).toEqual({ extension: [{
+    const exported = projectCanonicalCourse(importCanonicalCourse([persisted])).fhir[0];
+    expect(exported.timing?.repeat?.count).toBeUndefined();
+    expect(exported.timing?.repeat?.countMax).toBe(3);
+    expect(exported.timing?.repeat?._count).toEqual({ extension: [{
       url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
     }] });
   });
