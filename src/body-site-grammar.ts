@@ -496,13 +496,15 @@ function canonicalBodySiteLocativeRelation(
     : undefined;
 }
 
+const BODY_SITE_LOCATIVE_PATTERNS = Array.from(BODY_SITE_LOCATIVE_RELATION_PHRASES,
+  ([phrase, canonical]) => ({ parts: phrase.split(/\s+/u), canonical }));
+
 function matchBodySiteLocativeRelation(
   words: readonly string[],
   start = 0
 ): { relation: BodySiteLocativeRelation; length: number } | undefined {
   let best: { relation: BodySiteLocativeRelation; length: number } | undefined;
-  for (const [phrase, canonical] of BODY_SITE_LOCATIVE_RELATION_PHRASES) {
-    const parts = phrase.split(/\s+/u);
+  for (const { parts, canonical } of BODY_SITE_LOCATIVE_PATTERNS) {
     if (parts.length <= (best?.length ?? 0) || start + parts.length > words.length) continue;
     if (!parts.every((part, offset) => words[start + offset] === part)) continue;
     const relation = canonicalBodySiteLocativeRelation(canonical);
