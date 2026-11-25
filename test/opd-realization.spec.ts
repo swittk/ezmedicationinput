@@ -51,17 +51,16 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
 
     for (const { maximum, source } of cases) {
       const dosage: FhirDosage = { ...base, ...maximum, text: source };
-      expect(formatSig(dosage, "short", { locale: "th", realizationMode: "roundtrip" })).toBe(source);
-      expect(formatSig(dosage, "long", { locale: "th", realizationMode: "roundtrip" })).toBe(source);
-
+      const maximumText = maximum.maxDosePerAdministration
+        ? "max per administration: 1 tab" : "max lifetime: 10 tab";
       const imported = fromFhirDosage({ ...dosage }, { locale: "th", realizationMode: "roundtrip" });
-      expect(imported.shortText).toBe(source);
-      expect(imported.longText).toBe(source);
+      for (const text of [formatSig(dosage, "short", { locale: "th", realizationMode: "roundtrip" }), imported.shortText])
+        expect(text.split("; ข้อความเดิม: ")).toEqual([`ปัจจุบัน: 1 เม็ด วันละ 2 ครั้ง; ${maximumText}`, source]);
+      for (const text of [formatSig(dosage, "long", { locale: "th", realizationMode: "roundtrip" }), imported.longText])
+        expect(text.split("; ข้อความเดิม: ")).toEqual([`ปัจจุบัน: ใช้ 1 เม็ด วันละ 2 ครั้ง; ${maximumText}`, source]);
       expect(imported.fhir.text).toBe(source);
 
       const withoutSource: FhirDosage = { ...base, ...maximum };
-      const maximumText = maximum.maxDosePerAdministration
-        ? "max per administration: 1 tab" : "max lifetime: 10 tab";
       const normalized = fromFhirDosage({ ...dosage });
       expect(normalized.shortText).toBe(`1 tab 2x/d; ${maximumText}`);
       expect(normalized.longText).toBe(`Use 1 tablet twice daily; ${maximumText}`);

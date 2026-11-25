@@ -1,6 +1,7 @@
 import { cloneStructuredValue } from "../src/stable-structure";
 import { parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -34,6 +35,19 @@ const supply = {
 const parallel = "1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid";
 
 describe("external review: FHIR R5/R6 and medication correctness", () => {
+  it("checks the public R5 and current R6 contracts with strict TypeScript", () => {
+    const program = ts.createProgram([fileURLToPath(new URL("./pr14-round23-r5.spec.ts", import.meta.url))], {
+      noEmit: true, strict: true, skipLibCheck: true, target: ts.ScriptTarget.ES2015,
+      module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.NodeJs,
+      esModuleInterop: true, resolveJsonModule: true,
+    });
+    const diagnostics = ts.getPreEmitDiagnostics(program);
+    expect(ts.formatDiagnostics(diagnostics, {
+      getCanonicalFileName: name => name, getCurrentDirectory: ts.sys.getCurrentDirectory,
+      getNewLine: () => "\n",
+    })).toBe("");
+  }, 30000);
+
   it("declares the R6 predicate extension slice using a URL discriminator", () => {
     const profile = JSON.parse(readFileSync(
       new URL("../fhir/r6/medication-r6-condition-logic.json", import.meta.url), "utf8"

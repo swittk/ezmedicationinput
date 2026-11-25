@@ -17,7 +17,7 @@
   "scripts": {
     "test:dist": "npm run build && vitest run test-dist",
     "build": "tsup && tsc -p tsconfig.types.json",
-    "test": "npm run test:types && vitest run --dir test",
+    "test": "vitest run --dir test",
     "bench:torture": "npm run build && node bench/real-world-torture.mjs",
     "bench:r6-regression": "npm run build && node bench/compare-r6.mjs",
     "bench:adversarial": "npm run build && node bench/adversarial.mjs",
@@ -29,8 +29,7 @@
     "typecheck:boundaries": "tsc -p experiments/boundary-planner/tsconfig.json",
     "explain:boundaries": "node experiments/boundary-planner/explain.mjs",
     "test:boundary-clinical": "vitest run --config experiments/boundary-planner/vitest.acceptance.config.ts",
-    "typecheck:boundary-integration": "node experiments/boundary-planner/typecheck-integration.mjs",
-    "test:types": "tsc --noEmit --strict --skipLibCheck --target es6 --module commonjs --moduleResolution node --esModuleInterop --resolveJsonModule test/pr14-round23-r5.spec.ts"
+    "typecheck:boundary-integration": "node experiments/boundary-planner/typecheck-integration.mjs"
   },
   "files": [
     "dist"

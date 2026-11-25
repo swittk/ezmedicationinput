@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSig } from "../src/index";
+import { parseSig as parseProductionSig, formatSig } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { FhirDayOfWeek, FhirPeriodUnit, type FhirDosage } from "../src/types";
 
@@ -149,11 +149,11 @@ describe("Thai formatter human-review follow-up", () => {
   });
 
   it("applies explicit spatial relations to curated base-site translations", () => {
-    const parsed = parseSig("apply to right side of abdomen bid");
+    const parsed = parseProductionSig("apply to right side of abdomen bid");
     const dosage: FhirDosage = {
-      ...parsed.fhir,
+      ...parsed.fhir[0],
       site: {
-        ...parsed.fhir.site,
+        ...parsed.fhir[0].site,
         text: "abdomen"
       }
     };
@@ -241,7 +241,7 @@ describe("Thai formatter human-review follow-up", () => {
   });
 
   it("does not let a standalone instruction graph hide administration timing or duration", () => {
-    const warning = parseSig("do not take with food").fhir;
+    const warning = parseProductionSig("do not take with food").fhir[0];
     const withTimingCode: FhirDosage = {
       ...warning,
       timing: { code: { coding: [{ code: "BID" }], text: "BID" } }

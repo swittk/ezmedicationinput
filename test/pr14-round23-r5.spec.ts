@@ -2175,7 +2175,11 @@ describe("round30 interchange meaning", () => {
         scope === "lifetime" ? "max lifetime: 2 tab" : "max per period: 2 tab / 1 d");
       expect(actual).not.toMatch(/Take one tablet/u);
     }
-    expect(formatSig(row, "long", { realizationMode: "roundtrip" })).toBe(row.text);
+    const currentCap = scope === "administration" ? "max per administration: 2 tab" :
+      scope === "lifetime" ? "max lifetime: 2 tab" : "max per period: 2 tab / 1 d";
+    for (const text of [formatSig(row, "long", { realizationMode: "roundtrip" }),
+      fromFhirDosage(row, { realizationMode: "roundtrip" }).longText])
+      expect(text.split("; original directions: ")).toEqual([`Current: Use 1 tablet once daily; ${currentCap}`, row.text]);
     expect(JSON.stringify(row)).toBe(before);
   });
 
@@ -4424,7 +4428,8 @@ describe("round37 interchange phase, limit and source ownership", () => {
     }
     row = persist(row);
     row.text = "Authored infusion instructions";
-    expect(formatSig(row, "long", { realizationMode: "roundtrip" })).toBe("Authored infusion instructions");
+    expect(formatSig(row, "long", { realizationMode: "roundtrip" }).split("; original directions: "))
+      .toEqual([`Current: ${dose ? "Use 1 tablet" : "Use"}; Rate: 100 mL / 2 h`, "Authored infusion instructions"]);
     for (const displayed of [formatSig(row, "long"), fromFhirDosage(row).longText]) {
       expect(displayed).toContain("100 mL / 2 h");
       if (dose) expect(displayed).toMatch(/1 (?:tab|tablet)/);
@@ -5995,7 +6000,8 @@ describe("round33 scalar R5 quantity meaning", () => {
     }
     expect(JSON.stringify(row)).toBe(before);
     const authored = { ...row, text: "Infuse five units hourly, per the original instruction." };
-    expect(formatSig(authored, "long", { realizationMode: "roundtrip" })).toBe(authored.text);
+    expect(formatSig(authored, "long", { realizationMode: "roundtrip" }).split("; original directions: "))
+      .toEqual([`Current: Use; Rate: 5 ${unit}`, authored.text]);
   });
 
   it.each(["mg", "mL"])("keeps code-only %s units in equal-unit dose ranges", code => {
@@ -6808,7 +6814,8 @@ describe("round43 live editable exclusions and safety metadata", () => {
       expect(text).toMatch(/1 tab(?:let)?/u);
     }
     expect(JSON.stringify(row)).toBe(before);
-    expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(row.text);
+    expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" }).split("; original directions: "))
+      .toEqual(["Current: Use 1 tablet once daily; max per administration: 2 tab", row.text]);
   });
 
   it.each([false, true])("keeps period text at its own Ratio-list position (reordered %s)", reordered => {

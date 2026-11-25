@@ -211,7 +211,7 @@ describe("advanced compositional follow-up", () => {
       expect(formatSig(parsed.fhir, "long", { locale: "th" })).toBe(thai);
       expect(thai).not.toMatch(/[A-Za-z]/u);
 
-      const dosage = JSON.parse(JSON.stringify(parsed.fhir));
+      const dosage = JSON.parse(JSON.stringify(parseProductionSig(input).fhir[0]));
       expect(fromFhirDosage(dosage, { locale: "th" }).longText).toBe(thai);
       expect(formatSig(dosage, "long", { locale: "th" })).toBe(thai);
     });

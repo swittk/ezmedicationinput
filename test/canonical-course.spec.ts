@@ -2400,13 +2400,13 @@ describe("course locale boundary", () => {
     ]) {
       for (const input of [fresh(methodRow), fresh(methodR6), fresh(toFhirR5Dosages(methodR6))]) {
         const before = fresh(input);
-        expect(formatSig(input, "long", options)).toBe("Dose locale.");
+        expect(formatSig(input, "long", options)).toBe("Current: Dose locale; original directions: Dose locale.");
         expect(input).toEqual(before);
       }
       expect(formatCanonicalAdministration({
         kind: "administration", text: methodRow.text, method: methodRow.method,
         schedule: { recurrence: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } }
-      }, "long", options)).toBe("Dose locale.");
+      }, "long", options)).toBe("Current: Dose locale; original directions: Dose locale.");
     }
     expect(toDosageDetails(fresh(toFhirR5Dosages(methodR6)))).toEqual(methodR6);
   });

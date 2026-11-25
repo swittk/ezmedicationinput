@@ -1,6 +1,6 @@
 import { getTimingClocks } from "../src/fhir";
 import { describe, expect, it } from "vitest";
-import { fromFhirDosage, toFhirR5Dosages, formatSig, getDoseUnitSemantics, getBodySiteCode, getBodySiteCodeAsync, getBodySiteText, getBodySiteTextAsync, listSupportedBodySiteGrammar, listSupportedBodySiteText, lookupBodySite, listDoseUnitTerminology, suggestBodySiteText, suggestBodySites } from "../src/index";
+import { parseSig as parseProductionSig, fromFhirDosage, toFhirR5Dosages, formatSig, getDoseUnitSemantics, getBodySiteCode, getBodySiteCodeAsync, getBodySiteText, getBodySiteTextAsync, listSupportedBodySiteGrammar, listSupportedBodySiteText, lookupBodySite, listDoseUnitTerminology, suggestBodySiteText, suggestBodySites } from "../src/index";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL } from "../src/body-site-spatial";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
@@ -3056,12 +3056,12 @@ describe("parseSig core scenarios", () => {
   });
 
   it("emits structured spatial relation metadata for body-site relation phrases", () => {
-    const result = parseSig("apply below ear bid");
-    const relation = result.fhir.site?.extension?.find(
+    const result = parseProductionSig("apply below ear bid");
+    const relation = result.fhir[0].site?.extension?.find(
       (extension) => extension.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL
     );
 
-    expect(result.fhir.site?.coding?.[0]).toEqual({
+    expect(result.fhir[0].site?.coding?.[0]).toEqual({
       system: "http://snomed.info/sct",
       code: topographicalSiteCode("117590005", "351726001"),
       display: "below ear"
@@ -3103,8 +3103,8 @@ describe("parseSig core scenarios", () => {
     });
 
     const roundTripped = fromFhirDosage({
-      ...result.fhir,
-      site: { extension: result.fhir.site?.extension }
+      ...result.fhir[0],
+      site: { extension: result.fhir[0].site?.extension }
     });
     expect(roundTripped.longText).toBe("Apply the medication twice daily below the ear.");
     expect(roundTripped.meta.normalized.site?.spatialRelation?.targetCoding?.code).toBe("117590005");
@@ -4076,12 +4076,12 @@ describe("internationalization", () => {
     });
 
     it("formats Thai site text from SNOMED coding when FHIR site.text is absent", () => {
-      const parsed = parseSig("apply to right temple bid");
+      const parsed = parseProductionSig("apply to right temple bid");
       const fromFhir = fromFhirDosage(
         {
-          ...parsed.fhir,
+          ...parsed.fhir[0],
           site: {
-            coding: parsed.fhir.site?.coding
+            coding: parsed.fhir[0].site?.coding
           }
         },
         { locale: "th" }
@@ -4197,7 +4197,7 @@ describe("internationalization", () => {
     });
 
     it("translates spatial body-site relations in Thai", () => {
-      const belowEar = parseSig("apply below ear bid", { locale: "th" });
+      const belowEar = parseProductionSig("apply below ear bid", { locale: "th" });
       expect(belowEar.longText).toBe("ทาบริเวณใต้หู วันละ 2 ครั้ง.");
 
       const topOfHand = parseSig("apply to top of hand bid", { locale: "th" });
@@ -4229,8 +4229,8 @@ describe("internationalization", () => {
 
       const fromExtensionOnly = fromFhirDosage(
         {
-          ...belowEar.fhir,
-          site: { extension: belowEar.fhir.site?.extension }
+          ...belowEar.fhir[0],
+          site: { extension: belowEar.fhir[0].site?.extension }
         },
         { locale: "th" }
       );
@@ -4980,11 +4980,11 @@ describe("topical product forms and workflow", () => {
   });
 
   it("falls back to method display translations when method.text is absent", () => {
-    const parsed = parseSig("spray once daily to nostril");
+    const parsed = parseProductionSig("spray once daily to nostril");
     const dosage = {
-      ...parsed.fhir,
+      ...parsed.fhir[0],
       method: {
-        coding: parsed.fhir.method?.coding
+        coding: parsed.fhir[0].method?.coding
       }
     };
     const fromFhir = fromFhirDosage(dosage, { locale: "th" });
@@ -4992,10 +4992,10 @@ describe("topical product forms and workflow", () => {
   });
 
   it("prefers method.text overrides over generic translated method displays in Thai", () => {
-    const parsed = parseSig("reapply sunscreen every 2 hours");
-    const coding = parsed.fhir.method?.coding?.[0];
+    const parsed = parseProductionSig("reapply sunscreen every 2 hours");
+    const coding = parsed.fhir[0].method?.coding?.[0];
     const dosage = {
-      ...parsed.fhir,
+      ...parsed.fhir[0],
       method: {
         text: "Reapply",
         coding: coding ? [coding] : undefined
@@ -5006,7 +5006,7 @@ describe("topical product forms and workflow", () => {
     expect(fromFhir.longText).toBe("ทาซ้ำทุก 2 ชั่วโมง.");
     expect(fromFhir.fhir).toEqual(original);
     expect(dosage).toEqual(original);
-    expect(fromFhir.meta.canonical.clauses[0].rawText).toBe(original.text);
+    expect(fromFhir.fhir.text).toBe(original.text);
     // The current method owns the localized preview. The complete original
     // product wording remains source data; no reverse rendering infers it.
     const currentOnly = fromFhirDosage({ ...dosage, text: undefined }, { locale: "th" });
