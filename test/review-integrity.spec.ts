@@ -2790,3 +2790,28 @@ describe("review source and interchange ownership", () => {
     expect(getQuantityComparator(nested)).toBe("~");
   });
 });
+
+
+describe("equivalent nebulizer presentation limits", () => {
+  it.each([
+    ["nebule", "C71204", 2], ["respule", "C71204", 2], ["nebule", "C111984", 3],
+  ] as const)("counts %s against presentation code %s", (unit, capCode, expected) => {
+    const system = "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl";
+    const input: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit, system, code: "C71204" } }],
+      timing: { repeat: { frequency: 1, period: 8, periodUnit: FhirPeriodUnit.Hour } },
+      maxDosePerPeriod: [{ numerator: { value: 2, system, code: capCode }, denominator: {
+        value: 24, unit: "h", system: "http://unitsofmeasure.org", code: "h",
+      } }],
+    };
+    const from = "2026-12-01T08:00:00Z";
+    expect(calculateTotalUnits({ dosage: [input], from, orderedAt: from, timeZone: "UTC",
+      durationValue: 1, durationUnit: "d" })).toMatchObject({ totalUnits: expected, unit });
+    expect(nextDueDoses([input], { from, orderedAt: from, timeZone: "UTC", limit: 3 })).toEqual([
+      "2026-12-01T08:00:00+00:00", "2026-12-01T16:00:00+00:00",
+      expected === 2 ? "2026-12-02T08:00:00+00:00" : "2026-12-02T00:00:00+00:00",
+    ]);
+    expect(projectCanonicalCourse(importCanonicalCourse([input])).fhir[0].doseAndRate?.[0].doseQuantity)
+      .toEqual({ value: 1, unit, system, code: "C71204" });
+  });
+});

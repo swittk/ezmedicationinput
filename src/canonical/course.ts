@@ -311,6 +311,7 @@ export function normalizeQuantityCapUnit(unit: string): string {
     case "tab": case "tabs": case "tablet": case "tablets": return "tab";
     case "cap": case "caps": case "capsule": case "capsules": return "cap";
     case "drop": case "drops": return "drop";
+    case "nebule": case "nebules": case "respule": case "respules": return "nebule";
     default: return text;
   }
 }
