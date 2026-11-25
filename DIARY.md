@@ -15831,3 +15831,31 @@ primitive metadata. Reusing that metadata preserves its text-identity guard
 and annotations. The complete 8,060-test suite, strict types, build and four
 distribution tests pass after this correction. Focused paired checks now
 measure both affected formatter calls faster than the baseline.
+
+
+## 2026-11-25 — Dated transitions and structured instruction ownership
+
+Dated successors retain their authored calendar position, and finite dated
+courses resume after a terminal pause independently of the order date.
+Count-only successors keep their one-time identity after an explicit dated
+predecessor. Shifted administrations apply exclusions at their actual time;
+records outside a resolved phase cannot move its counted completion.
+
+Typed action arguments retain their own target, material, relation, cadence,
+and primary-administration ownership. English and Thai previews preserve
+seconds ranges and current structured quantities. Preparation sites remain
+local when a following measured administration supplies a distinct site.
+
+Interchange retains expression-slot edit ownership, source-only direction
+text, qualified duration bounds, ordered maxima, and unknown relation and
+Coding annotations. Extension-only timing elements use the existing carriers
+without inventing clinical values. PRN successors do not inherit an omitted
+recurring cadence.
+
+Validation passed 8,122 source tests, configured strict TypeScript, the build,
+and all four distribution tests. Representative paired measurements and
+focused checks found no remaining reproducible meaningful-workload regression
+above 4%. Two formatter regressions were corrected with native option
+assignment that retains configured terminology and declared getter values.
+Benchmark controls reject qualified exact-dose fixtures and keep fresh
+calendar queries on the same side of the dose boundary.
