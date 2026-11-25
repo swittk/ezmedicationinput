@@ -3475,9 +3475,9 @@ describe("round66 source meaning and authored metadata", () => {
 
   it("keeps the unresolved predecessor warning after removing the first saved step", () => {
     const native: CanonicalCourse = { kind: "course", stages: [
-      { administrations: [{ amounts: [{ quantity: { value: 1, unit: "tab" } }] }] },
-      { start: { anchor: "previous-phase-next-day" }, administrations: [{ amounts: [{ quantity: { value: 2, unit: "tab" } }] }] },
-      { administrations: [{ amounts: [{ quantity: { value: 3, unit: "tab" } }] }] },
+      { administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] }] },
+      { start: { anchor: "previous-phase-next-day" }, administrations: [{ kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }] }] },
+      { administrations: [{ kind: "administration", amounts: [{ quantity: { value: 3, unit: "tab" } }] }] },
     ] };
     const saved = courseToR6(native);
     const edited = { ...saved, step: saved.step.slice(1) };

@@ -390,7 +390,7 @@ function restoreComponentDelta(
         baseline?.rate !== undefined &&
         (old.rateExpression ||
           old.rateQuantity?.comparator || old.rateRange ||
-          old.rateRatio?.numerator?.comparator === "~") &&
+          old.rateRatio?.numerator?.comparator === "~" || getQuantityComparator(old.rateRatio?.denominator)) &&
         baseline.rate ===
           compactProjectionFingerprint({
             rateQuantity: simpleQuantityForR5(live?.rateQuantity),

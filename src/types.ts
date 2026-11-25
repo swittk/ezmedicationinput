@@ -482,7 +482,7 @@ export interface FhirDoseAndRate extends FhirBackboneElement {
 /** Current R6 Dosage.doseAndRate is an Element, unlike R5/R6 Dosage
  * itself (a BackboneType). No modifierExtension is valid on this child. */
 export type FhirR6DoseAndRate = Omit<EzDoseAndRate,
-  "modifierExtension" | "doseQuantity" | "rateQuantity" | "rateRatio"> & {
+  "extension" | "modifierExtension" | "doseQuantity" | "rateQuantity" | "rateRatio"> & FhirR6Element & {
   /** Both R5 and R6 scalar dose/rate choices constrain Quantity to
    * SimpleQuantity. Qualifiers use the shared quantity-operator extension. */
   doseQuantity?: FhirSimpleQuantity;
@@ -986,6 +986,9 @@ export interface InstructionConceptComponent {
   role: "head" | "qualifier" | "amount";
   text: string;
   coding?: FhirCoding;
+  /** Retained wire annotations are source data, never constituent meaning. */
+  sourceId?: string;
+  sourceExtensions?: FhirExtension[];
 }
 
 /** A standard-coded constituent of an instruction predicate, not an equivalent

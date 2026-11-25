@@ -154,7 +154,8 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
       { url: "text", valueString: component.text }
     ];
     add(parts, valueCoding("coding", component.coding));
-    nested.push({ url: "component", extension: parts });
+    if (component.sourceExtensions) parts.push(...component.sourceExtensions);
+    nested.push({ ...(component.sourceId ? { id: component.sourceId } : {}), url: "component", extension: parts });
   }
   if (argument.span) {
     add(nested, valueInteger("spanStart", argument.span.start));
@@ -403,15 +404,18 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     case "translation":{const value=parseTranslationNode(entry);if(value.locale&&value.text)(i18n??={})[value.locale]=value.text;break;}
     case "component":{
       let componentRole:FhirExtension|undefined,componentText:FhirExtension|undefined,componentCoding:FhirExtension|undefined;
+      let componentSource:FhirExtension[]|undefined;
       for(const part of entry.extension??[])switch(part.url){
         case "role":if(!componentRole)componentRole=part;break;
         case "text":if(!componentText)componentText=part;break;
         case "coding":if(!componentCoding)componentCoding=part;break;
+        default:(componentSource??=[]).push(part);break;
       }
       const value=componentRole?.valueCode,body=componentText?.valueString;
       if((value==="head"||value==="qualifier"||value==="amount")&&body!==undefined){
         const term=readCoding(componentCoding?.valueCoding);
-        components.push({role:value,text:body,...(term?{coding:term}:{})});
+        components.push({role:value,text:body,...(term?{coding:term}:{}),
+          ...(entry.id?{sourceId:entry.id}:{}),...(componentSource?{sourceExtensions:componentSource}:{})});
       }
       break;
     }

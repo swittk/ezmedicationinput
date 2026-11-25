@@ -6,7 +6,7 @@ import {
   type EzDosage, type FhirDosage, type FhirExtension, type FhirR6Extension, type FhirElement, type FhirRatio, type FhirR6Dosage,
   FhirPeriodUnit, FhirDayOfWeek, EventTiming, nextDueDoses, calculateTotalUnits,
   type FhirR6DosageInstruction, type FhirR6Quantity, type FhirR6DosageInstructionInput,
-  type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep, type FhirR6RelativeTime, type FhirReference,
+  type FhirR6DoseAndRate, type FhirDoseAndRate, type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep, type FhirR6RelativeTime, type FhirReference,
   registerMedicationLocaleDetector, inferMedicationLocale, registerMedicationSurfaceSegmenter,
   listMedicationSurfaceSegmenters, registerMedicationDateResolver, cloneBodySiteSpatialRelation,
   buildBodySiteSpatialRelationExtension, parseBodySiteSpatialRelationExtension,
@@ -16,7 +16,7 @@ import {
   type CanonicalInstructionGraph,
 } from "../src/index";
 import {
-  DOSAGE_CONDITION_R5_URL, DOSAGE_RECONCILIATION_SOURCE_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL, DOSAGE_RETAINED_R5_SEQUENCE_URL,
+  DOSAGE_CONDITION_R5_URL, DOSAGE_RECONCILIATION_WARNING_URL, DOSAGE_RECONCILIATION_SOURCE_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL, DOSAGE_RETAINED_R5_SEQUENCE_URL,
   setDosageCondition, getDosageCondition, getDosageCalendarDayCondition, conditionToR6, toEzDosages, isExactConditionBridge, DOSAGE_DETAILS_R5_URL, decodeR5RetainedFields, encodeR5RetainedFields,
   decodeR6SourceMetadata, encodeR6SourceMetadata, readRetainedField, retainField, sourceWithoutNestedHistory, withDosageEditProvenance, isRenderedInstructionMarker, getDosageSourceTextAgreement,
   PARALLEL_COMPONENT_PHASE_ORIGIN_URL, DOSAGE_ALTERNATIVE_CHOICE_URL, setDosageAlternativeChoice,
@@ -33,7 +33,7 @@ import {
   TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL,
   canonicalFromFhir, canonicalToFhir, getAnchoredCourseDuration, TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
   CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL,
-  ADMINISTRATION_OFFSET_EXTENSION_URL, getTimingClocks, cycleDayConstraintExtension, getCycleDayConstraint,
+  ADMINISTRATION_OFFSET_EXTENSION_URL, getTimingClocks, getTimingMonthDays, getTimingWeekdayOrdinal, getTimingOccurrenceCap, cycleDayConstraintExtension, getCycleDayConstraint,
 } from "../src/fhir";
 import { courseToR6, courseFromR6, courseToR5, administrationFromR5, boundaryToWire, R5_SOURCE_ONLY_MAXIMUM_URL } from "../src/adapters/canonical-course";
 import { courseFromR5 } from "../src/adapters/r5-import";
@@ -11647,12 +11647,185 @@ describe("round68 live R5 expression carrier", () => {
         const actual = wire.step![0].component[0].doseAndRate![0];
         expect(actual[field], edit + " save " + save).toEqual(expected);
         expect(actual.extension).toContainEqual(note);
-        if (edit !== "remove") expect(actual.extension?.reduce<FhirExtension[]>((all, item) =>
+        if (edit !== "remove") expect(actual.extension?.reduce<FhirR6Extension[]>((all, item) =>
           all.concat(item.url === DOSAGE_RECONCILIATION_SOURCE_URL ? item.extension ?? [] : [item]), []
         )).toContainEqual(slot);
         expect(rows).toEqual(before);
         rows = persist(toFhirR5Dosages(wire));
       }
     }
+  });
+});
+
+
+describe("round70 current interchange annotations and limits", () => {
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] };
+  const note: FhirExtension = { url: "urn:clinic:source-note", valueString: "retain supplied metadata" };
+
+  it("keeps both nasal targets under an unqualified Naris code", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "spray" } }],
+      site: { text: "both nostrils", coding: [{ system: "http://snomed.info/sct", code: "1797002", display: "Naris" }] },
+      timing: { repeat: daily } };
+    const before = persist(row), wire = toDosageDetails([row]);
+    for (const input of [row, wire, persist(toFhirR5Dosages(wire))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toMatch(/\b(?:both nostrils|each nostril)\b/);
+      expect(calculateTotalUnits({ dosage: input, orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC",
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(2);
+    }
+    const changed = persist(row);
+    changed.site!.coding![0] = { system: "http://snomed.info/sct", code: "723609004", display: "Structure of right anterior naris" };
+    expect(formatSig(changed, "long", { locale: "en" })).toContain("right");
+    expect(calculateTotalUnits({ dosage: changed, orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC",
+      durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(1);
+    expect(changed.site!.text).toBe("both nostrils");
+    expect(row).toEqual(before);
+    expect(wire.step![0].component[0].site?.concept).toEqual(row.site);
+  });
+
+  it.each(["clear amount", "clear period", "remove"] as const)("keeps the current period maximum after %s", edit => {
+    const source = course({ safety: { doseLimit: [{ id: "daily-max", scope: "period", valueQuantity: q(4),
+      period: { value: 1, unit: "d" }, extension: [note] }] } });
+    let rows = persist(toFhirR5Dosages(source));
+    const ratio = rows[0].maxDosePerPeriod![0];
+    if (edit === "remove") delete rows[0].maxDosePerPeriod;
+    else {
+      const endpoint = edit === "clear amount" ? ratio.numerator! : ratio.denominator!;
+      delete endpoint.value;
+      endpoint._value = { id: "unentered-value", extension: [{
+        url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+      }] };
+    }
+    const expected = persist(ratio);
+    for (let save = 0; save < 2; save++) {
+      const before = persist(rows), wire = toDosageDetails(rows);
+      const limits = wire.step![0].component[0].safety?.doseLimit;
+      if (edit === "remove") expect(limits ?? []).toEqual([]);
+      else expect(limits).toEqual([{ id: "daily-max", scope: "period", valueQuantity: expected.numerator,
+        period: expected.denominator, extension: [note] }]);
+      expect(rows).toEqual(before);
+      rows = persist(toFhirR5Dosages(wire));
+      expect(rows[0].maxDosePerPeriod).toEqual(edit === "remove" ? undefined : [expected]);
+    }
+  });
+
+  it.each(["annotation", "timestamp"] as const)("uses valued events to own the pause after an event %s edit", edit => {
+    let wire = r6Save({ step: [
+      { id: "induction", component: [{ id: "initial", doseAndRate: [{ doseQuantity: q(1) }],
+        timing: { event: ["2026-01-01T09:00:00Z", "2026-01-02T09:00:00Z"] } }] },
+      { id: "pause", end: { contextCode: { coding: [{
+        system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+      }] }, offsetDuration: { value: 14, unit: "d" } }, component: [] },
+      { id: "resume", component: [{ id: "later", doseAndRate: [{ doseQuantity: q(2) }], timing: { repeat: daily } }] },
+    ] });
+    wire = persist(wire);
+    const timing = wire.step![0].component[0].timing!;
+    timing.event!.push(null);
+    timing._event = [null, null, { id: "event-position", extension: [note] }];
+    if (edit === "timestamp") timing.event![1] = "2026-01-03T09:00:00Z";
+    const expectedTiming = persist(timing);
+    for (let save = 0; save < 2; save++) {
+      const before = persist(wire), editable = fromDosageDetails(wire);
+      expect(editable.course.step!.map(step => step.id)).toEqual(edit === "annotation"
+        ? ["induction", "pause", "resume"] : ["induction", "resume"]);
+      expect(wire.step![0].component[0].timing).toEqual(expectedTiming);
+      expect(wire).toEqual(before);
+      wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+    }
+  });
+
+  it.each([false, true])("retains a qualified rate denominator without a false edit warning (edited %s)", edited => {
+    const source = course({ doseAndRate: [{ rateRatio: {
+      numerator: { value: 100, unit: "mL" },
+      denominator: simpleQuantityForR5({ value: 2, unit: "h", comparator: "~", extension: [note] }),
+    } }] });
+    let rows = persist(toFhirR5Dosages(source));
+    if (edited) rows[0].doseAndRate![0].rateRatio!.denominator!.value = 3;
+    for (let save = 0; save < 2; save++) {
+      const before = persist(rows), wire = toDosageDetails(rows);
+      const denominator = wire.step![0].component[0].doseAndRate![0].rateRatio!.denominator!;
+      expect(denominator.value).toBe(edited ? 3 : 2);
+      expect(getQuantityComparator(denominator)).toBe("~");
+      expect(denominator.extension).toContainEqual(note);
+      if (!edited) expect((wire.extension ?? []).filter(item => item.url === DOSAGE_RECONCILIATION_WARNING_URL &&
+        item.valueString?.includes("superseded"))).toEqual([]);
+      expect(rows).toEqual(before);
+      rows = persist(toFhirR5Dosages(wire));
+    }
+  });
+
+  it("accepts R6 Quantity extensions on dose-and-rate entries without loosening scalar doses", () => {
+    const extension: FhirR6Extension = { url: "urn:clinic:rate-note", valueQuantity: { value: 2, comparator: "~", unit: "h" } };
+    const entry: FhirR6DoseAndRate = { rateQuantity: { value: 2, unit: "mL/h" }, extension: [extension] };
+    // @ts-expect-error R5 extension Quantity still excludes the R6 approximation comparator.
+    const r5: FhirDoseAndRate = { extension: [{ url: "urn:clinic:rate-note", valueQuantity: { comparator: "~" } }] };
+    // @ts-expect-error R6 scalar doses remain SimpleQuantity.
+    const scalar: FhirR6DoseAndRate = { doseQuantity: { value: 2, comparator: "~" } };
+    void r5; void scalar;
+    const wire = toDosageDetails(persist(toFhirR5Dosages(course({ doseAndRate: [entry] }))));
+    expect(wire.step![0].component[0].doseAndRate![0].extension).toContainEqual(extension);
+  });
+
+  it("keeps annotations on a recognized argument component through the public codec", () => {
+    const graph = parseSig("Apply ointment then cover with occlusive dressing").meta.canonical.clauses[0].instructionGraph!;
+    const original = buildInstructionGraphExtension(graph)!;
+    const qualifier = (marker: FhirExtension) => {
+      const action = marker.extension!.find(item => item.url === "action" &&
+        item.extension?.some(field => field.url === "predicateLemma" && field.valueString === "cover"))!;
+      const argument = action.extension!.find(item => item.url === "argument" &&
+        item.extension?.some(field => field.url === "conceptId" && field.valueString === "occlusive_dressing"))!;
+      return argument.extension!.find(item => item.url === "component" &&
+        item.extension?.some(field => field.url === "role" && field.valueCode === "qualifier"))!;
+    };
+    expect(qualifier(buildInstructionGraphExtension(parseInstructionGraphExtension([original])!)!)).toEqual(qualifier(original));
+    const annotated = persist(original), component = qualifier(annotated);
+    component.id = "dressing-qualifier";
+    component.extension!.push(note);
+    const before = persist(annotated);
+    let current = annotated;
+    for (let save = 0; save < 2; save++) {
+      current = buildInstructionGraphExtension(parseInstructionGraphExtension([persist(current)])!)!;
+      expect(qualifier(current)).toEqual(component);
+    }
+    expect(annotated).toEqual(before);
+  });
+});
+
+
+describe("round70 source-less native timing projection", () => {
+  const note: FhirExtension = { url: "urn:clinic:recurrence-note", valueString: "retain independently supplied metadata" };
+
+  it.each([undefined, 3])("projects explicit month days and ordinal %s without source dosage", weekdayOrdinal => {
+    const native: CanonicalCourse = { kind: "course", stages: [{ administrations: [{
+      kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { recurrence: {
+        period: 1, periodUnit: FhirPeriodUnit.Month, monthDays: [15], weekdayOrdinal,
+        dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Tuesday, FhirDayOfWeek.Wednesday, FhirDayOfWeek.Thursday, FhirDayOfWeek.Friday],
+        clocks: ["09:00:00"], provenance: { extension: [note] },
+      } },
+    }] }] };
+    const before = persist(native), projected = projectCanonicalCourse(native);
+    for (const row of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
+      expect(getTimingMonthDays(row.timing?.repeat)).toEqual([15]);
+      expect(getTimingWeekdayOrdinal(row.timing?.repeat)).toBe(weekdayOrdinal);
+      expect(getTimingClocks(row.timing?.repeat)).toEqual(["09:00:00"]);
+      expect(row.timing?.repeat?.extension).toContainEqual(note);
+    }
+    expect(native).toEqual(before);
+  });
+
+  it("projects an explicit-event occurrence cap with its current count", () => {
+    const events = ["2026-01-01T10:00:00Z", "2026-01-02T10:00:00Z"];
+    const cap = { max: 1, period: 1, periodUnit: FhirPeriodUnit.Day };
+    const native: CanonicalCourse = { kind: "course", stages: [{ administrations: [{
+      kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { explicitEvents: events, recurrence: { count: 1, occurrenceCap: cap, provenance: { extension: [note] } } },
+    }] }] };
+    const before = persist(native), projected = projectCanonicalCourse(native);
+    for (const row of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
+      expect(row.timing?.event).toEqual(events);
+      expect(row.timing?.repeat?.count).toBe(1);
+      expect(getTimingOccurrenceCap(row.timing?.repeat)).toEqual(cap);
+      expect(row.timing?.repeat?.extension).toContainEqual(note);
+    }
+    expect(native).toEqual(before);
   });
 });

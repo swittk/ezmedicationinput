@@ -1189,14 +1189,15 @@ function updateNativeTimingAnnotations(
   output: Record<string, unknown>,
   target: FhirR6Timing | undefined
 ): FhirR6Timing | undefined {
-  if (!a.provenance || a.provenance.format === "syntax") return target;
-  const fromR6 = a.provenance.format === "r6";
-  const raw = a.provenance.data as FhirR6Dosage;
+  if (a.provenance?.format === "syntax") return target;
+  // Native compositions own their typed annotations without an imported source.
+  const nativeOwnsAnnotations = !a.provenance || a.provenance.format === "r6";
+  const raw = (a.provenance?.data ?? {}) as FhirR6Dosage;
   const live = a.schedule?.recurrence;
   const original = raw.timing?.repeat;
   // The R5 boundary normally owns its annotations. Surviving duration
   // markers and superseded exact offsets still need shared reconciliation.
-  if (!fromR6 && !original?.extension?.length) return target;
+  if (!nativeOwnsAnnotations && !original?.extension?.length) return target;
   if (
     !original?.extension?.length &&
     !raw.modifierExtension?.length &&
@@ -1225,7 +1226,7 @@ function updateNativeTimingAnnotations(
     getExactTimingOffsetMinutes({ extension: [exactOffset] }) !== original?.offset;
   const frequencyMinimum = original?.extension?.find(item => item.url === TIMING_FREQUENCY_MIN_EXTENSION_URL);
   const supersededMinimum = frequencyMinimum?.valueInteger === 0 && live?.frequency !== 0;
-  if (!fromR6 && !durationChanged && !supersededOffset && !supersededMinimum) return target;
+  if (!nativeOwnsAnnotations && !durationChanged && !supersededOffset && !supersededMinimum) return target;
   const oldMarkers = original ? { extension: original.extension, offset: original.offset } : undefined;
   const changes = new Set<string>();
   if (supersededOffset) {
@@ -1247,7 +1248,7 @@ function updateNativeTimingAnnotations(
       { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [durationMarker!] }];
   }
   const administrationChanges = new Set<string>();
-  if (fromR6) {
+  if (nativeOwnsAnnotations) {
     changed(TIMING_DAY_OF_MONTH_EXTENSION_URL, getTimingMonthDays(oldMarkers), live?.monthDays);
     changed(TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, getTimingWeekdayOrdinal(oldMarkers), live?.weekdayOrdinal);
     changed(TIMING_CLOCK_WINDOW_EXTENSION_URL, getTimingClockWindow(oldMarkers), live?.clockWindow);
@@ -1309,7 +1310,7 @@ function updateNativeTimingAnnotations(
     assign(
       repeat as Record<string, unknown>,
       "extension",
-      replaceOwnedAnnotations(original?.extension, generated.timing?.repeat?.extension, changes)
+      replaceOwnedAnnotations(original?.extension ?? repeat.extension, generated.timing?.repeat?.extension, changes)
     );
     if (changes.has(TIMING_OFFSET_EXACT_EXTENSION_URL))
       assign(repeat as Record<string, unknown>, "offset", generated.timing?.repeat?.offset);
@@ -1494,7 +1495,7 @@ function administrationToWire(
     );
     assign(wireTiming.repeat as Record<string, unknown>, "offset", scheduleMetadata.timing.repeat.offset);
   }
-  wireTiming = updateNativeTimingAnnotations(a, output, wireTiming);
+  if (!clause || a.provenance) wireTiming = updateNativeTimingAnnotations(a, output, wireTiming);
   if (wireTiming?.repeat && a.schedule?.recurrence?.clocks !== undefined) {
     const sourceRepeat = (a.provenance?.data as FhirDosage | FhirR6Dosage | undefined)?.timing?.repeat;
     const repeat = projectTimingClocks(wireTiming.repeat, sourceRepeat, target);

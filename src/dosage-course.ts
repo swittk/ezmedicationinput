@@ -979,7 +979,9 @@ export function reconcileR5SafetySnapshot(
   if (row.safety !== undefined && !equalStructuredValues(row.safety, retained)) return row.safety;
   const partialPeriods = retained.doseLimit?.some(limit => limit.scope === "period" &&
     limit.valueQuantity && limit.period &&
-    (limit.valueQuantity.value === undefined || limit.period.value === undefined));
+    (limit.valueQuantity.value === undefined || limit.period.value === undefined)) ||
+    row.maxDosePerPeriod?.some(ratio => ratio.numerator && ratio.denominator &&
+      (ratio.numerator.value === undefined || ratio.denominator.value === undefined));
   const projected = partialPeriods ? toR6Safety(row, true) : r5SafetyBaseline(row);
   // Historical fingerprints omitted partial Ratios and Coding.version.
   // Compare the complete saved wire projection before restoring metadata:

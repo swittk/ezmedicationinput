@@ -11,7 +11,7 @@ import type {
 } from "../types";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { boundaryFromR6 } from "./canonical-course";
-import { getAdministrationOffsetMinutes, getAnchoredCourseDuration, getTimingClocks } from "../fhir";
+import { getAdministrationOffsetMinutes, getAnchoredCourseDuration, getTimingClocks, getTimingEvents } from "../fhir";
 import { getQuantityComparator, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
 import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL, encodeR6SourceMetadata, decodeR6SourceMetadata, compactProjectionFingerprint, DOSAGE_RECONCILIATION_SOURCE_URL, getDosageExcludedDates, getDosageExcludedWeekdays, getDosageCondition } from "../dosage-course";
 
@@ -91,7 +91,7 @@ function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undef
     const { id: _periodId, _start, _end, ...period } = repeat.boundsPeriod;
     repeat.boundsPeriod = period;
   }
-  return { event: timing.event, code: timing.code, repeat: timing.repeat ? repeat : undefined };
+  return { event: getTimingEvents(timing), code: timing.code, repeat: timing.repeat ? repeat : undefined };
 }
 /** Compare existing clinical quantity choices without treating Element IDs or
  * primitive annotations as a new completion. Original quantities stay untouched. */
