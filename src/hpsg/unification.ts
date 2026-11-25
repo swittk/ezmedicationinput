@@ -1080,7 +1080,7 @@ function fixedClockEventAdjunctSynsem(
   const clock = clockSign.synsem.head.schedule;
   const meal = mealSynsem.head.schedule;
   if (!clock?.timeOfDay?.length || !meal?.when?.length ||
-      meal.timeOfDay?.length || !context.sourceText ||
+      !context.sourceText ||
       (clockSign.synsem.head.dose && mealSynsem.head.dose)) return undefined;
   const isMeal = (event: NonNullable<HpsgScheduleFeature["when"]>[number]) => {
     for (const values of MEAL_TIMING_BY_RELATION.values()) {
@@ -1102,7 +1102,10 @@ function fixedClockEventAdjunctSynsem(
     }
   }
   const daypartQualification = Boolean(qualifiedDayparts?.size);
-  if (!mealQualification && !daypartQualification) return undefined;
+  // A composed daypart daughter may already contain an independent clock.
+  // Its local qualifier can still attach across this constituent boundary.
+  // Meal counsel retains its existing clock-free daughter requirement.
+  if (!daypartQualification && (!mealQualification || meal.timeOfDay?.length)) return undefined;
   const tokensFor = (sign: HpsgSign, field: "when" | "timeOfDay") => {
     const indices = new Set<number>();
     let qualifyingIndices: Set<number> | undefined;

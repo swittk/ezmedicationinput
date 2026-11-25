@@ -3775,3 +3775,25 @@ describe("round63 inherited next-day positions", () => {
       .toBe(daily ? 14 : 10);
   });
 });
+
+describe("round63 paired clock qualifiers", () => {
+  it.each([
+    ["Take 1 tablet at 8 AM in the morning and at 8 PM in the evening every day", false],
+    ["Take 1 tablet in the morning at 8 AM and in the evening at 8 PM every day", false],
+    ["Take 1 tablet at 8 PM in the evening and at 8 AM in the morning every day", false],
+    ["Take 1 tablet at 8 AM and in the morning and at 8 PM in the evening every day", true]
+  ] as const)("retains each clock's local daypart ownership: %s", (text, independentMorning) => {
+    const parsed = parsePublicSig(text);
+    expect(parsed.meta.canonical.clauses[0].schedule?.when)
+      .toEqual(independentMorning ? [EventTiming.Morning] : undefined);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+      timeZone: "UTC", limit: independentMorning ? 6 : 4, eventClock: { MORN: "09:00", EVE: "18:00" } };
+    const expected = [1, 2].flatMap(day =>
+      ["08:00", ...(independentMorning ? ["09:00"] : []), "20:00"].map(clock => `2026-12-0${day}T${clock}:00+00:00`));
+    for (const value of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+      expect(nextDueDoses(value, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: value, ...query, durationValue: 2, durationUnit: "d" }).totalUnits)
+        .toBe(independentMorning ? 6 : 4);
+    }
+  });
+});
