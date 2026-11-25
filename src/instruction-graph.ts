@@ -1796,10 +1796,10 @@ function buildActionFrame(
     relationHasSemanticClass(temporalRelation, "temporal") &&
     relationHasGrammarFeature(temporalRelation, "activityFallback")
       ? temporalRelation : undefined;
-  // The shared clock grammar also licenses a complete time daughter after
-  // a material complement, e.g. dissolve in water at 08:00.
+  // The shared time grammar licenses clock and event daughters after an
+  // earlier complement, including a material amount or procedure duration.
   const nextTime = temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "timeComplement")
-    ? clockArgumentFromParts(parts, temporalIndex + 1, semanticEnd, input) : undefined;
+    ? timeArgumentFromParts(parts, temporalIndex + 1, semanticEnd, input) : undefined;
   if (nextTime) {
     const bounds = semanticArgumentBounds(parts, temporalIndex + 1, semanticEnd);
     const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
