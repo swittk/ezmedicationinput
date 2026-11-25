@@ -302,7 +302,9 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
       nested[sourceTextIndex] = { ...annotations, ...(frame.sourceText ? { valueString: frame.sourceText } : {}) };
     } else nested.push(field);
   }
-  return { url: "action", extension: nested };
+  const result: FhirExtension = { url: "action", extension: nested };
+  if (frame.sourceId !== undefined) result.id = frame.sourceId;
+  return result;
 }
 
 export function buildInstructionGraphExtension(
@@ -383,7 +385,9 @@ export function buildInstructionGraphExtension(
     nested.push({ url: "opaque", extension: opaqueNested });
   }
   if (graph.sourceExtensions) for (const field of graph.sourceExtensions) nested.push(field);
-  return { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: nested };
+  const result: FhirExtension = { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: nested };
+  if (graph.sourceId !== undefined) result.id = graph.sourceId;
+  return result;
 }
 
 function firstRelation(coding:FhirCoding|undefined,raw:string|undefined):AdviceRelation|undefined {
@@ -617,6 +621,7 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
       semanticClass:semanticClass?.valueString,realizer:realizer?.valueCode as AdviceFrame["predicate"]["realizer"],
       realizerConfig:locales?{locales}:undefined,codings,...(semanticComponents.length?{semanticComponents}:{})},
     args,span:{start:start.valueInteger,end:end.valueInteger},sourceText:source.valueString??"",sequenceIndex:sequence?.valueInteger};
+  if(extension.id!==undefined)frame.sourceId=extension.id;
   if(relationCoding?.valueCoding)frame.sourceRelationCoding=readCoding(relationCoding.valueCoding);
   if(sourceExtensions)frame.sourceExtensions=sourceExtensions;
   return frame;
@@ -718,10 +723,12 @@ export function parseInstructionGraphExtension<T extends Pick<FhirExtension,"url
     default:(sourceExtensions??=[]).push(field);
   }
   if(!actions.length&&!opaque.length)return undefined;
-  return {actions,...(sourceExtensions ? {sourceExtensions} : {}),
+  const result:CanonicalInstructionGraph={actions,...(sourceExtensions ? {sourceExtensions} : {}),
     ...(ownership ? {primaryOwnership:parsePrimaryOwnership(ownership)} : {}),
     primaryAdministrationSpan:start?.valueInteger!==undefined&&end?.valueInteger!==undefined
     ?{start:start.valueInteger,end:end.valueInteger}:undefined,
     relations:relations.length?relations:undefined,opaqueSpans:opaque.length?opaque:undefined,
     coverage:coverage?parseGraphCoverage(coverage):undefined,sourceText:source?.valueString??"",sourceLocale:locale?.valueCode};
+  if(graph.id!==undefined)result.sourceId=graph.id;
+  return result;
 }

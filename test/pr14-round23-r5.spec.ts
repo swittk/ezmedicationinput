@@ -6949,3 +6949,32 @@ describe("round78 scoped additional-instruction translations", () => {
     }
   });
 });
+
+describe("round79 graph wrapper identity", () => {
+  it.each([false, true])("preserves graph and action Element IDs through the public codec (annotated=%s)", annotated => {
+    const source = "Take 1 tablet with 100 mL water";
+    const marker = persist(buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source),
+    })!);
+    const action = marker.extension!.find(item => item.url === "action")!;
+    const argument = action.extension!.find(item => item.url === "argument")!;
+    if (annotated) {
+      marker.id = "instruction-graph";
+      action.id = "take-action";
+      argument.id = "water-argument";
+      marker.extension!.push({ url: "urn:clinic:graph-note", valueString: "retain graph" });
+      action.extension!.push({ url: "urn:clinic:action-note", valueString: "retain action" });
+    }
+    const original = persist(marker);
+    let current = marker;
+    for (let save = 0; save < 2; save++) {
+      const graph = parseInstructionGraphExtension([persist(current)])!, before = persist(graph);
+      current = buildInstructionGraphExtension(graph)!;
+      expect(current).toStrictEqual(original);
+      expect(graph).toEqual(before);
+    }
+    const rows = toFhirR5Dosages(toDosageDetails(persist([{ extension: [marker] }])));
+    expect(rows[0].extension!.find(item => item.url === marker.url)).toEqual(original);
+    expect(marker).toEqual(original);
+  });
+});

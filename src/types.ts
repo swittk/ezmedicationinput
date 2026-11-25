@@ -1106,6 +1106,8 @@ export interface AdviceFrame {
   origin?: "grammar" | "semantic-resolver";
   confidence?: number;
   coding?: FhirCoding;
+  /** Original FHIR Element identity of the action wrapper. */
+  sourceId?: string;
   /** Imported action child annotations and unrecognized children, retained as non-executable FHIR data. */
   sourceExtensions?: FhirExtension[];
 }
@@ -2019,6 +2021,8 @@ export interface CanonicalInstructionGraph {
   /** Source fragments the parser deliberately did not assign semantics to. */
   opaqueSpans?: CanonicalSourceSpan[];
   coverage?: CanonicalInstructionCoverage;
+  /** Original FHIR Element identity of the graph wrapper. */
+  sourceId?: string;
   /** Unrecognized graph children retained at their original FHIR owner. */
   sourceExtensions?: FhirExtension[];
   /** Exact original source represented by this graph. */
