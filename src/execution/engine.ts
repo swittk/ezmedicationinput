@@ -1935,6 +1935,10 @@ function measuredRateComparator(
   throw new MedicationQuantityCalculationError("rate-ratio-bound-unresolved",
     "The rate ratio's quantity bounds do not determine a usable dose bound. Retain the ratio and supply the applicable rate before calculating.");
 }
+function getRateQuantityUnit(rate: CanonicalMeasure): string | undefined {
+  return rate.system === "http://unitsofmeasure.org"
+    ? rate.code ?? rate.unit : rate.unit ?? rate.code;
+}
 function measuredRateQuantity(
   amount: CanonicalAmount,
   recurrence: CanonicalRecurrence | undefined,
@@ -1952,8 +1956,7 @@ function measuredRateQuantity(
   if (amount.rate?.value !== undefined) {
     // The UCUM code owns a coded rate's dimension; the display label may
     // be absent or localized. Uncoded authoring retains its unit-label path.
-    const rateUnit = amount.rate.system === "http://unitsofmeasure.org"
-      ? amount.rate.code ?? amount.rate.unit : amount.rate.unit ?? amount.rate.code;
+    const rateUnit = getRateQuantityUnit(amount.rate);
     const match = rateUnit?.match(/^(.+?)\/(s|min|h|d|wk)$/i);
     const per = match ? INFUSION_TIME_SECONDS[match[2].toLowerCase()] : undefined;
     if (per) {
@@ -6527,6 +6530,9 @@ function prepareMeasuredDose(
   dosage: CanonicalAdministration,
   options: CanonicalSupplyOptions
 ): CanonicalAdministration {
+  const weight = options.patientWeightKg;
+  if (weight !== undefined && Number.isFinite(weight) && weight > 0)
+    dosage = weightResolvedAdministration(dosage, weight);
   const values = dosage.amounts ?? [];
   if (
     values.some((entry) => (entry as CanonicalAmount).expression || (entry as CanonicalAmount).rateExpression)
@@ -6585,14 +6591,6 @@ function prepareMeasuredDose(
           "The infusion rate's units cannot be converted to the provided duration. Supply a compatible rate/duration pair or a computed dose quantity."
         );
     }
-  }
-  const weight = options.patientWeightKg;
-  if (range && weight !== undefined && Number.isFinite(weight) && weight > 0) {
-    // Resolve the owned range before comparing its endpoints with numeric
-    // administration maxima. The original mg/kg instructions remain intact.
-    const low = range.low && weightResolvedQuantity(range.low, weight);
-    const high = range.high && weightResolvedQuantity(range.high, weight);
-    if (low !== range.low || high !== range.high) range = { ...range, low, high };
   }
   if (!quantity && range) {
     const high = range.high;
@@ -6653,6 +6651,71 @@ function weightResolvedQuantity(quantity: CanonicalMeasure, weight: number): Can
     ...quantity, value: roundCalculatedUnits(quantity.value * weight),
     unit: perKg[1], code: quantity.code ? perKg[1] : undefined,
   } : quantity;
+}
+/** Resolve only numeric weight dimensions. Keep the authored rate so later
+ * supply measurement still owns infusion-duration ranges and maxima. */
+function weightResolvedRate(rate: CanonicalMeasure, weight: number): CanonicalMeasure {
+  const perKg = getRateQuantityUnit(rate)?.match(/^(.+?)\/kg\/(s|min|h|d|wk)$/i);
+  if (!perKg || rate.value === undefined) return rate;
+  const unit = perKg[1] + "/" + perKg[2];
+  return { ...rate, value: rate.value * weight, unit, code: rate.code ? unit : undefined };
+}
+function weightResolvedAdministration(
+  dosage: CanonicalAdministration, weight: number
+): CanonicalAdministration {
+  let amounts: typeof dosage.amounts | undefined;
+  for (let index = 0; index < (dosage.amounts?.length ?? 0); index++) {
+    const source = dosage.amounts![index];
+    const quantity = source.quantity && weightResolvedQuantity(source.quantity, weight);
+    const rate = source.rate && weightResolvedRate(source.rate, weight);
+    let range = source.range, rateRatio = source.rateRatio;
+    if (range) {
+      const low = range.low && weightResolvedQuantity(range.low, weight);
+      const high = range.high && weightResolvedQuantity(range.high, weight);
+      if (low !== range.low || high !== range.high) range = { ...range, low, high };
+    }
+    if (rateRatio?.numerator) {
+      const numerator = weightResolvedQuantity(rateRatio.numerator, weight);
+      if (numerator !== rateRatio.numerator) rateRatio = { ...rateRatio, numerator };
+    }
+    if (quantity !== source.quantity || range !== source.range || rate !== source.rate || rateRatio !== source.rateRatio) {
+      amounts ??= dosage.amounts!.slice();
+      amounts[index] = { ...source, quantity, range, rate, rateRatio };
+    }
+  }
+  let limits: typeof dosage.limits | undefined;
+  for (let index = 0; index < (dosage.limits?.length ?? 0); index++) {
+    const source = dosage.limits![index];
+    if (!source.amount) continue;
+    const amount = weightResolvedQuantity(source.amount, weight);
+    if (amount !== source.amount) {
+      limits ??= dosage.limits!.slice();
+      limits[index] = { ...source, amount };
+    }
+  }
+  return amounts || limits ? { ...dosage,
+    ...(amounts ? { amounts } : {}), ...(limits ? { limits } : {}) } : dosage;
+}
+function weightResolvedSupplyCourse(course: CanonicalCourse, weight: number | undefined): CanonicalCourse {
+  if (weight === undefined || !Number.isFinite(weight) || weight <= 0) return course;
+  let stages: CanonicalCourse["stages"] | undefined;
+  for (let index = 0; index < course.stages.length; index++) {
+    const source = course.stages[index];
+    let administrations: typeof source.administrations | undefined;
+    for (let memberIndex = 0; memberIndex < source.administrations.length; memberIndex++) {
+      const member = source.administrations[memberIndex];
+      const resolved = weightResolvedAdministration(member, weight);
+      if (resolved !== member) {
+        administrations ??= source.administrations.slice();
+        administrations[memberIndex] = resolved;
+      }
+    }
+    if (administrations) {
+      stages ??= course.stages.slice();
+      stages[index] = { ...source, administrations };
+    }
+  }
+  return stages ? { ...course, stages } : course;
 }
 function sumCourseUnits(
   entries: Array<{
@@ -7671,6 +7734,9 @@ function calculateCourseTotalUnits(
     return qualifyCourseSupply(course, sumCourseUnits(entries, options));
   }
   course = executionCourseWithPeriodOffsets(selectedAlternativeCourse(course, options));
+  // Finite phase completion and supply must see the same quantity dimensions.
+  // This execution copy changes neither cadence nor source/phase provenance.
+  course = weightResolvedSupplyCourse(course, options.patientWeightKg);
   requireExecutableCourseContext(course, "calculating");
   const zone = options.timeZone ?? options.config?.timeZone;
   if (!zone)

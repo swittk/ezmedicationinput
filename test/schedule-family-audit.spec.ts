@@ -5182,3 +5182,114 @@ describe("round66 reviewed execution families", () => {
     }
   });
 });
+
+
+describe("round67 weight-resolved dose maxima", () => {
+  const quantity = (value: number, unit = "mg/kg") => ({ value, unit,
+    system: "http://unitsofmeasure.org", code: unit });
+  const options = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+    timeZone: "UTC", durationValue: 1, durationUnit: FhirPeriodUnit.Day };
+  const formats = (row: FhirDosage) => {
+    const native = importCanonicalCourse(row), r6 = courseToR6(native);
+    return [row, native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))];
+  };
+  it.each(["period", "administration", "lifetime"] as const)(
+    "resolves the %s maximum in the same weight dimension as its dose range", scope => {
+      const cap = scope === "administration" ? 1.5 : 3;
+      const row: FhirDosage = { asNeededBoolean: true,
+        doseAndRate: [{ doseRange: { low: quantity(1), high: quantity(2) } }],
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["09:00:00", "21:00:00"] } },
+        ...(scope === "period" ? { maxDosePerPeriod: [{ numerator: quantity(cap), denominator: quantity(1, "d") }] }
+          : scope === "administration" ? { maxDosePerAdministration: quantity(cap) }
+          : { maxDosePerLifetime: quantity(cap) }) };
+      for (const dosage of formats(row)) {
+        const before = JSON.stringify(dosage);
+        expect(calculateTotalUnits({ dosage, ...options })).toMatchObject({ totalUnits: 3, unit: "mg/kg", quantityKind: "maximum" });
+        const resolved = calculateTotalUnits({ dosage, ...options, patientWeightKg: 70 });
+        expect(resolved).toMatchObject({ totalUnits: 210, unit: "mg", quantityKind: "maximum" });
+        expect(resolved.explanation).not.toContain("unevaluable maximum-dose");
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
+
+  it("uses a weight-resolved administration maximum to close an open dose range", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseRange: { low: quantity(1) } }],
+      timing: { repeat: { count: 1, timeOfDay: ["09:00:00"] } }, maxDosePerAdministration: quantity(2) };
+    for (const dosage of formats(row))
+      expect(calculateTotalUnits({ dosage, ...options, patientWeightKg: 70 }))
+        .toMatchObject({ totalUnits: 140, unit: "mg", quantityKind: "maximum" });
+  });
+
+  it("applies the same patient weight to a relative maximum beside an absolute dose", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: quantity(100, "mg") }],
+      timing: { repeat: { frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      maxDosePerPeriod: [{ numerator: quantity(3), denominator: quantity(1, "d") }] };
+    for (const dosage of formats(row))
+      expect(calculateTotalUnits({ dosage, ...options, patientWeightKg: 70 }))
+        .toMatchObject({ totalUnits: 200, unit: "mg" });
+  });
+
+  it("retains weighted period caps while a counted phase completes before its successor", () => {
+    const first = importCanonicalCourse({ asNeededBoolean: true,
+      doseAndRate: [{ doseRange: { low: quantity(1), high: quantity(2) } }],
+      timing: { repeat: { count: 2, frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["09:00:00", "21:00:00"] } },
+      maxDosePerPeriod: [{ numerator: quantity(3), denominator: quantity(1, "d") }],
+    }).stages[0];
+    const second = importCanonicalCourse({ doseAndRate: [{ doseQuantity: quantity(5, "mg") }],
+      timing: { repeat: { count: 1, timeOfDay: ["09:00:00"] } } }).stages[0];
+    const native = { kind: "course" as const, stages: [first, second] }, r6 = courseToR6(native);
+    for (const dosage of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const before = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 2, patientWeightKg: 70 }))
+        .toMatchObject({ totalUnits: 215, unit: "mg", quantityKind: "maximum" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("keeps the counted predecessor open for doses deferred by its weighted daily maximum", () => {
+    const first = importCanonicalCourse({ doseAndRate: [{ doseQuantity: quantity(100, "mg") }],
+      timing: { repeat: { count: 3, frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "14:00:00", "20:00:00"] } },
+      maxDosePerPeriod: [{ numerator: quantity(3), denominator: quantity(1, "d") }],
+    }).stages[0];
+    const second = importCanonicalCourse({ doseAndRate: [{ doseQuantity: quantity(5, "mg") }],
+      timing: { repeat: { count: 1, timeOfDay: ["09:00:00"] } } }).stages[0];
+    const native = { kind: "course" as const, stages: [first, second] }, r6 = courseToR6(native);
+    for (const dosage of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const before = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 2, patientWeightKg: 70 }))
+        .toMatchObject({ totalUnits: 305, unit: "mg" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each(["coded rate", "unit rate", "ratio"] as const)(
+    "keeps the infusion duration maximum after resolving a weighted %s", kind => {
+      const infusion: FhirDosage = {
+        doseAndRate: [kind === "ratio" ? { rateRatio: {
+          numerator: { ...quantity(1), unit: "มิลลิกรัมต่อกิโลกรัม" }, denominator: quantity(2, "h") }
+        } : { rateQuantity: kind === "coded rate"
+          ? { ...quantity(0.5, "mg/kg/h"), unit: "มิลลิกรัมต่อกิโลกรัมต่อชั่วโมง" }
+          : { value: 0.5, unit: "mg/kg/h", system: "urn:test:rate-display", code: "local-rate" } }],
+        timing: { repeat: { count: 1, timeOfDay: ["08:00:00"], duration: 1, durationMax: 2,
+          durationUnit: FhirPeriodUnit.Hour } },
+      };
+      const companion = { doseAndRate: [{ doseQuantity: quantity(0.1) }],
+        timing: { repeat: { count: 1, timeOfDay: ["09:00:00"] } } };
+      const native = { kind: "course" as const, stages: [{ administrations: [
+        importCanonicalCourse(infusion).stages[0].administrations[0],
+        importCanonicalCourse(companion).stages[0].administrations[0],
+      ] }] }, r6 = courseToR6(native);
+      for (const dosage of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+        const before = JSON.stringify(dosage);
+        expect(calculateTotalUnits({ dosage, ...options }))
+          .toMatchObject({ totalUnits: 1.1, unit: "mg/kg", quantityKind: "maximum" });
+        expect(calculateTotalUnits({ dosage, ...options, patientWeightKg: 70 }))
+          .toMatchObject({ totalUnits: 77, unit: "mg", quantityKind: "maximum" });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
+
+});
