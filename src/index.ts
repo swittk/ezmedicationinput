@@ -1112,8 +1112,8 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
       !preferredTimingCoding(dosage.timing!)?.code) return true;
   // A compact R5 decoder cannot lend one range endpoint's unit to another.
   const durationRange = dosage.timing?.repeat?.boundsRange;
-  if (durationRange?.low?.value !== undefined && durationRange.high?.value !== undefined &&
-      (!(durationRange.low.code ?? durationRange.low.unit) || !(durationRange.high.code ?? durationRange.high.unit))) return true;
+  if (durationRange?.low?.value !== undefined && !(durationRange.low.code ?? durationRange.low.unit) ||
+      durationRange?.high?.value !== undefined && !(durationRange.high.code ?? durationRange.high.unit)) return true;
   const missingSite = !dosage.site?.text && !dosage.site?.coding?.some(coding => coding.code);
   if (missingSite && dosage.siteReference?.display) return true;
   if (dosage.modifierExtension?.some(extension => extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL ||

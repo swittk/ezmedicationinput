@@ -202,7 +202,7 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
       }
     }
     if (!current || identity === undefined || prior.id !== current.id || prior.count !== current.count ||
-        !equalStructuredValues(prior.start, current.start) ||
+        !equalStructuredValues(draftCompletionBoundary(prior.start), draftCompletionBoundary(current.start)) ||
         !endMatches ||
         needsMembers && prior.component.length !== current.component.length) {
       if (!prior.end && needsMembers && prior.component.length !== current?.component.length)
@@ -264,6 +264,11 @@ export function editableCourseSteps(input: FhirR6DosageInstructionInput): FhirR6
       } else if (member < active.length) {
         if (inferred.has(member)) {
           const step = { ...active[member] };
+          // The clinical start was synthesized from the restored pause. Keep
+          // a fresh annotation on that boundary as source when removing it.
+          if (!equalStructuredValues(step.start, saved.projected[member]?.start))
+            step.extension = [...(step.extension ?? []), { url: DOSAGE_RECONCILIATION_SOURCE_URL,
+              extension: [encodeR6SourceMetadata("step", { start: step.start }, "step")] }];
           delete step.start;
           restored.push(step);
         } else restored.push(active[member]);
@@ -326,8 +331,7 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
       const { doseLimit: _limits, ifExceeded: _action, modifierExtension: _modifiers, ...metadata } = current;
       if (!saved.course) step = { ...step, ...metadata };
       const limits = current.doseLimit?.filter((_, index) => !reconciled.stepLimits.has(index));
-      const action = sameAction || current.ifExceeded === reconciled.step?.ifExceeded
-        ? reconciled.course?.ifExceeded : current.ifExceeded;
+      const action = sameAction ? reconciled.course?.ifExceeded : current.ifExceeded;
       let modifiers = reconciled.course?.modifierExtension;
       if (!sameModifiers) {
         const original = saved.projected.modifierExtension;

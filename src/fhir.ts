@@ -166,7 +166,12 @@ export function cycleDayConstraintExtension(
     const position = positions.get(child.url) ?? 0;
     positions.set(child.url, position + 1);
     const next = owned.get(child.url)?.[position];
-    if (!next) { changed = true; continue; }
+    if (!next) {
+      // Removed days are archived by their ordinal owners below. Other known
+      // scalar children retain their annotations here without staying active.
+      if (child.url !== "day") children.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [child] });
+      changed = true; continue;
+    }
     if (child.url === "day") {
       children.push(next);
       if (next !== child) changed = true;
@@ -441,7 +446,7 @@ export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDa
   if (!mixed && !markers) return restorePositions ? { ...repeat, timeOfDay: clocks } : repeat;
   const unchangedBridge = bridgeMatches && bridgeIndex === (clocks?.length ?? 0);
   if (markers && unchangedBridge &&
-      (mixed || (target === "r5" || repeat.when?.length) && bridgeClocks && bridgeClocks.length > bridgeIndex)) {
+      (mixed || (target === "r5" || repeat.when?.length || repeat._when?.some(Boolean)) && bridgeClocks && bridgeClocks.length > bridgeIndex)) {
     // Keep metadata-only positions in the authored bridge for R5 or when
     // event anchors exclude core clocks. Other R6 bridges can use core arrays.
     // The native writer supplied timeOfDay temporarily for projection.

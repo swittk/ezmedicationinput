@@ -641,6 +641,9 @@ export interface FhirReference extends FhirElement {
   _display?: FhirPrimitiveElement;
 }
 
+/** Native R6 Reference annotations use native R6 Extension values. */
+export interface FhirR6Reference extends Omit<FhirReference, "extension">, FhirR6Element {}
+
 /** CodeableReference fields with R5-compatible Element metadata. */
 export interface FhirCodeableReference extends FhirElement {
   concept?: FhirCodeableConcept;
@@ -648,7 +651,9 @@ export interface FhirCodeableReference extends FhirElement {
 }
 
 /** Current R6 Element annotations may carry native R6 Quantity choices. */
-export interface FhirR6CodeableReference extends Omit<FhirCodeableReference, "extension">, FhirR6Element {}
+export interface FhirR6CodeableReference extends Omit<FhirCodeableReference, "extension" | "reference">, FhirR6Element {
+  reference?: FhirR6Reference;
+}
 
 /** FHIR R6 draft Dosage: no R5 sequence/legacy maxima/PRN alias. */
 export interface FhirR6Dosage extends Omit<FhirDosage,

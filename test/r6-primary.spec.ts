@@ -3164,7 +3164,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         rateQuantity: simpleQuantityForR5({ value: 4, comparator: ">=", unit: "mL/h" })!
       }]
     }] }] };
-    const edited = toFhirR5Dosages(course);
+    const edited = cloneStructuredValue(toFhirR5Dosages(course));
     edited[0].doseAndRate![0].doseExpression = {
       language: "text/fhirpath", expression: "%patient.weight"
     };
@@ -3580,7 +3580,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         { doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator: "~" })! }
       ]
     }] }] };
-    const anonymousRows = toFhirR5Dosages(anonymous);
+    const anonymousRows = cloneStructuredValue(toFhirR5Dosages(anonymous));
     expect(anonymousRows[0].doseAndRate?.map(entry => entry.doseQuantity?.value))
       .toEqual([10, 5]);
     anonymousRows[0].doseAndRate!.shift();
@@ -3655,7 +3655,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         { doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator: ">=" })! }
       ]
     }] }] };
-    const rows = toFhirR5Dosages(original);
+    const rows = cloneStructuredValue(toFhirR5Dosages(original));
     expect(rows[0].doseAndRate?.map(entry => entry.doseQuantity?.value))
       .toEqual([5, 5]);
     rows[0].doseAndRate!.shift();
@@ -3734,7 +3734,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(numeric.extension?.some(ext =>
       ext.url.includes("medication-course-reconciliation-source"))).toBe(true);
 
-    const replaced = toFhirR5Dosages(course);
+    const replaced = cloneStructuredValue(toFhirR5Dosages(course));
     replaced[0].doseAndRate![0].rateExpression = { expression: "%patient.weight" };
     const expression = toDosageDetails(replaced);
     expect(expression.step[0].component[0].doseAndRate).toEqual([{
@@ -4029,7 +4029,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       }] }
     });
     expect(toDosageDetails(JSON.parse(JSON.stringify(rows)))).toEqual(source);
-    const changed = toFhirR5Dosages(source);
+    const changed = cloneStructuredValue(toFhirR5Dosages(source));
     changed[0].maxDosePerAdministration!.value = 6;
     expect(toDosageDetails(changed).step[0].component[0].safety?.doseLimit)
       .toContainEqual(expect.objectContaining({
@@ -4970,7 +4970,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         ]
       }
     }] }] };
-    const row = toFhirR5Dosages(source)[0];
+    const row = cloneStructuredValue(toFhirR5Dosages(source))[0];
     delete row.maxDosePerAdministration;
     const edited = toDosageDetails([row]);
     const safety = edited.step[0].component[0].safety;
@@ -5030,13 +5030,13 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     }] }] };
     // R5 Ratio Element metadata now survives projection. An explicitly
     // annotated live B remains B even when its numeric value matches A.
-    const identified = toFhirR5Dosages(twin);
+    const identified = cloneStructuredValue(toFhirR5Dosages(twin));
     identified[0].maxDosePerPeriod!.shift();
     expect(toDosageDetails(identified).step[0].component[0].safety?.doseLimit?.[0].extension)
       .toEqual(b.extension);
     // A consumer can return only the numeric R5 projection. With those
     // live annotations omitted, the retained twin sources are ambiguous.
-    const ambiguous = toFhirR5Dosages(twin);
+    const ambiguous = cloneStructuredValue(toFhirR5Dosages(twin));
     for (const ratio of ambiguous[0].maxDosePerPeriod!) delete ratio.extension;
     ambiguous[0].maxDosePerPeriod!.shift();
     const survivor = toDosageDetails(ambiguous);
@@ -5462,7 +5462,7 @@ describe("adversarial clinical preservation and cycle wall-clock audit", () => {
     };
     const sizes: number[] = [];
     for (let i = 1; i <= 12; i++) {
-      const rows = toFhirR5Dosages(course);
+      const rows = cloneStructuredValue(toFhirR5Dosages(course));
       expect(rows).toHaveLength(1);
       expect(rows[0].doseAndRate).toBeUndefined();
       rows[0].text = "version " + i;
@@ -5646,7 +5646,7 @@ describe("review 17: course history, imported rate ranges and civil-clock caps",
     const texts = ["Version A"];
     let firstSize = 0;
     for (let index = 1; index <= 10; index++) {
-      const rows = toFhirR5Dosages(course);
+      const rows = cloneStructuredValue(toFhirR5Dosages(course));
       rows[0].text = "Version " + index;
       const annotation = index === 2
         ? { extension: [{ url: "https://example.org/new-annotation", valueString: "new" }] }
@@ -6138,7 +6138,7 @@ describe("review 20: typed expression identity and normalized calendar equivalen
       const source: FhirR6DosageInstruction = { step: [{ component: [{
         doseAndRate: [{ type, [choice]: expr }]
       }] }] };
-      const rows = toFhirR5Dosages(source);
+      const rows = cloneStructuredValue(toFhirR5Dosages(source));
       expect(rows[0].doseAndRate?.[0][choice]).toBeUndefined();
       rows[0].doseAndRate![0].id = "new-clinician-entry";
       const output = toDosageDetails(rows);
@@ -6151,7 +6151,7 @@ describe("review 20: typed expression identity and normalized calendar equivalen
       const existing: FhirR6DosageInstruction = { step: [{ component: [{
         doseAndRate: [{ id: "original-entry", type, [choice]: expr }]
       }] }] };
-      const changed = toFhirR5Dosages(existing);
+      const changed = cloneStructuredValue(toFhirR5Dosages(existing));
       changed[0].doseAndRate![0].id = "different-entry";
       expect(toDosageDetails(changed).step[0].component[0].doseAndRate?.[0][choice])
         .toBeUndefined();
@@ -6167,14 +6167,14 @@ describe("review 20: typed expression identity and normalized calendar equivalen
       doseAndRate: [{ type, doseExpression: expr },
         { type: typeB, rateExpression: rate }]
     }] }] };
-    const rows = toFhirR5Dosages(source);
+    const rows = cloneStructuredValue(toFhirR5Dosages(source));
     rows[0].doseAndRate![0].id = "new-dose-id";
     rows[0].doseAndRate![1].id = "new-rate-id";
     const result = toDosageDetails(rows).step[0].component[0].doseAndRate!;
     expect(result[0]).toMatchObject({ id: "new-dose-id", type, doseExpression: expr });
     expect(result[1]).toMatchObject({ id: "new-rate-id", type: typeB, rateExpression: rate });
     // A numeric edit still supersedes an expression regardless of the new ID.
-    const edited = toFhirR5Dosages(source);
+    const edited = cloneStructuredValue(toFhirR5Dosages(source));
     edited[0].doseAndRate![0].id = "new-dose-id";
     edited[0].doseAndRate![0].doseQuantity = { value: 7, unit: "mg" };
     expect(toDosageDetails(edited).step[0].component[0].doseAndRate?.[0])
@@ -6190,7 +6190,7 @@ describe("review 20: typed expression identity and normalized calendar equivalen
         { type, doseExpression: { language: "text/fhirpath", expression: "%patient.weight * 3" } }
       ]
     }] }] };
-    const rows = toFhirR5Dosages(source);
+    const rows = cloneStructuredValue(toFhirR5Dosages(source));
     rows[0].doseAndRate![0].id = "new-entry";
     const reconciled = toDosageDetails(rows);
     const active = reconciled.step[0].component[0].doseAndRate!;

@@ -3503,8 +3503,9 @@ describe("round66 source meaning and authored metadata", () => {
     const row: FhirDosage = { doseAndRate: tabletDaily.doseAndRate,
       timing: { event: [event], _event: [{ id: "authored-precision" }] } };
     for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
-      expect(text).toContain("Scheduled events: " + event);
-      expect(text).not.toContain(event + "-01");
+      const completeToken = new RegExp("Scheduled events: " + event + "(?![\\d-])", "u");
+      expect(text).toMatch(completeToken);
+      expect("Scheduled events: " + (event === "2026" ? "2026-12" : "2026-12-25")).not.toMatch(completeToken);
     }
     expect(toDosageDetails([row]).step[0].component[0].timing)
       .toMatchObject({ event: [event], _event: [{ id: "authored-precision" }] });
