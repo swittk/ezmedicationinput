@@ -427,7 +427,7 @@ export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDa
   // Extension-only primitive elements also participate in FHIR tim-10.
   // Keep their annotations in place and use the established clock carrier.
   const eventAnchored = Boolean(repeat.when?.length || repeat._when?.some(Boolean));
-  const mixed = eventAnchored && Boolean(clocks?.length);
+  const mixed = eventAnchored && Boolean(clocks?.length || repeat._timeOfDay?.some(Boolean));
   if (!mixed && !repeat.extension?.length)
     return restorePositions ? { ...repeat, timeOfDay: clocks } : repeat;
   let markers: FhirR6Extension[] | undefined;
@@ -469,12 +469,12 @@ export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDa
   }
   if (markers) kept.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: markers });
   if (mixed) {
-    const primitiveCount = Math.max(clocks!.length, repeat._timeOfDay?.length ?? 0);
+    const primitiveCount = Math.max(clocks?.length ?? 0, repeat._timeOfDay?.length ?? 0);
     for (let index = 0; index < primitiveCount; index++) {
       const metadata = repeat._timeOfDay?.[index];
-      if (index >= clocks!.length && !metadata) continue;
+      if (index >= (clocks?.length ?? 0) && !metadata) continue;
       const marker: FhirR6Extension = { url: TIMING_ADDITIONAL_CLOCK_EXTENSION_URL };
-      if (clocks![index] != null) marker.valueTime = clocks![index]!;
+      if (clocks?.[index] != null) marker.valueTime = clocks[index]!;
       if (metadata) marker._valueTime = metadata;
       kept.push(marker);
     }
@@ -2504,7 +2504,8 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
       administrationDurationComparator: administrationDuration?.comparator
     };
   }
-  state.frequency = dosage.timing?.repeat?.frequency;
+  state.frequency = repeat?.frequency ?? repeat?.extension?.find(
+    extension => extension.url === TIMING_FREQUENCY_MIN_EXTENSION_URL)?.valueInteger;
   state.frequencyMax = dosage.timing?.repeat?.frequencyMax;
   state.period = dosage.timing?.repeat?.period;
   state.periodMax = dosage.timing?.repeat?.periodMax;

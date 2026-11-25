@@ -1,4 +1,5 @@
 import { equalStructuredValues } from "./stable-structure";
+import { DOSAGE_RECONCILIATION_SOURCE_URL } from "./dosage-course";
 import { getEmaQuantityComparator, QUANTITY_OPERATOR_SOURCE_URL, quantityFromWire, simpleQuantityForR5 } from "./fhir-quantity-operator";
 import {
   AdviceArgument,
@@ -126,7 +127,7 @@ function addRelation(
 function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | undefined): void {
   for (const source of sources ?? []) {
     let index = -1;
-    if (source.url === "role" || source.url === "text" || source.url === "coding") {
+    if (source.url === "role" || source.url === "text" || source.url === "coding" || source.url === "normalized") {
       for (let i = 0; i < parts.length; i++) if (parts[i].url === source.url) { index = i; break; }
     }
     if (source.url === "coding" && source.valueCoding) {
@@ -139,6 +140,8 @@ function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | unde
       }
     }
     if (index >= 0) parts[index] = { ...source, ...parts[index] };
+    else if (source.url === "normalized")
+      parts.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [source] });
     else parts.push(source);
   }
 }
@@ -326,8 +329,10 @@ export function buildInstructionGraphExtension(
       let index = -1;
       for (let i = 0; i < activeFields; i++) if (ownership[i].url === field.url) { index = i; break; }
       if (index >= 0) ownership[index] = { ...field, ...ownership[index] };
-      else if (field.url !== "resolved" && field.url !== "administrationActionIndex" &&
-          field.url !== "doseActionIndex" && field.url !== "doseArgumentIndex") ownership.push(field);
+      else if (field.url === "resolved" || field.url === "administrationActionIndex" ||
+          field.url === "doseActionIndex" || field.url === "doseArgumentIndex")
+        ownership.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [field] });
+      else ownership.push(field);
     }
     const marker: FhirExtension = { url: "primaryOwnership", extension: ownership };
     if (graph.primaryOwnership.sourceId !== undefined) marker.id = graph.primaryOwnership.sourceId;
@@ -442,7 +447,10 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
       break;
     case "relation":if(!relation)relation=entry;break;
     case "relationCoding":if(!relationCoding)relationCoding=entry;break;
-    case "normalized":if(!normalized)normalized=entry;break;
+    case "normalized":
+      if(!normalized)normalized=entry;
+      if(hasFieldMetadata(entry,"valueString"))(sourceExtensions??=[]).push(entry);
+      break;
     case "conceptId":if(!concept)concept=entry;break;
     case "coding":if(!coding)coding=entry;break;
     case "spanStart":if(!spanStart)spanStart=entry;break;

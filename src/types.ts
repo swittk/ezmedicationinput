@@ -188,9 +188,10 @@ export interface FhirRatio extends FhirElement {
   denominator?: FhirSimpleQuantity;
 }
 
-/** R6 Ratio has the same shape as R5, but its numerator Quantity supports "~". */
-export interface FhirR6Ratio extends Omit<FhirRatio, "numerator"> {
+/** R6 Ratio uses native R6 annotations; only its numerator permits a comparator. */
+export interface FhirR6Ratio extends FhirR6Element {
   numerator?: FhirR6Quantity;
+  denominator?: FhirR6SimpleQuantity;
 }
 
 /**

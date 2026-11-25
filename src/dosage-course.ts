@@ -6,7 +6,7 @@ import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
  * course, condition and edit metadata remain structured and independently editable. */
 import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
-import { getEmaQuantityComparator, quantityFromR5, quantityForR6, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "./fhir-quantity-operator";
+import { getEmaQuantityComparator, quantityFromR5, quantityForR6, quantityForR5 as generalQuantityForR5, simpleQuantityForR5, quantityAnnotationExtensions } from "./fhir-quantity-operator";
 import { FhirDayOfWeek, FhirDosage, FhirExtension, FhirR6Extension, FhirQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition, FhirR6DosageInstruction, FhirR6DosageStep, FhirR6DosageInstructionInput, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat, FhirTimingRepeat, MedicationCondition, EzDosage, EzCourseMetadata, EzCourseStep } from "./types";
 
 /** R5 tim-8 requires the lower-count Element beside countMax, not a numeric
@@ -1123,15 +1123,23 @@ export function hasUnrecognizedEditMetadata(marker:FhirExtension):boolean {
   return false;
 }
 
-/** R6 Ratio numerators are regular Quantity: preserve the numeric rate,
- * translate "~" into EMA Coding, and reconcile enriched EMA on native edits. */
+/** Project Ratio quantities and their annotations through the existing operator
+ * boundary; unrelated opaque extension choices retain their supplied fields. */
 function ratioForR5(
   ratio: NonNullable<FhirR6Dosage["doseAndRate"]>[number]["rateRatio"]
 ): FhirRatio | undefined {
-  if (!ratio?.numerator) return ratio as FhirRatio | undefined;
-  const projected = generalQuantityForR5(ratio.numerator);
-  return projected === ratio.numerator ? ratio as FhirRatio :
-    { ...ratio, numerator: projected };
+  if (!ratio) return undefined;
+  const numerator = generalQuantityForR5(ratio.numerator);
+  const denominator = simpleQuantityForR5(ratio.denominator);
+  const extension = ratio.extension?.length ? quantityAnnotationExtensions(ratio.extension, "r5") : ratio.extension;
+  if (numerator === ratio.numerator && denominator === ratio.denominator && extension === ratio.extension)
+    return ratio as FhirRatio;
+  const projected = { ...ratio };
+  if (numerator !== ratio.numerator) projected.numerator = numerator;
+  if (denominator !== ratio.denominator) projected.denominator = denominator;
+  if (extension !== ratio.extension) projected.extension = extension;
+  // Known Quantity choices are converted above; other opaque choices are unchanged.
+  return projected as FhirRatio;
 }
 
 /** Project one R6 component without building course-storage metadata. Used by

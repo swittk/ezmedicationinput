@@ -134,6 +134,7 @@ import {
   quantityFromR5,
   quantityFromWire,
   quantityForR6,
+  quantityAnnotationExtensions,
 } from "../fhir-quantity-operator";
 import { equalStructuredValues } from "../stable-structure";
 import { clauseForAdministration } from "../canonical/compile";
@@ -214,15 +215,18 @@ export function rangeFromFhir(r: FhirRange | undefined): CanonicalRange | undefi
   return rangeFromWire(r);
 }
 function ratio(
-  r: { numerator?: FhirQuantity | FhirR6Quantity; denominator?: FhirQuantity | FhirR6Quantity } | undefined,
+  r: { numerator?: FhirQuantity | FhirR6Quantity; denominator?: FhirQuantity | FhirR6Quantity;
+    extension?: FhirR6Extension[] } | undefined,
   r5 = false
 ): CanonicalRatio | undefined {
   if (!r) return undefined;
   const numerator = r5 ? measureFromR5(r.numerator as FhirQuantity) : measureFromWire(r.numerator);
   const denominator = r5 ? measureFromR5(r.denominator as FhirQuantity) : measureFromWire(r.denominator);
-  return numerator === r.numerator && denominator === r.denominator
+  const extension = r.extension?.length ? quantityAnnotationExtensions(r.extension, "r6") : r.extension;
+  return numerator === r.numerator && denominator === r.denominator && extension === r.extension
     ? r
-    : { ...r, ...(r.numerator ? { numerator } : {}), ...(r.denominator ? { denominator } : {}) };
+    : { ...r, ...(r.numerator ? { numerator } : {}), ...(r.denominator ? { denominator } : {}),
+        ...(extension !== r.extension ? { extension } : {}) };
 }
 function offsetValue(repeat: { extension?: FhirR6Extension[] } | undefined, url: string): number | undefined {
   const value = repeat?.extension?.find((e) => e.url === url);
@@ -1508,7 +1512,8 @@ function administrationToWire(
     assign(wireTiming.repeat as Record<string, unknown>, "offset", scheduleMetadata.timing.repeat.offset);
   }
   if (!clause || a.provenance) wireTiming = updateNativeTimingAnnotations(a, output, wireTiming);
-  if (wireTiming?.repeat && a.schedule?.recurrence?.clocks !== undefined) {
+  if (wireTiming?.repeat && (a.schedule?.recurrence?.clocks !== undefined ||
+      wireTiming.repeat._timeOfDay?.some(Boolean))) {
     const sourceRepeat = (a.provenance?.data as FhirDosage | FhirR6Dosage | undefined)?.timing?.repeat;
     const repeat = projectTimingClocks(wireTiming.repeat, sourceRepeat, target);
     if (repeat !== wireTiming.repeat) wireTiming = { ...wireTiming, repeat };
@@ -1583,6 +1588,9 @@ function administrationToWire(
     "doseAndRate",
     a.amounts?.map((value) => {
       const original = value.provenance as NonNullable<FhirR6Dosage["doseAndRate"]>[number] | undefined;
+      const ratioExtensions = (value.rateRatio as { extension?: FhirR6Extension[] } | undefined)?.extension;
+      const projectedRatioExtensions = target === "r5" && ratioExtensions?.length
+        ? quantityAnnotationExtensions(ratioExtensions, "r5") : ratioExtensions;
       const externalR5 = target === "r6" && a.provenance?.format === "r5";
       const doseConflict = externalR5 && (value.quantity !== undefined
         ? value.range !== undefined || value.expression !== undefined
@@ -1600,7 +1608,9 @@ function administrationToWire(
         original.rateQuantity === value.rate &&
         (target !== "r5" || simpleQuantityForR5(value.quantity) === value.quantity &&
           simpleQuantityForR5(value.rate) === value.rate &&
-          generalQuantityForR5(value.rateRatio?.numerator) === value.rateRatio?.numerator) &&
+          generalQuantityForR5(value.rateRatio?.numerator) === value.rateRatio?.numerator &&
+          simpleQuantityForR5(value.rateRatio?.denominator) === value.rateRatio?.denominator &&
+          projectedRatioExtensions === ratioExtensions) &&
         original.rateRange === value.rateRange &&
         original.rateRatio === value.rateRatio &&
         original.type === value.role &&
@@ -1662,6 +1672,7 @@ function administrationToWire(
         "rateRatio",
         value.rateRatio && {
           ...value.rateRatio,
+          ...(projectedRatioExtensions !== ratioExtensions ? { extension: projectedRatioExtensions } : {}),
           ...(value.rateRatio.numerator
             ? {
                 numerator:
@@ -1673,7 +1684,7 @@ function administrationToWire(
           ...(value.rateRatio.denominator
             ? {
                 denominator:
-                  simpleQuantityForR5(code(value.rateRatio.denominator)),
+                  (target === "r5" ? simpleQuantityForR5 : simpleQuantityForR6)(code(value.rateRatio.denominator)),
               }
             : {}),
         }

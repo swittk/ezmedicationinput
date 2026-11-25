@@ -1555,7 +1555,7 @@ function reconcileNativeRetainedCourse(
     const ambiguousSources = new Set<number>(), ambiguousLive = new Set<number>();
     if (componentCountChanged) {
       // After stable identities are assigned, equal strict R5 projections
-      // cannot identify which distinct retained reference/expression survived a deletion.
+      // cannot identify which distinct retained policy/reference/expression survived a deletion.
       // Group once; equal duplicates never cause a repeated full-array scan.
       const projectionGroups = new Map<string, Array<{ indices: number[]; ambiguous: boolean }>>();
       for (let index = 0; index < originalProjections.length; index++) {
@@ -1568,7 +1568,8 @@ function reconcileNativeRetainedCourse(
         if (!group) groups.push({ indices: [index], ambiguous: false });
         else {
           const previous = step.component[group.indices[0]], current = step.component[index];
-          if (!equivalentProjection(previous.site?.reference, current.site?.reference)) group.ambiguous = true;
+          if (!equivalentProjection(previous.site?.reference, current.site?.reference) ||
+              !equivalentProjection(previous.safety, current.safety)) group.ambiguous = true;
           // Expressions have no ordinary R5 choice. Equal visible projections
           // cannot establish which hidden expression belongs to a survivor.
           const before = previous.doseAndRate, after = current.doseAndRate;

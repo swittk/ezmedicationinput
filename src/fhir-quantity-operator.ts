@@ -122,7 +122,7 @@ function editedOperator(
 /** Quantity-valued annotations use the same operator bridge as their owner.
  * Other Extension value choices remain opaque; this is not a general
  * extension-version converter or an object-tree normalizer. */
-function quantityAnnotationExtensions(
+export function quantityAnnotationExtensions(
   source: FhirR6Extension[], target: "r5" | "r6"
 ): FhirR6Extension[] {
   let result: FhirR6Extension[] | undefined;

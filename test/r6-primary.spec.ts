@@ -12,7 +12,7 @@ import {
   nextDueDoses, calculateTotalUnits, getEmaQuantityComparator,
   EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
-  getBodySiteText, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
+  getBodySiteText, buildBodySiteAdministrationTargetCountExtension, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
   type FormatOptions, type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
   EventTiming, FhirPeriodUnit, AdviceRelation, AdviceArgumentRole, type CanonicalInstructionGraph, parseInstructionActions, cloneBodySiteSpatialRelation
 } from "../src/index";
@@ -7485,7 +7485,9 @@ describe("round64 retained interchange annotations", () => {
     expect(current).not.toBe(target);
     expect(current._display).not.toBe(target._display);
     expect(current._display.extension).not.toBe(target._display.extension);
+    expect(current._display.extension[0]).not.toBe(target._display.extension[0]);
     expect(current.extension).not.toBe(target.extension);
+    expect(current.extension[0]).not.toBe(target.extension[0]);
     expect(current.i18n).not.toBe(target.i18n);
     expect(current.opaque).toBe(opaque);
   });
@@ -7640,9 +7642,13 @@ describe("round68 current preview fields", () => {
       site: { text: "affected skin" }, method: { text: "Apply" },
       timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
       extension: [buildInstructionGraphExtension(graph)!] };
-    const native = importCanonicalCourse(row);
-    native.stages[0].administrations[0].targetCount = 3;
+    const original = JSON.parse(JSON.stringify(row));
+    const edited: FhirDosage = { ...row, site: { ...row.site,
+      extension: [...(row.site?.extension ?? []), buildBodySiteAdministrationTargetCountExtension(3)!] } };
+    const native = importCanonicalCourse(edited);
+    expect(importCanonicalCourse(row).stages[0].administrations[0].targetCount).toBeUndefined();
     const r6 = courseToR6(native);
+    expect(row).toEqual(original);
     for (const input of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
       const before = JSON.stringify(input);
       expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("รวม 3 จุด");
