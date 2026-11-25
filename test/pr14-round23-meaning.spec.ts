@@ -5374,3 +5374,59 @@ describe("round60 typed meaning and interchange ownership", () => {
       .toContain(locale === "en" ? "bedtime" : "ก่อนนอน");
   });
 });
+
+
+describe("round61 complete carrier quantity daughters", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([
+    ["mg", "half a L", 0.5, "L", undefined],
+    ["mg", "half L", 0.5, "L", undefined],
+    ["mg", "half of a L", 0.5, "L", undefined],
+    ["mg", "three quarters of a L", 0.75, "L", undefined],
+    ["mg", "five quarters of a L", 1.25, "L", undefined],
+    ["mg", "a quarter L", 0.25, "L", undefined],
+    ["mg", "one and a half L", 1.5, "L", undefined],
+    ["mg", "about half a L", 0.5, "L", "~"],
+    ["mg", "at least half a L", 0.5, "L", ">="],
+    ["mg", "0.5 L", 0.5, "L", undefined],
+    ["mg", "0.5 litre", 0.5, "L", undefined],
+    ["mg", "500 milliliters", 500, "mL", undefined],
+    ["milligrams", "half a litre", 0.5, "L", undefined],
+    ["units", "half a litre", 0.5, "L", undefined],
+  ] as const)("keeps the active %s dose beside %s", (activeUnit, carrier, value, unit, comparator) => {
+    const source = "Infuse 20 " + activeUnit + " in " + carrier + " over 4 h";
+    const parsed = parseSig(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    for (const input of [parsed.fhir, parsed.fhirNext,
+      fresh(toFhirR5Dosages(fresh(parsed.fhirNext)))]) {
+      const before = fresh(input), course = importCanonicalCourse(input);
+      expect(course.stages).toHaveLength(1);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      const member = course.stages[0].administrations[0];
+      expect(member.target).toBeUndefined();
+      expect(member.amounts).toHaveLength(1);
+      const amount = member.amounts![0];
+      expect(amount.quantity?.value).toBe(20);
+      expect(amount.quantity?.code ?? amount.quantity?.unit).toBe(activeUnit === "units" ? "[iU]" : "mg");
+      expect(amount.rateRatio).toMatchObject({
+        numerator: { value, unit }, denominator: { value: 4, unit: "h" },
+      });
+      expect(getQuantityComparator(amount.rateRatio!.numerator)).toBe(comparator);
+      expect(member.schedule?.recurrence).toMatchObject({ count: 1, occurrenceDuration: 4, occurrenceDurationUnit: "h" });
+      expect(input).toEqual(before);
+    }
+  });
+
+  it("uses the registered unit vocabulary for both typed amounts", () => {
+    const parsed = parseSig("Infuse 20 activeunits in half a carrierunit over 4 h", {
+      unitMap: { activeunits: "mg", carrierunit: "L" },
+    });
+    const member = parsed.meta.canonical.course!.stages[0].administrations[0];
+    expect(member.amounts).toMatchObject([{ quantity: { value: 20, unit: "mg" },
+      rateRatio: { numerator: { value: 0.5, unit: "L" }, denominator: { value: 4, unit: "h" } } }]);
+    expect(member.target).toBeUndefined();
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+});

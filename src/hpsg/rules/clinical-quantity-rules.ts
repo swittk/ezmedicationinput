@@ -10,6 +10,7 @@ import {
   compactMillionDoseNumber,
   DOSE_FRACTION_ARTICLES,
   additiveDoseNumberAt,
+  fractionalDoseNumberAt,
   attachedNumberUnitAt,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
   DOSE_NUMBER_WORDS,
@@ -53,6 +54,21 @@ function doseNumberValue(
   return token.kind === LexKind.Number && token.value !== undefined
     ? token.value
     : DOSE_NUMBER_WORDS.get(normalizeTokenLower(token));
+}
+
+/** One plain numeric daughter shared by active amounts and carrier volumes. */
+function plainClinicalNumberAt(context: HpsgClauseContext, start: number, initial?: number) {
+  const token = context.tokens[start];
+  if (!token || !available(context, start)) return undefined;
+  const value = initial ?? doseNumberValue(token) ?? DOSE_FRACTION_WORDS.get(normalizeTokenLower(token));
+  if (value === undefined) return undefined;
+  const mixed = additiveDoseNumberAt(context.tokens, start, context.limit, value);
+  const fraction = mixed ? undefined : fractionalDoseNumberAt(context.tokens, start, context.limit, value);
+  const complete = mixed ?? fraction ?? millionDoseNumberAt(context.tokens, start, context.limit, value);
+  const numericIndex = complete?.numericIndex ?? start;
+  for (let index = start + 1; index <= numericIndex; index++)
+    if (!available(context, index)) return undefined;
+  return { value: complete?.value ?? value, numericIndex, mixed: Boolean(mixed), fractional: Boolean(mixed || fraction) };
 }
 
 function directDoseUnitAfter(
@@ -148,7 +164,7 @@ function massTerm(value: number, raw: string): HpsgDimensionalQuantityTerm | und
   if (normalized === "mg" || normalized === "g") {
     return { value, unit: normalized, dimension: "mass" };
   }
-  if (/^(?:iu|unit|units)$/u.test(normalized)) {
+  if (/^(?:u|iu|unit|units)$/u.test(normalized)) {
     return { value, unit: "[iU]", dimension: "biologic-activity" };
   }
   return undefined;
@@ -289,14 +305,15 @@ function activeDoseInCarrierOverTime(
     doseComparatorNumberAt(context.tokens, carrierStart, context.limit, normalizeTokenLower(carrierValueToken));
   const attachedCarrier = !qualifiedCarrier && carrierValueToken.kind !== LexKind.Number
     ? attachedNumberUnitAt(carrierValueToken.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
-  const carrierNumber = qualifiedCarrier?.value ??
-    (carrierValueToken.kind === LexKind.Number ? carrierValueToken.value : attachedCarrier?.value);
-  let carrierUnitStart = (qualifiedCarrier?.numericIndex ?? carrierStart) + 1;
-  // The same fractional numeric daughter owns "a"/"of a" before its unit,
-  // whether it is the active amount or the independently qualified carrier.
-  if (qualifiedCarrier && !qualifiedCarrier.rawUnit &&
-      (qualifiedCarrier.value < 1 || DOSE_FRACTION_DENOMINATOR_WORDS.has(
-        normalizeTokenLower(context.tokens[qualifiedCarrier.numericIndex])))) {
+  const plainCarrier = !qualifiedCarrier && !attachedCarrier
+    ? plainClinicalNumberAt(context, carrierStart) : undefined;
+  const carrierNumber = qualifiedCarrier?.value ?? plainCarrier?.value ?? attachedCarrier?.value;
+  let carrierUnitStart = (qualifiedCarrier?.numericIndex ?? plainCarrier?.numericIndex ?? carrierStart) + 1;
+  // A fractional numeric daughter owns its optional partitive/article,
+  // equally for bare and qualified carrier amounts.
+  if (!(qualifiedCarrier?.rawUnit || attachedCarrier?.rawUnit) && carrierNumber !== undefined &&
+      (carrierNumber < 1 || plainCarrier?.fractional || qualifiedCarrier &&
+        DOSE_FRACTION_DENOMINATOR_WORDS.has(normalizeTokenLower(context.tokens[qualifiedCarrier.numericIndex])))) {
     while (available(context, carrierUnitStart) &&
         DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[carrierUnitStart]))) carrierUnitStart++;
   }
@@ -304,8 +321,8 @@ function activeDoseInCarrierOverTime(
   const carrierUnit = qualifiedCarrier?.rawUnit ?? attachedCarrier?.rawUnit ??
     (carrierUnitToken && available(context, carrierUnitStart) ? normalizeTokenLower(carrierUnitToken) : undefined);
   if (carrierNumber === undefined || carrierNumber <= 0 || !carrierUnit) return undefined;
-  const activeDose = massTerm(value, activeUnit);
-  const carrier = volumeOrMassTerm(carrierNumber, carrierUnit);
+  const activeDose = massTerm(value, normalizeUnit(activeUnit, context.options) ?? activeUnit);
+  const carrier = volumeOrMassTerm(carrierNumber, normalizeUnit(carrierUnit, context.options) ?? carrierUnit);
   if (!activeDose || !carrier || carrier.dimension !== "volume" ||
       !hasAdministrationCue(context, phraseStart)) return undefined;
   if (qualifiedCarrier) carrier.comparator = qualifiedCarrier.comparator;
@@ -725,31 +742,15 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   const compactMillion = attachedLower?.endsWith("m") ? compactMillionDoseNumber(attachedLower) : undefined;
   const markedNumber = quantityToken.lower.startsWith("@") && /^@(?:\d+(?:\.\d+)?|\.\d+)$/u.test(quantityToken.lower)
     ? Number(quantityToken.lower.slice(1)) : undefined;
-  const exactNumber = qualified ? undefined : compactMillion ?? markedNumber ?? doseNumberValue(quantityToken) ??
-    DOSE_FRACTION_WORDS.get(quantityToken.canonical ?? quantityToken.lower);
-  const exactMixed = exactNumber !== undefined
-    ? additiveDoseNumberAt(context.tokens, phraseStart, context.limit, exactNumber) : undefined;
-  // A cardinal and fraction head form one numeric daughter: "three
-  // quarters" owns both words before the dimensional unit is attached.
-  const denominator = exactNumber !== undefined && !exactMixed && available(context, phraseStart + 1)
-    ? DOSE_FRACTION_DENOMINATOR_WORDS.get(normalizeTokenLower(context.tokens[phraseStart + 1])) : undefined;
-  const exactFraction = denominator !== undefined
-    ? { value: exactNumber! * denominator, numericIndex: phraseStart + 1 } : undefined;
-  const exactMillion = !exactMixed && exactNumber !== undefined
-    ? millionDoseNumberAt(context.tokens, exactFraction?.numericIndex ?? phraseStart,
-      context.limit, exactFraction?.value ?? exactNumber) : undefined;
-  const numericStart = qualified?.numericIndex ?? exactMixed?.numericIndex ??
-    exactMillion?.numericIndex ?? exactFraction?.numericIndex ?? phraseStart;
-  if (exactMixed || exactFraction || exactMillion) for (let index = phraseStart + 1; index <= numericStart; index++) {
-    if (!available(context, index)) return [];
-  }
+  const plainNumber = qualified ? undefined :
+    plainClinicalNumberAt(context, phraseStart, compactMillion ?? markedNumber);
+  const numericStart = qualified?.numericIndex ?? plainNumber?.numericIndex ?? phraseStart;
   // The general lower-case normalizer strips leading punctuation, but a
   // leading dot is a significant decimal point in '.1mcg/kg/min'. Trim
   // trailing sentence punctuation only; never turn .1 into 1.
   const attached = compactMillion === undefined && attachedLower
     ? attachedNumberUnitAt(attachedLower) : undefined;
-  const value = qualified?.value ?? exactMixed?.value ?? exactMillion?.value ??
-    exactFraction?.value ?? exactNumber ?? attached?.value;
+  const value = qualified?.value ?? plainNumber?.value ?? attached?.value;
   // Both a qualified amount ('~0.1mcg/kg per min') and an exact compact
   // amount ('0.1mcg/kg per min') use one bounded dimensional unit grammar.
   const unit = (qualified?.rawUnit ?? attached?.rawUnit)?.replace(/[μµ]/gu, "u");
@@ -758,7 +759,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   // complement ("half a mL", "three quarters of a mg"). All dimensional
   // constructions start after that complement, keeping its original value.
   let quantityEnd = numericStart;
-  if (!unit && (value < 1 || exactMixed || exactFraction || qualified &&
+  if (!unit && (value < 1 || plainNumber?.fractional || qualified &&
       DOSE_FRACTION_DENOMINATOR_WORDS.has(normalizeTokenLower(context.tokens[qualified.numericIndex])))) {
     while (available(context, quantityEnd + 1) &&
         DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[quantityEnd + 1]))) quantityEnd++;
@@ -790,7 +791,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   if (!expression) {
     // Only a scalar unit can finish the additive dose construction. A per-time
     // continuation belongs to the complete mixed numeric daughter above.
-    const additive = exactMixed ? additiveFractionDose(context, phraseStart) : undefined;
+    const additive = plainNumber?.mixed ? additiveFractionDose(context, phraseStart) : undefined;
     return additive ? [additive] : [];
   }
   const weight = qualifyClinicalSign(context, phraseStart, quantityEnd,

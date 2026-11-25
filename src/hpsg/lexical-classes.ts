@@ -819,7 +819,7 @@ export function compactMillionDoseNumber(lower: string): number | undefined {
 }
 
 /** A denominator word belongs to the numeric head before its unit connector. */
-function fractionalDoseNumberAt(
+export function fractionalDoseNumberAt(
   tokens: readonly LexToken[], start: number, limit: number, value: number
 ): { value: number; numericIndex: number } | undefined {
   const denominator = start + 1 < limit ? tokens[start + 1] : undefined;
