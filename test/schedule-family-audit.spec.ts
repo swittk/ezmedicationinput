@@ -5806,3 +5806,58 @@ describe("round77 reviewed course ownership", () => {
   });
 
 });
+
+
+describe("round78 ranged actual-count origins", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const duration = (value: number, unit: string) => ({ value, unit, code: unit, system: "http://unitsofmeasure.org" });
+  const note = { url: "urn:clinic:ranged-history-note", valueString: "Retain range and nominal cadence" };
+  const row = (minutes: number): FhirDosage => ({
+    doseAndRate: [{ doseRange: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } }],
+    modifierExtension: [{ url: "urn:ezmedicationinput:StructureDefinition:medication-administration-offset",
+      valueQuantity: duration(minutes, "min") }],
+    extension: [note],
+    timing: { repeat: { count: 2, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      timeOfDay: ["09:00:00"], boundsPeriod: { start: "2026-01-01T09:00:00Z" } } },
+    maxDosePerPeriod: [{ numerator: { value: 10, unit: "tab" }, denominator: duration(1, "mo") }],
+  });
+  const forms = (source: FhirR6DosageInstruction) => [fresh(source), importCanonicalCourse(fresh(source)),
+    fresh(toFhirR5Dosages(fresh(source))), fresh(toDosageDetails(fresh(toFhirR5Dosages(fresh(source)))))];
+  const query = { orderedAt: "2026-01-01T09:00:00Z", from: "2026-01-02T00:00:00Z", timeZone: "UTC", limit: 3 };
+
+  it.each([-120, 120])("spends the ranged count from actual recorded time at a %s minute displacement", minutes => {
+    const source = row(minutes), clock = minutes < 0 ? "07:00:00" : "11:00:00";
+    const options = { ...query, priorDoseTimes: ["2026-01-01T" + clock + "Z"] };
+    for (const dosage of [fresh(source), ...forms(toDosageDetails([fresh(source)]))]) {
+      const before = fresh(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(["2026-01-02T" + clock + "+00:00"]);
+      // One actual use leaves one administration of at most two tablets.
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab", quantityKind: "maximum" });
+      expect(dosage).toEqual(before);
+    }
+    const saved = toFhirR5Dosages(fresh(toDosageDetails([fresh(source)])))[0];
+    expect(saved.doseAndRate).toEqual(source.doseAndRate);
+    expect(saved.timing?.repeat?.timeOfDay).toEqual(["09:00:00"]);
+    expect(saved.modifierExtension).toEqual(source.modifierExtension);
+    expect(saved.extension).toContainEqual(note);
+  });
+
+  it.each(["07:00:00", "08:30:00"])("keeps the independent phase eligibility fence for a record at %s", recorded => {
+    const source = fresh(toDosageDetails([row(-120)]));
+    source.step[0].start = {
+      contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+      offsetDuration: duration(8, "h"),
+    };
+    const options = { ...query, orderedAt: "2026-01-01T00:00:00Z",
+      priorDoseTimes: ["2026-01-01T" + recorded + "Z"] };
+    const days = recorded === "07:00:00" ? [2, 3] : [2];
+    for (const dosage of forms(source)) {
+      const before = fresh(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(days.map(day => "2026-01-0" + day + "T07:00:00+00:00"));
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: days.length * 2, unit: "tab", quantityKind: "maximum" });
+      expect(dosage).toEqual(before);
+    }
+  });
+});

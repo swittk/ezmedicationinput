@@ -6488,12 +6488,13 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
  * across course cycles. Counts are spent only after all caps admit a dose. */
 function measureRangedSchedule(
   dosage: CanonicalAdministration, options: CanonicalSupplyOptions,
-  from: Date, end: Date, origin: Date, zone: string
+  from: Date, end: Date, origin: Date, historyOrigin: Date, zone: string
 ): { count: number; quantity: number; times: string[] } {
   const repeat = dosage.schedule?.recurrence;
   const totalCount = repeat ? repeatOccurrenceCap(repeat) : undefined;
   const eligibility = (options as PhaseCountOptions).countEligibilityStart;
-  const countStart = eligibility && eligibility > origin ? eligibility : origin;
+  // Cadence stays nominal; the resolved admission origin owns actual history.
+  const countStart = eligibility && eligibility > historyOrigin ? eligibility : historyOrigin;
   const prior: number[] = [];
   let used = options.priorCount ?? 0;
   let countedActual: Set<number> | undefined;
@@ -7247,7 +7248,8 @@ function calculateTotalUnitsSingle(
       capacityAllocations, rangePlan, supplyAccounting?.rangePrior, supplyAccounting?.capacityWindows
     );
   } else if (rangePlan) {
-    const concrete = measureRangedSchedule(dosage, options, countFrom, endDay, baseTime, timeZone);
+    const historyOrigin = admissionStart ?? countFrom;
+    const concrete = measureRangedSchedule(dosage, options, countFrom, endDay, baseTime, historyOrigin, timeZone);
     let selected = concrete;
     if ((maximalTiming.frequencyMaximum || maximalTiming.periodMinimum) && dosage.schedule?.recurrence) {
       const maximum: CanonicalAdministration = { ...dosage, schedule: {
@@ -7256,7 +7258,7 @@ function calculateTotalUnitsSingle(
           ? { ...maximalTiming.maximumRecurrence!, clocks: undefined, anchors: undefined }
           : maximalTiming.maximumRecurrence,
       } };
-      const upper = measureRangedSchedule(maximum, options, countFrom, endDay, baseTime, timeZone);
+      const upper = measureRangedSchedule(maximum, options, countFrom, endDay, baseTime, historyOrigin, timeZone);
       if (upper.quantity > concrete.quantity) selected = upper;
     }
     count = selected.count;
