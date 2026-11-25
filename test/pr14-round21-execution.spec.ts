@@ -6211,3 +6211,52 @@ describe("round61 equivalent civil infusion endpoints", () => {
     });
   }
 });
+
+describe("round61 zero-minimum compatible timing codes", () => {
+  const versions = ["native", "R5", "R6"] as const;
+  const ranges = [
+    { minimum: 0, maximum: 2 },
+    { minimum: 1, maximum: 2 },
+    { minimum: 0, maximum: 1 },
+  ];
+  const query = { ...options, limit: 2 };
+  for (const version of versions) {
+    for (const { minimum, maximum } of ranges) {
+      it("executes BID only inside the authored frequency range (" + minimum + "-" + maximum + "/" + version + ")", () => {
+        const code = { coding: [{
+          system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID",
+        }] };
+        const course = courseFromR6({ step: [{ component: [{
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { code, repeat: { frequencyMax: maximum, period: 1, periodUnit: Unit.Day,
+            ...(minimum === 0 ? { extension: [{
+              url: "urn:ezmedicationinput:StructureDefinition:medication-timing-frequency-min", valueInteger: 0,
+            }] } : { frequency: minimum }),
+          } },
+        }] }] });
+        const input = version === "native" ? course
+          : freshExecutionInput(version === "R5" ? courseToR5(course) : courseToR6(course));
+        const before = JSON.stringify(input);
+        const saved = freshExecutionInput(toDosageDetails(freshExecutionInput(courseToR5(importCanonicalCourse(input)))));
+        for (const dosage of [input, saved]) {
+          if (maximum === 1) {
+            expect(() => nextDueDoses(dosage, query))
+              .toThrow(expect.objectContaining({ code: "timing-code-repeat-conflict" }));
+            expect(() => calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }))
+              .toThrow(expect.objectContaining({ code: "timing-code-repeat-conflict" }));
+          } else {
+            expect(nextDueDoses(dosage, query))
+              .toEqual(["2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00"]);
+            expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }))
+              .toMatchObject({ totalUnits: 2, unit: "tab", quantityKind: "maximum" });
+          }
+          expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule)
+            .toMatchObject({ code, recurrence: {
+              frequency: minimum, frequencyMax: maximum, period: 1, periodUnit: Unit.Day,
+            } });
+        }
+        expect(JSON.stringify(input)).toBe(before);
+      });
+    }
+  }
+});

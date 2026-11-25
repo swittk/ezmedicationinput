@@ -1196,7 +1196,8 @@ function licensedDailyRangeRecurrence(
 ): CanonicalRecurrence | undefined {
   if ((repeat.frequencyMax === undefined && repeat.periodMax === undefined) ||
       !timing?.code || timing.explicitEvents?.length || repeat.clocks?.length || repeat.anchors?.length ||
-      !positiveInteger(repeat.frequency) || !positiveNumber(repeat.period) || !repeat.periodUnit)
+      (repeat.frequency !== 0 && !positiveInteger(repeat.frequency)) ||
+      !positiveNumber(repeat.period) || !repeat.periodUnit)
     return undefined;
   const seconds = INFUSION_TIME_SECONDS[repeat.periodUnit];
   if (daily === undefined || !seconds) return undefined;
@@ -6162,6 +6163,12 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
   }
   const frequency = positiveInteger(repeat.frequency);
   const frequencyMax = positiveInteger(repeat.frequencyMax);
+  // A compatible code supplies the concrete plan even when the authored
+  // minimum is zero. Resolve only this supply copy, retaining the upper plan.
+  if (preserveCadence && repeat.frequency === 0 && dosage.schedule?.code) {
+    const daily = standardTimingCodeFrequency(executionTimingCoding(dosage.schedule), true);
+    nextRepeat = licensedDailyRangeRecurrence(dosage.schedule, repeat, daily) ?? repeat;
+  }
   if (
     !dosage.schedule?.explicitEvents?.length &&
     frequencyMax &&
