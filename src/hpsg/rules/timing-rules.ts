@@ -1878,6 +1878,54 @@ function eventOffsetMinutes(value: number, unit: FhirPeriodUnit): number | undef
   return roundedSeconds / 60;
 }
 
+interface EventOffsetQuantity {
+  value: number;
+  unit: FhirPeriodUnit;
+  minutes: number;
+  bound: "minimum" | "maximum" | undefined;
+  next: number;
+}
+
+function eventOffsetQuantityAt(
+  context: HpsgClauseContext,
+  start: number
+): EventOffsetQuantity | undefined {
+  const first = context.tokens[start];
+  if (!first || context.state.consumed.has(first.index)) return undefined;
+  const firstLower = normalizeTokenLower(first);
+  const canStartWithValue =
+    (first.kind === LexKind.Number && first.value !== undefined) ||
+    EVENT_OFFSET_FRACTIONS.has(firstLower);
+  if (!canStartWithValue && !EVENT_OFFSET_BOUND_LEADS.has(firstLower)) return undefined;
+
+  const minimumLead = eventOffsetLeadLength(context, start, EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES);
+  const maximumLead = minimumLead
+    ? 0
+    : eventOffsetLeadLength(context, start, EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES);
+  const cursor = start + (minimumLead || maximumLead);
+  const valueToken = context.tokens[cursor];
+  if (!valueToken || context.state.consumed.has(valueToken.index)) return undefined;
+  const value = valueToken.kind === LexKind.Number && valueToken.value !== undefined
+    ? valueToken.value
+    : EVENT_OFFSET_FRACTIONS.get(normalizeTokenLower(valueToken));
+  if (value === undefined) return undefined;
+
+  let unitIndex = cursor + 1;
+  const article = context.tokens[unitIndex];
+  if (article && EVENT_OFFSET_ARTICLES.has(normalizeTokenLower(article))) unitIndex += 1;
+  const unitToken = context.tokens[unitIndex];
+  if (!unitToken || context.state.consumed.has(unitToken.index)) return undefined;
+  const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
+  if (!unit) return undefined;
+  const minutes = eventOffsetMinutes(value, unit);
+  if (minutes === undefined) return undefined;
+  return {
+    value, unit, minutes,
+    bound: minimumLead ? "minimum" : maximumLead ? "maximum" : undefined,
+    next: unitIndex + 1
+  };
+}
+
 function semanticActivityWindowAt(
   context: HpsgClauseContext,
   start: number
@@ -1894,36 +1942,11 @@ function semanticActivityWindowAt(
 
 export function quantityFirstActivityTimingRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.activityTiming.quantityFirst", (context, start) => {
-    const first = context.tokens[start];
-    if (!first || context.state.consumed.has(first.index)) return [];
-    const firstLower = normalizeTokenLower(first);
-    const canStartWithValue =
-      (first.kind === LexKind.Number && first.value !== undefined) ||
-      EVENT_OFFSET_FRACTIONS.has(firstLower);
-    if (!canStartWithValue && !EVENT_OFFSET_BOUND_LEADS.has(firstLower)) return [];
+    const quantity = eventOffsetQuantityAt(context, start);
+    if (!quantity) return [];
+    const { minutes, bound } = quantity;
 
-    let cursor = start;
-    const minimumLead = eventOffsetLeadLength(context, cursor, EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES);
-    const maximumLead = minimumLead ? 0 : eventOffsetLeadLength(context, cursor, EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES);
-    cursor += minimumLead || maximumLead;
-    const valueToken = context.tokens[cursor];
-    if (!valueToken || context.state.consumed.has(valueToken.index)) return [];
-    const value = valueToken.kind === LexKind.Number && valueToken.value !== undefined
-      ? valueToken.value
-      : EVENT_OFFSET_FRACTIONS.get(normalizeTokenLower(valueToken));
-    if (value === undefined) return [];
-
-    let unitIndex = cursor + 1;
-    const article = context.tokens[unitIndex];
-    if (article && EVENT_OFFSET_ARTICLES.has(normalizeTokenLower(article))) unitIndex += 1;
-    const unitToken = context.tokens[unitIndex];
-    if (!unitToken || context.state.consumed.has(unitToken.index)) return [];
-    const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
-    if (!unit) return [];
-    const minutes = eventOffsetMinutes(value, unit);
-    if (minutes === undefined) return [];
-
-    const window = semanticActivityWindowAt(context, unitIndex + 1);
+    const window = semanticActivityWindowAt(context, quantity.next);
     if (!window) return [];
     const activityKey = window.definition.activity;
     const relation = window.definition.relation;
@@ -1937,15 +1960,9 @@ export function quantityFirstActivityTimingRule(): HpsgLexicalRule<HpsgClauseCon
         i18n: activity.i18n ? { ...activity.i18n } : undefined,
         coding: medicationInstructionConceptCodings(activity)[0]
       },
-      ...(minimumLead ? { offsetMin: minutes } : maximumLead ? { offsetMax: minutes } : { offset: minutes })
+      ...(bound === "minimum" ? { offsetMin: minutes } : bound === "maximum" ? { offsetMax: minutes } : { offset: minutes })
     };
-    const tokens = [
-      ...context.tokens.slice(start, cursor),
-      valueToken,
-      ...(unitIndex > cursor + 1 && article ? [article] : []),
-      unitToken,
-      ...window.tokens
-    ];
+    const tokens = [...context.tokens.slice(start, quantity.next), ...window.tokens];
     return [lexicalSign({
       type: "schedule-sign",
       rule: "hpsg.lex.schedule.activityTiming.quantityFirst",
@@ -2030,41 +2047,11 @@ export function quantityFirstEventOffsetRule(): HpsgLexicalRule<HpsgClauseContex
   return lexicalRule("hpsg.lex.schedule.eventOffset.quantityFirst", (context, start) => {
     const zero = zeroEventOffsetSign(context, start);
     if (zero) return [zero];
-    const first = context.tokens[start];
-    if (!first || context.state.consumed.has(first.index)) return [];
-    const firstLower = normalizeTokenLower(first);
-    const canStartWithValue =
-      (first.kind === LexKind.Number && first.value !== undefined) ||
-      EVENT_OFFSET_FRACTIONS.has(firstLower);
-    if (!canStartWithValue && !EVENT_OFFSET_BOUND_LEADS.has(firstLower)) return [];
-    let cursor = start;
-    const minimumLead = eventOffsetLeadLength(context, cursor, EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES);
-    const maximumLead = minimumLead
-      ? 0
-      : eventOffsetLeadLength(context, cursor, EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES);
-    const qualifierLength = minimumLead || maximumLead;
-    cursor += qualifierLength;
+    const quantity = eventOffsetQuantityAt(context, start);
+    if (!quantity) return [];
+    const { minutes, bound } = quantity;
 
-    const valueToken = context.tokens[cursor];
-    if (!valueToken || context.state.consumed.has(valueToken.index)) return [];
-    const value = valueToken.kind === LexKind.Number && valueToken.value !== undefined
-      ? valueToken.value
-      : EVENT_OFFSET_FRACTIONS.get(normalizeTokenLower(valueToken));
-    if (value === undefined) return [];
-
-    let unitIndex = cursor + 1;
-    const possibleArticle = context.tokens[unitIndex];
-    if (possibleArticle && EVENT_OFFSET_ARTICLES.has(normalizeTokenLower(possibleArticle))) {
-      unitIndex += 1;
-    }
-    const unitToken = context.tokens[unitIndex];
-    if (!unitToken || context.state.consumed.has(unitToken.index)) return [];
-    const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
-    if (!unit) return [];
-    const minutes = eventOffsetMinutes(value, unit);
-    if (minutes === undefined) return [];
-
-    const relationIndex = unitIndex + 1;
+    const relationIndex = quantity.next;
     const relationToken = context.tokens[relationIndex];
     if (!relationToken || context.state.consumed.has(relationToken.index)) return [];
     const relation = mealRelationFromToken(normalizeTokenLower(relationToken));
@@ -2082,16 +2069,13 @@ export function quantityFirstEventOffsetRule(): HpsgLexicalRule<HpsgClauseContex
       relatedExpression.members.slice(0, resolvedEvent.length);
 
     const tokens = [
-      ...context.tokens.slice(start, cursor),
-      valueToken,
-      ...(unitIndex > cursor + 1 ? [possibleArticle] : []),
-      unitToken,
+      ...context.tokens.slice(start, quantity.next),
       relationToken,
       ...eventTokens
-    ].filter((token): token is Token => Boolean(token));
-    const schedule = minimumLead
+    ];
+    const schedule = bound === "minimum"
       ? { when: timings, offsetMin: minutes }
-      : maximumLead
+      : bound === "maximum"
         ? { when: timings, offsetMax: minutes }
         : { when: timings, offset: minutes };
 
@@ -2131,20 +2115,11 @@ export function eventOffsetRule(): HpsgLexicalRule<HpsgClauseContext> {
     const timings = coordinated?.timings ?? [timing];
     const eventTokens = coordinated?.members ??
       relatedExpression.members.slice(0, resolvedEvent.length);
-    let cursor = coordinated?.next ?? start + 1 + resolvedEvent.length;
-
-    const minimumLead = eventOffsetLeadLength(context, cursor, EVENT_OFFSET_MINIMUM_LEAD_SEQUENCES);
-    const maximumLead = minimumLead
-      ? 0
-      : eventOffsetLeadLength(context, cursor, EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES);
-    const qualifierLength = minimumLead || maximumLead;
-    cursor += qualifierLength;
-
-    const valueToken = context.tokens[cursor];
-    if (!valueToken || context.state.consumed.has(valueToken.index)) return [];
-    if (!qualifierLength &&
-        EVENT_TIMING_TOKENS[normalizeTokenLower(valueToken)] === EventTiming.Immediate) {
-      const tokens = [relationToken, ...eventTokens, valueToken];
+    const offsetStart = coordinated?.next ?? start + 1 + resolvedEvent.length;
+    const immediate = context.tokens[offsetStart];
+    if (immediate && !context.state.consumed.has(immediate.index) &&
+        EVENT_TIMING_TOKENS[normalizeTokenLower(immediate)] === EventTiming.Immediate) {
+      const tokens = [relationToken, ...eventTokens, immediate];
       return [lexicalSign({
         type: "schedule-sign", rule: "hpsg.lex.schedule.eventOffset.immediate",
         tokens, synsem: { head: { schedule: { when: timings, offset: 0 } },
@@ -2152,41 +2127,22 @@ export function eventOffsetRule(): HpsgLexicalRule<HpsgClauseContext> {
         score: 42 + tokens.length
       })];
     }
-    const value = valueToken.kind === LexKind.Number && valueToken.value !== undefined
-      ? valueToken.value
-      : EVENT_OFFSET_FRACTIONS.get(normalizeTokenLower(valueToken));
-    if (value === undefined) return [];
-
-    let unitIndex = cursor + 1;
-    const possibleArticle = context.tokens[unitIndex];
-    if (possibleArticle && EVENT_OFFSET_ARTICLES.has(normalizeTokenLower(possibleArticle))) {
-      unitIndex += 1;
-    }
-    const unitToken = context.tokens[unitIndex];
-    if (!unitToken || context.state.consumed.has(unitToken.index)) return [];
-    const unit = mapIntervalUnit(normalizeTokenLower(unitToken));
-    if (!unit) return [];
+    const quantity = eventOffsetQuantityAt(context, offsetStart);
+    if (!quantity) return [];
+    const { value, unit, minutes, bound } = quantity;
     // A whole-day constituent following a recurring meal anchor is an
-    // ordinary course adjunct (`หลังอาหาร 7 วัน`), not a displacement from
-    // every meal. Fractional-day meal offsets remain explicit offsets, and
-    // quantity-first event/activity offsets retain day-scale support.
-    if (!qualifierLength && unit === FhirPeriodUnit.Day && Number.isInteger(value) && value >= 1) {
-      return [];
-    }
-    const minutes = eventOffsetMinutes(value, unit);
-    if (minutes === undefined) return [];
+    // ordinary course adjunct, not a displacement from every meal.
+    // Fractional-day and quantity-first offsets retain day-scale support.
+    if (!bound && unit === FhirPeriodUnit.Day && Number.isInteger(value) && value >= 1) return [];
 
     const tokens = [
       relationToken,
       ...eventTokens,
-      ...context.tokens.slice(coordinated?.next ?? start + 1 + resolvedEvent.length, cursor),
-      valueToken,
-      ...(unitIndex > cursor + 1 ? [possibleArticle] : []),
-      unitToken
-    ].filter((token): token is Token => Boolean(token));
-    const schedule = minimumLead
+      ...context.tokens.slice(offsetStart, quantity.next)
+    ];
+    const schedule = bound === "minimum"
       ? { when: timings, offsetMin: minutes }
-      : maximumLead
+      : bound === "maximum"
         ? { when: timings, offsetMax: minutes }
         : { when: timings, offset: minutes };
 

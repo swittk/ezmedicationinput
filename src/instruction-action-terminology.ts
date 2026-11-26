@@ -1,5 +1,5 @@
 import source from "./instruction-action-terminology.json";
-import { localizedConfig } from "./localization";
+import { cloneLocaleAliases, flattenLocaleAliases, localizedConfig } from "./localization";
 import { shouldJoinAdjacentSourceTokens } from "./locale-detection";
 import { SNOMED_SYSTEM } from "./snomed";
 import {
@@ -159,24 +159,6 @@ export function normalizeActionSurface(value: string): string {
     .toLowerCase()
     .replace(/[{}\s]+/g, " ")
     .trim();
-}
-
-function cloneLocaleAliases(
-  aliases: Record<string, string[]> | undefined
-): Record<string, string[]> | undefined {
-  if (!aliases) return undefined;
-  const cloned: Record<string, string[]> = {};
-  for (const locale of Object.keys(aliases)) {
-    const values = aliases[locale];
-    if (values?.length) cloned[locale] = [...values];
-  }
-  return Object.keys(cloned).length ? cloned : undefined;
-}
-
-function flattenLocaleAliases(aliases: Record<string, string[]> | undefined): string[] {
-  const values: string[] = [];
-  for (const locale of Object.keys(aliases ?? {})) values.push(...(aliases?.[locale] ?? []));
-  return values;
 }
 
 function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {

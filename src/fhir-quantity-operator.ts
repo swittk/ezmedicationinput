@@ -176,6 +176,14 @@ function quantityMetadataForWire(
   return result;
 }
 
+function recognizedEmaOperatorCoding(extension: FhirR6Extension): FhirR6Extension["valueCoding"] {
+  const coding = extension.valueCoding;
+  return extension.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL &&
+    coding?.system === EMA_QUANTITY_OPERATOR_SYSTEM && coding.code &&
+    (comparatorByEmaCode[coding.code] || coding.code === EMA_EQUALITY_OPERATOR_CODE)
+      ? coding : undefined;
+}
+
 /** Both scalar wire versions use comparator-free SimpleQuantity and the
  * existing EMA operator. Primitive annotations keep their target version. */
 function simpleQuantityForWire(quantity: FhirR6Quantity | undefined, target: "r5" | "r6"):
@@ -198,10 +206,8 @@ function simpleQuantityForWire(quantity: FhirR6Quantity | undefined, target: "r5
   // If the native comparator was edited, replace its recognized EMA code in
   // place. Appending a second active operator makes both interpretations fail.
   const extensions = existing.map(ext => {
-    const coding = ext.valueCoding;
-    if (ext.url !== EMA_QUANTITY_COMPARATOR_EXTENSION_URL ||
-        coding?.system !== EMA_QUANTITY_OPERATOR_SYSTEM ||
-        !coding.code || !(comparatorByEmaCode[coding.code] || coding.code === EMA_EQUALITY_OPERATOR_CODE)) return ext;
+    const coding = recognizedEmaOperatorCoding(ext);
+    if (!coding) return ext;
     found = true;
     const staleDisplay = coding.display !== undefined &&
       coding.display !== emaDisplayByComparator[comparator] && knownEmaDisplays.has(coding.display);
@@ -246,10 +252,7 @@ export function quantityForR6(quantity: FhirR6Quantity | undefined): FhirR6Quant
   let changed = false;
   const extension: FhirR6Extension[] = [];
   for (const item of quantity.extension) {
-    const coding = item.valueCoding;
-    if (item.url !== EMA_QUANTITY_COMPARATOR_EXTENSION_URL ||
-        coding?.system !== EMA_QUANTITY_OPERATOR_SYSTEM || !coding.code ||
-        !(comparatorByEmaCode[coding.code] || coding.code === EMA_EQUALITY_OPERATOR_CODE)) {
+    if (!recognizedEmaOperatorCoding(item)) {
       extension.push(item);
       continue;
     }

@@ -2,6 +2,24 @@ import type { FhirR6Quantity } from "./types";
 
 export type I18nRecord = Record<string, string>;
 
+export function cloneLocaleAliases(
+  aliases: Record<string, string[]> | undefined
+): Record<string, string[]> | undefined {
+  if (!aliases) return undefined;
+  const cloned: Record<string, string[]> = {};
+  for (const locale of Object.keys(aliases)) {
+    const values = aliases[locale];
+    if (values?.length) cloned[locale] = [...values];
+  }
+  return Object.keys(cloned).length ? cloned : undefined;
+}
+
+export function flattenLocaleAliases(aliases: Record<string, string[]> | undefined): string[] {
+  const values: string[] = [];
+  for (const locale of Object.keys(aliases ?? {})) values.push(...(aliases?.[locale] ?? []));
+  return values;
+}
+
 export function normalizeLocaleTag(locale: string | undefined): string | undefined {
   const normalized = locale?.trim().toLowerCase().replace(/_/gu, "-");
   return normalized || undefined;

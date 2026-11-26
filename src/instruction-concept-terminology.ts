@@ -1,4 +1,5 @@
 import source from "./instruction-concept-terminology.json";
+import { cloneLocaleAliases, flattenLocaleAliases } from "./localization";
 import { cloneStructuredValue } from "./stable-structure";
 import {
   AdviceArgumentRole,
@@ -58,24 +59,6 @@ for (const definition of DEFAULT_CONCEPTS) {
     const normalized = normalizeConceptSurface(alias);
     if (normalized && !DEFAULT_BY_ALIAS.has(normalized)) DEFAULT_BY_ALIAS.set(normalized, definition);
   }
-}
-
-function cloneLocaleAliases(
-  aliases: Record<string, string[]> | undefined
-): Record<string, string[]> | undefined {
-  if (!aliases) return undefined;
-  const cloned: Record<string, string[]> = {};
-  for (const locale of Object.keys(aliases)) {
-    const values = aliases[locale];
-    if (values?.length) cloned[locale] = [...values];
-  }
-  return Object.keys(cloned).length ? cloned : undefined;
-}
-
-function flattenLocaleAliases(aliases: Record<string, string[]> | undefined): string[] {
-  const values: string[] = [];
-  for (const locale of Object.keys(aliases ?? {})) values.push(...(aliases?.[locale] ?? []));
-  return values;
 }
 
 export function normalizeConceptSurface(value: string): string {
