@@ -3764,7 +3764,7 @@ describe("independent coded timing previews", () => {
   const gts = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
   it.each([
     ["AM", "in the morning", "ตอนเช้า"],
-    ["PM", "in the evening", "ตอนเย็น"],
+    ["PM", "in the afternoon", "ตอนบ่าย"],
     ["BED", "at bedtime", "ก่อนนอน"],
     ["bed", "at bedtime", "ก่อนนอน"],
   ])("retains the event in code-only %s long previews", (value, english, thai) => {
@@ -3777,6 +3777,34 @@ describe("independent coded timing previews", () => {
     }
     expect(toFhirR5Dosages(r6)[0].timing?.code).toEqual(code);
     expect(toDosageDetails([row]).step[0].component[0].timing?.code).toEqual(code);
+  });
+
+  it.each([
+    [{ code: "PM" }, "in the evening", "ตอนเย็น"],
+    [{ system: "urn:clinic:timing", code: "PM" }, "PM", "PM"]
+  ] as const)("keeps free and foreign PM interpretations separate from standard coding", (coding, english, thai) => {
+    const timing = { code: { coding: [coding] } };
+    const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+    for (const input of [row, r6]) {
+      expect(formatSig(input, "long", { locale: "en" })).toBe(`Use 1 tablet ${english}.`);
+      expect(formatSig(input, "long", { locale: "th" })).toBe(`ใช้ครั้งละ 1 เม็ด ${thai}.`);
+    }
+    expect(toFhirR5Dosages(r6)[0].timing).toEqual(timing);
+  });
+
+  it.each([
+    [EventTiming.Afternoon, "in the afternoon", "ตอนบ่าย"],
+    [EventTiming.Evening, "in the evening", "ตอนเย็น"]
+  ] as const)("keeps explicit %s authoritative beside standard PM", (when, english, thai) => {
+    const timing = { code: { coding: [{ system: gts, code: "PM" }] }, repeat: { when: [when] } };
+    const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+    for (const input of [row, r6]) {
+      expect(formatSig(input, "long", { locale: "en" })).toBe(`Use 1 tablet ${english}.`);
+      expect(formatSig(input, "long", { locale: "th" })).toBe(`ใช้ครั้งละ 1 เม็ด ${thai}.`);
+    }
+    expect(toFhirR5Dosages(r6)[0].timing).toEqual(timing);
   });
 
   it.each([

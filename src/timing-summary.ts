@@ -66,8 +66,19 @@ export const TIMING_CODE_HOURLY_PERIODS: Readonly<Record<string, number>> = {
   Q1H: 1, Q2H: 2, Q3H: 3, Q4H: 4, Q6H: 6, Q8H: 8
 };
 
+/** Standard coding has its own clinical meaning; free SIG shorthand stays lexical. */
+export function timingCodeForPreview(coding: { system?: string; code?: string } | undefined): string | undefined {
+  return coding?.system === FHIR_GTS_TIMING_SYSTEM && coding.code === "PM"
+    ? EventTiming.Afternoon : coding?.code;
+}
+
+const AFTERNOON_TIMING_PREVIEW: typeof TIMING_ABBREVIATIONS[string] = {
+  code: EventTiming.Afternoon, when: [EventTiming.Afternoon]
+};
+
 /** Standard BED and the existing QHS shorthand share the same event anchor. */
 export function timingPreviewDescriptor(code: string) {
+  if (code === EventTiming.Afternoon) return AFTERNOON_TIMING_PREVIEW;
   const lower = code.toLowerCase();
   return TIMING_ABBREVIATIONS[lower === "bed" ? "qhs" : lower];
 }

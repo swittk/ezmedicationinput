@@ -85,7 +85,7 @@ import {
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 import { equalStructuredValues } from "./stable-structure";
-import { FHIR_GTS_TIMING_SYSTEM, FHIR_GTS_TIMING_CODES, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding } from "./timing-summary";
+import { FHIR_GTS_TIMING_SYSTEM, FHIR_GTS_TIMING_CODES, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding, timingCodeForPreview } from "./timing-summary";
 
 /** Known modifier: an independent cadence is restricted by unresolved cycle days. */
 export const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-cycle-day-eligibility";
@@ -2132,7 +2132,7 @@ export function toFhir(state: ParserState): FhirDosage {
  */
 const TIMING_ABBREVIATION_TEXT = /^(?:C|BID|TID|QID|QD|QOD|AM|PM|QAM|QPM|QHS|BLD|BED|WK|MO|Q\d+(?:MIN|H|HR|D|WK|W|MO|Y))$/iu;
 function timingCodeFromFhir(dosage: FhirDosage, coding: FhirCoding | undefined): string | undefined {
-  if (coding) return isPreviewTimingCoding(coding) ? coding.code : undefined;
+  if (coding) return isPreviewTimingCoding(coding) ? timingCodeForPreview(coding) : undefined;
   const raw = dosage.timing?.code?.text?.trim();
   return raw && TIMING_ABBREVIATION_TEXT.test(raw) ? raw.toUpperCase() : undefined;
 }

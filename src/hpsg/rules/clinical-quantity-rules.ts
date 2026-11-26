@@ -165,7 +165,7 @@ function clinicalDurationNumber(token: HpsgClauseContext["tokens"][number] | und
 
 export function clinicalRatePeriodUnit(raw: string): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | undefined {
   if (/^(?:h|hr|hrs|hour|hours)$/u.test(raw)) return FhirPeriodUnit.Hour;
-  if (/^(?:min|mins|minute|minutes)$/u.test(raw)) return FhirPeriodUnit.Minute;
+  if (/^(?:m|min|mins|minute|minutes)$/u.test(raw)) return FhirPeriodUnit.Minute;
   return undefined;
 }
 

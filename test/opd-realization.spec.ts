@@ -3514,3 +3514,58 @@ describe("round55: current clinical facts and independent graph meaning", () => 
     expect(toFhirR5Dosages(raw)[0].timing?.repeat?.count).toBeUndefined();
   });
 });
+
+describe("independent action accompaniments", () => {
+  it("keeps independently related liquids on a timed site action", () => {
+    const source = "Rinse mouth with water before breakfast";
+    const frame: AdviceFrame = {
+      force: AdviceForce.Sequence, predicate: parseInstructionActions("Rinse")[0].predicate,
+      relation: AdviceRelation.Before, sequenceIndex: 0, sourceText: source,
+      span: { start: 0, end: source.length },
+      args: [
+        { role: AdviceArgumentRole.Site, text: "mouth", normalized: "mouth", i18n: { th: "ปาก" } },
+        { role: AdviceArgumentRole.Substance, text: "water", normalized: "water",
+          relation: AdviceRelation.With, i18n: { th: "น้ำ" } },
+        { role: AdviceArgumentRole.Time, text: "breakfast", normalized: EventTiming.Breakfast,
+          relation: AdviceRelation.Before, i18n: { th: "อาหารเช้า" } }
+      ]
+    };
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: [frame]
+    })!] };
+    for (const input of [row, toDosageDetails([row])]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Rinse mouth with water before breakfast.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("ล้างปากด้วยน้ำก่อนอาหารเช้า.");
+    }
+  });
+
+  it.each([false, true])("keeps every explicit accompaniment and its relation (reverse %s)", reverse => {
+    const source = "Swallow 1 tablet with water without food";
+    const companions: AdviceFrame["args"] = [
+      { role: AdviceArgumentRole.Substance, text: "water", normalized: "water",
+        relation: AdviceRelation.With, i18n: { th: "น้ำ" } },
+      { role: AdviceArgumentRole.Substance, text: "food", normalized: "food",
+        relation: AdviceRelation.Without, i18n: { th: "อาหาร" } }
+    ];
+    const frame: AdviceFrame = {
+      force: AdviceForce.Sequence, predicate: parseInstructionActions("Swallow")[0].predicate,
+      relation: AdviceRelation.With, sequenceIndex: 0, sourceText: source,
+      span: { start: 0, end: source.length },
+      args: [
+        { role: AdviceArgumentRole.Amount, text: "1 tablet", normalized: "tab", quantity: { value: 1, unit: "tab" } },
+        ...(reverse ? companions.reverse() : companions)
+      ]
+    };
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: [frame]
+    })!] };
+    for (const input of [row, toDosageDetails([row])]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe(reverse ? "Swallow 1 tablet without food with water." : "Swallow 1 tablet with water without food.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe(reverse ? "กลืน 1 เม็ดโดยไม่อาหารร่วมกับน้ำ." : "กลืน 1 เม็ดร่วมกับน้ำโดยไม่อาหาร.");
+    }
+  });
+});

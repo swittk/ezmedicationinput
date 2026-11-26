@@ -3802,14 +3802,15 @@ type ActionRealizationContext = InstructionActionRealizationInput;
 type ActionRealizer = (context: ActionRealizationContext) => string;
 function defaultActionArguments(frame: AdviceFrame) {
   let explicitAccompaniment: AdviceArgument | undefined, unmarkedSubstances = 0;
+  let additionalAccompaniments: AdviceArgument[] | undefined;
   for (const arg of frame.args) {
     if (arg.role === AdviceArgumentRole.Substance && !arg.relation) unmarkedSubstances++;
     if ((arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
         arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance ||
         arg.role === AdviceArgumentRole.Material) &&
         relationHasSemanticClass(arg.relation, "accompaniment")) {
-      explicitAccompaniment = arg;
-      break;
+      if (explicitAccompaniment) (additionalAccompaniments ??= []).push(arg);
+      else explicitAccompaniment = arg;
     }
   }
   let objectArg: AdviceArgument | undefined;
@@ -3833,7 +3834,25 @@ function defaultActionArguments(frame: AdviceFrame) {
       else relationTargetArg ??= arg;
     }
   }
-  return { objectArg, relationTargetArg, amountArg };
+  return { objectArg, relationTargetArg, amountArg, additionalAccompaniments };
+}
+
+function defaultActionAccompaniment(c: ActionRealizationContext, arg: AdviceArgument | undefined): string | undefined {
+  if (!arg) return undefined;
+  const relation = arg.relation ?? c.frame.relation;
+  const materialArgument = arg.role === AdviceArgumentRole.Substance ||
+    arg.role === AdviceArgumentRole.Material ||
+    // The explicit relation owns a nominal accompaniment independently of
+    // the medication object, including typed Object and Theme arguments.
+    ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
+      relationHasSemanticClass(relation, "accompaniment"));
+  if (!materialArgument || !relation ||
+      !(relationHasSemanticClass(relation, "accompaniment") || relationHasSemanticClass(relation, "locative")))
+    return undefined;
+  const target = translatedArgument(arg, c.locale);
+  if (!target) return undefined;
+  const localized = localizeAdviceRelation(relation, c.locale, "complement") ?? relation;
+  return joinLocalizedTokens(c.locale, [localized, target]);
 }
 
 const DEFAULT_ACTION_REALIZER = (
@@ -3858,21 +3877,6 @@ const DEFAULT_ACTION_REALIZER = (
     return `${base}${base ? profile.quantitySeparator : ""}${phrase}`;
   };
 
-  const relationTarget = relationTargetArg ? translatedArgument(relationTargetArg, c.locale) : undefined;
-  const targetRelation = relationTargetArg?.relation ?? c.frame.relation;
-  const materialArgument = relationTargetArg && (
-    relationTargetArg.role === AdviceArgumentRole.Substance ||
-    relationTargetArg.role === AdviceArgumentRole.Material ||
-    // An explicitly attached nominal remains the accompaniment of WITH,
-    // whether its lexical role is Object or Theme. The selected semantic
-    // relation licenses the complement independently of the medication object.
-    ((relationTargetArg.role === AdviceArgumentRole.Object || relationTargetArg.role === AdviceArgumentRole.Theme) &&
-      relationHasSemanticClass(targetRelation, "accompaniment"))
-  );
-  const withTarget = materialArgument && targetRelation &&
-    (relationHasSemanticClass(targetRelation, "accompaniment") ||
-      relationHasSemanticClass(targetRelation, "locative"))
-    ? relationTarget : undefined;
   const activityRelation = c.activity &&
     (relationHasGrammarFeature(c.frame.relation, "activityFallback") ||
       relationHasSemanticClass(c.frame.relation, "accompaniment"))
@@ -3910,12 +3914,9 @@ const DEFAULT_ACTION_REALIZER = (
 
   text = appendDuration(text, c.duration);
   text = appendLocale(text, realizeTimeArgument(c));
-  if (withTarget && targetRelation) {
-    const materialRelation = localizeAdviceRelation(
-      targetRelation, c.locale, "complement"
-    ) ?? targetRelation;
-    text = appendLocale(text, joinLocalizedTokens(c.locale, [materialRelation, withTarget]));
-  }
+  text = appendLocale(text, defaultActionAccompaniment(c, relationTargetArg));
+  if (selected.additionalAccompaniments) for (const arg of selected.additionalAccompaniments)
+    text = appendLocale(text, defaultActionAccompaniment(c, arg));
   text = appendLocale(text, activityPhrase);
   text = appendLocale(text, resultPhrase);
   return text;

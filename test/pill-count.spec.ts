@@ -1655,3 +1655,43 @@ describe("fractional quantity limits retain administration ownership", () => {
     }
   });
 });
+
+describe("quantity windows and infusion minute aliases", () => {
+  it("keeps a numeric-window maximum separate from an administered rate", () => {
+    const source = "Give max 4 mg/24h as needed for pain";
+    const parsed = parseBatch(source);
+    expect(parsed.input).toBe(source);
+    for (const rows of [parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(rows).toHaveLength(1);
+      expect(rows[0].doseAndRate).toBeUndefined();
+      expect(rows[0].maxDosePerPeriod).toHaveLength(1);
+      expect(rows[0].maxDosePerPeriod?.[0]).toMatchObject({
+        numerator: { value: 4, unit: "mg" },
+        denominator: { value: 24, code: "h" }
+      });
+      expect(rows[0].asNeeded).toBe(true);
+    }
+  });
+
+  it.each([["m", "min"], ["min", "min"], ["min", "m"]])(
+    "measures an existing minute rate alias %s with duration alias %s",
+    (rateUnit, durationUnit) => {
+      const source = `Infuse IV at 2 mL/${rateUnit} for 30 ${durationUnit}`;
+      const parsed = parseBatch(source);
+      expect(parsed.input).toBe(source);
+      for (const rows of [parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+        expect(rows[0].doseAndRate).toHaveLength(1);
+        expect(rows[0].doseAndRate?.[0].doseQuantity).toBeUndefined();
+        expect(rows[0].doseAndRate?.[0].rateQuantity).toMatchObject({
+          value: 2, system: "http://unitsofmeasure.org", code: "mL/min"
+        });
+        expect(rows[0].timing?.repeat).toMatchObject({ count: 1, duration: 30, durationUnit: "min" });
+        expect(rows[0].timing?.repeat?.boundsDuration).toBeUndefined();
+      }
+      expect(calculateTotalUnits({
+        dosage: parsed.fhirNext, from: "2027-01-01T00:00:00Z", orderedAt: "2027-01-01T00:00:00Z",
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day, timeZone: "UTC"
+      })).toMatchObject({ totalUnits: 60, unit: "mL" });
+    }
+  );
+});
