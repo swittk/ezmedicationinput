@@ -7738,7 +7738,6 @@ function calculateTotalUnitsSingle(
       // The prescription already counts in the container's exact unit.
       result.totalContainerQuantity = { value: totalUnits, unit: containerUnit };
     } else if (containerUnit && doseUnit && containerUnit !== doseUnit) {
-      const strength = resolveContextStrengthRatio(context);
       const converted = convertValue(totalUnits, doseUnit, containerUnit, measuredStrengthRatio(context));
       if (converted !== null) {
         effectiveUnits = converted;
