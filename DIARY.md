@@ -16162,3 +16162,12 @@ quantities, units and source remain intact.
 
 Validation passed 8,827 normal tests, strict types, build and four
 distribution tests. Twenty-four representative paired workloads found no reproducible meaningful regression above 4%; the initial import timing flag did not reproduce in a focused repeat with reversed starting order.
+
+
+## 2026-11-26 — Quantity limits and timing fidelity
+
+- Shared quantity conversion and maximum selection preserve authored units and qualified limits. Ranged lifetime totals now use complete, feasible administrations.
+- Recorded administrations replace inferred history within their resolved cycle windows. Monthly inferred clocks retain their local time across daylight-saving transitions, and uncertain infusion duration reports unresolved successor supply only when it can affect the requested window.
+- Preserved supplied coding identities and R6 datatype declarations; corrected timing-code interpretation, timed action arguments, conditional previews, method labels and zero interval bounds.
+- Independent ranged supply reuses the established schedule counter and shared feasibility calculation, preserving the chronological planner for coupled constraints.
+- Validation: 8,882 tests across 45 files, strict TypeScript, build and four distribution tests passed. Twenty-four representative paired workflows passed practical performance acceptance; the reproduced lifetime-planning regression was corrected.
