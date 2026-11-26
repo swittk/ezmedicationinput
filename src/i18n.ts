@@ -2,10 +2,14 @@ import { THAI_DAY_NAMES, joinLocalizedList } from "./locales/course/types";
 import type { CourseLanguage } from "./locales/course/types";
 import { ENGLISH_COURSE } from "./locales/course/en";
 import { THAI_COURSE } from "./locales/course/th";
-import { getQuantityDurationUnit } from "./unit-lexicon";
 export type { CourseLanguage } from "./locales/course/types";
 import { localizedValue, quantityComparatorText } from "./localization";
-import { hasDailyRecurrenceAcrossClocks, formatDoseEnglish, timingCodeMatchesRecurrence, timingEventPreviewSchedule, independentTimingText, doseUnitUsesTargetScope } from "./format";
+import {
+  hasDailyRecurrenceAcrossClocks, formatDoseEnglish, timingCodeMatchesRecurrence,
+  timingEventPreviewSchedule, independentTimingText, doseUnitUsesTargetScope,
+  formatDurationShort as formatDurationShortThai, alternateDayEvent, standaloneOccurrenceCount,
+  describeDuration, describeAdministrationDuration, type DurationWording
+} from "./format";
 import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
@@ -88,7 +92,7 @@ import {
 } from "./types";
 import {
   getMealTimingGroup,
-  hourlyTimingPreviewPeriod,
+  intervalTimingPreviewDescriptor,
   timingPreviewDescriptor,
   isCompactIntervalTimingCode,
   inferDailyOccurrenceCount,
@@ -1197,17 +1201,10 @@ function formatUnitThai(unit: string, _value: number, style: "short" | "long"): 
   return entry ? entry[style] : unit;
 }
 
-function describeAlternateEventCadenceThai(
-  schedule: CanonicalScheduleExpr | undefined
-): string | undefined {
-  if (
-    schedule?.period !== 2 || schedule.periodUnit !== FhirPeriodUnit.Day ||
-    (schedule.periodMax !== undefined && schedule.periodMax !== 2) ||
-    schedule.when?.length !== 1 || schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
-    schedule.offset !== undefined || schedule.offsetMin !== undefined || schedule.offsetMax !== undefined
-  ) return undefined;
-  if (schedule.when[0] === EventTiming.Night) return "วันเว้นคืน";
-  if (schedule.when[0] === EventTiming.Morning) return "เช้าเว้นเช้า";
+function describeAlternateEventCadenceThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const event = alternateDayEvent(schedule);
+  if (event === EventTiming.Night) return "วันเว้นคืน";
+  if (event === EventTiming.Morning) return "เช้าเว้นเช้า";
   return undefined;
 }
 
@@ -1339,8 +1336,6 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined, word
     return `${countPrefix}ทุก ${stripTrailingZero(period)} ปี`;
   }
   if (timingCode && timingCodeMatchesRecurrence(schedule!)) {
-    const hourlyPeriod = hourlyTimingPreviewPeriod(timingCode);
-    if (hourlyPeriod !== undefined) return `ทุก ${stripTrailingZero(hourlyPeriod)} ชั่วโมง`;
     const map: Record<string, string> = {
       BID: "วันละ 2 ครั้ง",
       TID: "วันละ 3 ครั้ง",
@@ -1354,8 +1349,8 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined, word
     if (value) {
       return value;
     }
-    const interval = timingPreviewDescriptor(timingCode);
-    if (interval?.period && interval.periodUnit && !interval.when?.length)
+    const interval = intervalTimingPreviewDescriptor(timingCode);
+    if (interval)
       return `${countPrefix}ทุก ${stripTrailingZero(interval.period)} ${words.timeUnit(interval.periodUnit, interval.period) ?? interval.periodUnit}`;
   }
   if (frequency === undefined && frequencyMax === undefined && period === 1 &&
@@ -1384,35 +1379,9 @@ function describeFrequencyCountThai(count: number | undefined): string | undefin
   return TH_TIMES_PER_DAY[count] ?? `วันละ ${stripTrailingZero(count)} ครั้ง`;
 }
 
-function describeStandaloneOccurrenceCountThai(
-  schedule: CanonicalScheduleExpr | undefined
-): string | undefined {
-  const count = schedule?.count;
-  if (!count || count <= 0 || schedule?.countMax !== undefined) {
-    return undefined;
-  }
-  if (
-    schedule?.frequency !== undefined ||
-    schedule?.frequencyMax !== undefined ||
-    schedule?.period !== undefined ||
-    schedule?.periodMax !== undefined ||
-    schedule?.periodUnit !== undefined ||
-    schedule?.dayOfWeek?.length ||
-    schedule?.dayOfMonth?.length ||
-    schedule?.when?.length ||
-    schedule?.timeOfDay?.length ||
-    schedule?.duration !== undefined ||
-    schedule?.durationMax !== undefined ||
-    schedule?.durationUnit !== undefined ||
-    schedule?.offset !== undefined ||
-    schedule?.offsetMin !== undefined ||
-    schedule?.offsetMax !== undefined ||
-    Boolean(schedule?.activityTiming?.length) ||
-    schedule?.timingCode
-  ) {
-    return undefined;
-  }
-  return `จำนวน ${stripTrailingZero(count)} ครั้ง`;
+function describeStandaloneOccurrenceCountThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const count = standaloneOccurrenceCount(schedule);
+  return count === undefined ? undefined : `จำนวน ${stripTrailingZero(count)} ครั้ง`;
 }
 
 function joinMealNamesThai(parts: string[]): string {
@@ -1957,33 +1926,6 @@ function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): str
   return days.length ? `ใน${joinWithAndThai(days)}` : undefined;
 }
 
-function formatDurationShortThai(schedule: CanonicalScheduleExpr): string | undefined {
-  const durationUnit = schedule.durationUnit ?? schedule.durationUnitLabel;
-  const durationMaxUnit = schedule.durationMaxUnit ?? schedule.durationMaxUnitLabel;
-  if (schedule.durationIsRange && schedule.duration !== undefined && schedule.durationMax !== undefined &&
-      (!schedule.durationUnit || !schedule.durationMaxUnit)) {
-    const low = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration) + (durationUnit ?? "");
-    const high = (schedule.durationMaxComparator ?? "") + stripTrailingZero(schedule.durationMax) + (durationMaxUnit ?? "");
-    return `x${low} – ${high}`;
-  }
-  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !durationUnit && !schedule.durationIsRange) {
-    return undefined;
-  }
-  const upperUnit = durationMaxUnit ?? durationUnit ?? "";
-  if (schedule.duration === undefined)
-    return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${upperUnit}`;
-  const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
-  if (schedule.durationMax !== undefined &&
-      (schedule.durationMax !== schedule.duration || upperUnit !== durationUnit ||
-        schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
-    const lowerUnit = upperUnit !== durationUnit ? durationUnit : "";
-    return `x${base}${lowerUnit}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}${upperUnit}`;
-  }
-  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
-    (!schedule.durationComparator || schedule.durationComparator === "~") ? ">=" : "";
-  return `x${lowerBound}${base}${durationUnit ?? ""}`;
-}
-
 function describeOccurrenceCapThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
   const cap = schedule?.occurrenceCap;
   if (!cap) return undefined;
@@ -1998,35 +1940,17 @@ function describeOccurrenceCapThai(schedule: CanonicalScheduleExpr | undefined):
 }
 
 function describeDurationThai(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
-  if (schedule?.durationIsRange && schedule.duration !== undefined && schedule.durationMax !== undefined &&
-      (!schedule.durationUnit || !schedule.durationMaxUnit)) {
-    const endpoint = (value: number, unit: string | undefined, authoredUnit: string | undefined, comparator: string | undefined): string => {
-      const label = unit ? words.timeUnit(unit, value) ?? authoredUnit ?? unit : authoredUnit;
-      return (comparator ?? "") + stripTrailingZero(value) + (label ? " " + label : "");
-    };
-    return `เป็นเวลา ${endpoint(schedule.duration, schedule.durationUnit, schedule.durationUnitLabel, schedule.durationComparator)} – ${endpoint(schedule.durationMax, schedule.durationMaxUnit, schedule.durationMaxUnitLabel, schedule.durationMaxComparator)}`;
-  }
-  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit && !schedule.durationUnitLabel && !schedule.durationIsRange) {
-    return undefined;
-  }
-  const unit = schedule.durationUnit ?? schedule.durationUnitLabel ?? "";
-  const upperUnit = schedule.durationMaxUnit ?? schedule.durationMaxUnitLabel ?? unit;
-  const upperUnitCode = schedule.durationMaxUnit ?? schedule.durationUnit;
-  const label = (value: number | undefined, endpointUnit = unit, unitCode = schedule.durationUnit): string =>
-    unitCode ? words.timeUnit(unitCode, value) ?? endpointUnit : endpointUnit;
-  if (schedule.duration === undefined)
-    return `เป็นเวลา ${schedule.durationMaxComparator ?? "ไม่เกิน "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax, upperUnit, upperUnitCode)}`.trim();
-  const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
-  if (schedule.durationMax !== undefined &&
-      (schedule.durationMax !== schedule.duration || upperUnit !== unit ||
-        schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
-    const lowerUnit = upperUnit !== unit ? " " + label(schedule.duration) : "";
-    return `เป็นเวลา ${lower}${lowerUnit} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit, upperUnitCode)}`.trim();
-  }
-  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
-    (!schedule.durationComparator || schedule.durationComparator === "~") ? "อย่างน้อย " : "";
-  return `เป็นเวลา ${lowerBound}${lower} ${label(schedule.duration)}`.trim();
+  return describeDuration(schedule, words, THAI_DURATION_WORDING);
 }
+
+const THAI_DURATION_WORDING: DurationWording = {
+  locale: "th", coursePrefix: "เป็นเวลา", administrationPrefix: "โดยให้ยานาน",
+  administrationShortPrefix: "นาน", range: " ถึง ", upper: "ไม่เกิน ", lower: "อย่างน้อย ",
+  administrationUnit: (unit, value, maximum, short, words) => short
+    ? unit === FhirPeriodUnit.Minute ? "นาที" : unit === FhirPeriodUnit.Hour ? "ชั่วโมง"
+      : unit === FhirPeriodUnit.Second ? "วินาที" : unit === FhirPeriodUnit.Day ? "วัน" : unit
+    : words.timeUnit(unit, value ?? maximum) ?? unit
+};
 
 function describeAdministrationDurationThai(
   schedule: CanonicalScheduleExpr | undefined,
@@ -2034,36 +1958,7 @@ function describeAdministrationDurationThai(
   short = false,
   words: CourseLanguage = THAI_COURSE
 ): string | undefined {
-  const range = schedule?.administrationDurationRange;
-  if (range) {
-    const endpoint = (quantity: NonNullable<typeof range.low>): string => {
-      const unit = quantity.code ?? quantity.unit ?? "";
-      const recognizedUnit = short ? undefined : getQuantityDurationUnit(quantity);
-      const label = short ? quantity.unit ?? unit :
-        (recognizedUnit && words.timeUnit(recognizedUnit, quantity.value)) || quantity.unit || unit;
-      return (short ? quantity.comparator ?? "" : quantityComparatorText(quantity.comparator, "th")) +
-        (quantity.value === undefined ? "" : stripTrailingZero(quantity.value)) + (short ? "" : " ") + label;
-    };
-    const low = range.low?.value !== undefined ? endpoint(range.low) : undefined;
-    const high = range.high?.value !== undefined ? endpoint(range.high) : undefined;
-    if (low && high) return short ? "นาน" + low + "-" + high : prefix + " " + low + " ถึง " + high;
-    if (high) return short ? "นาน" + (range.high?.comparator && range.high.comparator !== "~" ? "" : "<=") + high : prefix + " " + (range.high?.comparator && range.high.comparator !== "~" ? "" : "ไม่เกิน ") + high;
-    if (low) return short ? "นาน" + (range.low?.comparator && range.low.comparator !== "~" ? "" : ">=") + low : prefix + " " + (range.low?.comparator && range.low.comparator !== "~" ? "" : "อย่างน้อย ") + low;
-    return undefined;
-  }
-  const value = schedule?.administrationDuration;
-  const unit = schedule?.administrationDurationUnit;
-  const max = schedule?.administrationDurationMax;
-  if ((value === undefined && max === undefined) || !unit) return undefined;
-  const label = short
-    ? unit === FhirPeriodUnit.Minute ? "นาที" : unit === FhirPeriodUnit.Hour ? "ชั่วโมง"
-      : unit === FhirPeriodUnit.Second ? "วินาที" : unit === FhirPeriodUnit.Day ? "วัน" : unit
-    : words.timeUnit(unit, value ?? max) ?? unit;
-  if (value === undefined) return `${prefix} ไม่เกิน ${stripTrailingZero(max!)} ${label}`;
-  const lower = quantityComparatorText(schedule?.administrationDurationComparator, "th") + stripTrailingZero(value);
-  return max !== undefined && max !== value
-    ? `${prefix} ${lower} ถึง ${stripTrailingZero(max)} ${label}`
-    : `${prefix} ${lower} ${label}`;
+  return describeAdministrationDuration(schedule, short, words, THAI_DURATION_WORDING, prefix);
 }
 
 function findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
