@@ -1801,7 +1801,7 @@ function buildParseResult(
   // do not prove graph authorship; fresh submitted copies use persisted proof.
   markFreshDoseSource(fhir, clause.dose?.defaulted === true, administration
     ? administration.provenance?.sourceTextAgreed === true
-    : Boolean(clause.instructionGraph?.actions.length) && !fhir.doseAndRate?.length);
+    : Boolean(clause.instructionGraph?.actions.length) && !fhir.doseAndRate?.length, !useOriginalText);
   const tokenUnderstoodByGraph = (value: { sourceStart: number; sourceEnd: number }): boolean =>
     sourceRangeUnderstoodByGraph({ start: value.sourceStart, end: value.sourceEnd });
   const consumedTokens: string[] = [];

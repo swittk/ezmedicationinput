@@ -223,8 +223,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
           const normalized = fromFhirDosage(submitted,
             mode === undefined ? undefined : { realizationMode: mode });
           const currentText = value === 1 ? "Use 1 tablet twice daily" : "Use 2 tablets twice daily";
-          expect(normalized.longText).toBe(mode === "roundtrip"
-            ? "Current: " + currentText + "; original directions: " + text : currentText + ".");
+          expect(normalized.longText).toBe("Current: " + currentText + "; original directions: " + text);
           expect(submitted).toEqual(expected);
           expect(normalized.fhir).toEqual(expected);
           expect(normalized.meta.canonical.clauses[0].rawText).toBe(text);
@@ -435,7 +434,8 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const after = toDosageDetails(updated);
     expect(after.step[0].component[0].doseAndRate![0].doseQuantity?.value).toBe(2);
     expect(after.renderedInstruction).toBe("2 tablets PO BID");
-    expect(formatSig(after, "long")).toBe("Take 2 tablets orally twice daily.");
+    expect(formatSig(after, "long").split("; original directions:")[0])
+      .toBe("Current: Take 2 tablets orally twice daily");
     const resaved = toFhirR5Dosages(updated);
     const liveInstruction = resaved[0].extension?.find(e =>
       e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension
@@ -554,7 +554,8 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(details.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
     expect(details.step[0].component[0].text).toBe(edited[0].text);
     expect(details.renderedInstruction).toBe(edited[0].text);
-    expect(formatSig(details, "long")).toBe("Take 2 tablets orally twice daily.");
+    expect(formatSig(details, "long").split("; original directions:")[0])
+      .toBe("Current: Take 2 tablets orally twice daily");
     expect(details.extension?.find(extension =>
       extension.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension?.find(child =>
       child.url === "instruction")?.valueString).toBe(source);
@@ -1299,7 +1300,7 @@ it("retains unfamiliar children on recognized course and edit markers even witho
   const expectedSteps = structuredClone(parseSig(parallel).fhirNext.step);
   expectedSteps[0].component[0].extension = [{
     url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [display]
-  }];
+  }, ...(expectedSteps[0].component[0].extension ?? [])];
   expect(restored.step).toEqual(expectedSteps);
 });
 

@@ -1610,7 +1610,9 @@ export interface FreshDoseSource {
   site: boolean;
 }
 const FRESH_HPSG_DOSE_SOURCE = new WeakMap<FhirDosage, FreshDoseSource>();
-export function markFreshDoseSource(dosage: FhirDosage, defaulted: boolean, sourceTextAgreed = false): void {
+export function markFreshDoseSource(
+  dosage: FhirDosage, defaulted: boolean, sourceTextAgreed = false, sourceTextCovered = false
+): void {
   const repeat = dosage.timing?.repeat;
   FRESH_HPSG_DOSE_SOURCE.set(dosage, {
     defaulted,
@@ -1627,6 +1629,11 @@ export function markFreshDoseSource(dosage: FhirDosage, defaulted: boolean, sour
       { url: "projectionFingerprint", valueString: dosageClinicalProjectionFingerprint(dosage) },
     ];
     (dosage.extension ??= []).push({ url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: fields });
+  } else if (sourceTextCovered && dosage.text !== undefined) {
+    (dosage.extension ??= []).push({ url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: [
+      { url: "sourceTextAgreed", valueBoolean: true },
+      { url: "textFingerprint", valueString: dosageTextFingerprint(dosage) }
+    ] });
   }
 }
 export function getFreshDoseSource(dosage: FhirDosage): FreshDoseSource | undefined {
@@ -1827,7 +1834,7 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
       row.maxDosePerAdministration || row.maxDosePerLifetime || (row as EzDosage).safety ||
       getTimingClocks(row.timing?.repeat)?.length);
     const baseline: FhirExtension[] = [{ url: "textFingerprint", valueString: currentText }];
-    if (sourceCovered && index === 0 && instruction !== undefined)
+    if (sourceCovered && !rowAgreement && index === 0 && instruction !== undefined)
       baseline.push({ url: "sourceTextAgreed", valueBoolean: true });
     // Preserve explicit established agreement even when the header has the
     // same default; legacy implicit agreement requires a current clinical match.

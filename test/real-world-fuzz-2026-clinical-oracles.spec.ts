@@ -663,7 +663,7 @@ describe("source-less R6 treatment-relative step display", () => {
     }
     const source = "keep the clinician-authored dosing text exactly";
     const authored = { ...course, renderedInstruction: source };
-    expect(formatSig(authored, "long")).toBe(english);
+    expect(formatSig(authored, "long")).toBe(`Current: ${english}; original directions: ${source}`);
     const imported = fromFhir(authored);
     expect(imported.fhirNext.renderedInstruction).toBe(source);
     const saved = JSON.parse(JSON.stringify(imported.fhir));
