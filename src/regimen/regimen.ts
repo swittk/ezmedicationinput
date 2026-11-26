@@ -438,8 +438,10 @@ export function scopeSequentialPhaseSemantics(
         // Every finite duration can end within a local day. The execution
         // owner knows its actual endpoint, order clock and timezone; grammar
         // must preserve NEXT instead of reducing it to an elapsed offset.
-        // A fully dated predecessor already supplies its civil endpoint.
-        contextualPredecessor = !start && (singleClockPredecessor !== undefined || priorStart === null ||
+        // A displaced dated endpoint still belongs to execution, which knows
+        // the actual occupied day rather than just the nominal calendar end.
+        const displaced = schedules.some(value => Boolean(value?.administrationOffsetMinutes));
+        contextualPredecessor = (!start || displaced) && (singleClockPredecessor !== undefined || priorStart === null ||
           schedules.some(value => value?.count !== undefined || value?.countMax !== undefined ||
             value?.phaseStartReference === 'previous-phase-next-day' ||
             value?.duration !== undefined || value?.durationUnit !== undefined ||
@@ -688,13 +690,19 @@ export function scopeSequentialPhaseSemantics(
       // Both the timing anaphor and ordinary anchor ellipsis use this decision
       // before copying clocks or consuming the source timing reference.
       const donorClockCount = shared?.timeOfDay?.length ?? 0;
+      const calendarPeriod = schedule?.period ?? 1;
+      const singleCalendarClock = donorClockCount === 1 &&
+        Number.isInteger(calendarPeriod) && calendarPeriod > 0 &&
+        (schedule?.periodUnit === "d" || schedule?.periodUnit === "wk" ||
+         schedule?.periodUnit === "mo" || schedule?.periodUnit === "a");
       const matchesSuccessorCadence = schedule?.frequency === undefined || (
         schedule.frequency === donorClockCount &&
-        (schedule.period === undefined || schedule.period === 1) &&
-        (schedule.periodUnit === undefined || schedule.periodUnit === 'd') &&
+        (singleCalendarClock || (schedule.period === undefined || schedule.period === 1) &&
+          (schedule.periodUnit === undefined || schedule.periodUnit === 'd')) &&
         (schedule.frequencyMax === undefined || schedule.frequencyMax === donorClockCount)
       );
-      const onsetOnlyContinuation = edge.relation.rule === "regimen.treatment-relative-phase-onset" &&
+      const onsetOnlyContinuation = edge.relation.semanticLicense === "dose-continuation" &&
+        (schedule?.treatmentStartOffsetDays !== undefined || Boolean(schedule?.phaseStartReference)) &&
         !clause.prn?.enabled && prior.length === 1 && schedule && !hasRecurringSchedule(schedule) &&
         (shared?.count !== 1 || cadenceKeys.some(key => cadence[key] !== undefined)) &&
         (hasRecurringSchedule(shared) || Boolean(shared?.activityTiming?.length));
@@ -723,6 +731,12 @@ export function scopeSequentialPhaseSemantics(
             (schedule as Record<string, unknown>)[key] = cloneStructuredValue(inherited);
           }
         }
+        // A selected recurrence supersedes the unowned single-dose default.
+        // A count with its own source daughter remains an independent bound.
+        if (schedule.count === 1 && !clause.evidence.some(item =>
+            (item.scheduleFields?.indexOf("count") ?? -1) >= 0 &&
+            item.spans.some(span => span.start >= 0 && span.end <= clause.rawText.length)))
+          delete schedule.count;
         if (schedule.timingReference === "previous" &&
             (schedule.when?.length || schedule.timeOfDay?.length || schedule.clockWindow || schedule.eventWindow)) {
           delete schedule.timingReference;

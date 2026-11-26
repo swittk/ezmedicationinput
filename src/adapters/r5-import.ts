@@ -129,14 +129,16 @@ function courseFromFields(
       if (headerAgreement === undefined && a.provenance?.sourceTextVerified === false) sourceTextVerified = false;
       if (membersCovered && a.text !== undefined && a.provenance) a.provenance.sourceTextAgreed = true;
     }
+  const cycleCount=getCourseCycleCount(fields);
   const course:CanonicalCourse={
     kind:"course",stages,instruction:fields.renderedInstruction,
     cycleInterval:measureFromWire(fields.repeatCycle),
-    cycleCount:getCourseCycleCount(fields),
+    cycleCount:cycleCount??undefined,
     safety:safetyFromWire(fields.safety,true),provenance:{format:"r5",data:fields}
   };
   // Set an optional typed scalar directly instead of creating spread
   // fragments/descriptors on every imported course in the ES6 build.
+  if(cycleCount===null)course.cycleCountUnresolved=true;
   if(contextIssue)course.contextIssue=contextIssue;
   if(sourceTextVerified!==undefined)course.provenance!.sourceTextVerified=sourceTextVerified;
   if (fields.renderedInstruction !== undefined && (headerCovered ||

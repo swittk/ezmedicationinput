@@ -3105,8 +3105,9 @@ describe("November 17 repeated-course caps remain bounded and anchored", () => {
       durationValue:1,durationUnit:FhirPeriodUnit.Day}).totalUnits).toBe(0);
   });
   it("a 60-day course retains exactly 30 administrations without retaining stale historical limits", () => {
-    const next = nextDueDoses(course, { ...base, from: orderedAt, limit: 30 });
-    expect(next).toEqual(Array.from({ length: 30 }, (_, index) =>
+    const next = nextDueDoses(course, { ...base, from: orderedAt, limit: 31 });
+    const windowEnd = Date.parse("2027-01-01T00:00:00+07:00");
+    expect(next.filter(instant => Date.parse(instant) < windowEnd)).toEqual(Array.from({ length: 30 }, (_, index) =>
       new Date(Date.UTC(2026, 10, 2 + index * 2)).toISOString().slice(0, 10) + "T08:00:00+07:00"));
     const supply = calculateTotalUnits({
       ...base,
@@ -6149,5 +6150,229 @@ describe("onset-only inheritance from a one-time clock", () => {
     if (recurring) expect(nextDueDoses(parsed, { orderedAt: "2026-01-01T00:00:00Z",
       from: "2026-01-03T00:00:00Z", timeZone: "UTC", limit: 2 })).toEqual([
         "2026-01-03T08:00:00+00:00", "2026-01-04T08:00:00+00:00"]);
+  });
+});
+
+
+describe("current course bounds and measured execution", () => {
+  const fresh = <T>(input: T): T => JSON.parse(JSON.stringify(input));
+  const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC" };
+  const forms = (row: FhirDosage) => {
+    const r6 = toDosageDetails([fresh(row)]);
+    return [fresh(row), importCanonicalCourse(fresh(row)), fresh(r6), fresh(toFhirR5Dosages(fresh(r6)))];
+  };
+
+  it.each(["missing", "unknown", "three"] as const)("keeps the authored course count %s", mode => {
+    const input: FhirR6DosageInstruction = {
+      repeatCycle: { value: 28, unit: "d", system: "http://unitsofmeasure.org", code: "d" },
+      step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { count: 1, timeOfDay: ["08:00:00"] } }
+      }] }],
+      ...(mode === "missing" ? {} : { modifierExtension: [{
+        url: COURSE_CYCLE_COUNT_EXTENSION_URL,
+        ...(mode === "three" ? { valueInteger: 3 } : { _valueInteger: { extension: [{
+          url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+        }] } })
+      }] })
+    };
+    const original = fresh(input), native = importCanonicalCourse(fresh(input));
+    expect(native.stages[0].administrations[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(native.cycleInterval).toMatchObject({ value: 28, unit: "d" });
+    expect(native.cycleCountUnresolved).toBe(mode === "unknown" ? true : undefined);
+    expect(getCourseCycleCount(input)).toBe(mode === "unknown" ? null : mode === "three" ? 3 : undefined);
+    const r5 = toFhirR5Dosages(fresh(input));
+    expect(toDosageDetails(fresh(r5)).modifierExtension).toEqual(input.modifierExtension);
+    for (const dosage of [fresh(input), native, fresh(r5)]) {
+      const before = fresh(dosage);
+      if (mode === "unknown") {
+        expect(() => nextDueDoses(dosage, { ...query, limit: 4 })).toThrowError(/finite course count is unknown/);
+        expect(() => calculateTotalUnits({ dosage, ...query, durationValue: 112, durationUnit: FhirPeriodUnit.Day }))
+          .toThrowError(/finite course count is unknown/);
+      } else {
+        const days = ["2026-12-01", "2026-12-29", "2027-01-26", "2027-02-23"];
+        expect(nextDueDoses(dosage, { ...query, limit: 4 })).toEqual(
+          days.slice(0, mode === "three" ? 3 : 4).map(day => day + "T08:00:00+00:00"));
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 112, durationUnit: FhirPeriodUnit.Day }).totalUnits)
+          .toBe(mode === "three" ? 3 : 4);
+      }
+      expect(dosage).toEqual(before);
+    }
+    expect(input).toEqual(original);
+  });
+
+  it.each([
+    ["ug/kg/min", 420], ["ug/(kg.min)", 420], ["ug/(kg.h)", 7]
+  ] as const)("measures the coded weight-rate denominator %s", (code, amount) => {
+    const rate = { value: 0.1, unit: "ug/kg/min", system: "http://unitsofmeasure.org", code,
+      extension: [{ url: "urn:clinic:rate-note", valueString: "authored rate" }] };
+    const row: FhirDosage = { doseAndRate: [{ rateQuantity: rate }],
+      timing: { repeat: { count: 1, duration: 60, durationUnit: FhirPeriodUnit.Minute } } };
+    for (const dosage of forms(row)) {
+      const before = fresh(dosage);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day,
+        patientWeightKg: 70 })).toMatchObject({ totalUnits: amount, unit: "ug" });
+      expect(dosage).toEqual(before);
+    }
+    expect(toFhirR5Dosages(toDosageDetails([fresh(row)]))[0].doseAndRate?.[0].rateQuantity).toEqual(rate);
+  });
+
+  it("keeps an opaque rate code unresolved without a supplied dimensional label", () => {
+    const row: FhirDosage = { doseAndRate: [{ rateQuantity: { value: 0.1, code: "ug/(kg.min)", system: "urn:clinic:rate" } }],
+      timing: { repeat: { count: 1, duration: 60, durationUnit: FhirPeriodUnit.Minute } } };
+    for (const dosage of forms(row))
+      expect(() => calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day,
+        patientWeightKg: 70 })).toThrowError(/units cannot be converted/);
+  });
+
+  it.each([true, false])("keeps authored clock positions inside the interval window: clock=%s", authoredClock => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{
+      kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { frequency: 1, period: 2, periodUnit: FhirPeriodUnit.Day,
+        ...(authoredClock ? { clocks: ["09:00:00"] } : {}),
+        clockWindow: { start: "08:00:00", end: "10:00:00", endInclusive: false } } }
+    }] }] };
+    for (const dosage of [course, courseToR5(course), courseToR6(course)]) {
+      const before = fresh(dosage), clock = authoredClock ? "09:00:00" : "08:00:00";
+      expect(nextDueDoses(dosage, { ...query, limit: 2 })).toEqual([
+        "2026-12-01T" + clock + "+00:00", "2026-12-03T" + clock + "+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, from: "2026-12-01T08:00:00Z",
+        durationValue: 30, durationUnit: FhirPeriodUnit.Minute }).totalUnits).toBe(authoredClock ? 0 : 1);
+      expect(dosage).toEqual(before);
+    }
+  });
+
+  it.each([[40, 50, "mg", 80], [70, 50, "mg", 100], [70, 0.05, "g", 100]] as const)(
+    "bounds the computed %s kg dose by %s %s before the rolling cap", (weight, maximum, unit, total) => {
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "mg/kg", system: "http://unitsofmeasure.org", code: "mg/kg" } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00", "20:00:00"] } },
+      maxDosePerAdministration: { value: maximum, unit, code: unit, system: "http://unitsofmeasure.org" },
+      maxDosePerPeriod: [{ numerator: { value: 100, unit: "mg" }, denominator: { value: 24, unit: "h" } }]
+    };
+    const repeated = importCanonicalCourse(fresh(row));
+    repeated.cycleInterval = { value: 1, unit: "d" }; repeated.cycleCount = 1;
+    for (const dosage of [...forms(row), repeated, courseToR5(repeated), courseToR6(repeated)]) {
+      const before = fresh(dosage);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day,
+        patientWeightKg: weight })).toMatchObject({ totalUnits: total, unit: "mg" });
+      expect(dosage).toEqual(before);
+    }
+    expect(row.doseAndRate?.[0].doseQuantity?.value).toBe(1);
+    expect(row.maxDosePerAdministration).toMatchObject({ value: maximum, unit });
+  });
+
+  it("does not rewrite an authored absolute dose into a different amount", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 70, unit: "mg" } }],
+      timing: { repeat: { count: 1 } }, maxDosePerAdministration: { value: 50, unit: "mg" } };
+    const before = fresh(row);
+    expect(calculateTotalUnits({ dosage: row, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day,
+      patientWeightKg: 70 })).toMatchObject({ totalUnits: 70, unit: "mg", quantityKind: "maximum" });
+    expect(row).toEqual(before);
+  });
+
+  it.each([false, true])("matches coded respule to its supplied nebule package: parallel=%s", parallel => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: {
+      value: 1, code: "C71204", system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl"
+    } }], timing: { repeat: { count: 1 } } };
+    const rows = parallel ? [fresh(row), fresh(row)] : [fresh(row)];
+    for (const dosage of [rows, toDosageDetails(fresh(rows)), importCanonicalCourse(fresh(rows))]) {
+      const before = fresh(dosage), count = parallel ? 2 : 1;
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day,
+        context: { packageUnit: "nebule", containerValue: 2.5, containerUnit: "mL" } }))
+        .toMatchObject({ totalUnits: count, unit: "respule", totalContainers: count,
+          totalContainerQuantity: { value: 2.5 * count, unit: "mL" } });
+      expect(dosage).toEqual(before);
+    }
+  });
+});
+
+describe("authored next-day and inherited recurrence ownership", () => {
+  const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC" };
+
+  it("retains the existing mixed clock/event NEXT positions after a late order", () => {
+    const source = "Take 1 tablet at 22:00 and take 2 tablets the next day at 10:00 and at bedtime";
+    const parsed = parseSig(source);
+    for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+      expect(nextDueDoses(dosage, { ...query, from: "2026-12-01T23:00:00Z",
+        orderedAt: "2026-12-01T23:00:00Z", eventClock: { HS: "21:00" }, limit: 4 })).toEqual([
+        "2026-12-02T22:00:00+00:00", "2026-12-03T10:00:00+00:00", "2026-12-03T21:00:00+00:00"
+      ]);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("inherits one compatible weekly clock without changing the weekly cadence", () => {
+    const source = "Take 1 tablet at 17:00 for 7 days, then take 2 tablets once weekly at the same time";
+    const parsed = parseSig(source);
+    for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const member = importCanonicalCourse(dosage).stages[1].administrations[0];
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "wk", clocks: ["17:00:00"] });
+      expect(nextDueDoses(dosage, { ...query, from: "2026-12-08T00:00:00Z", limit: 3 })).toEqual([
+        "2026-12-08T17:00:00+00:00", "2026-12-15T17:00:00+00:00", "2026-12-22T17:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 21, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(11);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("does not choose three clocks from four for a local TID cadence", () => {
+    const source = "Take 1 tablet at 08:00 and 12:00 and 16:00 and 20:00 for 7 days, then take 2 tablets TID at the same times";
+    const parsed = parseSig(source), successor = parsed.meta.canonical.course!.stages[1].administrations[0];
+    expect(successor.schedule?.recurrence?.clocks).toBeUndefined();
+    expect(successor.schedule?.recurrence).toMatchObject({ frequency: 3, period: 1, periodUnit: "d" });
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([false, true])("resolves a dated NEXT after the displaced predecessor end: delay=%s", delayed => {
+    const source = "Take 1 tablet " + (delayed ? "in 6 hours " : "") +
+      "every 6 hours for 1 day starting 2026-12-01, then take 2 tablets the next day at 08:00";
+    const parsed = parseSig(source);
+    for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      expect(nextDueDoses(dosage, { ...query, from: "2026-12-02T06:00:00Z", limit: 2 })).toEqual([
+        (delayed ? "2026-12-03" : "2026-12-02") + "T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, from: "2026-12-02T06:00:00Z",
+        durationValue: 18, durationUnit: FhirPeriodUnit.Hour }).totalUnits).toBe(delayed ? 0 : 2);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([false, true])("inherits infusion cadence while retaining an authored count: count=%s", counted => {
+    const source = "Infuse 100 mL over 1 hour daily for 2 days, then 50 mL over 30 minutes" +
+      (counted ? " for 1 dose" : "") + " from day 3";
+    const parsed = parseSig(source);
+    for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const member = importCanonicalCourse(dosage).stages[1].administrations[0];
+      expect(member.schedule?.recurrence).toMatchObject({
+        frequency: 1, period: 1, periodUnit: "d", occurrenceDuration: 30, occurrenceDurationUnit: "min" });
+      expect(member.schedule?.recurrence?.count).toBe(counted ? 1 : undefined);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 5, durationUnit: FhirPeriodUnit.Day }).totalUnits)
+        .toBe(counted ? 250 : 350);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each(["in", "after"])("lets the inherited administration head own its registered interval: %s", introducer => {
+    const source = "Infuse 100 mL over 1 hour daily for 2 days, then 50 mL " + introducer +
+      " 30 minutes from day 3";
+    const parsed = parseSig(source);
+    for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const member = importCanonicalCourse(dosage).stages[1].administrations[0];
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(member.schedule?.recurrence?.occurrenceDuration).toBe(introducer === "in" ? 30 : undefined);
+      expect(member.schedule?.recurrence?.occurrenceDurationUnit).toBe(introducer === "in" ? "min" : undefined);
+      expect(member.delayMinutes).toBe(introducer === "in" ? undefined : 30);
+      expect(nextDueDoses(dosage, { ...query, from: "2026-12-03T00:00:00Z", limit: 1 }))
+        .toEqual(["2026-12-03T09:" + (introducer === "in" ? "00" : "30") + ":00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 5, durationUnit: FhirPeriodUnit.Day }).totalUnits)
+        .toBe(350);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("retains the single-infusion default without an inherited recurrence", () => {
+    const parsed = parseSig("Infuse 50 mL over 30 minutes");
+    expect(parsed.meta.canonical.course!.stages[0].administrations[0].schedule?.recurrence?.count).toBe(1);
+    expect(calculateTotalUnits({ dosage: parsed.fhirNext, ...query, durationValue: 5,
+      durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(50);
   });
 });

@@ -15,7 +15,6 @@ import {
   normalizeUnit
 } from "../unit-lexicon";
 import { normalizeDosageForm } from "../context";
-import { lexInput } from "../lexer/lex";
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
 import { hasRecurringAdministrationSchedule } from "./projection";
 import { NEXT_DAY_ONSET_RULE } from "./lexical-classes";
@@ -518,7 +517,9 @@ export function applyAdministrationDurationSemantics(
   state: ParserState, options?: ParseOptions, inheritedMethod = false
 ): void {
   const schedule = state.primaryClause.schedule;
-  if (!schedule || schedule.duration === undefined || !schedule.durationUnit || state.methodText === undefined) return;
+  if (!schedule || state.methodText === undefined ||
+      (schedule.duration === undefined || !schedule.durationUnit) &&
+      (!inheritedMethod || schedule.administrationOffsetMinutes === undefined)) return;
   if (schedule.administrationDuration !== undefined || schedule.administrationDurationUnit !== undefined) return;
 
   const definition = resolveMedicationInstructionAction(state.methodText, options);
@@ -528,6 +529,8 @@ export function applyAdministrationDurationSemantics(
   let methodEnd = inheritedMethod ? 0 : -1;
   let durationSpan: { start: number; end: number } | undefined;
   let durationSpanCount = 0;
+  let intervalSpan: { start: number; end: number } | undefined;
+  let intervalSpanCount = 0;
   for (const item of state.primaryClause.evidence) {
     if (item.lexicalCategory === "method") {
       for (const span of item.spans) {
@@ -539,21 +542,47 @@ export function applyAdministrationDurationSemantics(
         durationSpan = span;
         durationSpanCount += 1;
       }
+    } else if ((item.scheduleFields?.indexOf("administrationOffsetMinutes") ?? -1) >= 0) {
+      for (const span of item.spans) {
+        intervalSpan = span;
+        intervalSpanCount += 1;
+      }
     }
   }
-  if (methodEnd < 0 || durationSpanCount !== 1 || !durationSpan) return;
-  if (durationSpan.start <= methodEnd) return;
+  if (methodEnd < 0) return;
 
-  const between = lexInput(state.input.slice(methodEnd, durationSpan.start));
-  const introducer = between.length ? (between[between.length - 1].canonical ?? between[between.length - 1].lower) : undefined;
-  if (!introducer || !introducers.has(introducer)) return;
-
-  schedule.administrationDuration = schedule.duration;
-  schedule.administrationDurationMax = schedule.durationMax;
-  schedule.administrationDurationUnit = schedule.durationUnit;
-  delete schedule.duration;
-  delete schedule.durationMax;
-  delete schedule.durationUnit;
+  // An omitted administration head can be selected after the interval daughter.
+  // Its registered introducer owns that already typed interval as run time;
+  // an independent course duration and other temporal relations stay intact.
+  let inheritedInterval = false;
+  if (inheritedMethod && schedule.administrationOffsetMinutes !== undefined &&
+      intervalSpanCount === 1 && intervalSpan && intervalSpan.start > methodEnd) {
+    for (const token of state.tokens) {
+      if (token.sourceStart !== intervalSpan.start) continue;
+      inheritedInterval = introducers.has(token.canonical ?? token.lower);
+      break;
+    }
+  }
+  if (inheritedInterval) {
+    schedule.administrationDuration = schedule.administrationOffsetMinutes;
+    schedule.administrationDurationUnit = FhirPeriodUnit.Minute;
+    delete schedule.administrationOffsetMinutes;
+  } else {
+    if (schedule.duration === undefined || !schedule.durationUnit ||
+        durationSpanCount !== 1 || !durationSpan || durationSpan.start <= methodEnd) return;
+    let introducer: string | undefined;
+    for (const token of state.tokens) {
+      if (token.sourceStart >= methodEnd && token.sourceEnd <= durationSpan.start)
+        introducer = token.canonical ?? token.lower;
+    }
+    if (!introducer || !introducers.has(introducer)) return;
+    schedule.administrationDuration = schedule.duration;
+    schedule.administrationDurationMax = schedule.durationMax;
+    schedule.administrationDurationUnit = schedule.durationUnit;
+    delete schedule.duration;
+    delete schedule.durationMax;
+    delete schedule.durationUnit;
+  }
   if ((state.primaryClause.dose || state.primaryClause.clinicalQuantity) &&
       !hasRecurringAdministrationSchedule(schedule) && !state.asNeeded &&
       !state.primaryClause.evidence.some(item => item.rule === NEXT_DAY_ONSET_RULE) &&

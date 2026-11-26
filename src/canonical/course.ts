@@ -258,6 +258,8 @@ export interface CanonicalCourse {
   cycleInterval?: CanonicalMeasure;
   /** Total complete-course cycles, including the first; independent of each stage's local count. */
   cycleCount?: number;
+  /** An authored finite count has primitive metadata but no known scalar. */
+  cycleCountUnresolved?: true;
   safety?: CanonicalSafety;
   contextIssue?: "conflicting-course-phase" | "missing-course-context";
   provenance?: { format: "r5" | "r6" | "syntax"; data: Record<string, unknown>;

@@ -80,7 +80,7 @@ export const R5_RATE_MODIFIERS_R6_URL =
 export const COURSE_CYCLE_COUNT_EXTENSION_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-course-cycle-count";
 
-type CourseCountField = Pick<FhirExtension, "url" | "valueInteger">;
+type CourseCountField = Pick<FhirExtension, "url" | "valueInteger"> & { _valueInteger?: unknown };
 type CourseCountOwner = { modifierExtension?: readonly CourseCountField[] };
 function countValue(item: CourseCountField): number | undefined {
   return item.url === COURSE_CYCLE_COUNT_EXTENSION_URL &&
@@ -88,12 +88,16 @@ function countValue(item: CourseCountField): number | undefined {
     ? item.valueInteger : undefined;
 }
 
-export function getCourseCycleCount(owner: CourseCountOwner): number | undefined {
+/** Null retains an authored primitive whose finite count is not known. */
+export function getCourseCycleCount(owner: CourseCountOwner): number | null | undefined {
+  let unknown = false;
   for (const item of owner.modifierExtension ?? []) {
     const count = countValue(item);
     if (count !== undefined) return count;
+    if (item.url === COURSE_CYCLE_COUNT_EXTENSION_URL && item.valueInteger === undefined &&
+        item._valueInteger !== undefined) unknown = true;
   }
-  return undefined;
+  return unknown ? null : undefined;
 }
 
 /** Write the current typed count while preserving unrelated modifiers and

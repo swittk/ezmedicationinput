@@ -950,17 +950,19 @@ export function courseFromR6(raw: FhirR6DosageInstructionInput, sourceContext = 
       provenance: record(safetyOwner && !step.safety ? { ...step, safety: stepSafety } : step),
     });
   }
+  const cycleCount = getCourseCycleCount(raw);
   const course: CanonicalCourse = {
     kind: "course",
     stages,
     instruction: raw.renderedInstruction,
     cycleInterval: measureFromWire(raw.repeatCycle),
-    cycleCount: getCourseCycleCount(raw),
+    cycleCount: cycleCount ?? undefined,
     safety: safetyFromWire(retainedSafety ? retainedSafety.course : raw.safety, true),
     contextIssue: raw.step ? getCourseContextIssue(raw as FhirR6DosageInstruction) : undefined,
     provenance: { format: "r6", data: record(retainedSafety
       ? { ...raw, safety: retainedSafety.course } : raw) },
   };
+  if (cycleCount === null) course.cycleCountUnresolved = true;
   if (stages.length) course.provenance!.sourceTextVerified = false;
   if (raw.renderedInstruction !== undefined &&
       dosageHasAgreedSourceText({ text: raw.renderedInstruction, extension: raw.extension }))

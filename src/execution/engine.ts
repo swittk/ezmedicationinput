@@ -1992,9 +1992,13 @@ function measuredRateComparator(
 function getRateQuantityUnit(rate: CanonicalMeasure): string | undefined {
   // The coded UCUM dimension owns calculation even beside a display label.
   // The shared reader removes annotations without changing the authored rate.
-  if (rate.system === "http://unitsofmeasure.org" && rate.code)
-    return getDoseQuantityUnit({ system: rate.system, code: rate.code }, false);
-  return rate.unit ?? (getDoseQuantityUnit(rate, false) || undefined);
+  const unit = rate.system === "http://unitsofmeasure.org" && rate.code
+    ? getDoseQuantityUnit({ system: rate.system, code: rate.code }, false)
+    : rate.unit ?? (getDoseQuantityUnit(rate, false) || undefined);
+  // UCUM groups the same weight and elapsed-time denominator with a dot.
+  // Both weight resolution and infusion measurement consume this one meaning.
+  const grouped = unit?.match(/^(.+?)\/\(kg\.(s|min|h|d|wk)\)$/);
+  return grouped ? grouped[1] + "/kg/" + grouped[2] : unit;
 }
 function measuredRateQuantity(
   amount: CanonicalAmount,
@@ -4967,9 +4971,9 @@ function intervalEventWindow(repeat: CanonicalRecurrence | undefined):
 /** A clockless daily dose shares the established explicit-window origin.
  * Authored dose clocks and event anchors keep their existing precedence. */
 function usesClockWindowCadence(repeat: CanonicalRecurrence): boolean {
-  return usesIntervalCadence(repeat) ||
-    repeat.frequency === 1 && repeat.period === 1 && repeat.periodUnit === DurationUnit.Day &&
-      !repeat.clocks?.length && !repeat.anchors?.length;
+  return !repeat.clocks?.length && !repeat.anchors?.length &&
+    (usesIntervalCadence(repeat) ||
+      repeat.frequency === 1 && repeat.period === 1 && repeat.periodUnit === DurationUnit.Day);
 }
 function isWakingHoursInterval(repeat: CanonicalRecurrence | undefined): boolean {
   return (
@@ -6509,6 +6513,10 @@ function requireExecutableCourseContext(
   course: CanonicalCourse,
   operation: "scheduling" | "calculating"
 ): void {
+  if (course.cycleCountUnresolved)
+    throw new MedicationQuantityCalculationError("course-cycle-count-unresolved",
+      "The authored finite course count is unknown. Resolve that count before " + operation +
+      "; the recurrence and original count annotation remain retained.");
   const issue = getCourseContextIssue(course);
   if (issue)
     throw new MedicationQuantityCalculationError(
@@ -6855,7 +6863,7 @@ function prepareMeasuredDose(
 ): CanonicalAdministration {
   const weight = options.patientWeightKg;
   if (weight !== undefined && Number.isFinite(weight) && weight > 0)
-    dosage = weightResolvedAdministration(dosage, weight);
+    dosage = weightResolvedAdministration(dosage, weight, options.context, strength);
   const values = dosage.amounts ?? [];
   if (
     values.some((entry) => (entry as CanonicalAmount).expression || (entry as CanonicalAmount).rateExpression)
@@ -6977,7 +6985,8 @@ function weightResolvedRate(rate: CanonicalMeasure, weight: number): CanonicalMe
   return { ...rate, value: rate.value * weight, unit, code: rate.code ? unit : undefined };
 }
 function weightResolvedAdministration(
-  dosage: CanonicalAdministration, weight: number
+  dosage: CanonicalAdministration, weight: number, context: MedicationContext | undefined,
+  strength: ReturnType<typeof measuredStrengthRatio>
 ): CanonicalAdministration {
   let amounts: typeof dosage.amounts | undefined;
   for (let index = 0; index < (dosage.amounts?.length ?? 0); index++) {
@@ -7009,18 +7018,35 @@ function weightResolvedAdministration(
       limits[index] = { ...source, amount };
     }
   }
-  return amounts || limits ? { ...dosage,
+  const resolved = amounts || limits ? { ...dosage,
     ...(amounts ? { amounts } : {}), ...(limits ? { limits } : {}) } : dosage;
+  const first = amounts?.length === 1 ? amounts[0] : undefined;
+  const quantity = first?.quantity;
+  // Apply an absolute upper bound to the computed patient-specific quantity,
+  // before chronological cap admission. Authored scalar doses stay authored.
+  if (quantity && quantity !== dosage.amounts?.[0].quantity) {
+    const maximum = numericAdministrationLimits(resolved, strength).administration;
+    if (maximum?.value !== undefined) {
+      const converted = convertQuantityValue(maximum.value, maximum, quantity, strength);
+      const bound = converted === null ? undefined : converted / getAdministrationTargetMultiplier(resolved, context);
+      if (bound !== undefined && quantity.value !== undefined && bound < quantity.value)
+        return { ...resolved, amounts: [{ ...first, quantity: { ...quantity, value: bound } }] };
+    }
+  }
+  return resolved;
 }
-function weightResolvedSupplyCourse(course: CanonicalCourse, weight: number | undefined): CanonicalCourse {
+function weightResolvedSupplyCourse(
+  course: CanonicalCourse, weight: number | undefined, context: MedicationContext | undefined
+): CanonicalCourse {
   if (weight === undefined || !Number.isFinite(weight) || weight <= 0) return course;
+  const strength = measuredStrengthRatio(context);
   let stages: CanonicalCourse["stages"] | undefined;
   for (let index = 0; index < course.stages.length; index++) {
     const source = course.stages[index];
     let administrations: typeof source.administrations | undefined;
     for (let memberIndex = 0; memberIndex < source.administrations.length; memberIndex++) {
       const member = source.administrations[memberIndex];
-      const resolved = weightResolvedAdministration(member, weight);
+      const resolved = weightResolvedAdministration(member, weight, context, strength);
       if (resolved !== member) {
         administrations ??= source.administrations.slice();
         administrations[memberIndex] = resolved;
@@ -7177,7 +7203,7 @@ function sumCourseUnits(
       containerUnit &&
       estimateUnit.toLowerCase() === containerUnit.toLowerCase();
     const matchesPackage =
-      commonUnit && packageUnit && commonUnit.toLowerCase() === packageUnit.toLowerCase();
+      commonUnit && packageUnit && normalizeQuantityCapUnit(commonUnit) === normalizeQuantityCapUnit(packageUnit);
     if (useEstimate || matchesPackage) {
       const effective = useEstimate ? estimateValue! : totalUnits;
       const divisor = matchesPackage && !useEstimate ? 1 : context.containerValue;
@@ -7749,7 +7775,7 @@ function calculateTotalUnitsSingle(
     } else if (
       packageUnit &&
       doseUnit &&
-      doseUnit.trim().toLowerCase() === packageUnit.trim().toLowerCase()
+      normalizeQuantityCapUnit(doseUnit) === normalizeQuantityCapUnit(packageUnit)
     ) {
       effectiveUnits = totalUnits;
       effectiveContainerValue = 1;
@@ -8059,7 +8085,7 @@ function calculateCourseTotalUnits(
   course = executionCourseWithPeriodOffsets(selectedAlternativeCourse(course, options));
   // Finite phase completion and supply must see the same quantity dimensions.
   // This execution copy changes neither cadence nor source/phase provenance.
-  course = weightResolvedSupplyCourse(course, options.patientWeightKg);
+  course = weightResolvedSupplyCourse(course, options.patientWeightKg, options.context);
   requireExecutableCourseContext(course, "calculating");
   const zone = options.timeZone ?? options.config?.timeZone;
   if (!zone)
