@@ -900,6 +900,7 @@ export function formatCanonicalCourse(
     only.count === undefined &&
     !oneOrCourse.cycleInterval &&
     oneOrCourse.cycleCount === undefined &&
+    !oneOrCourse.cycleCountUnresolved &&
     !administration.phaseStart && !administration.phaseEnd && !administration.phaseOrigin?.value &&
     !administration.choice
   ) {

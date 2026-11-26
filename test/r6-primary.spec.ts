@@ -7980,15 +7980,18 @@ describe("current structured preview qualifiers", () => {
     return { r5, returned, values: [input, importCanonicalCourse(input), r5, returned] };
   };
 
-  it.each(["dose and interval", "interval only", "count only", "authored count only"])(
+  it.each(["dose and interval", "dose and count only", "interval only", "count only", "authored count only"])(
     "qualifies an annotated unknown finite cycle count with %s", variant => {
       const count: FhirR6Extension = { url: COURSE_CYCLE_COUNT_EXTENSION_URL,
         _valueInteger: { id: "unknown-cycle-count", extension: [{
           url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
         }] } };
       const input: FhirR6DosageInstruction = {
-        ...(variant === "dose and interval" ? { step: [{ component: [{ ...dose, timing: { repeat: daily } }] }] } : {}),
-        ...(variant === "authored count only" ? { renderedInstruction: "Follow the treatment plan." } : {}),
+        ...(variant.startsWith("dose and ") ? { step: [{ component: [{ ...dose, timing: { repeat: daily },
+          ...(variant === "dose and count only" ? { text: "Take 1 tablet daily." } : {})
+        }] }] } : {}),
+        ...(variant === "authored count only" ? { renderedInstruction: "Follow the treatment plan." }
+          : variant === "dose and count only" ? { renderedInstruction: "Take 1 tablet daily." } : {}),
         ...(!variant.endsWith("count only") ? { repeatCycle: { value: 28, unit: "d", code: "d", system: "http://unitsofmeasure.org" } } : {}),
         modifierExtension: [count]
       };
@@ -7997,6 +8000,12 @@ describe("current structured preview qualifiers", () => {
       expect(importCanonicalCourse(input).cycleCount).toBeUndefined();
       expect(importCanonicalCourse(input).cycleCountUnresolved).toBe(true);
       expect(returned.modifierExtension).toContainEqual(count);
+      if (variant.startsWith("dose and ")) {
+        expect(returned.step?.[0].component?.[0].doseAndRate).toEqual(dose.doseAndRate);
+        expect(returned.step?.[0].component?.[0].timing?.repeat).toEqual(daily);
+      }
+      if (input.renderedInstruction) expect(returned.renderedInstruction).toBe(input.renderedInstruction);
+      if (variant === "dose and count only") expect(returned.step?.[0].component?.[0].text).toBe(input.renderedInstruction);
       for (const value of values)
         for (const locale of ["en", "th"])
           for (const style of ["short", "long"] as const) {
@@ -8004,8 +8013,8 @@ describe("current structured preview qualifiers", () => {
             expect(text).toContain(locale === "en" ? "Unresolved cycle timing" : "ยังระบุเวลาในรอบไม่ได้");
             expect(text).not.toContain(locale === "en" ? "Repeat this schedule every" : "ทำซ้ำแผนการใช้ยานี้ทุก");
             if (!variant.endsWith("count only")) expect(text).toContain(locale === "en" ? "28 days" : "28 วัน");
-            if (variant === "dose and interval") expect(text).toContain(locale === "en" ? "1 tab" : "1 เม็ด");
-            if (variant === "authored count only") expect(text).toContain(input.renderedInstruction!);
+            if (variant.startsWith("dose and ")) expect(text).toContain(locale === "en" ? "1 tab" : "1 เม็ด");
+            if (input.renderedInstruction) expect(text).toContain(input.renderedInstruction);
           }
       expect(JSON.stringify(input)).toBe(before);
     }
