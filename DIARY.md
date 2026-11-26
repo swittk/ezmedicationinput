@@ -16171,3 +16171,20 @@ distribution tests. Twenty-four representative paired workloads found no reprodu
 - Preserved supplied coding identities and R6 datatype declarations; corrected timing-code interpretation, timed action arguments, conditional previews, method labels and zero interval bounds.
 - Independent ranged supply reuses the established schedule counter and shared feasibility calculation, preserving the chronological planner for coupled constraints.
 - Validation: 8,882 tests across 45 files, strict TypeScript, build and four distribution tests passed. Twenty-four representative paired workflows passed practical performance acceptance; the reproduced lifetime-planning regression was corrected.
+
+
+## 2026-11-26 — Cumulative limits and conditional previews
+
+Comparative cumulative limits share lexical ownership with the boundary planner,
+keeping compact, spaced and coordinated caps attached to their dose. Rate period
+words use the existing interval lexicon. Standalone comparative doses and licensed
+infusion rates retain their meaning.
+
+Typed default previews keep medication conditions separate from independent advice.
+Whole-clause formatters retain full context and defaults and own their returned text.
+Dated replacements, displaced cycle events, PRN allowances and duration ranges
+share the existing execution owners. Equivalent-unit limits, Ratio annotations
+and native R6 Period metadata retain their supplied clinical facts.
+
+Validation: 8961 normal tests, strict types, build and four distribution
+tests passed.
