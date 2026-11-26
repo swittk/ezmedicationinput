@@ -492,15 +492,15 @@ function positiveInteger(value: number | undefined): number | undefined {
 function positiveNumber(value: number | undefined): number | undefined {
   return value !== undefined && Number.isFinite(value) && value > 0 ? value : undefined;
 }
-/** A Timing code owns cadence when repeat supplies only independent
- * constraints, such as a count or calendar bounds. Preserve those constraints
- * on the execution copy; explicit positions and authored cadence still own it. */
+/** A known Timing code completes missing cadence fields when the authored
+ * fields agree. Preserve independent constraints, such as count or bounds,
+ * on the execution copy; explicit positions and complete cadence still own it. */
 function prepareTimingCodeCadence(dosage: CanonicalAdministration): CanonicalAdministration {
   const timing = dosage.schedule;
   const repeat = timing?.recurrence;
   if (!timing?.code || timing.explicitEvents?.length || repeat && (
-      repeat.frequency !== undefined || repeat.frequencyMax !== undefined ||
-      repeat.period !== undefined || repeat.periodMax !== undefined || repeat.periodUnit !== undefined ||
+      repeat.frequencyMax !== undefined || repeat.periodMax !== undefined ||
+      repeat.frequency !== undefined && repeat.period !== undefined && repeat.periodUnit !== undefined ||
       repeat.clocks?.length || repeat.anchors?.length)) return dosage;
   const coding = executionTimingCoding(timing);
   const hours = isStandardTimingCoding(coding) && coding?.code
@@ -513,6 +513,9 @@ function prepareTimingCodeCadence(dosage: CanonicalAdministration): CanonicalAdm
     recurrence = daily >= 1 ? { ...repeat, frequency: daily, period: 1, periodUnit: DurationUnit.Day }
       : { ...repeat, frequency: 1, period: 1 / daily, periodUnit: DurationUnit.Day };
   }
+  if (repeat && (repeat.frequency !== undefined && repeat.frequency !== recurrence.frequency ||
+      repeat.period !== undefined && repeat.period !== recurrence.period ||
+      repeat.periodUnit !== undefined && repeat.periodUnit !== recurrence.periodUnit)) return dosage;
   return { ...dosage, schedule: { ...timing, recurrence } };
 }
 /**
@@ -1247,7 +1250,7 @@ function licensedDailyRangeRecurrence(
   daily?: number
 ): CanonicalRecurrence | undefined {
   if ((repeat.frequencyMax === undefined && repeat.periodMax === undefined) ||
-      !timing?.code || timing.explicitEvents?.length || repeat.clocks?.length || repeat.anchors?.length ||
+      !timing?.code || timing.explicitEvents?.length ||
       (repeat.frequency === undefined ? !positiveInteger(repeat.frequencyMax)
         : repeat.frequency !== 0 && !positiveInteger(repeat.frequency)) ||
       !positiveNumber(repeat.period) || !repeat.periodUnit)
@@ -1966,10 +1969,11 @@ function measuredRateComparator(
     "The rate ratio's quantity bounds do not determine a usable dose bound. Retain the ratio and supply the applicable rate before calculating.");
 }
 function getRateQuantityUnit(rate: CanonicalMeasure): string | undefined {
-  // Rates keep the full coded UCUM expression and otherwise prefer the authored
-  // label; the shared reader excludes opaque foreign-code dimensional inference.
-  return rate.system === "http://unitsofmeasure.org"
-    ? rate.code ?? rate.unit : rate.unit ?? (getDoseQuantityUnit(rate, false) || undefined);
+  // The coded UCUM dimension owns calculation even beside a display label.
+  // The shared reader removes annotations without changing the authored rate.
+  if (rate.system === "http://unitsofmeasure.org" && rate.code)
+    return getDoseQuantityUnit({ system: rate.system, code: rate.code }, false);
+  return rate.unit ?? (getDoseQuantityUnit(rate, false) || undefined);
 }
 function measuredRateQuantity(
   amount: CanonicalAmount,
@@ -4981,7 +4985,8 @@ function generateWakingHoursIntervalSeries(
   // A patient may wake in the evening and go to sleep the next morning.
   // Anchor weekday rules to the wake date, not to the spillover date.
   const overnight = sleepClock < wakeClock;
-  const firstTreatmentDay = overnight && orderedAt ? startOfLocalDay(orderedAt, timeZone) : null;
+  const firstWindowDay = overnight && orderedAt
+    ? addLocalDays(startOfLocalDay(orderedAt, timeZone), -1, timeZone) : null;
   const calendarCadence = normalizedCalendarInterval(repeat.period, repeat.periodUnit);
   const cadenceAnchor = calendarCadence ? resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from : undefined;
   const results: string[] = [];
@@ -4991,7 +4996,7 @@ function generateWakingHoursIntervalSeries(
   const maxDays = calendarScanLimit(currentDay, courseEnd, limit, repeat);
   while (results.length < limit && dayIterations < maxDays && (!courseEnd || currentDay < courseEnd)) {
     if (
-      (!firstTreatmentDay || currentDay >= firstTreatmentDay) &&
+      (!firstWindowDay || currentDay >= firstWindowDay) &&
       matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
       (!cadenceAnchor || clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter))
     ) {
@@ -6619,7 +6624,8 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
   // the inferred cadence once; both scalar and ranged supply reuse it.
   let maximumRecurrence = nextRepeat;
   if (preserveCadence && (frequencyMaximum || periodMinimum)) {
-    maximumRecurrence = { ...nextRepeat };
+    maximumRecurrence = { ...nextRepeat, frequency: repeat.frequency, frequencyMax: repeat.frequencyMax,
+      period: repeat.period, periodMax: repeat.periodMax, periodUnit: repeat.periodUnit };
     if (frequencyMaximum) {
       maximumRecurrence.frequency = frequencyMax;
       maximumRecurrence.frequencyMax = undefined;

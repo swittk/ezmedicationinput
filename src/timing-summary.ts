@@ -39,13 +39,17 @@ export function preferredTimingCoding<T extends { system?: string; code?: string
 ): T | undefined {
   let fallback: T | undefined;
   let preview: T | undefined;
+  let systemless: T | undefined;
   for (const coding of timing.code?.coding ?? []) {
     if (!coding.code) continue;
-    if (isStandardTimingCoding(coding)) return coding;
+    if (isStandardTimingCoding(coding)) {
+      if (coding.system === FHIR_GTS_TIMING_SYSTEM) return coding;
+      if (systemless === undefined) systemless = coding;
+    }
     if (includePreview && preview === undefined && isPreviewTimingCoding(coding)) preview = coding;
     if (fallback === undefined) fallback = coding;
   }
-  return preview ?? fallback;
+  return systemless ?? preview ?? fallback;
 }
 
 /** Preview shorthand does not change execution's standard-code preference. */

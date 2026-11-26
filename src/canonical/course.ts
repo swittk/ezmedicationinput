@@ -347,12 +347,13 @@ export function numericAdministrationLimits(
           ? high : amount?.range?.low);
       doseResolved = true;
     }
-    // A coded dose remains the comparison basis even without a display label.
-    // When no dose unit was supplied, the first usable bound owns that scope's
-    // basis. Keep returning the original winning quantity and its metadata.
-    const target = (dose?.code || dose?.unit ? dose : undefined) ??
-      (limit.scope === "administration" ? administrationUnit : lifetimeUnit) ?? bound;
-    const value = convertQuantityValue(bound.value, bound, target, strength);
+    // A supplied dose, including a unitless count, owns the comparison basis.
+    // Without a dose quantity, the first bound with a unit identity owns the
+    // scope. Keep returning the original winning quantity and its metadata.
+    const target = (dose?.value !== undefined || dose?.code || dose?.unit ? dose : undefined) ??
+      (limit.scope === "administration" ? administrationUnit : lifetimeUnit) ??
+      (bound.code || bound.unit ? bound : undefined);
+    const value = target ? convertQuantityValue(bound.value, bound, target, strength) : null;
     if (value === null || !Number.isFinite(value)) {
       multiple = true;
       continue;

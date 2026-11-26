@@ -2,7 +2,8 @@ import {
   DEFAULT_UNIT_BY_NORMALIZED_FORM,
   DEFAULT_UNIT_SYNONYMS,
   HOUSEHOLD_VOLUME_UNITS,
-  KNOWN_DOSAGE_FORMS_TO_DOSE
+  KNOWN_DOSAGE_FORMS_TO_DOSE,
+  getDoseQuantityUnit
 } from "./maps";
 import unitTerminologySource from "./unit-terminology.json";
 import { FhirPeriodUnit } from "./types";
@@ -265,15 +266,12 @@ export function getQuantityDurationUnit(
   // A local code belongs to its stated terminology, even if it spells a
   // familiar UCUM symbol. Keep unknown durations available without guessing.
   if (quantity?.code && quantity.system && quantity.system !== "http://unitsofmeasure.org") return undefined;
-  let candidate = quantity?.code?.trim() ?? quantity?.unit?.trim();
+  let candidate = quantity?.code
+    ? getDoseQuantityUnit({ code: quantity.code.trim(), system: quantity.system }, false)
+    : quantity?.unit?.trim();
   // Explicit UCUM codes are case-sensitive (S is conductance; s is time).
   // Uncoded labels and the supported systemless shorthand remain permissive.
   if (!quantity?.code || !quantity.system) candidate = candidate?.toLowerCase();
-  // UCUM annotations describe the quantity but do not change its unit.
-  // Interpret only a terminal annotation sequence; never rewrite the source.
-  const annotation = quantity?.code ? candidate?.indexOf("{") ?? -1 : -1;
-  if (annotation > 0 && /^(?:\{[^{}]*\})+$/u.test(candidate!.slice(annotation)))
-    candidate = candidate!.slice(0, annotation);
   switch (candidate) {
     case "s":
     case "sec":

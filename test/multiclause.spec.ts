@@ -5143,7 +5143,7 @@ describe("round69 current structured preview ownership", () => {
     const local = { system: "urn:clinic:timing", code: "QID", display: "Per clinic protocol" };
     const wire: FhirR6DosageInstruction = { step: [{ component: [{
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
-        code: { coding: localFirst ? [local, standard] : [standard] },
+        code: { coding: localFirst ? [local, standard] : [standard, local] },
         repeat: { period: 1, periodUnit: FhirPeriodUnit.Day, startOffset: { value: 1, unit: "h" } }
       }
     }] }] };
@@ -5154,6 +5154,27 @@ describe("round69 current structured preview ownership", () => {
     }
     expect(JSON.stringify(wire)).toBe(before);
   });
+
+  it.each(["standard first", "systemless first", "systemless only"] as const)(
+    "keeps explicit GTS PM ahead of systemless shorthand (%s)", order => {
+      const standard = { system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "PM" };
+      const systemless = { code: "PM" };
+      const codings = order === "systemless only" ? [systemless]
+        : order === "systemless first" ? [systemless, standard] : [standard, systemless];
+      const wire: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { code: { coding: codings } }
+      }] }] };
+      const before = JSON.stringify(wire), rows = JSON.parse(JSON.stringify(toFhirR5Dosages(wire)));
+      for (const input of [wire, rows]) {
+        expect(formatSig(input, "long", { locale: "en" }))
+          .toContain(order === "systemless only" ? "evening" : "afternoon");
+        expect(formatSig(input, "long", { locale: "th" }))
+          .toContain(order === "systemless only" ? "ตอนเย็น" : "ตอนบ่าย");
+      }
+      expect(toDosageDetails(rows).step[0].component[0].timing?.code?.coding).toEqual(codings);
+      expect(JSON.stringify(wire)).toBe(before);
+    });
 
   it("retains an opaque timing label beside an explicit offset frequency", () => {
     const code = { coding: [{ system: "urn:clinic:timing", code: "QID", display: "Per clinic protocol",

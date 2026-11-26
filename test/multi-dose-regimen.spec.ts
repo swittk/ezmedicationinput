@@ -3812,9 +3812,9 @@ describe("round61 PRN history, bare hourly codes and immediate supply", () => {
         const local = { orderedAt: stamp, from: stamp, timeZone: "UTC" };
         const clocks = variant === "coincident" ? ["08", "20"] : variant === "distinct" ? ["07", "08", "20"] : ["07", "19"];
         for (const dosage of [input, reopen(input)]) {
-          expect(nextDueDoses(dosage, { ...local, limit: clocks.length }))
+          expect(nextDueDoses(dosage, { ...local, limit: variant === "counted" ? 3 : clocks.length }))
             .toEqual(clocks.map(hour => "2026-01-03T" + hour + ":00:00+00:00"));
-          expect(calculateTotalUnits({ dosage, ...local, durationValue: 1, durationUnit: Unit.Day }).totalUnits)
+          expect(calculateTotalUnits({ dosage, ...local, durationValue: variant === "counted" ? 2 : 1, durationUnit: Unit.Day }).totalUnits)
             .toBe(clocks.length);
         }
       });

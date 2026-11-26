@@ -121,6 +121,7 @@ export function convertQuantityValue(
     if (sameCodedQuantityUnit(from, to)) return value;
     const fromUnit = getQuantityComparisonUnit(from);
     const toUnit = getQuantityComparisonUnit(to);
+    if (!fromUnit && !toUnit && from && to && !from.code && !from.system && !to.code && !to.system) return value;
     if (!fromUnit || !toUnit) return null;
     return convertValue(value, fromUnit, toUnit, strength);
 }

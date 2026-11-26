@@ -1560,17 +1560,17 @@ describe("waking-hours overnight shifts", () => {
     }
   });
 
-  it("does not manufacture prior-day administrations when a course begins at midnight", () => {
+  it("admits overnight administrations after a midnight order", () => {
     for (const dosage of variants) {
       expect(nextDueDoses(dosage, {
         ...options,
         from: "2026-11-02T00:00:00+07:00",
         limit: 4
       })).toEqual([
+        "2026-11-02T01:00:00+07:00",
+        "2026-11-02T04:00:00+07:00",
         "2026-11-02T22:00:00+07:00",
-        "2026-11-03T01:00:00+07:00",
-        "2026-11-03T04:00:00+07:00",
-        "2026-11-03T22:00:00+07:00"
+        "2026-11-03T01:00:00+07:00"
       ]);
     }
   });
@@ -1633,7 +1633,7 @@ describe("waking-hours overnight shifts", () => {
         from: "2026-11-02T00:00:00+07:00",
         durationValue: 2,
         durationUnit: FhirPeriodUnit.Day
-      }).totalUnits).toBe(4);
+      }).totalUnits).toBe(6);
     }
   });
 });
@@ -3047,17 +3047,16 @@ describe("review 24: phase history, dimensions, and independent supply oracles",
       timing: { code: { coding: [{ code: "BID" }] }, ...(variant === "code only" ? {} : {
         repeat: { frequency: 2, ...(variant === "full" ? { period: 1, periodUnit: Unit.Day } : {}) },
       }) } };
-    if (variant !== "missing period") {
-      expect(nextDueDoses(row, { ...options, limit: 2 })).toEqual([
+    const currentR6: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: row.doseAndRate, timing: row.timing,
+    }] }] };
+    for (const input of [row, currentR6]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...options, limit: 2 })).toEqual([
         "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",
       ]);
-      expect(calculateTotalUnits({ ...options, dosage: row, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(4);
-    } else {
-      // Missing cadence fields do not create a contradiction. Bare daily
-      // codes are executable; an authored incomplete repeat remains intact.
-      expect(nextDueDoses(row, { ...options, limit: 2 })).toEqual([]);
-      expect(() => calculateTotalUnits({ ...options, dosage: row, durationValue: 2, durationUnit: Unit.Day }))
-        .toThrow(expect.objectContaining({ code: "timing-required" }));
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(4);
+      expect(JSON.stringify(input)).toBe(before);
     }
   });
   it("subtracts the upper assumed prior ranged amount from the lifetime ceiling", () => {

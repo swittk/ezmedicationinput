@@ -1795,7 +1795,7 @@ export function serializeCanonicalContext(
  * R5 and current-R6 adapters independently choose their Quantity encodings. */
 export function serializeCanonicalSchedule(
   schedule: CanonicalSigClause["schedule"], options?: FhirProjectionOptions,
-  clinicalQuantity?: HpsgClinicalQuantityFeature
+  clinicalQuantity?: HpsgClinicalQuantityFeature, asNeeded = false
 ): Pick<FhirDosage, "timing" | "modifierExtension"> {
   const dosage: FhirDosage = {};
   const repeat: FhirTimingRepeat = {};
@@ -2010,7 +2010,7 @@ export function serializeCanonicalSchedule(
     hasRepeat = true;
   }
 
-  normalizeClockFrequency(repeat);
+  if (!asNeeded) normalizeClockFrequency(repeat);
   if (hasRepeat) {
     dosage.timing = {
       ...(dosage.timing ?? {}),
@@ -2041,7 +2041,7 @@ export function canonicalToFhir(
     ...(options?.sequence !== undefined ? { sequence: options.sequence } : {})
   };
   const schedule = clause.schedule;
-  Object.assign(dosage, serializeCanonicalSchedule(schedule, options, clause.clinicalQuantity));
+  Object.assign(dosage, serializeCanonicalSchedule(schedule, options, clause.clinicalQuantity, clause.prn?.enabled));
   if (schedule?.countMax !== undefined && dosage.timing?.repeat)
     dosage.timing.repeat = withTimingCountMinimum(dosage.timing.repeat);
   if (schedule?.administrationDurationMax !== undefined && dosage.timing?.repeat)

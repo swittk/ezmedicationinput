@@ -1299,7 +1299,7 @@ function updateNativeTimingAnnotations(
   // Ratio denominator while retaining a distinct authored timing duration.
   const clinicalQuantity = currentClause.clinicalQuantity ?? (raw.doseAndRate?.[0]?.rateRatio
     ? clinicalCarrierQuantityFromFhir(raw as FhirDosage) : undefined);
-  const generated = serializeCanonicalSchedule(currentClause.schedule, undefined, clinicalQuantity);
+  const generated = serializeCanonicalSchedule(currentClause.schedule, undefined, clinicalQuantity, currentClause.prn?.enabled);
   if (durationMarker && changes.has(TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)) {
     const marker = generated.timing?.repeat?.extension?.find(item =>
       item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
@@ -1486,7 +1486,7 @@ function administrationToWire(
       ? clauseForAdministration(a)
       : undefined);
   const context = clause ? serializeCanonicalContext(clause, options) : undefined;
-  const scheduleMetadata = clause ? serializeCanonicalSchedule(clause.schedule, options, clause.clinicalQuantity) : undefined;
+  const scheduleMetadata = clause ? serializeCanonicalSchedule(clause.schedule, options, clause.clinicalQuantity, clause.prn?.enabled) : undefined;
   const output: Record<string, unknown> = clause
     ? Object.assign({}, context)
     : Object.assign({}, a.provenance?.data, a.provenance?.retained);

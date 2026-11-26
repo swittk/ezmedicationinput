@@ -2315,6 +2315,28 @@ describe("round60 interoperability ownership", () => {
       expect(persist(clause)).toEqual(before);
     });
 
+  it("keeps PRN clock opportunities optional beside an upper frequency", () => {
+    const clause = canonicalFromFhir({
+      asNeeded: true, doseAndRate: [{ doseQuantity: q(1) }],
+      timing: { repeat: { frequencyMax: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"] } },
+    });
+    const before = persist(clause), row = canonicalToFhir(clause);
+    expect(row.asNeeded).toBe(true);
+    expect(row.timing!.repeat!.frequency).toBeUndefined();
+    expect(row.timing!.repeat!.frequencyMax).toBe(2);
+    expect(row.timing!.repeat!.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
+    const wire = toDosageDetails(persist([row]));
+    for (const input of [wire, persist(toFhirR5Dosages(wire))]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.asNeeded).toBe(true);
+      expect(member.schedule!.recurrence!.frequency).toBeUndefined();
+      expect(member.schedule!.recurrence!.frequencyMax).toBe(2);
+      expect(member.schedule!.recurrence!.clocks).toEqual(["08:00:00", "20:00:00"]);
+    }
+    expect(persist(clause)).toEqual(before);
+  });
+
   it.each(["id", "translation", "dose", "dose and id"] as const)(
     "separates current narrative annotations from clinical edits (%s)", edit => {
       const wording = "Take one tablet daily";

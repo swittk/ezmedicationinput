@@ -2085,8 +2085,15 @@ export function getDoseQuantityUnit(
   includeOpaqueCode = true
 ): string {
   if (!quantity) return "";
+  let code = quantity.code;
+  if (!includeOpaqueCode && code && (!quantity.system || quantity.system === "http://unitsofmeasure.org")) {
+    // Terminal UCUM annotations describe a quantity without changing its
+    // calculation unit. Keep the authored code and display untouched.
+    const annotation = code.indexOf("{");
+    if (annotation > 0 && /^(?:\{[^{}]*\})+$/u.test(code.slice(annotation))) code = code.slice(0, annotation);
+  }
   const fallbackCode = includeOpaqueCode || !quantity.system || quantity.system === "http://unitsofmeasure.org"
-    ? quantity.code : undefined;
+    ? code : undefined;
   if (quantity.system === "http://standardterms.edqm.eu" && quantity.code) {
     return EDQM_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
   }
@@ -2115,9 +2122,9 @@ export function getDoseQuantityUnit(
   // A foreign code must not override the authored unit as a UCUM spelling.
   // Keep the existing lexical and opaque-label fallbacks for imported quantities.
   const codedUnit = !quantity.system || quantity.system === "http://unitsofmeasure.org"
-    ? recognizedUnit(quantity.code) : undefined;
+    ? recognizedUnit(code) : undefined;
   const dimensionalCode = !includeOpaqueCode && quantity.system === "http://unitsofmeasure.org"
-    ? quantity.code : undefined;
+    ? code : undefined;
   return codedUnit ?? recognizedUnit(quantity.unit) ?? dimensionalCode ?? quantity.unit ?? fallbackCode ?? "";
 }
 
