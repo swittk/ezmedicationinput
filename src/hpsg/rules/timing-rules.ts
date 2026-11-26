@@ -77,7 +77,6 @@ import {
   isThaiDaypartListSeparator,
   MEAL_RELATION_BY_TOKEN,
   MEAL_TIMING_BY_RELATION,
-  MAXIMUM_COUNT_LEAD_TOKENS,
   OCCURRENCE_COUNT_WORDS,
   OCCURRENCE_COUNT_MODIFIERS,
   RANGE_CONNECTORS,
@@ -2597,17 +2596,16 @@ function timingRangeIsProcedureLocalDuration(
 export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.maximumDosePerPeriod", (context, start) => {
     const maximum = maximumDosePerPeriodAt(context, start);
-    if (!maximum) return [];
-    const { tokens: matched, amount, unit, period } = maximum;
-    const comparative = !MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[start]));
+    if (!maximum || maximum.headStart !== start) return [];
+    const { tokens: matched, amount, unit, period, headStart, comparative } = maximum;
     // An explicit maximum with a numeric window is a cumulative ceiling.
     // Comparative infusion constraints retain their existing licensed owner.
     const rateHead = period.unitDenominator && !("daypart" in period) && (period.period === 1 || comparative) &&
       clinicalRatePeriodUnit(period.periodUnit) && volumeOrMassTerm(amount, unit)
-      ? clinicalRateHeadAt(context, start, start + matched.length, comparative) : undefined;
+      ? clinicalRateHeadAt(context, headStart, headStart + matched.length, comparative) : undefined;
     // The earlier clinical quantity rule already owns a licensed rate, including
     // its external AT marker. That same constituent cannot also be a dose cap.
-    for (const sign of context.clinicalCache.quantityLookahead?.get(rateHead?.marker ?? start) ?? [])
+    for (const sign of context.clinicalCache.quantityLookahead?.get(rateHead?.marker ?? headStart) ?? [])
       if (sign.synsem.head.dose?.clinicalQuantity?.representation === "rate-quantity") return [];
     const rateConstraint = rateHead?.licensed;
     // Publish the same typed ownership as dimensional quantities. Advice and

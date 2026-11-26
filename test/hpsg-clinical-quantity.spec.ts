@@ -4462,6 +4462,38 @@ describe("round80 dated single-administration duration ownership", () => {
 
 describe("qualified maximum and omitted-unit ownership", () => {
   it.each([
+    [", ", "no more than 4 tablets daily"], [", ", "not more than 4 tablets daily"],
+    [", ", "no more than 4 tablets per day"], [", ", "maximum 4 tablets daily"],
+    ["; ", "no more than 4 tablets daily"], [" ", "no more than 4 tablets daily"]
+  ])("keeps %s%s with the existing PRN administration", (separator, limit) => {
+      const parsed = parsePublicSig("Take 1 tablet every 4 hours as needed" + separator + limit);
+      expect(parsed.meta.canonical.clauses).toHaveLength(1);
+      expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
+      expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+        period: 4, periodUnit: "h", maxDosePerPeriod: [{ amount: 4, unit: "tab", period: 1, periodUnit: "d" }]
+      });
+      for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+        expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(row.asNeeded).toBe(true);
+        expect(row.maxDosePerPeriod).toMatchObject([
+          { numerator: { value: 4, unit: "tab" }, denominator: { value: 1, unit: "d" } }
+        ]);
+      }
+    }
+  );
+
+  it("keeps a new sequential administration's comparative daily dose", () => {
+    const parsed = parsePublicSig("Take 1 tablet daily, then take at most 2 tablets daily");
+    expect(parsed.meta.canonical.clauses.map(clause => clause.dose)).toEqual([
+      { value: 1, unit: "tab" }, { value: 2, unit: "tab", comparator: "<=" }
+    ]);
+    for (const clause of parsed.meta.canonical.clauses) {
+      expect(clause.schedule?.maxDosePerPeriod).toBeUndefined();
+      expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    }
+  });
+
+  it.each([
     ["no more than", "mg/6h"], ["no more than", "mg per 6h"],
     ["no more than", "mg per 6 hours"], ["not more than", "mg/6h"],
     ["maximum", "mg/6h"]

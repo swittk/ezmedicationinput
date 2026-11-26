@@ -3,6 +3,7 @@ import { shouldJoinAdjacentSourceTokens } from "../locale-detection";
 import { FhirPeriodUnit, ParseOptions } from "../types";
 import { LexKind } from "../lexer/token-types";
 import { normalizeUnit } from "../unit-lexicon";
+import { isMedicationAdministrationMethod } from "./method-lexicon";
 import { FREQUENCY_NUMBER_WORDS, mapFrequencyAdverb, mapIntervalUnit } from "./timing-lexicon";
 import type { MedicationDateListMatch } from "../date-interpretation";
 import {
@@ -15,6 +16,10 @@ import {
   POST_MERIDIEM_TOKENS,
   normalizeTokenLower,
   attachedNumberUnitAt,
+  doseComparatorNumberAt,
+  ACTION_SEQUENCE_MARKERS,
+  HARD_SEGMENT_BOUNDARY_TOKENS,
+  INSTRUCTION_LEADING_SEPARATORS,
   additiveDoseNumberAt,
   fractionalDoseNumberAt,
   millionDoseNumberAt,
@@ -242,6 +247,39 @@ export function doseUnitIndexAfter(context: QuantityLexicalContext, start: numbe
   return quantityTokenAvailable(context, cursor) ? cursor : undefined;
 }
 
+export function directDoseUnitAfter(
+  context: QuantityLexicalContext, start: number
+): { unit: string; end: number } | undefined {
+  const cursor = doseUnitIndexAfter(context, start);
+  if (cursor === undefined) return undefined;
+  const unit = normalizeUnit(normalizeTokenLower(context.tokens[cursor]), context.options);
+  return unit ? { unit, end: cursor + 1 } : undefined;
+}
+
+/** The same lexical medication amount owns administration heads and dose caps. */
+export function medicationAmountAt(context: QuantityLexicalContext, index: number): boolean {
+  const token = context.tokens[index];
+  if (!token) return false;
+  const lower = normalizeTokenLower(token);
+  if ((token.kind === LexKind.Number || token.kind === LexKind.NumberRange ||
+      DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) &&
+      directDoseUnitAfter(context, index + 1)) return true;
+  if (token.kind !== LexKind.Word) return false;
+  const rawUnit = attachedNumberUnitAt(lower)?.rawUnit ??
+    doseComparatorNumberAt(context.tokens, index, context.limit ?? context.tokens.length, lower)?.rawUnit;
+  return Boolean(rawUnit && normalizeUnit(rawUnit, context.options));
+}
+
+function hasPrecedingMedicationAmount(context: QuantityLexicalContext, before: number): boolean {
+  for (let index = before - 1; index >= 0; index--) {
+    const lower = normalizeTokenLower(context.tokens[index]);
+    if (ACTION_SEQUENCE_MARKERS.has(lower) || HARD_SEGMENT_BOUNDARY_TOKENS.has(lower) ||
+        isMedicationAdministrationMethod(lower, context.options)) return false;
+    if (medicationAmountAt(context, index)) return true;
+  }
+  return false;
+}
+
 function maximumTokensAvailable(context: QuantityLexicalContext, start: number, span: number): Token[] | undefined {
   if (start + span > (context.limit ?? context.tokens.length)) return undefined;
   const tokens: Token[] = [];
@@ -348,11 +386,17 @@ export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: n
   amount: number;
   unit: string;
   period: MaximumDosePeriod;
+  headStart: number;
+  comparative: boolean;
 } | undefined {
-  const lead = maximumCountLeadAt(context, start);
+  const separator = context.tokens[start] && INSTRUCTION_LEADING_SEPARATORS.has(context.tokens[start].original.toLowerCase())
+    ? context.tokens[start] : undefined;
+  const headStart = start + (separator ? 1 : 0);
+  const lead = maximumCountLeadAt(context, headStart);
   if (!lead) return undefined;
+  const comparative = !MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(lead[0]));
 
-  let cursor = start + lead.length;
+  let cursor = headStart + lead.length;
   const matched = [...lead];
   const punctuation = context.tokens[cursor];
   if (punctuation && !context.state?.consumed.has(punctuation.index) &&
@@ -407,10 +451,11 @@ export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: n
   const period: MaximumDosePeriod | undefined = periodFirst ?? compactPeriod ?? maximumDosePeriodAt(context, cursor);
   if (!period) return undefined;
   // A comparative quantity followed by a bare cadence is an administered dose
-  // ("at most 2 tablets daily"). An explicit maximum head, initial period or
-  // denominator owns a cumulative limit; every competing rule shares this choice.
-  if (!periodFirst && !MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(lead[0])) &&
-      !period.unitDenominator && period.tokens.length <= 1) return undefined;
+  // ("at most 2 tablets daily"). A preceding medication amount makes that
+  // same phrase a cumulative adjunct; a new administration head or sequence
+  // stops that attachment. Explicit maxima/periods need no omitted head.
+  if (comparative && !periodFirst && !period.unitDenominator && period.tokens.length <= 1 &&
+      !hasPrecedingMedicationAmount(context, headStart)) return undefined;
   if (!periodFirst) matched.push(...period.tokens);
-  return { tokens: matched, amount, unit, period };
+  return { tokens: matched, amount, unit, period, headStart, comparative };
 }

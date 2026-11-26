@@ -5,7 +5,8 @@ import { FhirPeriodUnit, RouteCode } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
   HpsgClauseContext, lexicalRule, maximumDosePerPeriodAt, normalizeTokenLower,
-  quantityTokenAvailable as available, doseNumberValue, plainClinicalNumberAt, doseUnitIndexAfter
+  quantityTokenAvailable as available, doseNumberValue, plainClinicalNumberAt, doseUnitIndexAfter,
+  directDoseUnitAfter, medicationAmountAt
 } from "../rule-context";
 import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, mapIntervalUnit } from "../timing-lexicon";
 import {
@@ -47,16 +48,6 @@ const WEIGHT_RATE_WARNING =
 interface UnitExpression {
   compact: string;
   end: number;
-}
-
-function directDoseUnitAfter(
-  context: HpsgClauseContext,
-  start: number
-): { unit: string; end: number } | undefined {
-  const cursor = doseUnitIndexAfter(context, start);
-  if (cursor === undefined) return undefined;
-  const unit = normalizeUnit(normalizeTokenLower(context.tokens[cursor]), context.options);
-  return unit ? { unit, end: cursor + 1 } : undefined;
 }
 
 /**
@@ -203,19 +194,7 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number, allowP
               sign.synsem.head.route?.code === RouteCode["Oral route"]) return false;
       return true;
     }
-    if ((token.kind === LexKind.Number || token.kind === LexKind.NumberRange ||
-        DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) &&
-        // Only a medication amount owns the cue. Product strengths (0.9 %)
-        // and route determiners (via a peripheral IV) are not earlier doses.
-        directDoseUnitAfter(context, index + 1)) {
-      precedingAmount = true;
-    } else if (token.kind === LexKind.Word) {
-      // Compact doses own the same numeric argument, including a qualifier
-      // attached to that numeral. Reuse the bounded lexical quantity readers.
-      const rawUnit = attachedNumberUnitAt(lower)?.rawUnit ??
-        doseComparatorNumberAt(context.tokens, index, before, lower)?.rawUnit;
-      if (rawUnit && normalizeUnit(rawUnit, context.options)) precedingAmount = true;
-    }
+    if (medicationAmountAt(context, index)) precedingAmount = true;
   }
   return false;
 }
