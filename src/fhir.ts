@@ -59,6 +59,7 @@ import {
   CanonicalOccurrenceCapExpr,
   CanonicalDoseRange,
   CanonicalSigClause,
+  CanonicalPrnReasonExpr,
   BodySiteRestriction,
   BodySiteSpatialRelation,
   EventTiming,
@@ -1201,12 +1202,13 @@ function getSpatialPrnReasonSiteText(
   }
 }
 
-function getFallbackPrnReasonText(concept: FhirCodeableConcept | undefined): string | undefined {
-  if (concept?.text) {
+function getFallbackPrnReasonText(
+  concept: FhirCodeableConcept, coding: CodeableConceptCoding | undefined,
+  spatialRelation: BodySiteSpatialRelation | undefined
+): string | undefined {
+  if (concept.text) {
     return concept.text;
   }
-  const coding = selectFirstCodingWithCode(concept);
-  const spatialRelation = parseBodySiteSpatialRelationExtension(concept);
   const spatialSiteText = getSpatialPrnReasonSiteText(spatialRelation);
   const display = lowerFirst(coding?.display);
   if (display && !spatialSiteText) {
@@ -1234,6 +1236,32 @@ function getFallbackPrnReasonText(concept: FhirCodeableConcept | undefined): str
     code: parsed.siteCode
   });
   return focusText && siteText ? `${focusText} at ${siteText}` : focusText;
+}
+
+/** Convert one coded reason without deciding whether its caller enables PRN. */
+function canonicalPrnReasonFromConcept(concept: FhirCodeableConcept): CanonicalPrnReasonExpr {
+  const coding = selectFirstCodingWithCode(concept);
+  const defaultDef = coding?.code
+    ? findPrnReasonDefinitionByCoding(coding.system ?? SNOMED_SYSTEM, coding.code)
+    : undefined;
+  const i18n = codeableConceptTranslationI18n(concept, coding, defaultDef?.i18n);
+  const spatialRelation = parseBodySiteSpatialRelationExtension(concept);
+  return {
+    text: getFallbackPrnReasonText(concept, coding, spatialRelation),
+    i18n: i18n.text,
+    spatialRelation,
+    triggerPhase: parsePrnTriggerPhase(concept),
+    coding: coding?.code
+      ? {
+        code: coding.code,
+        display: coding.display,
+        system: coding.system,
+        extension: cloneExtensions(coding.extension),
+        _display: clonePrimitiveElement(coding._display),
+        i18n: i18n.display
+      }
+      : undefined
+  };
 }
 
 /** Build a quantity using exact standard terminology when available.
@@ -2215,29 +2243,9 @@ export function deserializeCanonicalContext(
   let hasPrnReason = false;
   const prnReasons = dosage.asNeededFor?.length
     ? dosage.asNeededFor.map((concept) => {
-      const coding = concept.coding?.find((code) => Boolean(code.code));
-      const defaultDef = coding?.code
-        ? findPrnReasonDefinitionByCoding(coding.system ?? SNOMED_SYSTEM, coding.code)
-        : undefined;
-      const i18n = codeableConceptTranslationI18n(concept, coding, defaultDef?.i18n);
-      const text = getFallbackPrnReasonText(concept);
-      if (text || coding?.code || i18n.text) hasPrnReason = true;
-      return {
-        text,
-        i18n: i18n.text,
-        spatialRelation: parseBodySiteSpatialRelationExtension(concept),
-        triggerPhase: parsePrnTriggerPhase(concept),
-        coding: coding?.code
-          ? {
-            code: coding.code,
-            display: coding.display,
-            system: coding.system,
-            extension: cloneExtensions(coding.extension),
-            _display: clonePrimitiveElement(coding._display),
-            i18n: i18n.display
-          }
-          : undefined
-      };
+      const reason = canonicalPrnReasonFromConcept(concept);
+      if (reason.text || reason.coding?.code || reason.i18n) hasPrnReason = true;
+      return reason;
     })
     : undefined;
   const primaryReason = prnReasons?.[0];
@@ -2561,29 +2569,7 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
   state.asNeeded = dosage.asNeeded ??
     (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean;
   if (dosage.asNeededFor?.length) {
-    const prnReasons = dosage.asNeededFor.map((concept) => {
-      const coding = selectFirstCodingWithCode(concept);
-      const defaultDef = coding?.code
-        ? findPrnReasonDefinitionByCoding(coding.system ?? SNOMED_SYSTEM, coding.code)
-        : undefined;
-      const i18n = codeableConceptTranslationI18n(concept, coding, defaultDef?.i18n);
-      return {
-        text: getFallbackPrnReasonText(concept),
-        i18n: i18n.text,
-        spatialRelation: parseBodySiteSpatialRelationExtension(concept),
-        triggerPhase: parsePrnTriggerPhase(concept),
-        coding: coding?.code
-          ? {
-            code: coding.code,
-            display: coding.display,
-            system: coding.system,
-            extension: cloneExtensions(coding.extension),
-            _display: clonePrimitiveElement(coding._display),
-            i18n: i18n.display
-          }
-          : undefined
-      };
-    });
+    const prnReasons = dosage.asNeededFor.map(canonicalPrnReasonFromConcept);
     state.asNeededReasons = prnReasons;
     state.asNeededReason = joinCanonicalPrnReasonTexts(prnReasons);
     state.asNeededReasonTriggerPhase = prnReasons[0]?.triggerPhase;

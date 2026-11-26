@@ -2452,6 +2452,15 @@ export function retainField(url: string, value: unknown): FhirExtension {
   return { url, extension: children };
 }
 
+/** Restore one retained name/value pair as a literal enumerable field. */
+function restoreRetainedField(result: Record<string, unknown>, child: FhirR6Extension): void {
+  const name = child.extension?.find(part => part.url === "name")?.valueString;
+  const value = child.extension?.find(part => part.url === "value");
+  if (name !== undefined && value) Object.defineProperty(result, name, {
+    value: readRetainedField(value), enumerable: true, writable: true, configurable: true
+  });
+}
+
 /** Read retained fields without evaluating them or reparsing serialized text.
  * @param node One preserved field extension.
  */
@@ -2466,11 +2475,7 @@ export function readRetainedField(node: FhirR6Extension): unknown {
   const result: Record<string, unknown> = {};
   for (const child of children) {
     if (child.url !== "field") continue;
-    const name = child.extension?.find(part => part.url === "name")?.valueString;
-    const value = child.extension?.find(part => part.url === "value");
-    if (name !== undefined && value) Object.defineProperty(result, name, {
-      value: readRetainedField(value), enumerable: true, writable: true, configurable: true
-    });
+    restoreRetainedField(result, child);
   }
   return result;
 }
@@ -2541,11 +2546,7 @@ function decodeFields(
       result[child.valueCode] = []; continue;
     }
     if (child.url === "retainedField") {
-      const name = child.extension?.find(part => part.url === "name")?.valueString;
-      const value = child.extension?.find(part => part.url === "value");
-      if (name !== undefined && value) Object.defineProperty(result, name, {
-        value: readRetainedField(value), enumerable: true, writable: true, configurable: true
-      });
+      restoreRetainedField(result, child);
       continue;
     }
     const field = Object.prototype.hasOwnProperty.call(shape, child.url) ? shape[child.url] : undefined;

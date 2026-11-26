@@ -278,7 +278,11 @@ function resolveContextStrengthRatio(
  * until those numeric/unit facts exist; no unchecked casts or unit guesses. */
 function measuredStrengthRatio(
   context?: CanonicalSupplyOptions["context"]
-): { numerator: { value: number; unit: string }; denominator: { value: number; unit: string } } | undefined {
+): {
+  numerator: { value: number; unit: string };
+  denominator: { value: number; unit: string };
+  numeratorDisplayUnit: string;
+} | undefined {
   const ratio = resolveContextStrengthRatio(context);
   const numerator = ratio?.numerator, denominator = ratio?.denominator;
   if (numerator?.value === undefined || denominator?.value === undefined ||
@@ -286,7 +290,9 @@ function measuredStrengthRatio(
   const numeratorUnit = getDoseQuantityUnit(numerator), denominatorUnit = getDoseQuantityUnit(denominator);
   return numeratorUnit && denominatorUnit
     ? { numerator: { value: numerator.value, unit: numeratorUnit },
-        denominator: { value: denominator.value, unit: denominatorUnit } }
+        denominator: { value: denominator.value, unit: denominatorUnit },
+        // A coded endpoint owns its dimension; an uncoded label keeps its authored display.
+        numeratorDisplayUnit: numerator.code ? numeratorUnit : numerator.unit ?? numeratorUnit }
     : undefined;
 }
 function estimateIngredientQuantity(
@@ -296,16 +302,10 @@ function estimateIngredientQuantity(
   if (quantity.value === undefined || !quantity.unit) {
     return undefined;
   }
-  const strength = resolveContextStrengthRatio(context);
-  const numerator = strength?.numerator;
-  const denominator = strength?.denominator;
-  if (numerator?.value === undefined || denominator?.value === undefined ||
-      getQuantityComparator(numerator)) return undefined;
-  const numeratorUnit = getDoseQuantityUnit(numerator), denominatorUnit = getDoseQuantityUnit(denominator);
-  if (!numeratorUnit || !denominatorUnit) return undefined;
-  // An uncoded recognized label remains the existing estimate's display.
-  // A coded endpoint uses its actual dimension even when its display is localized.
-  const ingredientUnit = numerator.code ? numeratorUnit : numerator.unit ?? numeratorUnit;
+  const strength = measuredStrengthRatio(context);
+  if (!strength) return undefined;
+  const { numerator, denominator, numeratorDisplayUnit: ingredientUnit } = strength;
+  const numeratorUnit = numerator.unit, denominatorUnit = denominator.unit;
   const quantityCategory = getUnitCategory(quantity.unit);
   const denominatorCategory = getUnitCategory(denominatorUnit);
   if (quantityCategory !== "other" && quantityCategory === denominatorCategory) {
@@ -326,10 +326,7 @@ function estimateIngredientQuantity(
       };
     }
   }
-  const converted = convertValue(quantity.value, quantity.unit, numeratorUnit, {
-    numerator: { value: numerator.value, unit: numeratorUnit },
-    denominator: { value: denominator.value, unit: denominatorUnit },
-  });
+  const converted = convertValue(quantity.value, quantity.unit, numeratorUnit, strength);
   if (converted === null) {
     return undefined;
   }
@@ -1087,6 +1084,20 @@ function mergeFrequencyDefaults(
   }
   return merged;
 }
+/** Per-call clock and meal preferences override the shared configuration.
+ * Each execution API keeps its own time-zone requirement and window policy. */
+function resolveExecutionConfig(
+  options: Pick<NextDueDoseOptions, "config" | "eventClock" | "mealOffsets" | "frequencyDefaults">,
+  timeZone: string
+): NextDueDoseConfig {
+  return {
+    timeZone,
+    eventClock: { ...(options.config?.eventClock ?? {}), ...(options.eventClock ?? {}) },
+    mealOffsets: { ...(options.config?.mealOffsets ?? {}), ...(options.mealOffsets ?? {}) },
+    frequencyDefaults: mergeFrequencyDefaults(options.config?.frequencyDefaults, options.frequencyDefaults),
+  };
+}
+
 function inferDailyFrequencyClocks(frequency: number): string[] {
   if (!Number.isFinite(frequency) || frequency <= 0) {
     return [];
@@ -4499,6 +4510,12 @@ function unrecordedCountCandidates(candidates: string[], options: NextDueDoseOpt
   const recorded = (options as PhaseCountOptions).countedActualTimes;
   return recorded ? candidates.filter(iso => !recorded.has(Date.parse(iso))) : candidates;
 }
+/** A relationship or relative window needs the shared course resolver. */
+function administrationRequiresCourseContext(one: CanonicalAdministration): boolean {
+  return Boolean(one.phaseOrigin || one.phaseStart || one.phaseEnd || one.phaseOriginIssue ||
+    one.phasePredecessors?.length || one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset);
+}
+
 /** A single administration with no course relationship has scalar semantics,
  * including its authored window and order bound. Scheduling and supply use
  * this same shape proof; no phase planner is needed for a wire wrapper. */
@@ -4508,10 +4525,7 @@ function scalarCourseAdministration(course: CanonicalCourse): CanonicalAdministr
   if (stage.administrations.length !== 1 || (stage.count !== undefined && stage.count !== 1) ||
       stage.start || stage.end) return undefined;
   const single = stage.administrations[0];
-  return single.phaseOrigin || single.phaseStart || single.phaseEnd || single.phaseOriginIssue ||
-    single.phasePredecessors?.length || single.schedule?.recurrence?.startOffset || single.schedule?.recurrence?.endOffset ||
-    hasAlternativeChoice(single)
-    ? undefined : single;
+  return administrationRequiresCourseContext(single) || hasAlternativeChoice(single) ? undefined : single;
 }
 export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDoseOptions): string[] {
   if (Array.isArray(dosage))
@@ -4552,8 +4566,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     );
   }
   requireConsistentTimingCode(one.schedule);
-  if (one.phaseOrigin || one.phaseStart || one.phaseEnd || one.phaseOriginIssue ||
-      one.phasePredecessors?.length || one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
+  if (administrationRequiresCourseContext(one))
     return nextDueDoses(courseFromCanonicalRows([one]), options);
   // The successor's cadence can be anchored to its predecessor's last
   // administration, even though that point belongs to the PREVIOUS phase.
@@ -5029,24 +5042,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     if (eventStatus && nominalStatus) eventStatus.possible ||= nominalStatus.possible;
     return result;
   }
-  const eventClock: EventClockMap = {
-    ...(providedConfig?.eventClock ?? {}),
-    ...(options.eventClock ?? {}),
-  };
-  const mealOffsets: MealOffsetMap = {
-    ...(providedConfig?.mealOffsets ?? {}),
-    ...(options.mealOffsets ?? {}),
-  };
-  const frequencyDefaults = mergeFrequencyDefaults(
-    providedConfig?.frequencyDefaults,
-    options.frequencyDefaults
-  );
-  const config: NextDueDoseConfig = {
-    timeZone,
-    eventClock,
-    mealOffsets,
-    frequencyDefaults,
-  };
+  const config = resolveExecutionConfig(options, timeZone);
   const timing: CanonicalTiming | undefined = dosage.schedule;
   const repeat = codedExecutionRecurrence(timing, config);
   const boundsPeriod = validateRepeatBoundsPeriod(repeat, timeZone);
@@ -7217,24 +7213,7 @@ function calculateTotalUnitsSingle(
     hasSafetyPolicy ||
     unresolvedOneTimeActivity;
   const orderedAtDate = options.orderedAt === undefined ? null : coerceDate(options.orderedAt, "orderedAt");
-  const eventClock: EventClockMap = {
-    ...(providedConfig?.eventClock ?? {}),
-    ...(options.eventClock ?? {}),
-  };
-  const mealOffsets: MealOffsetMap = {
-    ...(providedConfig?.mealOffsets ?? {}),
-    ...(options.mealOffsets ?? {}),
-  };
-  const frequencyDefaults = mergeFrequencyDefaults(
-    providedConfig?.frequencyDefaults,
-    options.frequencyDefaults
-  );
-  const config: NextDueDoseConfig = {
-    timeZone,
-    eventClock,
-    mealOffsets,
-    frequencyDefaults,
-  };
+  const config = resolveExecutionConfig(options, timeZone);
   const repeat = dosage.schedule?.recurrence;
   // Maximum-supply preparation has already realized executable bare codes.
   // Missing cadence is unknown, including conditional/capped scalar paths;
@@ -8255,8 +8234,7 @@ export function calculateTotalUnits(options: CanonicalSupplyOptions): TotalUnits
       },
     });
   }
-  if (one.phaseOrigin || one.phaseStart || one.phaseEnd || one.phaseOriginIssue ||
-      one.phasePredecessors?.length || one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
+  if (administrationRequiresCourseContext(one))
     return calculateTotalUnits({ ...options, dosage: courseFromCanonicalRows([one]) });
   return calculateTotalUnitsSingle(
     options as Omit<CanonicalSupplyOptions, "dosage"> & {
