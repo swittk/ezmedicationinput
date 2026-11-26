@@ -3078,6 +3078,29 @@ describe("review 24: phase history, dimensions, and independent supply oracles",
     }
   });
 
+  it.each([
+    { name: "authored hours", repeat: { period: 2, periodUnit: Unit.Hour } },
+    { name: "equivalent minutes", repeat: { period: 120, periodUnit: Unit.Minute } },
+    { name: "frequency only", repeat: { frequency: 1 } },
+    { name: "period only", repeat: { period: 2 } },
+    { name: "unit only", repeat: { periodUnit: Unit.Minute } },
+  ])("keeps hourly interval meaning with $name", ({ repeat }) => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
+      code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "Q2H" }] },
+      repeat,
+    } };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: row.doseAndRate, timing: row.timing }] }] };
+    for (const dosage of [row, r6]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual([
+        "2026-01-01T00:00:00+00:00", "2026-01-01T02:00:00+00:00",
+        "2026-01-01T04:00:00+00:00", "2026-01-01T06:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(24);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
   it.each(["foreign", "conflicting"] as const)("retains the existing %s timing code boundary during cadence completion", variant => {
     const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
       code: { coding: [{ system: variant === "foreign" ? "urn:clinic:timing"

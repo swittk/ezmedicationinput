@@ -528,8 +528,15 @@ function prepareTimingCodeCadence(dosage: CanonicalAdministration): CanonicalAdm
     period = repeat.period ?? frequency * 86400 / (daily * seconds);
     if (!positiveInteger(frequency) || !positiveNumber(period)) return dosage;
   }
-  const recurrence: CanonicalRecurrence = Object.assign({}, repeat, { frequency, period, periodUnit });
-  if (daily !== undefined && !matchesDailyCodeCadence(daily, recurrence)) return dosage;
+  const cadence: CanonicalRecurrence = { frequency, period, periodUnit };
+  if (daily !== undefined && !matchesDailyCodeCadence(daily, cadence)) return dosage;
+  // An authored elapsed interval already means one occurrence per interval.
+  // Keep it when the hourly code completes the same cadence; daily clinic
+  // clocks and incomplete intervals still need the execution copy below.
+  if (hours && repeat && repeat.countMax === undefined && repeat.frequency === undefined && frequency === 1 &&
+      repeat.period === period && repeat.periodUnit === periodUnit && usesIntervalCadence(cadence))
+    return dosage;
+  const recurrence: CanonicalRecurrence = Object.assign({}, repeat, cadence);
   return Object.assign({}, dosage, { schedule: Object.assign({}, timing, { recurrence }) });
 }
 /**
