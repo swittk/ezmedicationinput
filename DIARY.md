@@ -16314,3 +16314,14 @@ spatial concepts and extension-only graph fields. Mixed duration endpoints retai
 their exact active quantities beside a conforming core range, without generating
 historical reconciliation snapshots. Fresh clinical and conversion cases retain
 authored source, annotations and elapsed-versus-calendar behavior across DST.
+
+
+## 2026-11-27 — Selected conditional guards and core range annotations
+
+Registered conditional relations retain the selected clinical predicate on a
+positive administration. Its antecedent activity remains scoped while independent
+counseling stays visible, including when a calendar evaluator rejects the dose.
+
+Core dose, rate and duration range annotations use the existing Quantity bridge
+at import and R5 serialization. Exact endpoints, current annotations, source and
+localized previews remain intact.
