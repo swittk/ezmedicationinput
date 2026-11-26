@@ -3038,6 +3038,36 @@ describe("round37 interchange phase, limit and source ownership", () => {
     }
   });
 
+  it.each(["administration", "lifetime"] as const)("keeps the strict %s ceiling across equivalent converted units", scope => {
+    for (const pair of [[{ value: 700, unit: "ug" }, { value: 0.7, unit: "mg" }],
+      [{ value: 700, unit: "mg" }, { value: 0.7, unit: "g" }]]) {
+      for (const strictIndex of [0, 1]) {
+        const quantities: FhirR6Quantity[] = pair.map((quantity, index) => ({ ...quantity,
+          comparator: index === strictIndex ? "<" : "<=", id: index === strictIndex ? "strict" : "inclusive" }));
+        for (const amounts of [quantities, [...quantities].reverse()]) {
+          const input = course({ safety: { doseLimit: amounts.map(valueQuantity => ({ scope, valueQuantity })) } });
+          const before = JSON.stringify(input), rows = toFhirR5Dosages(input);
+          const selected = scope === "administration" ? rows[0].maxDosePerAdministration : rows[0].maxDosePerLifetime;
+          expect(selected).toMatchObject({ ...pair[strictIndex], id: "strict" });
+          expect(getQuantityComparator(selected)).toBe("<");
+          expect(selected?.comparator).toBeUndefined();
+          expect(JSON.stringify(input)).toBe(before);
+        }
+      }
+    }
+  });
+
+  it("retains the smaller distinct converted ceiling before comparator strictness", () => {
+    const tight: FhirR6Quantity = { value: 0.699, unit: "g", comparator: "<=", id: "tighter" };
+    const loose: FhirR6Quantity = { value: 700, unit: "mg", comparator: "<", id: "looser" };
+    for (const amounts of [[tight, loose], [loose, tight]]) {
+      const input = course({ safety: { doseLimit: amounts.map(valueQuantity => ({ scope: "administration", valueQuantity })) } });
+      const selected = toFhirR5Dosages(input)[0].maxDosePerAdministration;
+      expect(selected).toMatchObject({ value: 0.699, unit: "g", id: "tighter" });
+      expect(getQuantityComparator(selected)).toBe("<=");
+    }
+  });
+
   it.each(["administration", "lifetime"] as const)("projects the smaller physical %s ceiling in its authored unit", scope => {
     const tight = { value: 500, unit: "mg", id: "half-gram" };
     const loose = { value: 1, unit: "g", id: "one-gram" };

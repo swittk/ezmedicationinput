@@ -119,7 +119,7 @@ function editedOperator(
   } };
 }
 
-/** Quantity-valued annotations use the same operator bridge as their owner.
+/** Quantity annotations and Ratio numerators use the same operator bridge as their owner.
  * Other Extension value choices remain opaque; this is not a general
  * extension-version converter or an object-tree normalizer. */
 export function quantityAnnotationExtensions(
@@ -134,9 +134,15 @@ export function quantityAnnotationExtensions(
       continue;
     }
     const quantity = target === "r5" ? quantityForR5(item.valueQuantity) : quantityFromWire(item.valueQuantity);
+    let ratio = item.valueRatio;
+    if (ratio?.numerator) {
+      const numerator = target === "r5" ? quantityForR5(ratio.numerator) : quantityFromWire(ratio.numerator);
+      if (numerator !== ratio.numerator) ratio = { ...ratio, numerator };
+    }
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
-    const current = quantity === item.valueQuantity && children === item.extension ? item : {
+    const current = quantity === item.valueQuantity && ratio === item.valueRatio && children === item.extension ? item : {
       ...item, ...(quantity !== item.valueQuantity ? { valueQuantity: quantity } : {}),
+      ...(ratio !== item.valueRatio ? { valueRatio: ratio } : {}),
       ...(children !== item.extension ? { extension: children } : {}),
     };
     if (current !== item) result ??= source.slice(0, index);

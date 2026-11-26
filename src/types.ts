@@ -450,6 +450,12 @@ export interface FhirPeriod extends FhirElement {
   _end?: FhirPrimitiveElement;
 }
 
+/** Native R6 Period metadata uses native R6 Extension values. */
+export interface FhirR6Period extends Omit<FhirPeriod, "extension" | "_start" | "_end">, FhirR6Element {
+  _start?: FhirR6PrimitiveElement;
+  _end?: FhirR6PrimitiveElement;
+}
+
 export interface FhirTimingRepeat extends FhirElement {
   count?: number;
   /** Primitive metadata may represent an unspecified lower count without inventing a value. */
@@ -486,7 +492,7 @@ export interface FhirTimingRepeat extends FhirElement {
 
 /** R6 Snapshot 1 adds period-local interlacing windows to Timing.repeat.
  * These are not R5 Timing fields and must remain confined to the R6 wire type. */
-export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration" | "boundsRange" | "extension" |
+export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration" | "boundsRange" | "boundsPeriod" | "extension" |
   "_count" | "_duration" | "_period" | "_dayOfWeek" | "_timeOfDay" | "_when">, FhirR6Element {
   _count?: FhirR6PrimitiveElement;
   _duration?: FhirR6PrimitiveElement;
@@ -497,6 +503,7 @@ export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDurati
   /** R6 Quantity permits the native approximate "~" comparator. */
   boundsDuration?: FhirR6Quantity;
   boundsRange?: FhirR6Range;
+  boundsPeriod?: FhirR6Period;
   startOffset?: FhirR6SimpleQuantity;
   endOffset?: FhirR6SimpleQuantity;
 }
@@ -629,7 +636,7 @@ interface FhirR6DosageConditionValues {
   valueHumanName?: Record<string, unknown>;
   valueIdentifier?: NonNullable<FhirR6Reference["identifier"]>;
   valueMoney?: Record<string, unknown>;
-  valuePeriod?: FhirPeriod;
+  valuePeriod?: FhirR6Period;
   valueQuantity?: FhirR6Quantity;
   valueRange?: FhirR6Range;
   valueRatio?: FhirR6Ratio;
@@ -710,11 +717,12 @@ export interface FhirR6Reference extends Omit<FhirReference, "extension" | "iden
   _reference?: FhirR6PrimitiveElement;
   _type?: FhirR6PrimitiveElement;
   _display?: FhirR6PrimitiveElement;
-  identifier?: Omit<NonNullable<FhirReference["identifier"]>, "extension" | "type" | "assigner" | "_use" | "_system" | "_value"> & FhirR6Element & {
+  identifier?: Omit<NonNullable<FhirReference["identifier"]>, "extension" | "type" | "assigner" | "period" | "_use" | "_system" | "_value"> & FhirR6Element & {
     type?: FhirR6CodeableConcept;
     _use?: FhirR6PrimitiveElement;
     _system?: FhirR6PrimitiveElement;
     _value?: FhirR6PrimitiveElement;
+    period?: FhirR6Period;
     assigner?: FhirR6Reference;
   };
 }

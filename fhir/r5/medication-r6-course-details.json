@@ -154,14 +154,14 @@
         "definition": "Current count semantics: step.count repeats that step. The previous unversioned owned R5 encoding used the first step count as the whole-course bound when repeatCycle was present; import migrates that saved representation and preserves its source."
       },
       {
-        "id": "Extension.extension:countScope.url",
-        "path": "Extension.extension.url",
-        "fixedUri": "countScope"
-      },
-      {
         "id": "Extension.extension:countScope.extension",
         "path": "Extension.extension.extension",
         "max": "0"
+      },
+      {
+        "id": "Extension.extension:countScope.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "countScope"
       },
       {
         "id": "Extension.extension:countScope.value[x]",

@@ -6,7 +6,7 @@ import {
   type EzDosage, type FhirDosage, type FhirExtension, type FhirR6Extension, type FhirElement, type FhirR6PrimitiveElement, type FhirRatio, type FhirR6Ratio, type FhirR6Dosage,
   FhirPeriodUnit, FhirDayOfWeek, EventTiming, nextDueDoses, calculateTotalUnits,
   type FhirR6DosageInstruction, type FhirR6Quantity, type FhirR6SimpleQuantity, type FhirR6DosageInstructionInput,
-  type FhirR6Expression, type FhirR6Range, type FhirR6CodeableConcept, type FhirR6Reference, type FhirR6DoseAndRate, type FhirDoseAndRate, type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep, type FhirR6RelativeTime, type FhirReference,
+  type FhirR6Expression, type FhirR6Range, type FhirR6Period, type FhirPeriod, type FhirR6CodeableConcept, type FhirR6Reference, type FhirR6DoseAndRate, type FhirDoseAndRate, type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep, type FhirR6RelativeTime, type FhirReference,
   registerMedicationLocaleDetector, inferMedicationLocale, registerMedicationSurfaceSegmenter,
   listMedicationSurfaceSegmenters, registerMedicationDateResolver, cloneBodySiteSpatialRelation,
   buildBodySiteSpatialRelationExtension, parseBodySiteSpatialRelationExtension,
@@ -2997,6 +2997,27 @@ describe("round62 reviewed interchange ownership", () => {
     expect(source).toEqual(before);
   });
 
+  it.each(["~", undefined] as const)("projects a native concentration annotation with comparator %s to strict R5", comparator => {
+    const annotation: FhirR6Extension = { id: "concentration-annotation", url: "urn:clinic:concentration", valueRatio: {
+      id: "concentration", extension: [{ url: "urn:clinic:ratio-note", valueString: "authored concentration" }],
+      numerator: { id: "concentration-mass", value: 2, unit: "mg", ...(comparator ? { comparator } : {}) },
+      denominator: { id: "concentration-volume", value: 1, unit: "mL" },
+    } };
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [{
+      doseQuantity: { value: 1, unit: "mL", extension: [annotation] },
+    }] }] }] };
+    const before = persist(source), rows = toFhirR5Dosages(source);
+    const projected = rows[0].doseAndRate![0].doseQuantity!.extension!.find(item => item.url === annotation.url)!;
+    expect(projected.id).toBe(annotation.id);
+    expect(projected.valueRatio).toMatchObject({ id: "concentration", extension: annotation.valueRatio!.extension,
+      numerator: { id: "concentration-mass", value: 2, unit: "mg" }, denominator: annotation.valueRatio!.denominator });
+    expect(projected.valueRatio!.numerator!.comparator).toBeUndefined();
+    expect(getQuantityComparator(projected.valueRatio!.numerator)).toBe(comparator);
+    if (!comparator) expect(projected).toEqual(annotation);
+    expect(toDosageDetails(rows).step![0].component[0].doseAndRate![0].doseQuantity!.extension).toEqual([annotation]);
+    expect(source).toEqual(before);
+  });
+
   const quantityNode = (graph: FhirExtension): FhirExtension => {
     for (const action of graph.extension ?? [])
       for (const argument of action.extension ?? []) {
@@ -5500,6 +5521,22 @@ describe("independent source coding and safety scope", () => {
 
 
 describe("native R6 nested datatype declarations", () => {
+  it("accepts native Period annotations at each R6 boundary while R5 remains strict", () => {
+    const annotation: FhirR6Extension = { url: "urn:clinic:end-estimate", valueQuantity: { value: 1, comparator: "~", unit: "h" } };
+    const period: FhirR6Period = { start: "2026-11-01", end: "2026-11-07", _end: { extension: [annotation] } };
+    const timing: FhirR6Timing = { repeat: { boundsPeriod: period } };
+    const condition: FhirR6DosageCondition = { code: { text: "Treatment period" }, valuePeriod: period };
+    const reference: FhirR6Reference = { identifier: { period } };
+    const strict: FhirPeriod = { _end: { extension: [{ url: "urn:clinic:end-estimate", valueQuantity: {
+      // @ts-expect-error R5 Period metadata retains strict R5 Quantity comparator values.
+      comparator: "~",
+    } }] } };
+    expect(timing.repeat!.boundsPeriod).toBe(period);
+    expect(condition.valuePeriod).toBe(period);
+    expect(reference.identifier!.period).toBe(period);
+    expect(strict._end!.extension![0].valueQuantity!.comparator).toBe("~");
+  });
+
   it("accepts native annotations in expressions, concepts and ranges while R5 remains strict", () => {
     const annotation: FhirR6Extension = { url: "urn:clinic:estimate", valueQuantity: { value: 1, comparator: "~", unit: "mg" } };
     const expression: FhirR6Expression = { language: "text/fhirpath", expression: "%patient.weight * 0.1", extension: [annotation] };

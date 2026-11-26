@@ -1361,9 +1361,18 @@ function maximumComparisonUnitKey(quantity: CanonicalMeasure): string | undefine
 }
 function preferMaximum(
   value: number, strict: boolean, index: number | undefined,
-  previousValue: number, previousStrict: boolean, previousIndex: number | undefined
+  previousValue: number, previousStrict: boolean, previousIndex: number | undefined,
+  quantity?: CanonicalMeasure, previousQuantity?: CanonicalMeasure
 ): boolean {
-  if (value !== previousValue) return value < previousValue;
+  if (value !== previousValue) {
+    // Multiplication/division at a dimensional boundary can perturb an equal
+    // bound. Same-scale and coded identities still compare their exact values.
+    const near = Math.abs(value - previousValue) <=
+      2 * Number.EPSILON * Math.max(Math.abs(value), Math.abs(previousValue));
+    const scale = near && quantity && previousQuantity
+      ? convertQuantityValue(1, quantity, previousQuantity) : null;
+    if (scale === null || scale === 1) return value < previousValue;
+  }
   if (strict !== previousStrict) return strict;
   return index === undefined || previousIndex === undefined || index >= previousIndex;
 }
@@ -1413,12 +1422,12 @@ export function selectR5Maximum(
     if (!previous) { current.groups.set(groupKey, candidate); continue; }
     const previousValue = convertQuantityValue(previous.quantity.value!, previous.quantity, quantity);
     if (previousValue === null || preferMaximum(quantity.value!, strict, index,
-        previousValue, previous.strict, previous.index)) {
+        previousValue, previous.strict, previous.index, quantity, previous.quantity)) {
       current.groups.set(groupKey, candidate);
       continue;
     }
     if (preferMaximum(previousValue, previous.strict, previous.index,
-        selectedValue, selected.strict, selected.index)) {
+        selectedValue, selected.strict, selected.index, previous.quantity, selected.quantity)) {
       selected = previous; selectedValue = previousValue;
     }
   }
