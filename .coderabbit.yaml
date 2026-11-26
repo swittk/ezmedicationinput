@@ -26,6 +26,9 @@ reviews:
     # This legacy first-clause adapter has no assertions; its clinical test
     # suites remain selected, including source and conversion correctness.
     - "!test/helpers/r5-parser.ts"
+    # Pinned upstream reference data; handwritten FHIR definitions, public
+    # types and the suites checking this contract remain selected.
+    - "!fhir/r6/official-snapshot1-20261113-contract.json"
     - "!package-lock.json"
   path_instructions:
     - path: "**/*"
