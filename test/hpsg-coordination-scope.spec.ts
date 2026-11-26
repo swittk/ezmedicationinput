@@ -2240,17 +2240,18 @@ describe("condition and successor timing ownership", () => {
   });
 
   it.each([
-    ["if it is a dialysis day, hold the morning dose", false],
-    ["hold the morning dose if it is a dialysis day", false],
-    ["if it is a dialysis day, hold the morning dose; call the clinic", true]
-  ] as const)("keeps predicate activities inside the withholding antecedent: %s", (advice, independentCall) => {
+    ["if it is a dialysis day, hold the morning dose", false, "if"],
+    ["hold the morning dose if it is a dialysis day", false, "if"],
+    ["if it is a dialysis day, hold the morning dose; call the clinic", true, "if"],
+    ["when it is a dialysis day, hold the morning dose; call the clinic", true, "when"]
+  ] as const)("keeps predicate activities inside the withholding antecedent: %s", (advice, independentCall, relation) => {
     const source = `Take 1 tablet at 08:00 daily for 2 days; ${advice}.`;
     const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
     const predicate = { kind: "not", condition: { kind: "text", text: "it is a dialysis day" } };
     const clause = parsed.meta.canonical.clauses[0], graph = clause.instructionGraph!;
     expect(graph.actions.map(action => action.predicate.lemma)).toEqual(independentCall ? ["hold", "call"] : ["hold"]);
     expect(graph.relations).toContainEqual(expect.objectContaining({
-      kind: "if", toActionIndex: 0, text: expect.stringContaining("if it is a dialysis day")
+      kind: relation, toActionIndex: 0, text: expect.stringContaining(`${relation} it is a dialysis day`)
     }));
     expect(clause.clinicalAdjuncts?.calendarDayCondition).toEqual(predicate);
     expect(clause.prn?.enabled).not.toBe(true);

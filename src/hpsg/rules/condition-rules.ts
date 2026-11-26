@@ -9,7 +9,7 @@ import {
 } from "../../date-interpretation";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
-import { parseMedicationGuard, scopeMedicationGuardSign } from "../constructions";
+import { parseMedicationGuard, scopeMedicationGuardSign, type ParsedMedicationGuard } from "../constructions";
 import {
   relationHasGrammarFeature,
   resolveActionRelationSurface
@@ -353,31 +353,6 @@ function withholdsMedicationAdministration(
   });
 }
 
-/** Return an inverse condition only when the selected conditional construction
- * relates a typed withholding action to a medication-dose argument. */
-function localWithholdingGuard(
-  context: HpsgClauseContext,
-  sourceStart: number,
-  frame: AdviceFrame,
-  sourceEnd?: number
-) {
-  if (!withholdsMedicationAdministration(context, frame)) return undefined;
-  const cached = medicationGuardForContext(context);
-  const applicable = cached?.start === sourceStart ? cached : undefined;
-  // An explicit ELSE branch does not invert the earlier permission guard.
-  if (applicable?.alternative && applicable.alternative.end <= frame.span.start) return undefined;
-  // A typed withholding predicate licenses a non-numeric conditional daughter
-  // (IF dizzy, HOLD) without reclassifying ordinary TAKE-if-symptom PRN syntax.
-  // All predicate/Boolean meaning still comes from the same HPSG constructor.
-  const guard = applicable && (sourceEnd === undefined || sourceEnd >= applicable.end)
-    ? applicable
-    : parseMedicationGuard(context.state.input.slice(sourceStart, sourceEnd), undefined, true, context.options);
-  if (!guard) return undefined;
-  return guard.condition.kind === "not"
-    ? guard.condition.condition
-    : { kind: "not" as const, condition: guard.condition };
-}
-
 /** Resolve either the broad daypart head or one of its meal-relative members
  * to the same typed dose-slot family. Thus BREAKFAST can select a BEFORE
  * BREAKFAST administration just as MORNING can, without rewriting either
@@ -429,15 +404,26 @@ function withholdingDoseTarget(
  * until the related regimen daughters have been composed. */
 function withholdingAdjunct(
   context: HpsgClauseContext,
-  range: { start: number; end: number },
-  frames: readonly AdviceFrame[]
+  scope: HpsgConditionFeature,
+  markerEnd: number,
+  selectedGuard?: ParsedMedicationGuard
 ): HpsgClinicalAdjunctFeature | undefined {
-  for (const frame of frames) {
-    const condition = localWithholdingGuard(context, range.start, frame, range.end);
-    if (!condition) continue;
-    const sourceGuard = medicationGuardForContext(context);
-    const dayInvariant = sourceGuard?.start === range.start &&
-      sourceGuard.sign.synsem.cont.clinicalAdjunct?.calendarDayCondition;
+  const range = { start: scope.sourceStart, end: scope.sourceEnd };
+  for (const frame of scope.frames) {
+    if (!withholdsMedicationAdministration(context, frame)) continue;
+    const cached = selectedGuard ?? medicationGuardForContext(context);
+    const applicable = cached?.start === range.start ? cached : undefined;
+    // An explicit ELSE branch does not invert the earlier permission guard.
+    if (applicable?.alternative && applicable.alternative.end <= frame.span.start) continue;
+    // The closed conditional owns its relation and predicate span. Reuse them
+    // in the same guard construction instead of selecting another action head.
+    const guard = applicable && range.end >= applicable.end ? applicable
+      : parseMedicationGuard(context.state.input, context.tokens, true, context.options,
+        { relation: scope.relation, start: range.start, markerEnd, end: range.end });
+    if (!guard) continue;
+    const condition = guard.condition.kind === "not" ? guard.condition.condition
+      : { kind: "not" as const, condition: guard.condition };
+    const dayInvariant = guard.sign.synsem.cont.clinicalAdjunct?.calendarDayCondition;
     return {
       condition,
       ...(dayInvariant ? { calendarDayCondition: condition } : {}),
@@ -453,7 +439,6 @@ function withholdingAdjunct(
   return undefined;
 }
 
-/** Medication guards are lexical adjuncts, separate from procedural IF scope. */
 export function medicationGuardLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.clinical.condition", (context, start) => {
     const lead = context.tokens[start];
@@ -478,8 +463,7 @@ export function medicationGuardLexicalRule(): HpsgLexicalRule<HpsgClauseContext>
     // modifies, for both prefix and postfix order. Its matcher calls the
     // pure frame helper, never this discovery function, so no recursion.
     const scoped = getConditionFeatures(context).find(feature => feature.sourceStart === guard.start);
-    const withheld = scoped && withholdingAdjunct(context,
-      { start: scoped.sourceStart, end: scoped.sourceEnd }, scoped.frames);
+    const withheld = scoped && withholdingAdjunct(context, scoped, guard.markerEnd, guard);
     const scope = clinicalAdjunctSign("hpsg.lex.clinical.condition", context, tokens, {
       condition: withheld?.condition ?? guard.condition,
       ...(withheld ? { conditionTarget: withheld.conditionTarget } : {}),
@@ -800,7 +784,24 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       a.span.start - b.span.start || a.span.end - b.span.end
     );
 
-    const guard = medicationGuardForContext(context);
+    let guard = medicationGuardForContext(context);
+    const markerEnd = lexicalConditional?.start === 0
+      ? lead.sourceStart + lexicalConditional.end : lead.sourceEnd;
+    if (!guard || guard.end <= lead.sourceStart) {
+      const delimiter = context.tokens.find(token => token.sourceStart >= markerEnd &&
+        /^[,;:.!?]$/u.test(token.original));
+      if (delimiter && /^[,:]$/u.test(delimiter.original) && frames.some(frame =>
+          frame.span.start >= markerEnd && frame.span.start < delimiter.sourceStart)) {
+        const consequent = frames.find(frame => frame.span.start >= delimiter.sourceEnd &&
+          !hasStrongBoundary(context.state.input.slice(delimiter.sourceEnd, frame.span.start)));
+        if (consequent && isScopeTarget(context, consequent)) {
+          // A complete admitted predicate before the delimiter owns its activity;
+          // the separately selected action after it is the consequent.
+          guard = parseMedicationGuard(context.state.input, context.tokens, undefined, context.options,
+            { relation, start: lead.sourceStart, markerEnd, end: delimiter.sourceStart });
+        }
+      }
+    }
     let nextIndex = -1;
     for (let index = 0; index < frames.length; index++) {
       const frame = frames[index];
@@ -829,8 +830,11 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const fullText = context.state.input.slice(lead.sourceStart, targetEnd).trim();
       const safety = program.some((frame) => frame.polarity === AdvicePolarity.Negate ||
         isSafetyTarget(context, frame, frameActionDefinition(frame, context.options)));
-      const sourceRange = { start: lead.sourceStart, end: conditionEnd };
-      const withheld = withholdingAdjunct(context, sourceRange, program);
+      const condition: HpsgConditionFeature = {
+        relation, text, fullText, sourceStart: lead.sourceStart, sourceEnd: conditionEnd,
+        targetStart, targetEnd, safety, frames: program
+      };
+      const withheld = withholdingAdjunct(context, condition, markerEnd, guard);
       return [lexicalSign({
         type: "conditional-sign",
         rule: "hpsg.lex.condition",
@@ -840,17 +844,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           valence: {},
           cont: {
             clauseKind: "administration",
-            condition: {
-              relation,
-              text,
-              fullText,
-              sourceStart: lead.sourceStart,
-              sourceEnd: conditionEnd,
-              targetStart,
-              targetEnd,
-              safety,
-              frames: program
-            },
+            condition,
             ...(withheld ? { clinicalAdjunct: withheld } : {})
           }
         },
@@ -876,8 +870,11 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const fullText = context.state.input.slice(previous.span.start, sourceEnd).trim();
     const safety = previous.polarity === AdvicePolarity.Negate ||
       isSafetyTarget(context, previous, frameActionDefinition(previous, context.options));
-    const sourceRange = { start: lead.sourceStart, end: sourceEnd };
-    const withheld = withholdingAdjunct(context, sourceRange, [previous]);
+    const condition: HpsgConditionFeature = {
+      relation, text, fullText, sourceStart: lead.sourceStart, sourceEnd,
+      targetStart: previous.span.start, targetEnd: previous.span.end, safety, frames: [previous]
+    };
+    const withheld = withholdingAdjunct(context, condition, markerEnd, guard);
     return [lexicalSign({
       type: "conditional-sign",
       rule: "hpsg.lex.condition",
@@ -887,17 +884,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         valence: {},
         cont: {
           clauseKind: "administration",
-          condition: {
-            relation,
-            text,
-            fullText,
-            sourceStart: lead.sourceStart,
-            sourceEnd,
-            targetStart: previous.span.start,
-            targetEnd: previous.span.end,
-            safety,
-            frames: [previous]
-          },
+          condition,
           ...(withheld ? { clinicalAdjunct: withheld } : {})
         }
       },
