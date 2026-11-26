@@ -1179,12 +1179,14 @@ function resolveFrequencyCadence(
     codeClocks = configuredCodeClocks;
     if (codeClocks === undefined && isStandardTimingCoding(coding)) {
       const meaning = timingCodeMeaning(coding);
-      const descriptor = meaning ? timingPreviewDescriptor(meaning) : undefined;
-      // Standard event-only codes retain the authored cadence and share the
-      // same event clock resolution as an explicit timing anchor.
-      codeClocks = descriptor?.when?.length && descriptor.frequency === undefined && descriptor.period === undefined
-        ? expandWhenCodes(descriptor.when, config, effectiveRepeat, true).map(entry => entry.time)
-        : DEFAULT_FREQUENCY_DEFAULTS.byCode[normalizedCode];
+      codeClocks = meaning ? DEFAULT_FREQUENCY_DEFAULTS.byCode[meaning.toUpperCase()] : undefined;
+      if (codeClocks === undefined) {
+        const descriptor = meaning ? timingPreviewDescriptor(meaning) : undefined;
+        // Event-only meanings without a clinic default use the same clock
+        // resolution as an explicit timing anchor, retaining the cadence.
+        if (descriptor?.when?.length && descriptor.frequency === undefined && descriptor.period === undefined)
+          codeClocks = expandWhenCodes(descriptor.when, config, effectiveRepeat, true).map(entry => entry.time);
+      }
     }
   }
   if (codeClocks) {
