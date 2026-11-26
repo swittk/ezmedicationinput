@@ -1,3 +1,4 @@
+import { rateFromClinicalQuantity } from "./canonical/compile";
 import { resolveBodySiteRestrictionPredicate } from "./body-site-grammar";
 import { resolveMedicationInstructionActionForMethod, selectMedicationInstructionMethodCoding } from "./instruction-action-terminology";
 import {
@@ -2761,16 +2762,22 @@ function projectHpsgClinicalQuantityToFhir(
       ? originalDose
       : buildFhirDoseQuantity(dose.value, dose.unit, dose.comparator);
   if (quantity.representation === "rate-quantity") {
-    const unit = [quantity.numerator.unit, ...quantity.denominators.map((term) => term.unit)].join("/");
-    dosage.doseAndRate = [{
+    const rate = rateFromClinicalQuantity(quantity);
+    const amount: NonNullable<FhirDosage["doseAndRate"]>[number] = {
       ...(quantity.projectedDose ? {
         doseQuantity: resolvedDose(quantity.projectedDose)
-      } : originalAmount?.doseRange ? { doseRange: originalAmount.doseRange } : {}),
-      rateQuantity: buildFhirDoseQuantity(
-        quantity.numerator.value / quantity.denominators.reduce((scale, term) => scale * term.value, 1),
-        unit, quantity.numerator.comparator
-      )
-    }];
+      } : originalAmount?.doseRange ? { doseRange: originalAmount.doseRange } : {})
+    };
+    if (rate.rateRatio) {
+      amount.rateRatio = {
+        numerator: buildFhirDoseQuantity(rate.rateRatio.numerator.value, rate.rateRatio.numerator.unit,
+          rate.rateRatio.numerator.comparator),
+        denominator: buildFhirDoseQuantity(rate.rateRatio.denominator.value, rate.rateRatio.denominator.unit)
+      };
+    } else {
+      amount.rateQuantity = buildFhirDoseQuantity(rate.rate.value, rate.rate.unit, rate.rate.comparator);
+    }
+    dosage.doseAndRate = [amount];
     return;
   }
   // An explicit ratio period survives even when independent coded quantities

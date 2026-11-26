@@ -830,15 +830,15 @@ describe("HPSG clinical quantity grammar", () => {
 
 describe("compositional amount, rate, and division ownership", () => {
   it.each([
-    "Give 10 mg/kg/day PO divided into 2 doses",
-    "Give 10 mg/kg/24h PO divided into 2 doses",
-    "Give 10 mg/kg/day divided into two equal doses PO",
-    "Give 10 mg/kg/day in two equal doses orally"
-  ])("composes division across a route without turning the divisor into a dose: %s", source => {
+    ["Give 10 mg/kg/day PO divided into 2 doses", 1, "d"],
+    ["Give 10 mg/kg/24h PO divided into 2 doses", 24, "h"],
+    ["Give 10 mg/kg/day divided into two equal doses PO", 1, "d"],
+    ["Give 10 mg/kg/day in two equal doses orally", 1, "d"]
+  ] as const)("composes division across a route without turning the divisor into a dose: %s", (source, period, periodUnit) => {
     const parsed = parseSig(source);
     expect(parsed.items).toHaveLength(1);
     expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 5, unit: "mg/kg" });
-    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 2, period, periodUnit });
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
       status: "resolved", dividedDoseCount: 2,
       numerator: { value: 10 }, projectedDose: { value: 5, unit: "mg/kg" }
@@ -872,9 +872,10 @@ it("represents the original compact 24-hour weight-total case without inventing 
   expect(parsed.fhir.text).toBe(source);
   expect(parsed.fhir.route?.text).toBe("intravenous");
   expect(parsed.fhir.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
-  expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toMatchObject({ value: 5, code: "ug/kg/d" });
+  expect(parsed.fhir.doseAndRate?.[0]?.rateQuantity).toMatchObject({ value: 5 / 24, code: "ug/kg/h" });
   expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
-    numerator: { value: 5, unit: "ug" }, dailyTotal: true, requiresPatientWeight: true
+    numerator: { value: 5, unit: "ug" }, requiresPatientWeight: true,
+    denominators: [{ value: 1, unit: "kg" }, { value: 24, unit: "h" }]
   });
 });
 
@@ -3530,13 +3531,13 @@ describe("round56: explicit division and occurrence bounds", () => {
   it.each([
     ["Give 10 mg/kg/12h PO divided into 2 doses", 12, "h"],
     ["Give 10 mg/kg/12h in 2 divided doses PO", 12, "h"],
-    ["Give 10 mg/kg/24h PO divided into 2 doses", 1, "d"],
+    ["Give 10 mg/kg/24h PO divided into 2 doses", 24, "h"],
     ["Give 10 mg/kg per day PO divided into 2 doses", 1, "d"],
-    ["Give 10 mg/kg per 24 hours PO divided into 2 doses", 1, "d"],
-    ["Give 10 mg / kg / 24 h PO divided into 2 doses", 1, "d"],
-    ["Give 10mg / kg per 24 hours PO divided into 2 doses", 1, "d"],
+    ["Give 10 mg/kg per 24 hours PO divided into 2 doses", 24, "h"],
+    ["Give 10 mg / kg / 24 h PO divided into 2 doses", 24, "h"],
+    ["Give 10mg / kg per 24 hours PO divided into 2 doses", 24, "h"],
     ["Give 10 mg/kg per 12 hours PO divided into 2 doses", 12, "h"],
-    ["Give 10 mg/kg per 48 hours PO divided into 2 doses", 2, "d"],
+    ["Give 10 mg/kg per 48 hours PO divided into 2 doses", 48, "h"],
     ["Give 10 mg/kg per 30 minutes PO divided into 2 doses", 30, "min"],
     ["Give 10 mg/kg per 1 week PO divided into 2 doses", 1, "wk"]
   ] as const)("divides the authored weight-based total over its original period: %s", (source, period, periodUnit) => {
@@ -3560,7 +3561,7 @@ describe("round56: explicit division and occurrence bounds", () => {
 
   it.each([
     ["Give 10 mg/kg per 12 hours PO", 10 / 12, "mg/kg/h"],
-    ["Give 10 mg / kg / 24 h PO", 10, "mg/kg/d"]
+    ["Give 10 mg / kg / 24 h PO", 10 / 24, "mg/kg/h"]
   ] as const)("keeps an undivided spaced weight rate dose-free: %s", (source, value, code) => {
     const parsed = parsePublicSig(source);
     expect(parsed.meta.canonical.clauses).toHaveLength(1);
@@ -4878,5 +4879,62 @@ describe("postfix clinical guards beside typed dose limits", () => {
       expect(input).toEqual(before);
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+});
+
+
+describe("authored fixed-rate numeric periods", () => {
+  it.each([
+    ["Infuse 100 mL per hour", 1, "h", 200],
+    ["Infuse 100 mL per 1 hour", 1, "h", 200],
+    ["Infuse 100 mL per 2 hours", 2, "h", 100],
+    ["Infuse 100 mL/2h", 2, "h", 100],
+    ["Infuse 100 mL per 30 minutes", 30, "min", 400],
+    ["Infuse 100 mL per 0.5 hour", 0.5, "h", 400]
+  ] as const)("retains the rate numerator and numeric period without a scalar dose: %s", (source, period, unit, totalUnits) => {
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const ratio = { numerator: { value: 100, unit: "mL" }, denominator: { value: period, unit } };
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", numerator: { value: 100, unit: "mL" },
+      denominators: [{ value: period, unit, dimension: "time" }]
+    });
+    for (const course of [parsed.meta.canonical.course!, importCanonicalCourse(parsed.fhir),
+        importCanonicalCourse(parsed.fhirNext)]) {
+      expect(course.stages).toHaveLength(1);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      const amounts = course.stages[0].administrations[0].amounts;
+      expect(amounts).toHaveLength(1);
+      expect(amounts?.[0].quantity).toBeUndefined();
+      if (period === 1) expect(amounts?.[0].rate).toMatchObject({ value: 100, unit: "mL/h" });
+      else expect(amounts?.[0].rateRatio).toMatchObject(ratio);
+      expect(course.stages[0].administrations[0].schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+      expect(() => calculateTotalUnits({ dosage: course, from: "2027-01-01T00:00:00Z",
+        orderedAt: "2027-01-01T00:00:00Z", timeZone: "UTC",
+        durationValue: 2, durationUnit: FhirPeriodUnit.Hour })).toThrow("duration per infusion");
+    }
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.fhirNext.step[0].component).toHaveLength(1);
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.doseAndRate).toHaveLength(1);
+      expect(row.doseAndRate?.[0].doseQuantity).toBeUndefined();
+      if (period === 1) expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
+      else {
+        expect(row.doseAndRate?.[0].rateRatio).toMatchObject(ratio);
+        expect(row.doseAndRate?.[0].rateQuantity).toBeUndefined();
+      }
+      expect(row.timing?.repeat?.duration).toBeUndefined();
+      expect(row.maxDosePerPeriod).toBeUndefined();
+    }
+    const timed = parsePublicSig(source + " over 2 hours");
+    for (const dosage of [timed.meta.canonical.course!, timed.fhir, timed.fhirNext]) {
+      expect(calculateTotalUnits({ dosage, from: "2027-01-01T00:00:00Z",
+        orderedAt: "2027-01-01T00:00:00Z", timeZone: "UTC",
+        durationValue: 2, durationUnit: FhirPeriodUnit.Hour })).toMatchObject({ totalUnits, unit: "mL" });
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
   });
 });

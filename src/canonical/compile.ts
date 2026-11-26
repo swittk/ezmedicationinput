@@ -34,6 +34,27 @@ const quantity = (
 ): CanonicalMeasure | undefined =>
   value === undefined ? undefined : { value, unit, ...(comparator ? { comparator } : {}) };
 
+/** Choose the native rate shape once, preserving an authored numeric time
+ * denominator. Protocol adapters only encode this clinical amount. */
+export function rateFromClinicalQuantity(
+  quantity: NonNullable<CanonicalSigClause["clinicalQuantity"]>
+) {
+  const period = quantity.denominators.length === 1 && quantity.denominators[0].dimension === "time"
+    ? quantity.denominators[0] : undefined;
+  if (period && period.value !== 1) return {
+    rateRatio: {
+      numerator: { value: quantity.numerator.value, unit: quantity.numerator.unit,
+        ...(quantity.numerator.comparator ? { comparator: quantity.numerator.comparator } : {}) },
+      denominator: { value: period.value, unit: period.unit }
+    }
+  };
+  return { rate: {
+    value: quantity.numerator.value / quantity.denominators.reduce((scale, part) => scale * part.value, 1),
+    unit: [quantity.numerator.unit, ...quantity.denominators.map(part => part.unit)].join("/"),
+    ...(quantity.numerator.comparator ? { comparator: quantity.numerator.comparator } : {})
+  } };
+}
+
 /** Dimensional quantity has already been resolved by HPSG. Retain a daily
  * total as a rate when no per-administration split was actually stated. */
 function amounts(clause: CanonicalSigClause): CanonicalAmount[] | undefined {
@@ -74,11 +95,7 @@ function amounts(clause: CanonicalSigClause): CanonicalAmount[] | undefined {
     return [
       {
         ...(resolved ? { quantity: resolved } : result?.range ? { range: result.range } : {}),
-        rate: quantity(
-          q.numerator.value / q.denominators.reduce((scale, part) => scale * part.value, 1),
-          [q.numerator.unit, ...q.denominators.map((part) => part.unit)].join("/"),
-          q.numerator.comparator
-        ),
+        ...rateFromClinicalQuantity(q),
       },
     ];
   const duration = q.administrationDuration;

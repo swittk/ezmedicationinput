@@ -740,9 +740,22 @@ describe('HPSG coordination cadence scope', () => {
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
       expect(row.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
       expect(row.asNeeded).not.toBe(true);
-      expect(getDosageCondition(row)).toMatchObject({
-        kind: "not", condition: { kind: "state", name: symptom, expected: true }
-      });
+      expect(getDosageCondition(row)).toBeUndefined();
+    }
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    const actionIndex = graph.actions.findIndex(action => action.predicate.lemma === "chew");
+    expect(actionIndex).toBeGreaterThanOrEqual(0);
+    expect(graph.actions[actionIndex]).toMatchObject({ polarity: "negate" });
+    expect(graph.relations).toContainEqual(expect.objectContaining({
+      kind: "if", toActionIndex: actionIndex, text: expect.stringContaining(symptom)
+    }));
+    for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      let evaluations = 0;
+      expect(calculateTotalUnits({ dosage, from: "2027-01-01T00:00:00Z", orderedAt: "2027-01-01T00:00:00Z",
+        timeZone: "UTC", durationValue: 2, durationUnit: "d", evaluateCondition: () => {
+          evaluations++; return false;
+        } })).toMatchObject({ totalUnits: 2, unit: "tab" });
+      expect(evaluations).toBe(0);
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(input);
   });
@@ -1995,5 +2008,53 @@ describe("negative meal accompaniment ownership", () => {
     expect(fasting.fhir[0].timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
     expect(formatSig(fasting.fhirNext, "long", { locale: "en", realizationMode: "normalized" }))
       .toBe("Take 1 tablet orally once daily. While fasting.");
+  });
+});
+
+
+describe("prefix guard constituent ownership", () => {
+  it.each([
+    ["Only if dizzy take 1 tablet, with food", { kind: "state", name: "dizzy", expected: true }],
+    ["Only if dizzy, take 1 tablet with food", { kind: "state", name: "dizzy", expected: true }],
+    ["If glucose > 180 and dizzy take 1 tablet, with food", { kind: "all", conditions: [
+      { kind: "measurement", name: "glucose", operation: "gt", value: 180 },
+      { kind: "state", name: "dizzy", expected: true }] }],
+    ["If glucose > 180 and dizzy, take 1 tablet with food", { kind: "all", conditions: [
+      { kind: "measurement", name: "glucose", operation: "gt", value: 180 },
+      { kind: "state", name: "dizzy", expected: true }] }],
+    ["เฉพาะเมื่อเวียนศีรษะ ให้รับประทาน 1 เม็ด, พร้อมอาหาร", { kind: "state", name: "เวียนศีรษะ", expected: true }],
+    ["เฉพาะเมื่อเวียนศีรษะ, ให้รับประทาน 1 เม็ด พร้อมอาหาร", { kind: "state", name: "เวียนศีรษะ", expected: true }]
+  ])("keeps the administration out of the admitted predicate: %s", (input, condition) => {
+    const source = input as string, parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    expect(parseMedicationGuard(source)?.condition).toMatchObject(condition);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
+    for (const course of [parsed.meta.canonical.course!, importCanonicalCourse(parsed.fhir),
+        importCanonicalCourse(parsed.fhirNext)]) {
+      expect(course.stages[0].administrations).toHaveLength(1);
+      expect(course.stages[0].administrations[0].predicate).toMatchObject(condition);
+      expect(course.stages[0].administrations[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(course.stages[0].administrations[0].asNeeded?.enabled).not.toBe(true);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
+    ["Take 1 tablet daily; If dizzy, hold the dose", 1, "tab"],
+    ["Take 1 tablet daily; If dizzy, do not take 1 tablet", 1, "tab"],
+    ["Apply 1 patch daily; If dizzy, do not apply 1 patch", 1, "patch"],
+    ["Instill 1 drop daily; If dizzy, do not instill 1 drop", 1, "drop"]
+  ] as const)("keeps a true administration prohibition executable: %s", (source, value, unit) => {
+    const parsed = parsePublicSig(source);
+    for (const course of [parsed.meta.canonical.course!, importCanonicalCourse(parsed.fhir),
+        importCanonicalCourse(parsed.fhirNext)]) {
+      const administration = course.stages[0].administrations[0];
+      expect(administration.amounts?.[0].quantity).toMatchObject({ value, unit });
+      expect(administration.predicate).toMatchObject({ kind: "not", condition: {
+        kind: "state", name: "dizzy", expected: true } });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });

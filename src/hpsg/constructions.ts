@@ -853,13 +853,33 @@ export function parseMedicationGuard(
     end = Math.min(end, lead.end + (comma >= 0 ? comma : tail.length));
     // Registered administration heads and their directive prefixes delimit the
     // consequent. Locale lexing supplies their canonical tokens and source spans.
-    for (let index = 0; index < tokens.length; index++) {
+    const administrationAt = (index: number) => {
+      if (index < 0 || index >= tokens.length) return undefined;
+      const match = actionMatchAt(tokens, index, options), action = match?.definition;
+      if (!match || !action?.primaryAdministrationHead && !(action?.definesDose && action.administrationMethod)) return undefined;
+      return action.procedural && explicitDoseLexicalEnd(tokens, index + match.length, options) === undefined
+        ? undefined : match;
+    };
+    let delimitedConsequent = false;
+    if (comma >= 0) {
+      let next = tokens.findIndex(token => token.sourceStart >= end) + 1;
+      for (const directive of ACTION_DIRECTIVE_PREFIXES) {
+        if (next + directive.parts.length <= tokens.length &&
+            directive.parts.every((part, offset) => normalizeTokenLower(tokens[next + offset]) === part)) {
+          next += directive.parts.length;
+          break;
+        }
+      }
+      // A complete consequent after the delimiter licenses an antecedent
+      // containing its own activity, including a quantified ability predicate.
+      delimitedConsequent = Boolean(administrationAt(next));
+    }
+    for (let index = 0; !delimitedConsequent && index < tokens.length; index++) {
       const token = tokens[index];
       if (token.sourceStart < lead.end) continue;
       if (token.sourceStart >= end) break;
-      const match = actionMatchAt(tokens, index, options), action = match?.definition;
-      if (!match || !action?.primaryAdministrationHead && !(action?.definesDose && action.administrationMethod)) continue;
-      if (action.procedural && explicitDoseLexicalEnd(tokens, index + match.length, options) === undefined) continue;
+      const match = administrationAt(index);
+      if (!match) continue;
       let consequentStart = token.sourceStart;
       for (const directive of ACTION_DIRECTIVE_PREFIXES) {
         const start = index - directive.parts.length;
@@ -869,16 +889,13 @@ export function parseMedicationGuard(
           break;
         }
       }
-      if (comma >= 0) {
-        const context: GuardConstituentContext = { source, range: { start: lead.start, end } };
-        const delimited = guardPredicateConstituent(context, tokens, lead.end, end);
-        if (delimited?.synsem.cont.guard?.licensesBareIf) continue;
-        const predicate = guardPredicateConstituent(context, tokens, lead.end, consequentStart);
-        // A predicate activity remains inside its delimited antecedent. A
-        // complete clinical guard can instead precede a later instruction comma.
-        if (!predicate?.synsem.cont.guard?.licensesBareIf) continue;
-      }
+      const context: GuardConstituentContext = { source, range: { start: lead.start, end: consequentStart },
+        ...(withholdingConsequent ? { withholdingConsequent } : {}) };
+      const predicate = guardPredicateConstituent(context, tokens, lead.end, consequentStart);
+      const guard = predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate);
+      if (!guard?.synsem.cont.clinicalAdjunct?.condition) continue;
       end = consequentStart;
+      scopedGuard = guard;
       break;
     }
   } else {

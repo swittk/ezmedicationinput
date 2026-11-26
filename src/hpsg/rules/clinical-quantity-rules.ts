@@ -153,14 +153,27 @@ export function volumeOrMassTerm(value: number, raw: string): HpsgDimensionalQua
   return undefined;
 }
 
+/** Numeric denominator morphology is shared by fixed and weight-based rates.
+ * Each construction keeps its own licensed time-unit domain. */
+function clinicalTimeDenominator(
+  raw: string, resolveUnit: (unit: string) => FhirPeriodUnit | undefined = mapIntervalUnit
+): { value: number; unit: FhirPeriodUnit; dimension: "time" } | undefined {
+  const parts = raw.match(/^(\d+(?:\.\d+)?|\.\d+)?([a-z]+)$/u);
+  if (!parts) return undefined;
+  const value = parts[1] ? Number(parts[1]) : 1;
+  const unit = resolveUnit(parts[2]);
+  return value > 0 && unit ? { value, unit, dimension: "time" } : undefined;
+}
+
 export function clinicalRatePeriodUnit(raw: string): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | undefined {
   const unit = mapIntervalUnit(raw);
   return unit === FhirPeriodUnit.Hour || unit === FhirPeriodUnit.Minute ? unit : undefined;
 }
 
-function weightRatePeriodUnit(
+function weightQuantityPeriodUnit(
   raw: string
-): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | FhirPeriodUnit.Week | undefined {
+): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | FhirPeriodUnit.Week | FhirPeriodUnit.Day | undefined {
+  if (/^(?:day|daily|d)$/u.test(raw)) return FhirPeriodUnit.Day;
   const unit = mapIntervalUnit(raw);
   return unit === FhirPeriodUnit.Hour || unit === FhirPeriodUnit.Minute || unit === FhirPeriodUnit.Week
     ? unit : undefined;
@@ -469,15 +482,9 @@ function weightQuantity(
   const perDose = suffix === "dose";
   // Compound denominator morphology (e.g. /24h or /30min) is independent of
   // the medication, route, and placement of a division complement.
-  const timeParts = suffix?.match(/^(\d+(?:\.\d+)?|\.\d+)?([a-z]+)$/u);
-  let periodValue = timeParts?.[1] ? Number(timeParts[1]) : 1;
-  let periodUnit: FhirPeriodUnit | undefined = timeParts
-    ? /^(?:day|daily|d)$/u.test(timeParts[2]) ? FhirPeriodUnit.Day : weightRatePeriodUnit(timeParts[2])
-    : undefined;
-  if (periodUnit === FhirPeriodUnit.Hour && periodValue >= 24 && periodValue % 24 === 0) {
-    periodValue /= 24;
-    periodUnit = FhirPeriodUnit.Day;
-  }
+  const denominator = suffix ? clinicalTimeDenominator(suffix, weightQuantityPeriodUnit) : undefined;
+  const periodValue = denominator?.value ?? 1;
+  const periodUnit = denominator?.unit;
   if (parts.length > 3 || (suffix && !perDose && (!periodUnit || periodValue <= 0))) {
     return clinicalSign(context, "hpsg.lex.clinicalQuantity.weight.unsupported", indices, {
       representation: "rate-quantity",
@@ -562,7 +569,7 @@ function fixedRate(
   const parts = expression.compact.split("/");
   if (parts.length !== 2) return undefined;
   const numerator = volumeOrMassTerm(value, parts[0]);
-  const denominatorUnit = clinicalRatePeriodUnit(parts[1]);
+  const denominator = clinicalTimeDenominator(parts[1], clinicalRatePeriodUnit);
   // A bare/approximate per-time rate can complete the preceding volume,
   // with or without a comma. A qualified limit still needs its own marker
   // or local head; the earlier volume cannot lend the administration cue.
@@ -572,7 +579,7 @@ function fixedRate(
   // complement. The selected sequential construction owns its omitted method.
   const completeRateComplement = completesVolume && phraseStart === 0 && duration !== undefined;
   const head = clinicalRateHeadAt(context, phraseStart, expression.end, completesVolume);
-  if (!numerator || !denominatorUnit || (!completeRateComplement && !head.licensed)) return undefined;
+  if (!numerator || !denominator || (!completeRateComplement && !head.licensed)) return undefined;
   const indices = [
     ...(head.marker !== undefined ? [head.marker] : []),
     ...Array.from({ length: expression.end - start }, (_, offset) => start + offset)
@@ -582,7 +589,7 @@ function fixedRate(
     representation: "rate-quantity",
     status: "resolved",
     numerator,
-    denominators: [{ value: 1, unit: denominatorUnit, dimension: "time" }],
+    denominators: [denominator],
     administrationDuration: duration ? { value: duration.value, unit: duration.unit,
         ...(duration.comparator ? { comparator: duration.comparator } : {}) } : undefined
   });
@@ -765,7 +772,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
         (terms.length === 2 || terms.length === 3 && Boolean(terms[2]));
     }
     return terms.length === 2 && Boolean(volumeOrMassTerm(value, terms[0])) &&
-      Boolean(mapIntervalUnit(terms[1]));
+      Boolean(clinicalTimeDenominator(terms[1]));
   };
   const expression = compactUnitExpression(
     context, quantityEnd + 1, accepts, unit ?? ""
@@ -774,7 +781,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     // An unsupported fixed-rate range still owns both numeric endpoints.
     // Neither endpoint may become an exact rate or an independent scalar dose.
     const weight = expression && weightQuantity(context, quantityEnd, value, expression, phraseStart);
-    if (expression && (mapIntervalUnit(expression.compact.split("/")[1]) ||
+    if (expression && (clinicalTimeDenominator(expression.compact.split("/")[1]) ||
         weight?.synsem.head.dose?.clinicalQuantity?.representation === "rate-quantity")) {
       const owned = context.clinicalCache.unlicensedRateTokenIndices ??= new Set<number>();
       for (let index = phraseStart; index < expression.end; index++) owned.add(context.tokens[index].index);

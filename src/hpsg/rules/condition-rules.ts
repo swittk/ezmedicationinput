@@ -296,7 +296,8 @@ function withholdsMedicationAdministration(
 ): boolean {
   const action = frameActionDefinition(frame, context.options);
   const prohibitedAdministration = frame.polarity === AdvicePolarity.Negate &&
-    (action?.primaryAdministrationHead || action?.definesDose && action.administrationMethod);
+    (action?.semanticClass === "administration" || action?.semanticClass === "ingest") &&
+    (action.primaryAdministrationHead || action.definesDose && action.administrationMethod);
   const effect = prohibitedAdministration ? "withhold" : action?.argumentParserConfig?.medicationConditionEffect;
   if (frame.polarity === AdvicePolarity.Negate && !prohibitedAdministration || !effect) return false;
   // A bare "hold/omit/skip" is an elliptical medication-dose object under

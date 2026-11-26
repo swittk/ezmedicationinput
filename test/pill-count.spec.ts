@@ -1875,7 +1875,12 @@ describe("recognized duration labels and qualified scheduling quantities", () =>
     "keeps the comparative clock %s pm out of the dose quantity", (clock, expected) => {
       const source = "Take around " + clock + " pm", parsed = parseBatch(source);
       expect(parsed.meta.canonical.clauses[0].dose).toBeUndefined();
-      for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(parsed.fhir).toHaveLength(1);
+      expect(parsed.fhirNext.step).toHaveLength(1);
+      expect(parsed.fhirNext.step[0].component).toHaveLength(1);
+      const reopened = toFhirR5Dosages(parsed.fhirNext);
+      expect(reopened).toHaveLength(1);
+      for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], reopened[0]]) {
         expect(row.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
         expect(row.timing?.repeat?.timeOfDay).toEqual([expected]);
         expect(row.timing?.repeat?.when).toBeUndefined();
