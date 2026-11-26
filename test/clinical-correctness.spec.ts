@@ -3795,6 +3795,39 @@ describe("independent coded timing previews", () => {
   });
 
   it.each([
+    ["unknown shorthand", { code: "AFT" }, undefined, "09:00:00", 1],
+    ["unknown standard coding", { system: gts, code: "AFT" }, undefined, "09:00:00", 1],
+    ["morning preview alias", { code: "QAM" }, undefined, "09:00:00", 1],
+    ["evening preview alias", { code: "QPM" }, undefined, "09:00:00", 1],
+    ["configured preview alias", { code: "QAM" }, "06:30", "06:30:00", 0],
+    ["configured unknown code", { code: "AFT" }, "16:30", "16:30:00", 0],
+    ["configured foreign code", { system: "urn:clinic:timing", code: "MORNING" }, "07:45", "07:45:00", 0]
+  ] as const)("keeps numeric cadence independent of %s", (_label, coding, configured, clock, morningTotal) => {
+    const row = { text: "Use one tablet with the current daily cadence and supplied timing code.",
+      extension: [{ url: "urn:clinic:timing-note", valueString: "retain the authored timing coding" }],
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [coding] },
+        repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } } };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+    const options = { from: "2027-01-01T00:00:00Z", orderedAt: "2027-01-01T00:00:00Z",
+      timeZone: "UTC", limit: 2,
+      ...(configured ? { frequencyDefaults: { byCode: { [coding.code]: [configured] } } } : {}) };
+    for (const input of [row, r6, importCanonicalCourse(row)]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, options)).toEqual([
+        "2027-01-01T" + clock + "+00:00", "2027-01-02T" + clock + "+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...options, from: "2027-01-01T08:30:00Z",
+        durationValue: 1, durationUnit: FhirPeriodUnit.Hour }).totalUnits).toBe(morningTotal);
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.schedule?.code).toEqual(row.timing.code);
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(member.text).toBe(row.text);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([
     ["AM", "in the morning", "ตอนเช้า"],
     ["PM", "in the afternoon", "ตอนบ่าย"],
     ["BED", "at bedtime", "ก่อนนอน"],

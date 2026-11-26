@@ -1,4 +1,5 @@
-import { preferredTimingCoding as executionTimingCoding, timingCodeMeaning, timingPreviewDescriptor } from "../timing-summary";
+import { preferredTimingCoding as executionTimingCoding, timingCodeMeaning, timingPreviewDescriptor,
+  isStandardTimingCoding as isRegisteredTimingCoding } from "../timing-summary";
 /** Version-neutral medication execution kernel. All interchange decoding
  * happens in adapters/canonical-course. Calendar, count, phase and supply
  * calculations operate on native clinical facts, never FHIR storage markers. */
@@ -1180,7 +1181,7 @@ function resolveFrequencyCadence(
     if (codeClocks === undefined && isStandardTimingCoding(coding)) {
       const meaning = timingCodeMeaning(coding);
       codeClocks = meaning ? DEFAULT_FREQUENCY_DEFAULTS.byCode[meaning.toUpperCase()] : undefined;
-      if (codeClocks === undefined) {
+      if (codeClocks === undefined && isRegisteredTimingCoding(coding)) {
         const descriptor = meaning ? timingPreviewDescriptor(meaning) : undefined;
         // Event-only meanings without a clinic default use the same clock
         // resolution as an explicit timing anchor, retaining the cadence.
@@ -1224,7 +1225,7 @@ function codedExecutionRecurrence(timing: CanonicalTiming | undefined, config: N
   if (!repeat || !timing?.code || repeat.clocks?.length || repeat.anchors?.length ||
       timing.explicitEvents?.length) return repeat;
   const coding = executionTimingCoding(timing);
-  const meaning = isStandardTimingCoding(coding) ? timingCodeMeaning(coding) : undefined;
+  const meaning = isRegisteredTimingCoding(coding) ? timingCodeMeaning(coding) : undefined;
   const descriptor = meaning ? timingPreviewDescriptor(meaning) : undefined;
   if (descriptor?.when?.length && descriptor.frequency === undefined && descriptor.period === undefined)
     return { ...repeat, clocks: resolveFrequencyCadence(timing, repeat, config, coding).clocks };
