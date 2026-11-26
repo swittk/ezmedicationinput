@@ -717,13 +717,14 @@ function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getP
 /** A selected positive dose keeps an already licensed clinical condition.
  * Unknown predicates and procedural/negative targets retain their scope owner. */
 function targetHasClinicalCondition(
-  context: HpsgClauseContext, start: number, frame: AdviceFrame
+  context: HpsgClauseContext, start: number, frame: AdviceFrame, guard: ParsedMedicationGuard | undefined
 ): boolean {
   // A workflow head can be excluded from procedural lexical admission while
   // its complements still belong to a procedure rather than an administration.
   if (isProceduralInstructionFrame(context, frame) ||
       sourceRangeAttachmentClass(context, frame.span.start, frame.span.end) !== "administration") return false;
-  if (isMedicationGuardMarker(context, start)) return true;
+  const lead = context.tokens[start];
+  if (guard && guard.start <= lead.sourceStart && lead.sourceStart < guard.markerEnd) return true;
   return prnAt(context, start).some(sign => {
     const requests = sign.synsem.valence.prn?.lookupRequests;
     return Boolean(requests?.length && requests.every(request => request.canonical));
@@ -836,7 +837,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           frame.span.start >= markerEnd && frame.span.start < delimiter.sourceStart)) {
         const consequent = frames.find(frame => frame.span.start >= delimiter.sourceEnd &&
           !hasStrongBoundary(context.state.input.slice(delimiter.sourceEnd, frame.span.start)));
-        if (consequent && isScopeTarget(context, consequent)) {
+        if (consequent) {
           // A complete admitted predicate before the delimiter owns its activity;
           // the separately selected action after it is the consequent.
           guard = parseMedicationGuard(context.state.input, context.tokens, undefined, context.options,
@@ -855,7 +856,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           token.sourceEnd <= frame.span.start && /^[;.!?]$/u.test(token.original))) break;
       // Select the positive dose before procedural eligibility can skip it.
       // Its clinical condition cannot transfer to later counseling.
-      if (targetHasClinicalCondition(context, start, frame)) {
+      if (targetHasClinicalCondition(context, start, frame, guard)) {
         const sign = selectedClinicalGuardSign(context, start, relation, frame, guard, frames);
         return sign ? [sign] : [];
       }
@@ -899,12 +900,12 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
 
     const previous = frames
       .filter((frame) => frame.span.end <= lead.sourceStart &&
-        (targetHasClinicalCondition(context, start, frame) || isScopeTarget(context, frame)))
+        (targetHasClinicalCondition(context, start, frame, guard) || isScopeTarget(context, frame)))
       .sort((a, b) => b.span.end - a.span.end)[0];
     if (!previous) return [];
     const gap = context.state.input.slice(previous.span.end, lead.sourceStart);
     if (hasStrongBoundary(gap)) return [];
-    if (targetHasClinicalCondition(context, start, previous)) {
+    if (targetHasClinicalCondition(context, start, previous, guard)) {
       const sign = selectedClinicalGuardSign(context, start, relation, previous, guard, frames);
       return sign ? [sign] : [];
     }
