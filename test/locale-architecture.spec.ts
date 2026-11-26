@@ -431,6 +431,25 @@ describe("independent cadence and preview condition owners", () => {
     expect(JSON.stringify(source)).toBe(before);
   });
 
+  it.each(["en", "th"] as const)("keeps identical independent advice from satisfying a replaced dose guard in %s", locale => {
+    const advice = locale === "en" ? "Recheck BP only if SBP > 160" : "Recheck BP เฉพาะเมื่อ SBP > 160";
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [tablet],
+      condition: [guard], additionalInstruction: [{ text: advice }]
+    }] }] };
+    const before = JSON.stringify(source);
+    const dose = "Administer 1 tablet";
+    const guardText = locale === "en" ? "only if" : "เฉพาะเมื่อ";
+    for (const prefix of ["", "Directions: "]) {
+      const text = formatSig(source, "long", { locale, realizationMode: "normalized", i18n: {
+        formatLong: context => prefix + context.defaultText.replace(
+          `Use 1 tablet ${guardText} SBP > 160.`, dose + ".")
+      } });
+      expect(text).toBe(`${prefix}${dose} ${guardText} SBP > 160. ${advice}.`);
+      expect(text.match(/SBP > 160/gu)).toHaveLength(2);
+    }
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
   it.each(["en", "th"] as const)("guards partially authored dose directions once in %s", locale => {
     const source: FhirR6DosageInstruction = { step: [{ component: [{ text: "Swallow 1 tablet whole",
       timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }, condition: [guard]
