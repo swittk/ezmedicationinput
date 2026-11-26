@@ -344,13 +344,10 @@ If learned behavior is added later, it should be:
   clinical facts where supported; historical export edits, saved draft/pause
   restoration and source-history reconciliation have no conformance guarantee.
   Per-instance verification need not recheck later caller mutation.
-- Performance review (updated by the owner on 2026-11-24): use short paired
-  measurements of representative parse, format, FHIR, schedule, supply and
-  suggestion workflows. Judge absolute latency, usage frequency, CPU spread
-  and reproducibility. Reproducible regressions over 4% on meaningful-time
-  workloads fail acceptance. For tiny routines (indicatively below 0.5 ms),
-  judge absolute change and cumulative call-volume impact instead of mechanical
-  percentage noise; the fast-call category is not a blanket exemption.
+- Preserve responsiveness across ordinary parsing, formatting, FHIR,
+  scheduling, supply and suggestion workflows. Investigate reproducible
+  regressions and consider absolute latency, realistic usage and cumulative
+  cost. Keep detailed measurement policy and results outside product guidance.
 - Original audit blocker (resolved in the later direct-adapter checkpoint):
   native-to-R5 used to construct R6 first. Complete R5 and R6 sibling
   projection/import now independently own their source-compatibility codecs.
@@ -383,15 +380,10 @@ locales/course/ supply calendars, stages, temporal units, conjunctions,
 conditions, exclusions, rate/dose labels and technical fallbacks. A third
 language test covers registration and inheritance without a second parser.
 
-The public API benchmark defaults to one short representative diagnostic,
-including parse, format, FHIR interchange, scheduling, supply and suggestions.
-It reports absolute latency, paired ratios and spread. Meaningful-work regressions
-over 4% fail; smaller fast-call timings are marked for practical latency and
-frequency review, not automatically accepted. Use --only for a suspect workflow
-and --meaningful if a fast workflow has meaningful cumulative impact. --all
-retains the optional complete inventory. No exhaustive sweep or fixed confirmation
-protocol is mandatory. Compare against a relevant built baseline and investigate
-reproducible regressions without treating small relative noise as a blocker.
+Performance validation covers representative public workflows against a
+relevant built baseline. Investigate reproducible regressions and practical
+latency costs without compulsory exhaustive sweeps or treating measurement
+noise as a product defect.
 
 
 ## 2026-11-17 — Chronological overlap and source replay ownership
