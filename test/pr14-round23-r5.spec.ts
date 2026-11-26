@@ -4320,7 +4320,7 @@ describe("round76 shared current preview owners", () => {
       expect(short).not.toMatch(/x2h|hours|ชั่วโมง/u);
       const native = importCanonicalCourse(input);
       expect(native.stages[0].administrations[0].schedule?.recurrence?.courseLength).toEqual(bound);
-      expect(projectCanonicalCourse(native).fhirNext.step[0].component[0].timing?.repeat?.boundsDuration).toEqual(bound);
+      expect(projectCanonicalCourse(native).fhirNext.step![0].component[0].timing?.repeat?.boundsDuration).toEqual(bound);
     }
   });
 

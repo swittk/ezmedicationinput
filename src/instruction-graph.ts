@@ -4139,7 +4139,8 @@ function realizeAction(
   const genericRealizer = ACTION_REALIZERS[realizerKey];
   const genericText = genericRealizer && (!negated ||
       realizerKey === "amount-material-destination" ||
-      realizerKey === "default" && defaultArguments?.relationTargetArg ||
+      realizerKey === "default" && defaultArguments?.relationTargetArg &&
+        relationHasSemanticClass(defaultArguments.relationTargetArg.relation ?? frame.relation, "accompaniment") ||
       (realizerKey === "default" || realizerKey === "result") && firstArguments[AdviceArgumentRole.Amount]?.quantity)
     ? genericRealizer === DEFAULT_ACTION_REALIZER
       ? DEFAULT_ACTION_REALIZER(input, input.frame === frame ? defaultArguments : undefined)
