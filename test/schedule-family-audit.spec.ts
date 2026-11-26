@@ -14,7 +14,7 @@ import { createBoundaryPlan } from "../src/regimen/planner";
 import { buildRegimenGraph } from "../src/regimen/regimen";
 import { recognizeCycles } from "../src/hpsg/rules/timing-rules";
 import { DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
-import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount } from "../src/fhir-course-cycle-count";
+import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount } from "../src/dosage-course";
 import { calendarBoundaryDate, makeZonedDate } from "../src/execution/calendar";
 
 const start = "2024-01-01T00:00:00Z";

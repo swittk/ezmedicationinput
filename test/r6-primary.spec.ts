@@ -30,7 +30,7 @@ import {
   setDosageAlternativeChoice, buildDosageAlternativeChoiceStructureDefinition
 } from "../src/dosage-course";
 
-import { COURSE_CYCLE_COUNT_EXTENSION_URL } from "../src/fhir-course-cycle-count";
+import { COURSE_CYCLE_COUNT_EXTENSION_URL } from "../src/dosage-course";
 import { getQuantityComparator, quantityForR5, quantityFromR5, simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 
 describe("EZMED extended R5 dosage and R6 projection", () => {

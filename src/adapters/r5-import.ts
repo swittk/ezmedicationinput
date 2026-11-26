@@ -32,7 +32,7 @@ import {
   removeLiftedPartialMaximumMirrors,
 } from "./canonical-course";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
-import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
+import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../dosage-course";
 import { FHIR_TRANSLATION_EXTENSION_URL } from "../fhir-translations";
 import { R6_DRAFT_STEPS_SOURCE_URL, retainedDraftStepIndices } from "./r6-editable-metadata";
 import { quantityFromR5, simpleQuantityForR5, quantityForR5, getQuantityComparator } from "../fhir-quantity-operator";

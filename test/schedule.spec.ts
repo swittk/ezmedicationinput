@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits, evaluateMedicationCondition, toDosageDetails, toFhirR5Dosages, formatSig } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
-import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount } from "../src/fhir-course-cycle-count";
+import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount } from "../src/dosage-course";
 import {
   EventTiming, FhirDosage, FhirR6DosageInstruction, NextDueDoseOptions,
   FhirPeriodUnit, FhirDayOfWeek

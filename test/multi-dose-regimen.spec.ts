@@ -16,7 +16,7 @@ import {
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { AdviceArgumentRole, FhirDosage } from "../src/types";
 import { getDosageCalendarDayCondition, setDosageCondition } from "../src/dosage-course";
-import { getCourseCycleCount } from "../src/fhir-course-cycle-count";
+import { getCourseCycleCount } from "../src/dosage-course";
 import { formatParseBatch } from "../src/index";
 import { formatSigBatch } from "../src/index";
 import { fromFhir } from "../src/index";

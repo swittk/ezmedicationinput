@@ -1,5 +1,5 @@
 import retainedCourseProfile from "../fhir/r5/medication-r6-course-details.json";
-import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../src/fhir-course-cycle-count";
+import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../src/dosage-course";
 import { describe, expect, it } from "vitest";
 import {
   fromDosageDetails, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages, parseSig, parseSig as parsePublicSig, parseInstructionActions, formatSig, importCanonicalCourse, projectCanonicalCourse,

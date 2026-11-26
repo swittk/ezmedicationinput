@@ -1,7 +1,7 @@
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../instruction-graph-fhir";
 import { projectR6ModifierWrapper, reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, sourceOwnership, isSourceAgreementMarker } from "../dosage-course";
 import { courseFromR5 } from "./r5-import";
-import { getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
+import { getCourseCycleCount, setCourseCycleCount } from "../dosage-course";
 import { projectNativeR5Course } from "./r5-course";
 import { editableCourseSteps, retainedSingleStepSafety, liftSingleStepSafety, retainDraftSteps, retainConflictingAmountChoices, R6_DRAFT_STEPS_SOURCE_URL, R6_SINGLE_STEP_SAFETY_SOURCE_URL } from "./r6-editable-metadata";
 /**
