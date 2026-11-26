@@ -41,7 +41,7 @@ import {
   createR5EmptyCourseCarrier,
   withDosageEditProvenance,
   getDosageSourceTextAgreement,
-  retainedSourceProjectionFingerprint, dosageHasAgreedSourceText,
+  retainedSourceProjectionFingerprint, dosageHasAgreedSourceText, isCompactSourceAgreementMarker,
   getDosageSourceTextFingerprint,
   type DosageSourceTextBaseline,
   r5StepMetadata,
@@ -257,6 +257,18 @@ export function projectNativeR5Course(
 ): { dosages: EzDosage[]; course: EzCourseMetadata; strictDosages?: FhirDosage[];
   sourceBaselines?: readonly (DosageSourceTextBaseline | undefined)[] } {
   const header = courseMetadataToWire(course);
+  const headerCovered = course.instruction !== undefined && course.provenance?.sourceTextAgreed === true;
+  if (headerCovered && header.extension?.length && course.stages.some(stage => stage.administrations.length)) {
+    // The existing instruction baseline owns header coverage in R5. Do not
+    // duplicate its compact native proof in retained shared-course metadata.
+    const kept = header.extension.filter(marker => !isCompactSourceAgreementMarker(marker) ||
+      marker.extension?.length !== 3 ||
+      !marker.extension.some(field => field.url === "sourceAgreement" && field.valueBoolean === false) ||
+      !marker.extension.some(field => field.url === "sourceTextAgreed" && field.valueBoolean === true) ||
+      !dosageHasAgreedSourceText({ text: course.instruction, extension: [marker] }));
+    if (kept.length) header.extension = kept;
+    else delete header.extension;
+  }
   const sourceAgreement = course.provenance?.format !== "r6" && course.provenance?.sourceTextVerified !== false;
   let rowSources: Array<DosageSourceTextBaseline | undefined> | undefined;
   const hasHeader = Object.keys(header).length > 0;
@@ -336,21 +348,23 @@ export function projectNativeR5Course(
       const sourceClocks = a.provenance?.sourceHasStructuredClocks,
         sourceEvents = a.provenance?.sourceHasStructuredEvents,
         sourceSite = a.provenance?.sourceHasStructuredSite,
-        sourceAgreed = a.provenance?.sourceTextAgreed === true && !administrationHasAmountFacts(a);
+        sourceCovered = a.provenance?.sourceTextAgreed === true,
+        sourceAgreed = sourceCovered && !administrationHasAmountFacts(a);
       const originalAgreement = sourceAgreed ? true :
         (originalRow?.text !== undefined && !dosageHasAgreedSourceText(originalRow) ||
           a.text !== undefined && a.syntax?.instructionGraph?.actions.length) &&
           !administrationHasAmountFacts(a) ? false :
         !deferSourceProvenance && originalRow && a.provenance?.sourceTextVerified !== undefined
           ? getDosageSourceTextAgreement(originalRow, false) : undefined;
-      if (sourceClocks !== undefined || sourceEvents !== undefined || sourceSite !== undefined || sourceAgreed ||
+      if (sourceClocks !== undefined || sourceEvents !== undefined || sourceSite !== undefined || sourceCovered ||
           !deferSourceProvenance && (originalAgreement === false || sourceAgreement && a.provenance?.format === "r6")) {
         rowSources ??= [];
         rowSources[rowIndex] = { sourceAgreement: sourceAgreed || (originalAgreement !== false &&
           !(sourceAgreement && a.provenance?.format === "r6") && sourceAgreement),
-          ...(sourceAgreed ? { sourceTextAgreed: true,
+          ...(sourceCovered ? { sourceTextAgreed: true,
             textFingerprint: getDosageSourceTextFingerprint(a.provenance!.data),
-            projectionFingerprint: retainedSourceProjectionFingerprint(a.provenance!.data) } : {}),
+            projectionFingerprint: !administrationHasAmountFacts(a)
+              ? retainedSourceProjectionFingerprint(a.provenance!.data) : undefined } : {}),
           ...(sourceClocks !== undefined ? { sourceHasStructuredClocks: sourceClocks } : {}),
           ...(sourceEvents !== undefined ? { sourceHasStructuredEvents: sourceEvents } : {}),
           ...(sourceSite !== undefined ? { sourceHasStructuredSite: sourceSite } : {}),
@@ -461,9 +475,9 @@ export function projectNativeR5Course(
   const writeProvenance = !deferSourceProvenance && hasAdministrations &&
     (instruction !== undefined || !sourceAgreement && hasSourceText || rowSources !== undefined);
   const dosages = writeProvenance
-    ? withDosageEditProvenance(rows, instruction, sourceAgreement, rowSources) : rows;
+    ? withDosageEditProvenance(rows, instruction, sourceAgreement, rowSources, headerCovered) : rows;
   const strictDosages = strictRows
-    ? writeProvenance ? withDosageEditProvenance(strictRows, instruction, sourceAgreement, rowSources) : strictRows
+    ? writeProvenance ? withDosageEditProvenance(strictRows, instruction, sourceAgreement, rowSources, headerCovered) : strictRows
     : dosages;
   return {
     dosages,

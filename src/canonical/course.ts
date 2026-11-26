@@ -262,7 +262,9 @@ export interface CanonicalCourse {
   contextIssue?: "conflicting-course-phase" | "missing-course-context";
   provenance?: { format: "r5" | "r6" | "syntax"; data: Record<string, unknown>;
     /** Source preservation is independent of authority to replay that wording. */
-    sourceTextVerified?: boolean };
+    sourceTextVerified?: boolean;
+    /** The producer established coverage of this exact header, independently of clinical replay. */
+    sourceTextAgreed?: boolean };
 }
 export type CanonicalScheduleInput =
   | CanonicalCourse

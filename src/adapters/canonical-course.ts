@@ -962,6 +962,9 @@ export function courseFromR6(raw: FhirR6DosageInstructionInput, sourceContext = 
       ? { ...raw, safety: retainedSafety.course } : raw) },
   };
   if (stages.length) course.provenance!.sourceTextVerified = false;
+  if (raw.renderedInstruction !== undefined &&
+      dosageHasAgreedSourceText({ text: raw.renderedInstruction, extension: raw.extension }))
+    course.provenance!.sourceTextAgreed = true;
   // No defensive copy. Re-reading an externally changed FHIR input should
   // still observe its current fields, while ordinary callers leave it alone.
   return course;
@@ -1968,6 +1971,10 @@ function administrationToWire(
   }
   let agreedSourceFields: FhirExtension[] | undefined;
   if (target === "r6") {
+    // A just-compiled clause owns its emitted wording. Carry the same source
+    // agreement used by R5 without requiring a graph or a clinical replay hash.
+    const agreedText = a.text !== undefined &&
+      (currentSyntax !== undefined || a.provenance?.sourceTextAgreed === true);
     const agreedGraphText = a.provenance?.sourceTextAgreed === true && projectedGraph &&
       !administrationHasAmountFacts(a);
     const clocks = a.provenance?.sourceHasStructuredClocks ??
@@ -1976,14 +1983,16 @@ function administrationToWire(
       (clause?.instructionGraph ? Boolean(a.schedule?.recurrence?.anchors?.length) : undefined);
     const site = a.provenance?.sourceHasStructuredSite ??
       (clause?.instructionGraph ? Boolean(a.target || a.siteReference) : undefined);
-    if (clocks !== undefined || events !== undefined || site !== undefined || agreedGraphText) {
+    if (clocks !== undefined || events !== undefined || site !== undefined || agreedText) {
       // R6 current-source replay remains unverified. Preserve an established
       // component-text baseline independently of the primary-field evidence
       // that distinguishes deletions from independent graph facts.
       const fields: FhirExtension[] = [{ url: "sourceAgreement", valueBoolean: agreedGraphText }];
-      if (agreedGraphText && a.text !== undefined) {
-        agreedSourceFields = fields;
-        fields.push({ url: "textFingerprint", valueString: getDosageSourceTextFingerprint(a.provenance!.data) ?? dosageTextFingerprint({ text: a.text }) });
+      if (agreedText) {
+        fields.push({ url: "sourceTextAgreed", valueBoolean: true });
+        if (agreedGraphText) agreedSourceFields = fields;
+        fields.push({ url: "textFingerprint", valueString:
+          (a.provenance && getDosageSourceTextFingerprint(a.provenance.data)) ?? dosageTextFingerprint({ text: a.text }) });
       }
       if (clocks !== undefined) fields.push({ url: "sourceHasStructuredClocks", valueBoolean: clocks });
       if (events !== undefined) fields.push({ url: "sourceHasStructuredEvents", valueBoolean: events });
@@ -2267,6 +2276,20 @@ function projectCourseToR6(
   liftSingleStepSafety(result);
   if (drafts || result.extension?.length) retainDraftSteps(result, drafts, synthesizedStarts);
   if (course.instruction !== undefined) result.renderedInstruction = course.instruction;
+  if (course.instruction !== undefined &&
+      (freshlyCompiled || course.provenance?.sourceTextAgreed === true) &&
+      !dosageHasAgreedSourceText({ text: course.instruction, extension: result.extension })) {
+    // Header coverage is independent of component coverage. A fresh external
+    // header never acquires agreement merely because its members have amounts.
+    result.extension = [...(result.extension ?? []), {
+      url: DOSAGE_RENDERED_INSTRUCTION_R5_URL,
+      extension: [
+        { url: "sourceAgreement", valueBoolean: false },
+        { url: "sourceTextAgreed", valueBoolean: true },
+        { url: "textFingerprint", valueString: dosageTextFingerprint({ text: course.instruction }) }
+      ]
+    }];
+  }
   return result;
 }
 /** Ordinary native export must derive source-annotation views from current

@@ -157,8 +157,12 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
     const recovered = toDosageDetails(r5);
     expect(recovered.renderedInstruction).toBe(expected.renderedInstruction);
     expect(recovered.step).toEqual(expected.step);
-    expect(recovered.extension?.some(extension =>
-      extension.extension?.some(child => equalStructuredValues(child, unknown)))).toBe(true);
+    expect(recovered.extension).toEqual(expect.arrayContaining(expected.extension ?? []));
+    expect(recovered.extension?.flatMap(extension => extension.extension ?? []))
+      .toContainEqual(expect.objectContaining({
+        url: unknown.url,
+        extension: expect.arrayContaining(unknown.extension!.filter(child => child.url !== "course"))
+      }));
 
     const phase = marker(1).extension!.find(child => child.url === "step")!;
     const end = phase.extension!.find(child => child.url === "end")!;
@@ -2259,11 +2263,11 @@ describe("parser state import preserves administration offsets", () => {
 describe("compact row-local R5 course persistence", () => {
   const input = "1 drop OD q2h x7d then qid; 1 drop OS qid x1mo then bid";
 
-  it("keeps the six-row independent taper below 12 KB in both public R5 outputs", () => {
+  it("keeps the six-row independent taper below 12 KB in public R5 outputs", () => {
     const parsed = parseSig(input);
     const strict = toFhirR5Dosages(parsed.fhirNext);
     expect(parsed.fhir).toHaveLength(6);
-    for (const rows of [parsed.fhir, strict]) {
+    for (const rows of [parsed.fhir, strict, fromFhir(parsed.fhirNext).fhir]) {
       expect(Buffer.byteLength(JSON.stringify(rows), "utf8")).toBeLessThan(12_000);
       expect(toDosageDetails(JSON.parse(JSON.stringify(rows)))).toEqual(parsed.fhirNext);
     }

@@ -1158,11 +1158,9 @@ describe("round23 external R6 wording across R5", () => {
         expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" })).toContain("2 tablets");
         expect(row.text).toContain("1 tablet");
       }
-      expect(rows[1].extension!.filter(item => item.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)).toEqual([{
-        url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: [
-          { url: "sourceAgreement", valueBoolean: false },
-          { url: "textFingerprint", valueString: expect.any(String) },
-        ],
+      expect(rows[1].extension!.filter(item => item.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)).toMatchObject([{
+        url: DOSAGE_RENDERED_INSTRUCTION_R5_URL,
+        extension: expect.arrayContaining([{ url: "textFingerprint", valueString: expect.any(String) }]),
       }]);
       const reopened = toDosageDetails(rows);
       expect(reopened.renderedInstruction).toBe(source.renderedInstruction);

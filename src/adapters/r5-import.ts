@@ -50,7 +50,7 @@ import {
   offsetCadenceFingerprint,
   matchesOffsetCadence,
   matchesDosageProjectionFingerprint,
-  dosageTextFingerprint, getDosageSourceTextAgreement,
+  dosageTextFingerprint, getDosageSourceTextAgreement, dosageHasAgreedSourceText,
   getDosageSourceProjectionFingerprint, getDosageSourceTextFingerprint,
   isRenderedInstructionMarker,
   hasUnrecognizedEditMetadata,
@@ -116,7 +116,9 @@ function removeInstructionTranslations(header: Omit<FhirR6DosageInstruction, "st
 function courseFromFields(
   fields: Omit<FhirR6DosageInstruction, "step">,
   stages: CanonicalStage[],
-  headerAgreement?: boolean
+  headerAgreement?: boolean,
+  headerCovered = false,
+  membersCovered = false
 ): CanonicalCourse {
   let contextIssue: CanonicalCourse["contextIssue"];
   let sourceTextVerified: boolean | undefined = headerAgreement;
@@ -125,6 +127,7 @@ function courseFromFields(
       if (a.contextIssue === "conflicting-course-phase") contextIssue = a.contextIssue;
       else if (a.contextIssue && !contextIssue) contextIssue = a.contextIssue;
       if (headerAgreement === undefined && a.provenance?.sourceTextVerified === false) sourceTextVerified = false;
+      if (membersCovered && a.text !== undefined && a.provenance) a.provenance.sourceTextAgreed = true;
     }
   const course:CanonicalCourse={
     kind:"course",stages,instruction:fields.renderedInstruction,
@@ -136,6 +139,9 @@ function courseFromFields(
   // fragments/descriptors on every imported course in the ES6 build.
   if(contextIssue)course.contextIssue=contextIssue;
   if(sourceTextVerified!==undefined)course.provenance!.sourceTextVerified=sourceTextVerified;
+  if (fields.renderedInstruction !== undefined && (headerCovered ||
+      dosageHasAgreedSourceText({ text: fields.renderedInstruction, extension: fields.extension })))
+    course.provenance!.sourceTextAgreed = true;
   return course;
 }
 function extensionFields(course: CanonicalCourse): FhirR6Extension[] {
@@ -552,14 +558,16 @@ function instructionBaseline(marker: FhirExtension | undefined): {
   rows: Array<{ projection?: string; text?: string }>;
   complete: boolean;
   sourceAgreement?: boolean;
+  sourceTextAgreed?: boolean;
 } {
-  let sourceAgreement: boolean | undefined;
+  let sourceAgreement: boolean | undefined, sourceTextAgreed: boolean | undefined;
   let instruction: string | undefined,
     instructionSeen = false,
     complete = true;
   const rows: Array<{ projection?: string; text?: string }> = [];
   for (const item of marker?.extension ?? []) {
     if (item.url === "sourceAgreement" && typeof item.valueBoolean === "boolean") sourceAgreement = item.valueBoolean;
+    if (item.url === "sourceTextAgreed" && typeof item.valueBoolean === "boolean") sourceTextAgreed = item.valueBoolean;
     if (item.url === "instruction" && !instructionSeen) {
       instructionSeen = true;
       instruction = item.valueString;
@@ -579,7 +587,7 @@ function instructionBaseline(marker: FhirExtension | undefined): {
     if (!row.projection || !row.text) complete = false;
     rows.push(row);
   }
-  return { instruction, rows, complete: complete && rows.length > 0, sourceAgreement };
+  return { instruction, rows, complete: complete && rows.length > 0, sourceAgreement, sourceTextAgreed };
 }
 
 /** A returned draft baseline identifies the complete lifted membership list.
@@ -1168,8 +1176,12 @@ function reconcileNativeCompactCourse(
   }
   const replacementOwnsHeader = instruction !== undefined &&
     (renderedInstruction !== undefined || instruction !== savedInstruction);
+  const unchangedBaseline = instructionMatches && parsedBaseline.complete && savedInstruction !== undefined &&
+    instruction === savedInstruction && !replacementOwnsHeader;
+  const membersCovered = unchangedBaseline && parsedBaseline.sourceAgreement !== false;
   const result = courseFromFields(currentHeader, steps,
-    replacementOwnsHeader ? true : parsedBaseline.sourceAgreement);
+    replacementOwnsHeader ? true : parsedBaseline.sourceAgreement,
+    membersCovered || unchangedBaseline && parsedBaseline.sourceTextAgreed === true, membersCovered);
   if (savedInstruction !== undefined && !instructionMatches)
     addWarning(
       warnings,
@@ -1966,6 +1978,9 @@ export function courseFromR5(
   // never pass it to reconciliation as an explicit replacement instruction.
   const replacementInstruction = explicitCourseInstruction ?? renderedInstruction ?? clinicianEditedText;
   const currentInstruction = replacementInstruction ?? preservedInstruction;
+  const unchangedBaseline = instructionStillMatches && savedInstruction !== undefined && replacementInstruction === undefined;
+  const membersCovered = unchangedBaseline && snapshot.sourceAgreement !== false;
+  const headerCovered = membersCovered || unchangedBaseline && snapshot.sourceTextAgreed === true;
   const instructionSource =
     instructionMarker && (!instructionStillMatches ||
       replacementInstruction !== undefined && replacementInstruction !== savedInstruction ||
@@ -2125,7 +2140,7 @@ export function courseFromR5(
       );
     const result = courseFromFields(header, [
       { administrations: [administrationFromR5(row, sourceContext)] },
-    ], replacementInstruction !== undefined ? true : snapshot.sourceAgreement);
+    ], replacementInstruction !== undefined ? true : snapshot.sourceAgreement, headerCovered, membersCovered);
     return withPreservedSourceExtension(
       withReconciliationSources(withReconciliationWarnings(result, warnings), reconciliationSources),
       instructionSource
@@ -2169,7 +2184,7 @@ export function courseFromR5(
   for (const sequence of [...sequences].sort((a, b) => a - b))
     stages.push(stageFromFields(r6StepMetadata(metadata.get(sequence) ?? {}), groups.get(sequence) ?? []));
   const result = courseFromFields(header, stages,
-    replacementInstruction !== undefined ? true : snapshot.sourceAgreement);
+    replacementInstruction !== undefined ? true : snapshot.sourceAgreement, headerCovered, membersCovered);
   return withPreservedSourceExtension(
     withReconciliationSources(withReconciliationWarnings(result, warnings), reconciliationSources),
     instructionSource

@@ -1355,12 +1355,14 @@ export function fromFhir(
     : strict;
   const r5Rows = normalizedStrict.length
     ? hasAdministrations
-      ? withDosageEditProvenance(normalizedStrict, dosageDetails.renderedInstruction, false, projection.sourceBaselines)
+      ? withDosageEditProvenance(normalizedStrict, dosageDetails.renderedInstruction, false, projection.sourceBaselines,
+          native.provenance?.sourceTextAgreed === true)
       : normalizedStrict
     : toFhirR5Dosages(dosageDetails); // zero-component text/safety carrier only
   const dosages = projection.dosages === normalizedStrict
     ? r5Rows
-    : withDosageEditProvenance(projection.dosages, dosageDetails.renderedInstruction, false, projection.sourceBaselines);
+    : withDosageEditProvenance(projection.dosages, dosageDetails.renderedInstruction, false, projection.sourceBaselines,
+        native.provenance?.sourceTextAgreed === true);
   const compiled = new Map<CanonicalAdministration, CanonicalSigClause>();
   const items: ParseResult[] = [];
   let row = 0;
