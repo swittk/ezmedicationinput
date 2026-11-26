@@ -3,7 +3,7 @@ import {
   DEFAULT_UNIT_SYNONYMS,
   HOUSEHOLD_VOLUME_UNITS,
   KNOWN_DOSAGE_FORMS_TO_DOSE,
-  getDoseQuantityUnit
+  stripTerminalUcumAnnotations
 } from "./maps";
 import unitTerminologySource from "./unit-terminology.json";
 import { FhirPeriodUnit } from "./types";
@@ -267,7 +267,7 @@ export function getQuantityDurationUnit(
   // familiar UCUM symbol. Keep unknown durations available without guessing.
   if (quantity?.code && quantity.system && quantity.system !== "http://unitsofmeasure.org") return undefined;
   let candidate = quantity?.code
-    ? getDoseQuantityUnit({ code: quantity.code.trim(), system: quantity.system }, false)
+    ? stripTerminalUcumAnnotations(quantity.code.trim())
     : quantity?.unit?.trim();
   // Explicit UCUM codes are case-sensitive (S is conductance; s is time).
   // Uncoded labels and the supported systemless shorthand remain permissive.

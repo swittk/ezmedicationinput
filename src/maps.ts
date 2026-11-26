@@ -2074,6 +2074,14 @@ const SNOMED_UNIT_BY_CODE = new Map<string, string>(
 );
 
 
+/** Remove only terminal UCUM annotations without changing the unit code.
+ * Callers retain their own terminology and case rules. */
+export function stripTerminalUcumAnnotations(code: string): string {
+  if (code.indexOf("{") < 0) return code;
+  const annotation = code.match(/(?:\{[^{}]*\})+$/u);
+  return annotation?.index ? code.slice(0, annotation.index) : code;
+}
+
 /** Resolve standard codes and plain unit labels to the same calculation unit.
  * @param quantity A dose or limit quantity; its original display remains untouched.
  * @param includeOpaqueCode Retain an unknown code as a display/counting label.
@@ -2087,12 +2095,8 @@ export function getDoseQuantityUnit(
   if (!quantity) return "";
   let code = quantity.code;
   if (!includeOpaqueCode && code && (!quantity.system || quantity.system === "http://unitsofmeasure.org")) {
-    // Terminal UCUM annotations describe a quantity without changing its
-    // calculation unit. Keep the authored code and display untouched.
-    if (code.indexOf("{") >= 0) {
-      const annotation = code.match(/(?:\{[^{}]*\})+$/u);
-      if (annotation?.index) code = code.slice(0, annotation.index);
-    }
+    // Keep the authored code and display untouched.
+    code = stripTerminalUcumAnnotations(code);
   }
   const fallbackCode = includeOpaqueCode || !quantity.system || quantity.system === "http://unitsofmeasure.org"
     ? code : undefined;
