@@ -767,6 +767,17 @@ describe('HPSG coordination cadence scope', () => {
     const input = `Swallow 1 tablet daily for 7 days; If dizzy, do not chew ${target}.`;
     const parsed = parsePublicSig(input);
     expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    const actionIndex = graph.actions.findIndex(action => action.predicate.lemma === "chew");
+    expect(actionIndex).toBeGreaterThanOrEqual(0);
+    expect(graph.actions[actionIndex]).toMatchObject({ polarity: "negate",
+      args: expect.arrayContaining([expect.objectContaining({ text: target })]) });
+    expect(graph.relations).toContainEqual(expect.objectContaining({
+      kind: "if", toActionIndex: actionIndex, text: "If dizzy,"
+    }));
+    for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+      expect(formatSig(dosage, "long", { locale: "en", realizationMode: "normalized" }))
+        .toContain(`If dizzy, do not chew ${target}.`);
     expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.condition).toBeUndefined();
     for (const row of [parsed.fhir[0], ...toFhirR5Dosages(parsed.fhirNext)]) {
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });

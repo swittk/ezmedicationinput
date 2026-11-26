@@ -369,6 +369,10 @@ describe("structured preview defaults", () => {
       expect(JSON.stringify(source)).toBe(before);
     }
     expect(fromFhirDosage(component).longText).toContain("Chew 1 tablet");
+    const projected = toDosageDetails([component]);
+    expect(projected.step[0].component[0].method).toEqual({ coding: [{ display: "Chew" }] });
+    for (const source of [native, projected])
+      expect(toFhirR5Dosages(source)[0].method).toEqual({ coding: [{ display: "Chew" }] });
   });
 
   it.each([0, 2])("displays both endpoints of a %s-to-four-hour PRN interval", period => {

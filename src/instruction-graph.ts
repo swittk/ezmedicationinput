@@ -612,14 +612,17 @@ function timeArgumentsFromParts(
       if (overt) { inheritedRelation = overt; begin++; }
       const bounds = semanticArgumentBounds(parts, begin, member.end);
       const time = timeArgumentFromParts(parts, bounds.start, bounds.endExclusive, input, true);
-      if (!time) break;
+      if (!time) {
+        // A later independently marked complement belongs to the caller's
+        // next relation, not to this already complete temporal conjunction.
+        return member.start >= singleEnd && times.length ? times : undefined;
+      }
       times.push({ ...time, relation: inheritedRelation,
         span: { start: offset + parts[bounds.start].sourceStart,
           end: offset + parts[bounds.endExclusive - 1].sourceEnd } });
     }
-    // Only complete conjunctive Time daughters share this relation scope.
-    // Other complements retain their existing bounded single-argument path.
-    if (times.length === members.length) return times;
+    // Every daughter in this relation scope was consumed completely.
+    return times;
   }
   const single = timeArgumentFromParts(parts, start, singleEnd, input);
   return single ? [single] : undefined;
@@ -3838,7 +3841,7 @@ function defaultActionArguments(frame: AdviceFrame) {
             (unmarkedSubstances < 2 || objectArg !== undefined))
         relationTargetArg ??= arg;
       else if (!objectArg || objectArg.role === AdviceArgumentRole.Site &&
-          relationHasSemanticClass(objectArg.relation, "locative") &&
+          relationHasSemanticClass(objectArg.relation ?? frame.relation, "locative") &&
           (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object)) objectArg = arg;
       else relationTargetArg ??= arg;
     }

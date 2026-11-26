@@ -106,6 +106,13 @@ function relationForSite(input: InstructionActionRealizationInput): AdviceRelati
     (() => { throw new Error("Missing declarative default site relation"); })();
 }
 
+/** A substance's own attachment takes precedence over the frame's accompaniment. */
+function relationForSubstance(input: InstructionActionRealizationInput): AdviceRelation {
+  return input.frame.args.find(arg => arg.role === AdviceArgumentRole.Substance)?.relation ??
+    (relationHasSemanticClass(input.frame.relation, "accompaniment")
+      ? input.frame.relation! : AdviceRelation.With);
+}
+
 /** Preserve both typed participants of a negated relational action. */
 function negatedAttachmentArguments(c: InstructionActionRealizationInput): {
   theme?: string; target?: string;
@@ -349,7 +356,9 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       const object = c.site ?? c.theme ?? c.container;
       const relationTarget = c.time ?? c.activity;
       const manner = c.manner ? ` ${c.manner}` : "";
-      const substance = c.substance ? ` with ${c.substance}` : "";
+      const substanceRelation = c.substance ? relationForSubstance(c) : undefined;
+      const substance = c.substance
+        ? ` ${localizeAdviceRelation(substanceRelation, c.locale, "complement") ?? substanceRelation} ${c.substance}` : "";
       const elapsed = c.duration ? ` for ${c.duration}` : "";
       if (relationTarget) {
         if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
@@ -511,7 +520,10 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const object = c.site ?? c.theme ?? c.container;
       const relationTarget = c.time ?? c.activity;
       const manner = c.manner ?? "";
-      const substance = c.substance ? `ด้วย${c.substance}` : "";
+      const substanceRelation = c.substance ? relationForSubstance(c) : undefined;
+      const substance = c.substance ? `${substanceRelation === AdviceRelation.With ? "ด้วย"
+        : substanceRelation === AdviceRelation.Without ? "โดยไม่ใช้"
+          : localizeAdviceRelation(substanceRelation, c.locale, "complement") ?? substanceRelation}${c.substance}` : "";
       const elapsed = c.duration ? `เป็นเวลา ${c.duration}` : "";
       if (relationTarget) {
         if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;

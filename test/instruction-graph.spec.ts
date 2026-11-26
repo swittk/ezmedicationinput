@@ -72,6 +72,14 @@ describe("procedural instruction graph", () => {
 
   it.each(["Chew gum", "Do not chew tablets"])("does not invent an amount for %s", source => {
     const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses.length).toBeGreaterThan(0);
+    expect(parsed.fhir.length).toBeGreaterThan(0);
+    if (source === "Do not chew tablets") {
+      const chew = parsed.meta.canonical.clauses.flatMap(clause => clause.instructionGraph?.actions ?? [])
+        .find(action => action.predicate.lemma === "chew");
+      expect(chew).toMatchObject({ polarity: AdvicePolarity.Negate,
+        args: expect.arrayContaining([expect.objectContaining({ text: "tablets" })]) });
+    }
     expect(parsed.meta.canonical.clauses.every(clause => clause.dose === undefined)).toBe(true);
     expect(parsed.fhir.every(row => !row.doseAndRate?.length)).toBe(true);
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
@@ -3298,7 +3306,8 @@ describe("round32 natural clock daughters", () => {
     }));
     expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Object)).toEqual([]);
     const initial = formatSig(parsed.fhirNext, "long", { locale: "en", realizationMode: "normalized" });
-    expect(initial.match(/(?:^|[^0-9:])0?8:00(?::00)?(?![0-9:])/gu)).toHaveLength(1);
+    expect(initial.match(/\b(?:08:00(?::00)?|8:00(?::00)?\s*am)\b/giu)).toHaveLength(1);
+    expect(initial).not.toMatch(/\b(?:20:00(?::00)?|0?8:00(?::00)?\s*pm)\b/iu);
   });
 
   it.each(["delete", "replace"] as const)("honors a %s edit on freshly parsed R6 rich clock source", edit => {
@@ -5636,6 +5645,94 @@ describe("required graph conditions beside independent Boolean guards", () => {
 
 
 describe("independent primary graph rendering owners", () => {
+  it.each([AdviceRelation.With, AdviceRelation.Without])("retains a rinse substance's %s attachment beside its clock", relation => {
+    for (const explicit of [false, true]) {
+      const frame: AdviceFrame = { ...parseInstructionActions("Rinse the mouth")[0], sourceText: "",
+        relation: explicit ? AdviceRelation.On : relation, args: [
+          { role: AdviceArgumentRole.Site, text: "mouth", normalized: "mouth", i18n: { th: "ปาก" } },
+          { role: AdviceArgumentRole.Substance, text: "mouthwash", normalized: "mouthwash",
+            i18n: { th: "น้ำยาบ้วนปาก" }, ...(explicit ? { relation } : {}) },
+          { role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00", relation: AdviceRelation.On }
+        ] };
+      const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: "", actions: [frame] })!] };
+      for (const locale of ["en", "th"]) {
+        const expected = locale === "en" ? `Rinse mouth ${relation} mouthwash at 08:00`
+          : `ล้างปาก${relation === AdviceRelation.Without ? "โดยไม่ใช้" : "ด้วย"}น้ำยาบ้วนปาก เวลา 08:00`;
+        expect(realizeInstructionAction(frame, locale)).toBe(expected);
+        for (const input of [[row], toDosageDetails([row]), importCanonicalCourse([row])]) {
+          const before = JSON.stringify(input);
+          expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toBe(expected + ".");
+          expect(JSON.stringify(input)).toBe(before);
+        }
+      }
+    }
+  });
+
+  it.each(["site-first inherited", "theme-first inherited", "site-first explicit"])(
+    "retains the medication and the complete locative target for %s", variant => {
+      const site = { role: AdviceArgumentRole.Site, text: "left forearm", normalized: "left forearm",
+        i18n: { th: "แขนซ้าย" }, ...(variant === "site-first explicit" ? { relation: AdviceRelation.On } : {}) };
+      const theme = { role: AdviceArgumentRole.Theme, text: "cream", normalized: "cream", i18n: { th: "ครีม" } };
+      const frame: AdviceFrame = { ...parseInstructionActions("Apply cream to the left forearm")[0],
+        sourceText: "", relation: AdviceRelation.On,
+        args: variant === "theme-first inherited" ? [theme, site] : [site, theme] };
+      const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: "", actions: [frame] })!] };
+      for (const locale of ["en", "th"]) {
+        const expected = locale === "en" ? "Apply cream on left forearm" : "ทาครีมบนแขนซ้าย";
+        expect(realizeInstructionAction(frame, locale)).toBe(expected);
+        for (const input of [[row], toDosageDetails([row]), importCanonicalCourse([row])]) {
+          const before = JSON.stringify(input);
+          expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toBe(expected + ".");
+          expect(JSON.stringify(input)).toBe(before);
+        }
+      }
+    }
+  );
+
+  it.each(["breakfast and your clinic appointment", "breakfast and lunch", "breakfast or lunch"])(
+    "retains the whole temporal complement: %s", complement => {
+      const source = "Dilute 1 mL before " + complement;
+      const parsed = parsePublicSig(source);
+      const action = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+      const times = action.args.filter(arg => arg.role === AdviceArgumentRole.Time);
+      if (complement === "breakfast and lunch") {
+        expect(times.map(arg => [arg.normalized, arg.relation])).toEqual([
+          [EventTiming.Breakfast, AdviceRelation.Before], [EventTiming.Lunch, AdviceRelation.Before]
+        ]);
+      } else {
+        expect(times).toEqual([]);
+        expect(action.args).toContainEqual(expect.objectContaining({
+          role: AdviceArgumentRole.Activity, text: complement, normalized: complement, relation: AdviceRelation.Before
+        }));
+      }
+      for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+        for (const locale of ["en", "th"]) {
+          const before = JSON.stringify(input);
+          const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          expect(text).toContain(locale === "en" ? "Dilute 1 mL" : "เจือจาง 1 มิลลิลิตร");
+          expect(text).toContain(complement === "breakfast and lunch"
+            ? locale === "en" ? "before breakfast before lunch" : "ก่อนอาหารเช้าก่อนอาหารกลางวัน"
+            : (locale === "en" ? "before " : "ก่อน") + complement);
+          expect(JSON.stringify(input)).toBe(before);
+        }
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    }
+  );
+
+  it.each(["hands", "the hand"])("preserves the number of the washed site: %s", site => {
+    const source = "Wash " + site;
+    const frame = parseInstructionActions(source)[0];
+    expect(frame.args[0]).toMatchObject({ role: AdviceArgumentRole.Site, text: site,
+      coding: { code: "85562004" } });
+    expect(realizeInstructionAction(frame, "en")).toBe(source);
+    expect(realizeInstructionAction(frame, "th")).toBe("ล้างมือ");
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe(site === "hands" ? "Wash the hands." : "Wash the hand.");
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
   it.each([
     { warning: "Do not touch tube tip to the eye", primaryRole: AdviceArgumentRole.Object,
       targetRole: AdviceArgumentRole.Site, enTarget: "the eye", thTarget: "ตา" },
@@ -5752,13 +5849,14 @@ describe("independent primary graph rendering owners", () => {
       if (unit === "spray") {
         expect(en).toContain("each nostril"); expect(en).not.toContain("across 2 sites");
         expect(th).toContain("ข้างละ");
+        expect(th).toMatch(/(?:^|[^0-9.])1 พ่น(?![0-9])/u);
       } else {
         expect(en).toContain("both nostrils"); expect(en).not.toContain("each nostril");
         expect(th).not.toContain("ข้างละ");
         expect(th).toContain("รูจมูกทั้งสองข้าง");
-        expect(th).toContain("1 มิลลิลิตร");
+        expect(th).toMatch(/(?:^|[^0-9.])1 มิลลิลิตร(?![0-9])/u);
       }
-      expect(en).toContain("1 " + (unit === "spray" ? "spray" : "mL"));
+      expect(en).toMatch(unit === "spray" ? /(?:^|[^0-9.])1 sprays?\b/u : /(?:^|[^0-9.])1 mL\b/u);
       expect(en.toLowerCase()).toContain("gently");
     }
   });

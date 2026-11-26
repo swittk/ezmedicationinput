@@ -830,11 +830,20 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { coding: { code: "287579007", display: "Right hip" }, routeHint: RouteCode["Topical route"] }
     },
     {
-      names: ["hand", "hands", "มือ"],
+      names: ["hand", "มือ"],
       definition: {
         coding: { code: "85562004", display: "Hand" },
         text: "hand",
         i18n: { th: "มือ" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["hands"],
+      definition: {
+        coding: { code: "85562004", display: "Hand" },
+        text: "hands",
+        i18n: { en: "hands", th: "มือ" },
         routeHint: RouteCode["Topical route"]
       }
     },

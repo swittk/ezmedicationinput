@@ -1852,10 +1852,10 @@ describe("round41 supported graph and clinical preview facts", () => {
     for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
       const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
       const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
-      expect(en).toContain("Wash the hand");
+      expect(en).toContain("Wash hands");
       expect(th).toContain("ล้างมือ");
       if (english) { expect(en).toContain(english); expect(th).toContain(thai); }
-      else { expect(en).toBe("Wash the hand."); expect(th).toBe("ล้างมือ."); }
+      else { expect(en).toBe("Wash hands."); expect(th).toBe("ล้างมือ."); }
     }
   });
 });
@@ -1880,7 +1880,7 @@ describe("round41 graph duration endpoints", () => {
       for (const locale of ["en", "th"]) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
         expect(text).toContain(locale === "en" ? "30 minutes to 1 hour" : "30 นาที ถึง 1 ชั่วโมง");
-        expect(text).toContain(locale === "en" ? "Wash the hand" : "ล้างมือ");
+        expect(text).toContain(locale === "en" ? "Wash hands" : "ล้างมือ");
       }
     expect(JSON.stringify(row)).toBe(original);
   });

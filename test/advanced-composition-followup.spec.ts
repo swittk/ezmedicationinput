@@ -6147,7 +6147,7 @@ describe("round78 current clinical facts and retained directions", () => {
       for (const style of ["long", "short"] as const) {
         const text = formatSig(input, style, options);
         expect(text).toContain("5 mL/h");
-        expect(text).toContain(kind === "literal" ? "after dialysis" : "15");
+        expect(text).toContain(kind === "literal" ? "after dialysis" : "on day 15 of each month");
       }
     }
   });
@@ -6190,7 +6190,9 @@ describe("round78 current clinical facts and retained directions", () => {
     }] } } }] }] };
     for (const input of [raw, fresh(toFhirR5Dosages(raw))]) for (const locale of ["en", "th"]) {
       const text = formatSig(input, "long", { ...options, locale });
-      expect(text).toContain(locale === "en" ? side === "low" ? "at least" : "up to" : side === "low" ? "อย่างน้อย" : "ไม่เกิน");
+      expect(text).toContain(locale === "en"
+        ? (side === "low" ? "at least" : "up to") + " approximately 2 hours"
+        : (side === "low" ? "อย่างน้อย" : "ไม่เกิน") + " ประมาณ 2 ชั่วโมง");
       expect(formatSig(input, "short", { ...options, locale })).toContain((side === "low" ? ">=" : "<=") + "~2h");
     }
   });
