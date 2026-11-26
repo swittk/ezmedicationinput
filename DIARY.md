@@ -16285,3 +16285,11 @@ A predicate’s activity remains inside its typed condition, preserving withhold
 polarity and independent dose/counseling ownership. Configured clocks, clinic
 defaults and registered event meanings retain their existing precedence. Unknown
 timing codes keep the current numeric cadence and their authored data.
+
+
+## 2026-11-27 — Condition scope and projection reuse
+
+Instruction graph composition keeps condition-owned activities in their
+antecedents while retaining commanded and independent actions. R5 projection
+reuses an already-computed safety baseline within the same conversion, preserving
+current facts, annotations and the separate explicit-safety path.
