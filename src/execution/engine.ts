@@ -2164,6 +2164,18 @@ function rangeDoseCapacity(value: number, range: ExecutableDoseRange): number {
     ? range.strictLow ? Math.ceil(value / range.low) - 1 : Math.floor(value / range.low + 1e-9)
     : Infinity;
 }
+/** Independent complete slots can share one feasible uniform amount.
+ * The allowance and returned quantity use the range's per-target unit. */
+function uniformRangeQuantity(
+  availableCount: number, range: ExecutableDoseRange, maximum: number
+): { count: number; quantity: number } | undefined {
+  const count = Math.min(availableCount, rangeDoseCapacity(maximum, range));
+  if (!count) return { count: 0, quantity: 0 };
+  const quantity = Math.min(maximum, count * range.high);
+  const value = quantity / count;
+  if (!rangeDoseFits(value, range) || (range.strictHigh && value >= range.high)) return undefined;
+  return { count, quantity };
+}
 /** Start of the existing rolling medication-quantity window at a hypothetical instant. */
 function quantityCapWindowStart(at: Date, cap: CanonicalOccurrenceCapExpr, zone: string): number {
   const quantity = cap.period;
@@ -3659,8 +3671,28 @@ function maximumTimedRangePlan(
   const candidates = ledger.candidates;
   if (!candidates.length) return [];
   const range = sourceRange.low === 0 ? { ...sourceRange, strictLow: true } : sourceRange;
-  const prior = priorTimes.map(at => ({ at, count: 1, quantity: range.high }));
+  const assign = (events: readonly UncommittedCycleEvent[], values: readonly number[]) => {
+    const result: UncommittedCycleEvent[] = [];
+    for (let index = 0; index < events.length; index++) {
+      events[index].quantity = values[index] * range.multiplier;
+      if (events[index].at >= from) result.push(events[index]);
+    }
+    return result;
+  };
   const occurrence = getTimingOccurrenceCap(candidates[0].member.schedule?.recurrence);
+  const lifetimeUpper = range.maximum === undefined ? undefined : Math.min(range.maximum,
+    rangeDoseCapacity(range.maximum, range) * range.high);
+  // With only a lifetime allowance, accepted complete-dose slots already
+  // attain the count bound. Prove their uniform amount before preparing
+  // rolling-window partitions or search state; selected events are chronological.
+  if (lifetimeUpper !== undefined && !range.caps.length && !occurrence && !priorTimes.length &&
+      (!ledger.selected.length || ledger.selected[0].at >= from)) {
+    const uniform = uniformRangeQuantity(ledger.selected.length, range, lifetimeUpper);
+    if (uniform && uniform.count === ledger.selected.length)
+      return uniform.count ? assign(ledger.selected,
+        new Array(uniform.count).fill(uniform.quantity / uniform.count)) : [];
+  }
+  const prior = priorTimes.map(at => ({ at, count: 1, quantity: range.high }));
   const buckets: string[] = [], supplied: number[] = [];
   const priorBuckets = new Map<string, number[]>();
   if (occurrence) for (const at of priorTimes) {
@@ -3740,19 +3772,10 @@ function maximumTimedRangePlan(
   }
   for (const partition of capPartitions)
     upper = Math.min(upper, partition.total + partitionSupply(partition));
-  if (range.maximum !== undefined)
-    upper = Math.min(upper, range.maximum, rangeDoseCapacity(range.maximum, range) * range.high);
+  if (lifetimeUpper !== undefined) upper = Math.min(upper, lifetimeUpper);
   const completed = new Map<CycleEventQuota, number>();
   for (const [quota, count] of ledger.quotas)
     if (quota.advance && quota.remaining === 0 && count !== undefined) completed.set(quota, count);
-  const assign = (events: readonly UncommittedCycleEvent[], values: readonly number[]) => {
-    const result: UncommittedCycleEvent[] = [];
-    for (let index = 0; index < events.length; index++) {
-      events[index].quantity = values[index] * range.multiplier;
-      if (events[index].at >= from) result.push(events[index]);
-    }
-    return result;
-  };
   // Long independent or completely filled ranges have a linear proof and
   // never enter the combinatorial planner or allocate a constraint graph.
   const attainableValues = [range.high, range.low];
@@ -3882,13 +3905,14 @@ function chronologicalCapAcceptor(
     }
     if (event.quota.remaining !== undefined && event.quota.remaining <= 0) return false;
     const at = event.at;
-    const date = new Date(at);
     const quantity = state.range?.low;
     if (state.range && state.remainingQuantity !== undefined && at >= from &&
         !rangeDoseFits(state.remainingQuantity, state.range)) return false;
+    const occurrence = state.occurrence;
+    const date = state.caps.length || occurrence ? new Date(at) : undefined;
     for (let index = 0; index < state.caps.length; index++) {
       const cap = state.caps[index],
-        since = quantityCapWindowStart(date, cap, zone);
+        since = quantityCapWindowStart(date!, cap, zone);
       let head = state.heads[index];
       if (cap.periodUnit === DurationUnit.Month || cap.periodUnit === DurationUnit.Year) {
         // Clamping March 30/31 back into February can move this cutoff
@@ -3910,9 +3934,8 @@ function chronologicalCapAcceptor(
           ? available <= state.range.low + 1e-10 : available < state.range.low - 1e-10) return false;
       } else if (state.times.length - head + previously >= cap.max) return false;
     }
-    const occurrence = state.occurrence;
     if (occurrence) {
-      const bucket = occurrenceCapBucketKey(date, occurrence, zone);
+      const bucket = occurrenceCapBucketKey(date!, occurrence, zone);
       if (state.occurrenceKey !== bucket) {
         state.occurrenceKey = bucket;
         state.occurrenceUsed = 0;
@@ -3939,7 +3962,7 @@ function chronologicalCapAcceptor(
           // Later dates may reuse any part of the clamped target day.
           // Retire only history older than that day's boundary.
           const safeHead = cap.periodUnit === DurationUnit.Month || cap.periodUnit === DurationUnit.Year
-            ? upperBoundTimestamp(state.times, quantityCapHistoryFloor(date, cap, zone))
+            ? upperBoundTimestamp(state.times, quantityCapHistoryFloor(date!, cap, zone))
             : state.heads[index];
           if (safeHead < trim) trim = safeHead;
         }
@@ -7297,6 +7320,14 @@ function calculateTotalUnitsSingle(
     !!getTimingOccurrenceCap(repeat) ||
     isWakingHoursInterval(repeat) ||
     Boolean((options as PhaseCountOptions).countEligibilityStart);
+  // Independent lifetime-only supply needs an eligible count, not a list
+  // of concrete events. History and coupled constraints keep their existing plan.
+  const countOnlyRange = rangePlan?.maximum !== undefined && !needsFilteredEnumeration &&
+    options.priorCount === undefined && !options.priorDoseTimes?.length &&
+    !dosage.schedule?.explicitEvents?.length && !unresolvedOneTimeActivity &&
+    !maximalTiming.frequencyMaximum && !maximalTiming.periodMinimum && !rangePlan.strictHigh &&
+    acceptedEventCount === undefined && supplyAccounting?.acceptedQuantity === undefined &&
+    !supplyAccounting?.acceptedTimes ? rangePlan : undefined;
   let count: number;
   let measuredRangeQuantity: number | undefined;
   let selectedTimes: string[] | undefined;
@@ -7323,7 +7354,7 @@ function calculateTotalUnitsSingle(
       rangePlan?.caps ?? executableQuantityCaps(dosage, context),
       capacityAllocations, rangePlan, supplyAccounting?.rangePrior, supplyAccounting?.capacityWindows
     );
-  } else if (rangePlan) {
+  } else if (rangePlan && !countOnlyRange) {
     const historyOrigin = admissionStart ?? countFrom;
     const concrete = measureRangedSchedule(dosage, options, countFrom, endDay, baseTime, historyOrigin, timeZone, lifetimeMaximum);
     let selected = concrete;
@@ -7419,6 +7450,19 @@ function calculateTotalUnitsSingle(
             options.priorCount === undefined ? Math.max(activityPriorCount, recordedPriorCount) : suppliedPriorCount,
             options.priorCount === undefined && !dosage.asNeeded && !unresolvedOneTimeActivity
           );
+  }
+  if (countOnlyRange) {
+    const uniform = uniformRangeQuantity(count, countOnlyRange, countOnlyRange.maximum!);
+    if (uniform) {
+      count = uniform.count;
+      measuredRangeQuantity = uniform.quantity * countOnlyRange.multiplier;
+    } else {
+      const selected = measureRangedSchedule(dosage, options, countFrom, endDay, baseTime,
+        admissionStart ?? countFrom, timeZone, lifetimeMaximum);
+      count = selected.count;
+      measuredRangeQuantity = selected.quantity;
+      selectedTimes = selected.times;
+    }
   }
   if (acceptedEventCount === undefined && countFrom < endDay && !rangePlan && !dosage.schedule?.explicitEvents?.length &&
       (maximalTiming.frequencyMaximum || maximalTiming.periodMinimum) && dosage.schedule?.recurrence) {
