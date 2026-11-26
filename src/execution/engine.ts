@@ -7021,16 +7021,31 @@ function weightResolvedAdministration(
   const resolved = amounts || limits ? { ...dosage,
     ...(amounts ? { amounts } : {}), ...(limits ? { limits } : {}) } : dosage;
   const first = amounts?.length === 1 ? amounts[0] : undefined;
-  const quantity = first?.quantity;
-  // Apply an absolute upper bound to the computed patient-specific quantity,
-  // before chronological cap admission. Authored scalar doses stay authored.
-  if (quantity && quantity !== dosage.amounts?.[0].quantity) {
+  const authored = dosage.amounts?.[0];
+  // Apply an absolute upper bound to computed patient-specific quantities,
+  // including range endpoints, before chronological cap admission.
+  // Authored scalar doses and absolute range endpoints stay authored.
+  if (first && (first.quantity !== authored?.quantity || first.range !== authored?.range)) {
     const maximum = numericAdministrationLimits(resolved, strength).administration;
-    if (maximum?.value !== undefined) {
-      const converted = convertQuantityValue(maximum.value, maximum, quantity, strength);
-      const bound = converted === null ? undefined : converted / getAdministrationTargetMultiplier(resolved, context);
-      if (bound !== undefined && quantity.value !== undefined && bound < quantity.value)
-        return { ...resolved, amounts: [{ ...first, quantity: { ...quantity, value: bound } }] };
+    const maximumValue = maximum?.value;
+    if (maximum && maximumValue !== undefined) {
+      const multiplier = getAdministrationTargetMultiplier(resolved, context);
+      const boundedComputedQuantity = (
+        quantity: CanonicalMeasure | undefined, source: CanonicalMeasure | undefined
+      ): CanonicalMeasure | undefined => {
+        if (!quantity || quantity === source || quantity.value === undefined) return quantity;
+        const converted = convertQuantityValue(maximumValue, maximum, quantity, strength);
+        const bound = converted === null ? undefined : converted / multiplier;
+        return bound !== undefined && bound < quantity.value ? { ...quantity, value: bound } : quantity;
+      };
+      const quantity = boundedComputedQuantity(first.quantity, authored?.quantity);
+      const low = boundedComputedQuantity(first.range?.low, authored?.range?.low);
+      const high = boundedComputedQuantity(first.range?.high, authored?.range?.high);
+      let bounded: CanonicalAmount | undefined;
+      if (quantity !== first.quantity) bounded = { ...first, quantity };
+      if (low !== first.range?.low || high !== first.range?.high)
+        (bounded ??= { ...first }).range = { ...first.range, low, high };
+      if (bounded) return { ...resolved, amounts: [bounded] };
     }
   }
   return resolved;

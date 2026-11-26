@@ -6262,6 +6262,50 @@ describe("current course bounds and measured execution", () => {
     expect(row.maxDosePerAdministration).toMatchObject({ value: maximum, unit });
   });
 
+  it.each([40, 70])("bounds computed range endpoints before admitting doses at %s kg", weight => {
+    const row: FhirDosage = {
+      doseAndRate: [{ doseRange: {
+        low: { value: 1, unit: "mg/kg", system: "http://unitsofmeasure.org", code: "mg/kg" },
+        high: { value: 2, unit: "mg/kg", system: "http://unitsofmeasure.org", code: "mg/kg" }
+      } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"] } },
+      maxDosePerAdministration: { value: 50, unit: "mg", code: "mg", system: "http://unitsofmeasure.org" },
+      maxDosePerPeriod: [{ numerator: { value: 100, unit: "mg" }, denominator: { value: 24, unit: "h" } }]
+    };
+    const repeated = importCanonicalCourse(fresh(row));
+    repeated.cycleInterval = { value: 1, unit: "d" }; repeated.cycleCount = 1;
+    for (const dosage of [...forms(row), repeated, courseToR5(repeated), courseToR6(repeated)]) {
+      const before = fresh(dosage);
+      for (const from of ["2026-12-01T00:00:00Z", "2026-12-01T12:00:00Z"])
+        expect(calculateTotalUnits({ dosage, ...query, from, durationValue: 12,
+          durationUnit: FhirPeriodUnit.Hour, patientWeightKg: weight }))
+          .toMatchObject({ totalUnits: 50, unit: "mg", quantityKind: "maximum" });
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 24,
+        durationUnit: FhirPeriodUnit.Hour, patientWeightKg: weight }))
+        .toMatchObject({ totalUnits: 100, unit: "mg", quantityKind: "maximum" });
+      expect(dosage).toEqual(before);
+    }
+  });
+
+  it("retains an authored absolute range beside a conflicting administration maximum", () => {
+    const row: FhirDosage = {
+      doseAndRate: [{ doseRange: { low: { value: 70, unit: "mg" }, high: { value: 140, unit: "mg" } } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"] } },
+      maxDosePerAdministration: { value: 50, unit: "mg" },
+      maxDosePerPeriod: [{ numerator: { value: 100, unit: "mg" }, denominator: { value: 24, unit: "h" } }]
+    };
+    for (const dosage of forms(row)) {
+      const before = fresh(dosage);
+      const result = calculateTotalUnits({ dosage, ...query, durationValue: 12,
+        durationUnit: FhirPeriodUnit.Hour, patientWeightKg: 70 });
+      expect(result).toMatchObject({ totalUnits: 100, unit: "mg", quantityKind: "maximum" });
+      expect(result.explanation).toMatch(/unevaluable maximum-dose constraint/);
+      expect(dosage).toEqual(before);
+    }
+  });
+
   it("does not rewrite an authored absolute dose into a different amount", () => {
     const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 70, unit: "mg" } }],
       timing: { repeat: { count: 1 } }, maxDosePerAdministration: { value: 50, unit: "mg" } };
