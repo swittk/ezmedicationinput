@@ -172,7 +172,7 @@ export function clinicalRatePeriodUnit(raw: string): FhirPeriodUnit.Hour | FhirP
   return unit === FhirPeriodUnit.Hour || unit === FhirPeriodUnit.Minute ? unit : undefined;
 }
 
-function weightQuantityPeriodUnit(
+function doseQuantityPeriodUnit(
   raw: string
 ): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | FhirPeriodUnit.Week | FhirPeriodUnit.Day | undefined {
   if (DAYPART_INTERVAL_TOKENS.has(raw)) return undefined;
@@ -488,7 +488,7 @@ function weightQuantity(
   const perDose = suffix === "dose";
   // Compound denominator morphology (e.g. /24h or /30min) is independent of
   // the medication, route, and placement of a division complement.
-  const denominator = suffix ? clinicalTimeDenominator(suffix, weightQuantityPeriodUnit) : undefined;
+  const denominator = suffix ? clinicalTimeDenominator(suffix, doseQuantityPeriodUnit) : undefined;
   const periodValue = denominator?.value ?? 1;
   const periodUnit = denominator?.unit;
   if (parts.length > 3 || (suffix && !perDose && (!periodUnit || periodValue <= 0))) {
@@ -565,32 +565,43 @@ export function clinicalRateHeadAt(
     hasAdministrationCue(context, phraseStart, allowPrecedingDose && !maximum) };
 }
 
-function fixedRate(
+function fixedTimeQuantity(
   context: HpsgClauseContext,
   start: number,
   value: number,
   expression: UnitExpression,
   phraseStart = start,
-  comparator?: HpsgClinicalQuantityFeature["numerator"]["comparator"]
+  comparator?: HpsgClinicalQuantityFeature["numerator"]["comparator"],
+  maximum?: ReturnType<typeof maximumDosePerPeriodAt>
 ) {
   const parts = expression.compact.split("/");
   if (parts.length !== 2) return undefined;
   const numerator = volumeOrMassTerm(value, parts[0]);
-  const denominator = clinicalTimeDenominator(parts[1], clinicalRatePeriodUnit);
+  const denominator = clinicalTimeDenominator(parts[1], doseQuantityPeriodUnit);
+  if (!numerator || !denominator) return undefined;
   // A bare/approximate per-time rate can complete the preceding volume,
   // with or without a comma. A qualified limit still needs its own marker
   // or local head; the earlier volume cannot lend the administration cue.
   const completesVolume = comparator === undefined || comparator === "~";
-  const duration = durationAfter(context, expression.end);
-  // A clause-initial rate with its own elapsed duration is a complete typed
-  // complement. The selected sequential construction owns its omitted method.
-  const completeRateComplement = completesVolume && phraseStart === 0 && duration !== undefined;
-  const head = clinicalRateHeadAt(context, phraseStart, expression.end, completesVolume, denominator?.value);
-  if (!numerator || !denominator || (!completeRateComplement && !head.licensed)) return undefined;
+  const head = clinicalRateHeadAt(context, phraseStart, expression.end, completesVolume, denominator.value);
   const indices = [
     ...(head.marker !== undefined ? [head.marker] : []),
     ...Array.from({ length: expression.end - start }, (_, offset) => start + offset)
   ];
+  // A civil daily amount without a rate head belongs to the ordinary dose
+  // and recurrence. A separately admitted maximum keeps its existing owner.
+  if (!maximum && !head.licensed && denominator.value === 1 && denominator.unit === FhirPeriodUnit.Day) {
+    const dose = { value, unit: numerator.unit };
+    return clinicalSign(context, "hpsg.lex.clinicalQuantity.dailyDose", indices, {
+      representation: "dose", status: "resolved", numerator, denominators: [], projectedDose: dose
+    }, dose, { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day });
+  }
+  if (!clinicalRatePeriodUnit(denominator.unit)) return undefined;
+  const duration = durationAfter(context, expression.end);
+  // A clause-initial rate with its own elapsed duration is a complete typed
+  // complement. The selected sequential construction owns its omitted method.
+  const completeRateComplement = completesVolume && phraseStart === 0 && duration !== undefined;
+  if (!completeRateComplement && !head.licensed) return undefined;
   if (duration) indices.push(...duration.indices);
   return clinicalSign(context, "hpsg.lex.clinicalQuantity.fixedRate", indices, {
     representation: "rate-quantity",
@@ -812,12 +823,12 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
     return signs;
   }
-  const rate = qualifyClinicalSign(context, phraseStart, quantityEnd,
-    fixedRate(context, quantityEnd, value, expression, phraseStart, comparator), comparator);
-  if (rate) {
+  const fixed = qualifyClinicalSign(context, phraseStart, quantityEnd,
+    fixedTimeQuantity(context, quantityEnd, value, expression, phraseStart, comparator, maximum), comparator);
+  if (fixed) {
     const owned = context.clinicalCache.quantityTokenIndices ??= new Set<number>();
-    for (const token of rate.tokens) owned.add(token.index);
-    const signs = [rate];
+    for (const token of fixed.tokens) owned.add(token.index);
+    const signs = [fixed];
     (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
     return signs;
   } else {

@@ -18,7 +18,7 @@ import {
   treatmentRelativePeriodStartAt, recognizeCycles, maximumOccurrenceAt
 } from '../hpsg/rules/timing-rules';
 import { normalizeUnit } from '../unit-lexicon';
-import { FREQUENCY_SIMPLE_WORDS, mapFrequencyAdverb } from '../hpsg/timing-lexicon';
+import { FREQUENCY_SIMPLE_WORDS, mapFrequencyAdverb, mapIntervalUnit } from '../hpsg/timing-lexicon';
 import { ACTION_DISCOURSE_CONNECTORS, ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS, DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS, DOSE_FRACTION_WORDS, DOSE_NUMBER_WORDS,
@@ -923,7 +923,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     return true;
   };
   const possibleQuantityDenominator = (site: BoundarySite) => site.kind === 'slash' &&
-    tokens[site.rightIndex]?.kind === LexKind.Number &&
+    (tokens[site.rightIndex]?.kind === LexKind.Number || Boolean(mapIntervalUnit(lexeme(tokens[site.rightIndex])))) &&
     Boolean(normalizeUnit(lexeme(tokens[site.tokenIndex - 1]), options));
   const probeBoundary = (rightIndex: number, broad = false): BoundarySite | undefined => {
     const rightStart = tokens[rightIndex]?.sourceStart ?? input.length;
