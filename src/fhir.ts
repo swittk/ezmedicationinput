@@ -2629,29 +2629,13 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
   }
 
   if (dosage.asNeededFor?.length === 1) {
-    const reasonCoding = selectFirstCodingWithCode(dosage.asNeededFor[0]);
-    if (reasonCoding?.code) {
-      const defaultDef = findPrnReasonDefinitionByCoding(
-        reasonCoding.system ?? SNOMED_SYSTEM,
-        reasonCoding.code
-      );
-      const i18n = codeableConceptTranslationI18n(
-        dosage.asNeededFor[0],
-        reasonCoding,
-        defaultDef?.i18n
-      );
-      state.asNeededReasonCoding = {
-        code: reasonCoding.code,
-        display: reasonCoding.display,
-        system: reasonCoding.system,
-        extension: cloneExtensions(reasonCoding.extension),
-        _display: clonePrimitiveElement(reasonCoding._display),
-        i18n: i18n.display
-      };
-      if (i18n.text && state.primaryClause.prn?.reason) {
+    const reason = state.asNeededReasons?.[0];
+    if (reason?.coding?.code) {
+      state.asNeededReasonCoding = reason.coding;
+      if (reason.i18n && state.primaryClause.prn?.reason) {
         state.primaryClause.prn.reason = {
           ...state.primaryClause.prn.reason,
-          i18n: i18n.text
+          i18n: reason.i18n
         };
       }
     }
