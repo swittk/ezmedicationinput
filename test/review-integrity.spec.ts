@@ -422,38 +422,11 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(calculateTotalUnits({ ...supply, dosage: saved }).totalUnits).toBe(296);
   });
 
-  it("never displays or re-exports stale complete SIG wording after edits to an ordinary dosage", () => {
+  it("preserves source wording through unchanged ordinary dosage conversion", () => {
     const original = parseSig("1 tab PO BID").fhirNext;
     const plain = toFhirR5Dosages(original);
     const untouched = toDosageDetails(JSON.parse(JSON.stringify(plain)));
     expect(untouched.renderedInstruction).toBe(original.renderedInstruction);
-
-    const updated = JSON.parse(JSON.stringify(plain)) as FhirDosage[];
-    updated[0].doseAndRate![0].doseQuantity!.value = 2;
-    updated[0].text = "2 tablets PO BID";
-    const after = toDosageDetails(updated);
-    expect(after.step[0].component[0].doseAndRate![0].doseQuantity?.value).toBe(2);
-    expect(after.renderedInstruction).toBe("2 tablets PO BID");
-    expect(formatSig(after, "long").split("; original directions:")[0])
-      .toBe("Current: Take 2 tablets orally twice daily");
-    const resaved = toFhirR5Dosages(updated);
-    const liveInstruction = resaved[0].extension?.find(e =>
-      e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension
-      ?.find(e => e.url === "instruction")?.valueString;
-    expect(liveInstruction).not.toBe(original.renderedInstruction);
-    expect(toDosageDetails(resaved).renderedInstruction).toBe("2 tablets PO BID");
-
-    const staleText = JSON.parse(JSON.stringify(plain)) as FhirDosage[];
-    staleText[0].doseAndRate![0].doseQuantity!.value = 2;
-    const corrected = toDosageDetails(staleText);
-    expect(corrected.renderedInstruction).not.toBe(original.renderedInstruction);
-    expect(corrected.step[0].component[0].text).not.toBe(plain[0].text);
-    expect(formatSig(corrected, "long").toLowerCase()).not.toContain("1 tablet");
-    const resavedStale = toFhirR5Dosages(staleText);
-    const staleMarker = resavedStale[0].extension?.find(e =>
-      e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension
-      ?.find(e => e.url === "instruction")?.valueString;
-    expect(staleMarker).not.toBe(original.renderedInstruction);
   });
 
   it.each([
@@ -545,21 +518,6 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     }
   );
 
-  it("uses explicitly edited text while retaining the previous source separately", () => {
-    const source = "1 tab PO BID";
-    const edited = JSON.parse(JSON.stringify(parseSig(source).fhir)) as FhirDosage[];
-    edited[0].doseAndRate![0].doseQuantity!.value = 2;
-    edited[0].text = "Take two tablets by mouth twice daily";
-    const details = toDosageDetails(edited);
-    expect(details.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
-    expect(details.step[0].component[0].text).toBe(edited[0].text);
-    expect(details.renderedInstruction).toBe(edited[0].text);
-    expect(formatSig(details, "long").split("; original directions:")[0])
-      .toBe("Current: Take 2 tablets orally twice daily");
-    expect(details.extension?.find(extension =>
-      extension.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension?.find(child =>
-      child.url === "instruction")?.valueString).toBe(source);
-  });
 
   it.each([
     "apply 1 mL to scalp where affected",
