@@ -5645,6 +5645,102 @@ describe("required graph conditions beside independent Boolean guards", () => {
 
 
 describe("independent primary graph rendering owners", () => {
+  it.each([
+    ["Rinse mouth with water at 08:00", "rinse_mouth", AdviceArgumentRole.Substance, "water", "with water", "ด้วยน้ำ", AdviceRelation.With, undefined],
+    ["Rinse mouth without mouthwash at 08:00", "rinse_mouth", AdviceArgumentRole.Substance, "mouthwash", "without mouthwash", "โดยไม่ใช้mouthwash", AdviceRelation.Without, undefined],
+    ["Rinse the mouth with water at 08:00", "rinse", AdviceArgumentRole.Substance, "water", "with water", "ด้วยน้ำ", AdviceRelation.With, undefined],
+    ["Rinse the mouth without mouthwash at 08:00", "rinse", AdviceArgumentRole.Substance, "mouthwash", "without mouthwash", "โดยไม่ใช้mouthwash", AdviceRelation.Without, undefined],
+    ["Gargle with water at 08:00", "gargle", AdviceArgumentRole.Substance, "water", "with water", "ด้วยน้ำ", AdviceRelation.With, undefined],
+    ["Rinse mouth with 10 mL water at 08:00", "rinse_mouth", AdviceArgumentRole.Substance, "water", "with 10 mL water", "ด้วย10 มิลลิลิตรน้ำ", AdviceRelation.With, 10],
+    ["Rinse mouth with syringe at 08:00", "rinse_mouth", AdviceArgumentRole.Object, "syringe", "with syringe", "ด้วยกระบอกฉีดยา", AdviceRelation.With, undefined],
+    ["บ้วนปากด้วยน้ำ เวลา 08:00", "rinse_mouth", AdviceArgumentRole.Substance, "water", "with water", "ด้วยน้ำ", AdviceRelation.With, undefined]
+  ] as const)("retains a rinse-family accompaniment and its independent clock: %s",
+    (source, lemma, role, nominal, en, th, relation, quantity) => {
+      const action = parseInstructionActions(source)[0];
+      expect(action.predicate.lemma).toBe(lemma);
+      const companion = action.args.find(arg => arg.role === role && arg.normalized === nominal)!;
+      expect(companion).toBeDefined();
+      expect(companion.relation ?? action.relation).toBe(relation);
+      expect(companion.text).not.toContain("08:00");
+      if (quantity !== undefined) expect(companion.quantity).toEqual({ value: quantity, unit: "mL" });
+      if (nominal === "mouthwash") expect(companion.coding).toBeUndefined();
+      expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Amount)).toEqual([]);
+      expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Time)).toEqual([
+        expect.objectContaining({ text: "08:00", normalized: "08:00:00", relation: AdviceRelation.On })
+      ]);
+      const parsed = parsePublicSig(source);
+      expect(parsed.meta.canonical.clauses).toHaveLength(1);
+      expect(parsed.meta.canonical.clauses[0].dose).toBeUndefined();
+      for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+        for (const locale of ["en", "th"]) {
+          const before = JSON.stringify(input);
+          const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          expect(text).toContain(locale === "en" ? en : th);
+          expect(text.match(/(?:^|[^0-9:])(?:08:00(?::00)?|8:00\s*am)(?![0-9:])/giu)).toHaveLength(1);
+          expect(text).not.toMatch(/\bTake\b|รับประทาน/u);
+          if (quantity !== undefined)
+            expect(text.match(locale === "en" ? /10 mL/gu : /10 มิลลิลิตร/gu)).toHaveLength(1);
+          expect(JSON.stringify(input)).toBe(before);
+        }
+      expect(parsed.input).toBe(source);
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    }
+  );
+
+  it("retains the administered rinse volume and elapsed minute", () => {
+    const source = "Rinse mouth 10 mL for 1 minute", parsed = parsePublicSig(source);
+    const action = parseInstructionActions(source)[0];
+    expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Amount,
+      quantity: { value: 10, unit: "mL" } }));
+    expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Duration,
+      quantity: { value: 1, unit: "min" } }));
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 10, unit: "mL" });
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Rinse mouth 10 mL for 1 minute.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("บ้วนปาก 10 มิลลิลิตร นาน 1 นาที.");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([
+    ["Do not rinse mouth with mouthwash at 08:00", "mouthwash", "with mouthwash", "ด้วยmouthwash"],
+    ["Do not rinse the mouth with water at 08:00", "water", "with water", "ด้วยน้ำ"],
+    ["Do not gargle 10 mL for 1 minute", undefined, "10 mL for 1 minute", "10 มิลลิลิตร นาน 1 นาที"]
+  ] as const)("retains the complete negated rinse-family action: %s", (source, material, en, th) => {
+    const action = parseInstructionActions(source)[0];
+    expect(action.polarity).toBe(AdvicePolarity.Negate);
+    if (material) {
+      const companion = action.args.find(arg => arg.role === AdviceArgumentRole.Substance)!;
+      expect(companion.normalized).toBe(material);
+      expect(companion.relation ?? action.relation).toBe(AdviceRelation.With);
+    } else {
+      expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Amount,
+        quantity: { value: 10, unit: "mL" } }));
+      expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Duration,
+        quantity: { value: 1, unit: "min" } }));
+    }
+    const parsed = parsePublicSig(source);
+    for (const locale of ["en", "th"]) {
+      const expected = locale === "en" ? en : th;
+      const direct = realizeInstructionAction(action, locale);
+      expect(direct).toMatch(locale === "en" ? /^Do not /u : /^ห้าม/u);
+      expect(direct).toContain(expected);
+      for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+        const before = JSON.stringify(input);
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toMatch(locale === "en" ? /^Do not /u : /^ห้าม/u);
+        expect(text).toContain(expected);
+        if (material) expect(text.match(/(?:^|[^0-9:])08:00(?::00)?(?![0-9:])/gu)).toHaveLength(1);
+        else expect(text.match(locale === "en" ? /10 mL/gu : /10 มิลลิลิตร/gu)).toHaveLength(1);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
   it.each([AdviceRelation.With, AdviceRelation.Without])("retains a rinse substance's %s attachment beside its clock", relation => {
     for (const explicit of [false, true]) {
       const frame: AdviceFrame = { ...parseInstructionActions("Rinse the mouth")[0], sourceText: "",

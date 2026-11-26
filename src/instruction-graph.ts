@@ -27,6 +27,7 @@ import { inferMedicationLocale, shouldJoinAdjacentSourceTokens, withMedicationSo
 import {
   getInstructionActionLocaleAdapter,
   instructionArgumentNeedsAuthoredDirections,
+  quantityOnlyInstructionArgument,
   realizeTimeArgument,
   InstructionActionRealizationInput
 } from "./instruction-action-locale-adapter";
@@ -1068,6 +1069,7 @@ interface ActionArgumentParseContext {
   relationTargetEnd: number;
   conditionalTail: boolean;
   relationTimes?: AdviceArgument[];
+  accompaniment?: AdviceArgument;
   amount?: AdviceArgument;
   duration?: AdviceArgument;
   separableParticleIndex?: number;
@@ -1280,7 +1282,7 @@ const AMOUNT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
           c.parts, c.relIndex + 1, c.relationTargetEnd, c.input, AdviceArgumentRole.Activity, c.options
         )
       : undefined;
-  return { args: parsedArgs(c.amount, c.duration, activity, ...(c.relationTimes ?? [])) };
+  return { args: parsedArgs(c.amount, c.duration, c.accompaniment, activity, ...(c.relationTimes ?? [])) };
 };
 const OBJECT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, duration } = c;
@@ -1590,7 +1592,7 @@ const SITE_RELATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       : undefined;
   if (elapsed) pushArgument(args, elapsed);
   else if (relIndex >= 0 && relIndex < semanticEnd) pushArgument(args, argumentFromParts(
-    parts, relIndex + 1, semanticEnd, input, preferredRinseRole(relation), options));
+    parts, relIndex + 1, Math.min(c.relationTargetEnd, semanticEnd), input, preferredRinseRole(relation), options));
   else pushArgument(args, argumentFromParts(
     parts, argumentStart, semanticEnd, input, preferredRinseRole(relation), options));
   pushArgument(args, resultTail?.argument);
@@ -1760,7 +1762,21 @@ function buildActionFrame(
   const relationTimes = (directObjectValence || definition.argumentParser === "amount-duration") &&
     relIndex >= 0 && !conditionalTail && relationHasGrammarFeature(relation, "timeComplement")
     ? timeArgumentsFromParts(parts, relIndex + 1, semanticEnd, input, offset, relation, relationTargetEnd) : undefined;
-  const headOwnsAmount = directObjectValence && !relationTimes &&
+  let accompaniment: AdviceArgument | undefined;
+  if (definition.argumentParser === "amount-duration" && !relationTimes && relIndex >= 0 &&
+      relationHasSemanticClass(relation, "accompaniment")) {
+    const nominal = argumentFromParts(parts, relIndex + 1, relationTargetEnd,
+      input, AdviceArgumentRole.Substance, options);
+    const companion = quantifiedEntityArgument(parts, relIndex + 1, relationTargetEnd,
+      input, offset, nominal?.role ?? AdviceArgumentRole.Substance, options);
+    // WITH a bare quantity remains the administered amount; a separate
+    // measured nominal owns its own quantity and cannot supply the head dose.
+    if (companion && !quantityOnlyInstructionArgument(companion)) {
+      companion.relation = relation;
+      accompaniment = companion;
+    }
+  }
+  const headOwnsAmount = accompaniment !== undefined || directObjectValence && !relationTimes &&
       relationHasGrammarFeature(relation, "accompanimentComplement") ||
     (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
       !relationHasSemanticClass(relation, "temporal");
@@ -1806,7 +1822,7 @@ function buildActionFrame(
     definition, parts, actionIndex, argumentStart,
     segmentEnd: definition.argumentParser === "mix-substance" ? semanticEnd : segmentEnd,
     input, offset, options,
-    relation, relIndex, relationTargetEnd, conditionalTail, relationTimes, amount, duration,
+    relation, relIndex, relationTargetEnd, conditionalTail, relationTimes, accompaniment, amount, duration,
     separableParticleIndex: actionMatch.separableParticleIndex
   });
   const args = parsed.args;
@@ -4150,8 +4166,9 @@ function realizeAction(
       : genericRealizer(input)
     : undefined;
   const realized = negated ? adapter.renderNegated(input, genericText ??
-      (realizerKey === "mix-substance" || realizerKey === "relation-duration" &&
-        firstArguments[AdviceArgumentRole.Amount]?.quantity ? adapter.render(realizerKey, input) : undefined))
+      (realizerKey === "mix-substance" || realizerKey === "amount-duration" || realizerKey === "site-relation" ||
+        realizerKey === "relation-duration" && firstArguments[AdviceArgumentRole.Amount]?.quantity
+          ? adapter.render(realizerKey, input) : undefined))
     : genericText ?? adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
   // material/site valence. Never infer a temporal relation from display text.

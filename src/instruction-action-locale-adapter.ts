@@ -106,11 +106,30 @@ function relationForSite(input: InstructionActionRealizationInput): AdviceRelati
     (() => { throw new Error("Missing declarative default site relation"); })();
 }
 
-/** A substance's own attachment takes precedence over the frame's accompaniment. */
-function relationForSubstance(input: InstructionActionRealizationInput): AdviceRelation {
-  return input.frame.args.find(arg => arg.role === AdviceArgumentRole.Substance)?.relation ??
-    (relationHasSemanticClass(input.frame.relation, "accompaniment")
-      ? input.frame.relation! : AdviceRelation.With);
+/** Keep the selected nominal and its attachment together, independently of Time. */
+function accompanimentContent(c: InstructionActionRealizationInput): { text: string; relation: AdviceRelation } | undefined {
+  const arg = c.frame.args.find(arg => arg.role === AdviceArgumentRole.Substance ||
+    arg.role !== AdviceArgumentRole.Time && relationHasSemanticClass(arg.relation, "accompaniment"));
+  if (!arg) return undefined;
+  const relation = arg.relation ?? (relationHasSemanticClass(c.frame.relation, "accompaniment")
+    ? c.frame.relation! : AdviceRelation.With);
+  const { amount, text } = instructionCompanionContent(c, arg);
+  return { text: joinLocalizedTokens(c.locale, [amount, text]), relation };
+}
+
+function renderEnglishAccompaniment(c: InstructionActionRealizationInput): string {
+  const content = accompanimentContent(c);
+  return content?.text
+    ? ` ${localizeAdviceRelation(content.relation, c.locale, "complement") ?? content.relation} ${content.text}` : "";
+}
+
+function renderThaiAccompaniment(c: InstructionActionRealizationInput): string {
+  const content = accompanimentContent(c);
+  if (!content?.text) return "";
+  const label = content.relation === AdviceRelation.With ? "ด้วย"
+    : content.relation === AdviceRelation.Without ? "โดยไม่ใช้"
+      : localizeAdviceRelation(content.relation, c.locale, "complement") ?? content.relation;
+  return label + content.text;
 }
 
 /** Preserve both typed participants of a negated relational action. */
@@ -186,7 +205,7 @@ export function instructionArgumentNeedsAuthoredDirections(arg: AdviceArgument, 
     arg.normalized === undefined && !localizedValue(arg.i18n, locale) && !quantityOnlyInstructionArgument(arg);
 }
 
-function additionalMixCompanion(c: InstructionActionRealizationInput, arg: AdviceArgument) {
+function instructionCompanionContent(c: InstructionActionRealizationInput, arg: AdviceArgument) {
   const amount = arg.quantity ? c.translateQuantity(arg.quantity) : undefined;
   const quantityOnly = quantityOnlyInstructionArgument(arg);
   const text = instructionArgumentNeedsAuthoredDirections(arg, c.locale) ? undefined : !quantityOnly || !amount
@@ -346,7 +365,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
       let companionsText = "";
       if (additionalCompanions) for (const arg of additionalCompanions) {
-        const { amount, text } = additionalMixCompanion(c, arg);
+        const { amount, text } = instructionCompanionContent(c, arg);
         const relation = localizeAdviceRelation(arg.relation!, c.locale) ?? arg.relation;
         if (amount || text) companionsText += ` ${relation} ${amount ?? ""}${amount && text ? " " : ""}${text ?? ""}`;
       }
@@ -356,9 +375,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       const object = c.site ?? c.theme ?? c.container;
       const relationTarget = c.time ?? c.activity;
       const manner = c.manner ? ` ${c.manner}` : "";
-      const substanceRelation = c.substance ? relationForSubstance(c) : undefined;
-      const substance = c.substance
-        ? ` ${localizeAdviceRelation(substanceRelation, c.locale, "complement") ?? substanceRelation} ${c.substance}` : "";
+      const substance = renderEnglishAccompaniment(c);
       const elapsed = c.duration ? ` for ${c.duration}` : "";
       if (relationTarget) {
         if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
@@ -388,7 +405,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       const relationTarget = c.activity;
       const relation = relationHasGrammarFeature(c.frame.relation, "activityFallback")
         ? localizeAdviceRelation(c.frame.relation, c.locale) : undefined;
-      const base = `${c.label}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` for ${c.duration}` : ""}`;
+      const base = `${c.label}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` for ${c.duration}` : ""}${renderEnglishAccompaniment(c)}`;
       const body = relation && relationTarget ? `${base} ${relation} ${relationTarget}` : base;
       const time = realizeTimeArgument(c);
       return time ? `${body} ${time}` : body;
@@ -508,7 +525,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
       let companionsText = "";
       if (additionalCompanions) for (const arg of additionalCompanions) {
-        const { amount, text } = additionalMixCompanion(c, arg);
+        const { amount, text } = instructionCompanionContent(c, arg);
         const relation = arg.relation === AdviceRelation.Without ? "โดยไม่ใช้"
           : relationHasSemanticClass(arg.relation, "locative")
             ? localizeAdviceRelation(arg.relation!, c.locale) ?? arg.relation : "กับ";
@@ -520,10 +537,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const object = c.site ?? c.theme ?? c.container;
       const relationTarget = c.time ?? c.activity;
       const manner = c.manner ?? "";
-      const substanceRelation = c.substance ? relationForSubstance(c) : undefined;
-      const substance = c.substance ? `${substanceRelation === AdviceRelation.With ? "ด้วย"
-        : substanceRelation === AdviceRelation.Without ? "โดยไม่ใช้"
-          : localizeAdviceRelation(substanceRelation, c.locale, "complement") ?? substanceRelation}${c.substance}` : "";
+      const substance = renderThaiAccompaniment(c);
       const elapsed = c.duration ? `เป็นเวลา ${c.duration}` : "";
       if (relationTarget) {
         if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
@@ -554,7 +568,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const relationTarget = c.activity;
       const relation = relationHasGrammarFeature(c.frame.relation, "activityFallback")
         ? localizeAdviceRelation(c.frame.relation, c.locale) : undefined;
-      const base = `${c.label}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` นาน ${c.duration}` : ""}`;
+      const base = `${c.label}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` นาน ${c.duration}` : ""}${renderThaiAccompaniment(c)}`;
       const body = relation && relationTarget ? `${base}${relation}${relationTarget}` : base;
       const time = realizeTimeArgument(c);
       return time ? `${body}${time}` : body;
