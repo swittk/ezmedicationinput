@@ -47,6 +47,15 @@ export function inferMedicationLocale(text: string, fallback = "en"): string {
   return baseLanguageTag(fallback) ?? fallback.toLowerCase();
 }
 
+/** Registered source languages keep their authored wording; English uses the
+ * lexical definition's wording rather than overriding it with a surface form. */
+export function withMedicationSourceI18n(
+  sourceText: string, i18n: Record<string, string> | undefined
+): Record<string, string> | undefined {
+  const sourceLocale = inferMedicationLocale(sourceText, "en");
+  return sourceLocale === "en" ? i18n : { ...(i18n ?? {}), [sourceLocale]: sourceText };
+}
+
 // Built-in Thai detector preserves historical auto-detection. Other languages can
 // register detectors without changing parser/HPSG core.
 registerMedicationLocaleDetector({

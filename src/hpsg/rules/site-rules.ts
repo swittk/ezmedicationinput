@@ -19,7 +19,7 @@ import {
 } from "../../relation-terminology";
 import { inferRouteFromContext } from "../../context";
 import { baseLanguageTag } from "../../localization";
-import { inferMedicationLocale } from "../../locale-detection";
+import { withMedicationSourceI18n } from "../../locale-detection";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
   EVERY_INTERVAL_TOKENS,
@@ -246,12 +246,7 @@ function siteBoundary(lower: string, context: HpsgClauseContext, allowRelativeMa
     mapFrequencyAdverb(lower) ||
     mapIntervalUnit(lower)
   ) return true;
-  return Boolean(
-    (DEFAULT_ROUTE_SYNONYMS[lower] || normalizeUnit(lower, context.options)) &&
-    !resolveBodySiteLexeme(lower, context.options?.siteCodeMap, {
-      bodySiteContext: context.options?.context?.bodySiteContext
-    })
-  );
+  return false;
 }
 
 function trimBraceRange(
@@ -270,16 +265,6 @@ function trimBraceRange(
     end -= 1;
   }
   return { start, end };
-}
-
-function siteI18nWithSourceText(
-  sourceText: string,
-  definitionI18n: Record<string, string> | undefined,
-  context: HpsgClauseContext
-): Record<string, string> | undefined {
-  const sourceLocale = inferMedicationLocale(sourceText, "en");
-  if (sourceLocale === "en") return definitionI18n;
-  return { ...(definitionI18n ?? {}), [sourceLocale]: sourceText };
 }
 
 /**
@@ -759,7 +744,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
             site: {
               text: displayText,
               i18n: !resolved?.coding && resolved?.definition?.text === "affected area"
-                ? siteI18nWithSourceText(sourceText, resolved?.definition?.i18n, context)
+                ? withMedicationSourceI18n(sourceText, resolved?.definition?.i18n)
                 : resolved?.definition?.i18n,
               source: "text",
               coding: resolved?.coding,
@@ -847,7 +832,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
               site: {
                 text: displayText,
                 i18n: !resolved.coding && resolved.definition?.text === "affected area"
-                  ? siteI18nWithSourceText(sourceText, resolved.definition?.i18n, context)
+                  ? withMedicationSourceI18n(sourceText, resolved.definition?.i18n)
                   : resolved.siteI18n ?? resolved.definition?.i18n,
                 source: "text",
                 coding: resolved.coding,

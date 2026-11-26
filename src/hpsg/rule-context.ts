@@ -209,15 +209,17 @@ function maximumTokensAvailable(context: MaximumDoseLexicalContext, start: numbe
   return tokens;
 }
 
-export function maximumCountLeadAt(context: MaximumDoseLexicalContext, start: number): Token[] | undefined {
+export function maximumCountLeadAt(
+  context: MaximumDoseLexicalContext, start: number, firstLower?: string
+): Token[] | undefined {
   const first = context.tokens[start];
-  const lower = first && normalizeTokenLower(first);
+  const lower = firstLower ?? (first && normalizeTokenLower(first));
   if (!lower || !MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(lower)) return undefined;
   for (const parts of MAXIMUM_COUNT_LEAD_SEQUENCES) {
     if (parts[0] !== lower) continue;
     const tokens = maximumTokensAvailable(context, start, parts.length);
     if (!tokens) continue;
-    if (tokens.every((candidate, offset) => normalizeTokenLower(candidate) === parts[offset])) {
+    if (tokens.every((candidate, offset) => offset === 0 || normalizeTokenLower(candidate) === parts[offset])) {
       return tokens;
     }
   }
@@ -236,7 +238,7 @@ export function occurrenceCapPeriodAt(
     if (definition.parts[0] !== lower) continue;
     const tokens = maximumTokensAvailable(context, start, definition.parts.length);
     if (!tokens) continue;
-    if (!tokens.every((candidate, offset) => normalizeTokenLower(candidate) === definition.parts[offset])) continue;
+    if (!tokens.every((candidate, offset) => offset === 0 || normalizeTokenLower(candidate) === definition.parts[offset])) continue;
     const periodUnit = mapIntervalUnit(definition.periodUnit);
     if (!periodUnit) continue;
     return { tokens, period: definition.period, periodUnit };
@@ -303,8 +305,6 @@ export function maximumDosePerPeriodAt(context: MaximumDoseLexicalContext, start
   unit: string;
   period: MaximumDosePeriod;
 } | undefined {
-  const first = context.tokens[start];
-  if (!first || !MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(normalizeTokenLower(first))) return undefined;
   const lead = maximumCountLeadAt(context, start);
   if (!lead) return undefined;
 

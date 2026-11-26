@@ -626,12 +626,13 @@ export function clinicalRateHeadAt(
   const marker = separateRateMarker(context, phraseStart);
   const next = context.tokens[end];
   const after = next?.original === "," ? context.tokens[end + 1] : next;
+  // A route cannot turn the maximum head or its numeric daughter into a rate.
+  const maximum = MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[phraseStart])) ||
+    cue && MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(cue));
   return { marker, licensed: marker !== undefined || context.tokens[phraseStart].lower.startsWith("@") ||
-    // An explicit maximum cannot borrow the preceding dose's route.
-    getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] &&
-      !MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[phraseStart])) ||
-    getRouteMeaning(after)?.code === RouteCode["Intravenous route"] ||
-    hasAdministrationCue(context, phraseStart, allowPrecedingDose) };
+    !maximum && (getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] ||
+      getRouteMeaning(after)?.code === RouteCode["Intravenous route"]) ||
+    hasAdministrationCue(context, phraseStart, allowPrecedingDose && !maximum) };
 }
 
 function fixedRate(

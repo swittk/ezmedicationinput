@@ -4415,8 +4415,9 @@ describe("round80 dated single-administration duration ownership", () => {
     fresh(source.fhir), fresh(source.fhirNext), fresh(toFhirR5Dosages(source.fhirNext))];
   const query = { orderedAt: "2026-11-22T00:00:00Z", from: "2026-11-22T00:00:00Z", timeZone: "UTC", limit: 4 };
 
-  it.each(["over", "for"])("gives the selected elapsed administration one dated clock (%s)", introducer => {
-    const parsed = parsePublicSig("Infuse 100 mL " + introducer + " 2 hours starting 2026-11-22 at 08:00");
+  it.each([["over", "08:00"], ["for", "08:00"], ["over", "8 AM in the morning"]] as const)(
+    "gives the selected elapsed administration one dated clock (%s, %s)", (introducer, clock) => {
+    const parsed = parsePublicSig("Infuse 100 mL " + introducer + " 2 hours starting 2026-11-22 at " + clock);
     for (const input of views(parsed)) {
       const member = importCanonicalCourse(input).stages[0].administrations[0];
       expect(member.schedule?.recurrence).toMatchObject({ count: 1, occurrenceDuration: 2,
@@ -4427,7 +4428,7 @@ describe("round80 dated single-administration duration ownership", () => {
     }
   });
 
-  it.each(["daily", "for 3 days", "through 2026-11-24"])("retains independently recurring infusion slots (%s)", cadence => {
+  it.each(["daily", "for 3 days", "through 2026-11-24", "and in the morning"])("retains independently recurring infusion slots (%s)", cadence => {
     const parsed = parsePublicSig("Infuse 100 mL over 2 hours starting 2026-11-22 at 08:00 " + cadence);
     for (const input of views(parsed)) {
       const member = importCanonicalCourse(input).stages[0].administrations[0];
@@ -4556,5 +4557,34 @@ describe("round77 leading decimals after clause separators", () => {
     expect(tokens[3].kind).toBe(SurfaceTokenKind.Separator);
     expect(tokens[4]).toMatchObject({ kind: SurfaceTokenKind.Text, start: 9, end: 11 });
     expect(lexInput(source).find(token => token.sourceStart === 9)).toMatchObject({ value: 0.5 });
+  });
+});
+
+
+describe("explicit maximum ownership beside a trailing route", () => {
+  it.each(["maximum", "max."])("keeps the %s amount as a period cap under trailing IV", lead => {
+    const source = "Give 2 mg every 15 minutes as needed, " + lead + " 6 mg per hour IV";
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 2, unit: "mg" });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      period: 15, periodUnit: "min", maxDosePerPeriod: [{ amount: 6, unit: "mg", period: 1, periodUnit: "h" }]
+    });
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext,
+      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "mg" });
+      expect(member.amounts?.[0].rate).toBeUndefined();
+      expect(member.asNeeded).toBe(true);
+      expect(member.schedule?.recurrence).toMatchObject({ period: 15, periodUnit: "min" });
+      expect(member.limits).toMatchObject([
+        { scope: "period", amount: { value: 6, unit: "mg" }, period: { value: 1, unit: "h" } }
+      ]);
+    }
+    for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(row.route?.coding?.[0].code).toBe(RouteCode["Intravenous route"]);
+      expect(row.doseAndRate?.[0].rateQuantity).toBeUndefined();
+      expect(row.doseAndRate?.[0].rateRatio).toBeUndefined();
+    }
   });
 });

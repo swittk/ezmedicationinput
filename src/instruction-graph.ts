@@ -23,7 +23,7 @@ import { resolveEventTimingExpression } from "./event-timing-expression";
 import { maximumDosePerPeriodAt, parseClockToken } from "./hpsg/rule-context";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { baseLanguageTag, composeLocalizedRecords, localizedConfig, localizedValue, quantityComparatorText } from "./localization";
-import { inferMedicationLocale, shouldJoinAdjacentSourceTokens } from "./locale-detection";
+import { inferMedicationLocale, shouldJoinAdjacentSourceTokens, withMedicationSourceI18n } from "./locale-detection";
 import {
   getInstructionActionLocaleAdapter,
   instructionArgumentNeedsAuthoredDirections,
@@ -67,7 +67,6 @@ import {
   INSTRUCTION_DURATION_UNITS,
   INSTRUCTION_QUANTITY_UNIT_LABELS,
   MEAL_TIMING_BY_RELATION,
-  MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
   PRN_LEADS,
   RANGE_CONNECTORS,
   ROUTE_SITE_PREPOSITIONS,
@@ -340,15 +339,11 @@ function codingFromSite(text: string, options?: ParseOptions): AdviceArgument | 
     conceptId: resolved.canonical,
     coding: resolved.coding,
     codings: resolved.coding ? [resolved.coding] : undefined,
-    i18n: {
+    i18n: withMedicationSourceI18n(text, {
       en: resolved.englishObjectText,
       ...(resolved.definition?.i18n ?? {}),
-      ...(resolved.siteI18n ?? {}),
-      ...(() => {
-        const sourceLocale = inferMedicationLocale(text, "en");
-        return sourceLocale === "en" ? {} : { [sourceLocale]: text };
-      })()
-    }
+      ...(resolved.siteI18n ?? {})
+    })
   };
 }
 
@@ -1344,10 +1339,8 @@ function quantifiedEntityArgument(
     normalized: quantity?.quantity?.unit ?? text.toLowerCase()
   };
   if (sourceEntityText) {
-    const sourceLocale = inferMedicationLocale(sourceEntityText, "en");
-    if (sourceLocale !== "en") {
-      result.i18n = { ...(result.i18n ?? {}), [sourceLocale]: sourceEntityText };
-    }
+    const i18n = withMedicationSourceI18n(sourceEntityText, result.i18n);
+    if (i18n !== result.i18n) result.i18n = i18n;
   }
   result.role = role;
   result.text = text;
@@ -2273,7 +2266,7 @@ function actionTailIsRegimenModifier(
   // The complete typed maximum is a regimen adjunct after the preparation.
   // A comparator without a period still belongs to its own amount/material.
   if (!negatedAction && definition?.definesDose && previous &&
-      /^[,;:]$/u.test(previous.original.trim()) && MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(token) &&
+      /^[,;:]$/u.test(previous.original.trim()) &&
       maximumDosePerPeriodAt({ tokens: parts, options }, index)) return true;
   const timing = !localAmountUnit && Boolean(
     TIMING_ABBREVIATIONS[token] ||
@@ -3834,7 +3827,9 @@ function defaultActionArguments(frame: AdviceFrame) {
             relationHasSemanticClass(frame.relation, "accompaniment") &&
             (unmarkedSubstances < 2 || objectArg !== undefined))
         relationTargetArg ??= arg;
-      else if (!objectArg) objectArg = arg;
+      else if (!objectArg || objectArg.role === AdviceArgumentRole.Site &&
+          relationHasSemanticClass(objectArg.relation, "locative") &&
+          (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object)) objectArg = arg;
       else relationTargetArg ??= arg;
     }
   }
@@ -4723,13 +4718,9 @@ function timeArgumentCoversSingleScheduledEvent(
   if (arg.normalized && KNOWN_EVENT_TIMINGS.has(arg.normalized)) return false;
   const words = normalizeActionSurface(arg.normalized ?? arg.text)
     .split(/\s+/u).filter((word) => word.length > 0 && !EVENT_ARTICLE_TOKENS.has(word));
-  for (let index = 0; index < words.length; index += 1) {
-    const expression = resolveEventTimingExpression(words, index);
-    if (!expression) continue;
-    if (timeArgumentCoveredBySchedule(frame, arg, clause, expression.timing)) return true;
-    index += expression.length - 1;
-  }
-  return false;
+  const expression = resolveEventTimingExpression(words, 0);
+  return Boolean(expression && expression.length === words.length &&
+    timeArgumentCoveredBySchedule(frame, arg, clause, expression.timing));
 }
 
 function primaryActionCoveredByCanonicalClause(

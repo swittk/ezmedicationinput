@@ -76,7 +76,6 @@ import {
   isThaiDaypartListSeparator,
   MEAL_RELATION_BY_TOKEN,
   MEAL_TIMING_BY_RELATION,
-  MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
   MAXIMUM_COUNT_LEAD_TOKENS,
   OCCURRENCE_COUNT_WORDS,
   OCCURRENCE_COUNT_MODIFIERS,
@@ -3052,9 +3051,7 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
             context, token.sourceStart, duration.tokens[duration.tokens.length - 1].sourceEnd
           )) return [duration];
     }
-    const maximumLead = MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(lower)
-      ? maximumCountLeadAt(context, start)
-      : undefined;
+    const maximumLead = maximumCountLeadAt(context, start, lower);
     if (maximumLead) {
       const valueIndex = start + maximumLead.length;
       const valueToken = context.tokens.slice(valueIndex, valueIndex + 1).shift();

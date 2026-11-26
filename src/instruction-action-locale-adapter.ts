@@ -392,10 +392,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     }
     case "object-time": {
       const object = c.theme ?? c.site;
-      // Unmarked dayparts retain this realizer's established English
-      // preposition; authored relations use the shared typed Time owner.
-      const realizedTime = realizeTimeArgument(c);
-      const time = c.time && !c.timeRelation ? "in " + c.time : realizedTime;
+      const time = realizeTimeArgument(c);
       const amount = c.amount ? (c.theme ? " (" + c.amount + ")" : " " + c.amount) : "";
       const site = c.theme && c.site ? " to " + c.site : "";
       return c.label + (object ? " " + object : "") + amount + site +

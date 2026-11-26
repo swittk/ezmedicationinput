@@ -692,8 +692,7 @@ export function projectHpsgSignToState(
       target.frequency = dividedCount;
       target.timingCode = undefined;
     }
-    if (!hasRecurringAdministrationSchedule(schedule, dividedCount === undefined) &&
-        !hasRecurringAdministrationSchedule(target, dividedCount === undefined) &&
+    if (!hasRecurringAdministrationSchedule(target, dividedCount === undefined) &&
         !sign.synsem.valence.prn && !state.asNeeded &&
         (dividedCount !== undefined || !sign.evidence.some(item => item.rule === NEXT_DAY_ONSET_RULE)) &&
         (dividedCount !== undefined || target.timingReference !== "previous") &&

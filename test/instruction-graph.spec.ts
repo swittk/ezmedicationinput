@@ -4383,7 +4383,7 @@ describe("round65 structured cadence and action ownership", () => {
     expect(marker).toEqual(before);
   });
 
-  it("keeps a selected site's relation beside an independent application instrument", () => {
+  it.each([false, true])("keeps a selected site's relation beside an independent application instrument (site first=%s)", siteFirst => {
     const frame = fresh(parseInstructionActions("Apply cream")[0]);
     frame.sourceText = ""; frame.relation = AdviceRelation.With; frame.predicate.realizer = "default";
     frame.args = [
@@ -4391,6 +4391,7 @@ describe("round65 structured cadence and action ownership", () => {
       { role: AdviceArgumentRole.Site, text: "rash", normalized: "rash", i18n: { en: "the rash", th: "ผื่น" }, relation: AdviceRelation.To },
       { role: AdviceArgumentRole.Material, text: "cotton swab", normalized: "cotton swab", i18n: { en: "a cotton swab", th: "สำลี" }, relation: AdviceRelation.With }
     ];
+    if (siteFirst) [frame.args[0], frame.args[1]] = [frame.args[1], frame.args[0]];
     const marker = buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!;
     const before = fresh(marker), reopened = parseInstructionGraphExtension([fresh(marker)])!.actions[0];
     const en = realizeInstructionAction(reopened, "en"), th = realizeInstructionAction(reopened, "th");
@@ -5538,5 +5539,57 @@ describe("scoped action conditions and independent complements", () => {
       expect(realizeInstructionAction(action, "en")).toContain("10 mL");
     }
     expect(parsed.longText).toContain("10 mL");
+  });
+});
+
+
+describe("complete action time realization", () => {
+  it.each(["morning of surgery", "the morning", "MORN"])(
+    "retains a daily Morning anchor unless the complete Time matches it (%s)", time => {
+      const action = parseInstructionActions("Take 1 tablet")[0];
+      const frame: AdviceFrame = { ...action, sourceText: "", args: [
+        ...action.args, { role: AdviceArgumentRole.Time, text: time, normalized: time }
+      ] };
+      const graph = { sourceText: "", sourceLocale: "en", actions: [frame], primaryAdministrationSpan: frame.span };
+      const row: FhirDosage = { method: { text: "Take" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: "d", when: [EventTiming.Morning] } },
+        extension: [buildInstructionGraphExtension(graph)!] };
+      const details = toDosageDetails([row]);
+      for (const input of [[row], importCanonicalCourse(row), details, toFhirR5Dosages(details)]) {
+        const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        expect(en).toContain("1 tablet");
+        expect(en).toContain("once daily");
+        expect(en.match(/in the morning/gu)).toHaveLength(1);
+        if (time === "morning of surgery") {
+          expect(en).toContain(time);
+          const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+          expect(th).toContain(time);
+          expect(th).toContain("ตอนเช้า");
+        }
+        expect(importCanonicalCourse(input).stages[0].administrations[0].schedule?.recurrence)
+          .toMatchObject({ frequency: 1, period: 1, periodUnit: "d", anchors: [EventTiming.Morning] });
+      }
+    });
+
+  it.each([
+    ["08:00", undefined, "at 08:00"],
+    ["the morning", undefined, "in the morning"],
+    ["08:00", AdviceRelation.Before, "before 08:00"]
+  ] as const)("uses the selected point or daypart relation for a new patch (%s, %s)", (time, relation, expected) => {
+    const frame: AdviceFrame = {
+      ...parseInstructionActions("Apply new patch")[0], sourceText: "", span: { start: 0, end: 0 },
+      predicate: { lemma: "apply_patch", display: "Apply", i18n: { th: "แปะ" }, realizer: "object-time" },
+      args: [
+        { role: AdviceArgumentRole.Object, text: "new patch", i18n: { en: "new patch", th: "แผ่นใหม่" } },
+        { role: AdviceArgumentRole.Time, text: time, normalized: time, relation }
+      ]
+    };
+    const graph = { sourceText: "", sourceLocale: "en", actions: [frame] };
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension(graph)!] };
+    for (const text of [realizeInstructionGraph(graph, "en"),
+      ...[[row], toDosageDetails([row])].map(input =>
+        formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))]) {
+      expect(text).toContain("Apply new patch " + expected);
+    }
   });
 });

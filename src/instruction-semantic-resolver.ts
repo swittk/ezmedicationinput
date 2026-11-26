@@ -1,7 +1,7 @@
 import { cloneStructuredValue } from "./stable-structure";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { baseLanguageTag } from "./localization";
-import { inferMedicationLocale } from "./locale-detection";
+import { withMedicationSourceI18n } from "./locale-detection";
 import { lexInput } from "./lexer/lex";
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS } from "./hpsg/lexical-classes";
 import {
@@ -120,14 +120,10 @@ function buildBodySiteArgument(
     conceptId: resolved.canonical,
     coding: resolved.coding,
     codings: resolved.coding ? [resolved.coding] : undefined,
-    i18n: {
+    i18n: withMedicationSourceI18n(sourceText, {
       en: resolved.englishObjectText,
-      ...(resolved.definition?.i18n ?? {}),
-      ...(() => {
-        const sourceLocale = inferMedicationLocale(sourceText, "en");
-        return sourceLocale === "en" ? {} : { [sourceLocale]: sourceText };
-      })()
-    },
+      ...(resolved.definition?.i18n ?? {})
+    }),
     span: absolute
   };
 }

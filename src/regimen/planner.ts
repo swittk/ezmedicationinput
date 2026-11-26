@@ -22,7 +22,7 @@ import { FREQUENCY_SIMPLE_WORDS, mapFrequencyAdverb } from '../hpsg/timing-lexic
 import { ACTION_DISCOURSE_CONNECTORS, ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS, DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS, DOSE_FRACTION_WORDS, DOSE_NUMBER_WORDS,
-  HARD_SEGMENT_BOUNDARY_TOKENS, sequenceConnectorEnd, MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
+  HARD_SEGMENT_BOUNDARY_TOKENS, sequenceConnectorEnd,
   TREATMENT_PERIOD_START_LEADS,
   LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
   coordinationConnectorKind } from '../hpsg/lexical-classes';
@@ -174,12 +174,12 @@ function possibleAdditiveDoseSeam(tokens: Token[], site: BoundarySite): boolean 
 /** Lexical seams are candidates, never decisions. Owned structures can veto every seam kind. */
 function candidateSites(input: string, tokens: Token[], options?: ParseOptions): BoundarySite[] {
   const sites: BoundarySite[] = [];
+  const maximumContext = { tokens, options };
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
     // The existing maximum constituent owns its qualifier, amount and period.
     // Its internal numerals cannot introduce independent administrations.
-    const maximum = MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(lexeme(token))
-      ? maximumDosePerPeriodAt({ tokens, options }, i) : undefined;
+    const maximum = maximumDosePerPeriodAt(maximumContext, i);
     if (maximum) { i += maximum.tokens.length - 1; continue; }
     // A typed phase-adjustment predicate supplies a candidate boundary;
     // its complete dosage daughter is still checked by the boundary grammar.
