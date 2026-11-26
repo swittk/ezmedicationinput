@@ -229,9 +229,11 @@ export function occurrenceCapPeriodAt(
   start: number
 ): { tokens: Token[]; period: number; periodUnit: FhirPeriodUnit } | undefined {
   const adverb = maximumTokensAvailable(context, start, 1)?.[0];
-  const adverbUnit = adverb ? mapFrequencyAdverb(normalizeTokenLower(adverb)) : undefined;
+  const lower = adverb ? normalizeTokenLower(adverb) : undefined;
+  const adverbUnit = lower !== undefined ? mapFrequencyAdverb(lower) : undefined;
   if (adverb && adverbUnit) return { tokens: [adverb], period: 1, periodUnit: adverbUnit };
   for (const definition of OCCURRENCE_CAP_PERIOD_PHRASES) {
+    if (definition.parts[0] !== lower) continue;
     const tokens = maximumTokensAvailable(context, start, definition.parts.length);
     if (!tokens) continue;
     if (!tokens.every((candidate, offset) => normalizeTokenLower(candidate) === definition.parts[offset])) continue;
