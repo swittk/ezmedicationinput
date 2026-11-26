@@ -2281,10 +2281,10 @@ describe("parseSig core scenarios", () => {
     expect(result.fhir.timing?.repeat?.when).toEqual(["NOON"]);
   });
 
-  it("maps PM", () => {
+  it("keeps PM shorthand as evening without an afternoon code", () => {
     const result = parseSig("1 po pm", { context: TAB_CONTEXT });
     expect(result.fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
-    expect(result.fhir.timing?.code?.coding?.[0]?.code).toBe("PM");
+    expect(result.fhir.timing?.code).toEqual({ text: "PM" });
     expect(result.fhir.timing?.repeat?.when).toEqual(["EVE"]);
   });
 
