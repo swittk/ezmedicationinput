@@ -5636,6 +5636,43 @@ describe("required graph conditions beside independent Boolean guards", () => {
 
 
 describe("independent primary graph rendering owners", () => {
+  it.each([
+    { warning: "Do not touch tube tip to the eye", primaryRole: AdviceArgumentRole.Object,
+      targetRole: AdviceArgumentRole.Site, enTarget: "the eye", thTarget: "ตา" },
+    { warning: "ห้ามให้ปลายหลอดสัมผัสดวงตา", primaryRole: AdviceArgumentRole.Theme,
+      targetRole: AdviceArgumentRole.Object, enTarget: "ดวงตา", thTarget: "ดวงตา" }
+  ])("retains negative contact participants beside a current dose: $warning", entry => {
+    const source = "1 drop OD QID x7d; " + entry.warning;
+    const parsed = parsePublicSig(source);
+    const action = parsed.meta.canonical.clauses.flatMap(clause => clause.instructionGraph?.actions ?? [])
+      .find(frame => frame.predicate.lemma === "touch" && frame.polarity === AdvicePolarity.Negate)!;
+    expect(action.args[0]).toMatchObject({ role: entry.primaryRole, conceptId: "tube-tip" });
+    expect(action.args[1].role).toBe(entry.targetRole);
+    const native = importCanonicalCourse(parsed.fhirNext);
+    expect(native.stages[0].administrations[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "drop" });
+    for (const locale of ["en", "th"]) {
+      const target = locale === "en" ? entry.enTarget : entry.thTarget;
+      const primary = locale === "en" ? "tube tip" : "ปลายหลอด";
+      const direct = realizeInstructionAction(action, locale);
+      expect(direct).toContain(primary);
+      expect(direct).toContain(target);
+      expect(direct).toMatch(locale === "en" ? /^Do not touch/u : /^ห้ามสัมผัส/u);
+      for (const input of [parsed.fhir, parsed.fhirNext, native]) {
+        const before = JSON.stringify(input);
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? "1 drop" : "1 หยด");
+        const start = text.indexOf(locale === "en" ? "Do not touch" : "ห้าม");
+        expect(start).toBeGreaterThanOrEqual(0);
+        const warning = text.slice(start);
+        expect(warning).toContain(primary);
+        expect(warning).toContain(target);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
   it.each([false, true])("retains explicit accompaniment under a negated medication action (milk=%s)", accompanied => {
     const source = "Do not swallow the tablet" + (accompanied ? " with milk" : "");
     const frame = parseInstructionActions(source)[0];

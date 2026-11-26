@@ -110,6 +110,9 @@ function relationForSite(input: InstructionActionRealizationInput): AdviceRelati
 function negatedAttachmentArguments(c: InstructionActionRealizationInput): {
   theme?: string; target?: string;
 } {
+  // The shared action selector accepts Object or Theme as the primary
+  // nominal. Its separate typed Site remains the attachment target.
+  if (c.theme && c.site) return { theme: c.theme, target: c.site };
   const theme = c.frame.args.find(arg => arg.role === AdviceArgumentRole.Theme);
   const target = theme && c.frame.args.find(arg =>
     arg !== theme && (arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Object)
