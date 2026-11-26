@@ -5435,6 +5435,10 @@ describe("fresh structured quantity and annotation ownership", () => {
     expect(convertQuantityValue(2, enzyme, { ...enzyme, unit: "U" })).toBe(2);
     expect(convertQuantityValue(2, { unit: "U" }, international)).toBe(2);
     expect(convertQuantityValue(1, { system: ucum, code: "g" }, { system: ucum, code: "mg" })).toBe(1000);
+    expect(convertQuantityValue(1, { system: ucum, code: "l" }, { system: ucum, code: "mL" })).toBe(1000);
+    expect(convertQuantityValue(1, { system: ucum, code: "ml" }, { system: ucum, code: "mL" })).toBe(1);
+    expect(convertQuantityValue(1, { system: ucum, code: "ML" }, { system: ucum, code: "mL" })).toBeNull();
+    expect(convertQuantityValue(1, { system: ucum, code: "5.mL" }, { system: ucum, code: "mL" })).toBe(5);
     const limits = [{ scope: "administration" as const, valueQuantity: { ...enzyme, value: 20 } },
       { scope: "administration" as const, valueQuantity: { ...international, value: 1 } }];
     const input: FhirR6DosageInstruction = { step: [{ component: [{
@@ -5444,6 +5448,24 @@ describe("fresh structured quantity and annotation ownership", () => {
     expect(rows[0].maxDosePerAdministration).toEqual(limits[0].valueQuantity);
     expect(toDosageDetails(copy(rows)).step![0].component[0].safety!.doseLimit).toEqual(limits);
     expect(input).toEqual(before);
+  });
+
+  it.each([
+    { code: "ml", value: 100, tighterCode: "L", tighterValue: 0.05 },
+    { code: "l", value: 0.1, tighterCode: "mL", tighterValue: 50 },
+  ])("compares the UCUM litre symbol $code without folding prefix case", ({ code, value, tighterCode, tighterValue }) => {
+    const first = { system: ucum, code, value, id: "larger-volume", _value: { id: "authored-volume" } };
+    const tight = { system: ucum, code: tighterCode, value: tighterValue, id: "smaller-volume" };
+    for (const quantities of [[first, tight], [tight, first]]) {
+      const limits = quantities.map(valueQuantity => ({ scope: "administration" as const, valueQuantity }));
+      const input: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { system: ucum, code, value: value / 10 } }], safety: { doseLimit: limits },
+      }] }] };
+      const before = copy(input), rows = toFhirR5Dosages(input);
+      expect(rows[0].maxDosePerAdministration).toEqual(tight);
+      expect(toDosageDetails(copy(rows)).step![0].component[0].safety!.doseLimit).toEqual(limits);
+      expect(input).toEqual(before);
+    }
   });
 
   it.each([undefined, 1])("preserves a two-hour upper administration duration with lower %s", lower => {

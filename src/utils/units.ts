@@ -117,14 +117,17 @@ export function sameCodedQuantityUnit(left: QuantityUnit | undefined, right: Qua
 
 /** The calculation unit shared by numeric comparison and compatible-unit indexing. */
 export function getQuantityComparisonUnit(quantity: QuantityUnit | undefined): string {
+    const unit = getDoseQuantityUnit(quantity, false);
     if (quantity?.system === "http://unitsofmeasure.org" && quantity.code) {
         // Explicit UCUM codes retain their identity. Lexical aliases such as U
         // are licensed for authored unit labels, not for coded quantities.
         const code = stripTerminalUcumAnnotations(quantity.code);
-        const supported = getStandardDoseUnitCoding(code);
-        if (supported?.system !== quantity.system || supported.code !== code) return "";
+        const supported = getStandardDoseUnitCoding(unit);
+        // UCUM permits both l and L for litre; SI prefix case stays significant.
+        if (supported?.system !== quantity.system || supported.code !== code &&
+            supported.code !== code.replace(/l(?=\/|$)/g, "L")) return "";
     }
-    return normalizeQuantityCapUnit(getDoseQuantityUnit(quantity, false));
+    return normalizeQuantityCapUnit(unit);
 }
 
 /** Compare quantity identities before resolving their supported dimensional or
