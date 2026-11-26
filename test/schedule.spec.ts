@@ -5762,6 +5762,66 @@ describe("shared current cadence, phase and quantity owners", () => {
       .toThrow(expect.objectContaining({ code: "invalid-stage-order" }));
   });
 
+  const endOnlyCourse = (): FhirR6DosageInstruction => ({
+    renderedInstruction: "Take 1 tablet at 08:00 through 4 December 2026",
+    extension: [{ url: "https://example.org/current-order-note", valueString: "Retain current source" }],
+    step: [{ id: "ending-phase", component: [{ id: "daily-tablet",
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00"],
+        boundsPeriod: { end: "2026-12-04T23:59:59Z", _end: { id: "authored-end" } } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab", extension: [
+        { url: "https://example.org/quantity-note", valueString: "Retain tablet annotation" },
+      ] } }],
+    }] }],
+  });
+
+  it("retains an end-only daily dose before expiry and returns no remaining scalar supply after it", () => {
+    const source = endOnlyCourse(), original = JSON.stringify(source);
+    const native = importCanonicalCourse(source), projected = projectCanonicalCourse(native);
+    expect(projected.fhirNext.renderedInstruction).toBe(source.renderedInstruction);
+    expect(projected.fhirNext.extension).toEqual(expect.arrayContaining(source.extension!));
+    const returned = projected.fhirNext.step![0].component![0];
+    expect(returned.timing?.repeat?.boundsPeriod).toEqual(source.step![0].component![0].timing!.repeat!.boundsPeriod);
+    expect(returned.doseAndRate?.[0].doseQuantity?.extension)
+      .toEqual(source.step![0].component![0].doseAndRate![0].doseQuantity!.extension);
+    for (const input of [native, projected.fhir[0], source]) {
+      const before = JSON.stringify(input);
+      const early = { from: "2026-12-04T07:00:00Z", timeZone: "UTC", limit: 3 };
+      expect(nextDueDoses(input, early)).toEqual(["2026-12-04T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...early, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      const late = { from: "2026-12-05T07:00:00Z", timeZone: "UTC", limit: 3 };
+      expect(nextDueDoses(input, late)).toEqual([]);
+      expect(calculateTotalUnits({ dosage: input, ...late, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it("keeps an expired end-only phase empty before a dated replacement without inventing its start", () => {
+    const source = endOnlyCourse();
+    source.renderedInstruction += "; then take 2 tablets daily at 08:00 from 5 December 2026";
+    source.step!.push({ id: "dated-replacement", component: [{
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00"],
+        boundsPeriod: { start: "2026-12-05T00:00:00Z" } } },
+      doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+    }] });
+    const original = JSON.stringify(source), native = importCanonicalCourse(source);
+    for (const input of [native, projectCanonicalCourse(native).fhir, source]) {
+      const before = JSON.stringify(input);
+      const early = { from: "2026-12-04T07:00:00Z", timeZone: "UTC", limit: 3 };
+      expect(nextDueDoses(input, early)).toEqual([
+        "2026-12-04T08:00:00+00:00", "2026-12-05T08:00:00+00:00", "2026-12-06T08:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...early, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      const late = { from: "2026-12-05T07:00:00Z", timeZone: "UTC", limit: 3 };
+      expect(nextDueDoses(input, late)).toEqual([
+        "2026-12-05T08:00:00+00:00", "2026-12-06T08:00:00+00:00", "2026-12-07T08:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...late, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(2);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
   it("keeps an unknown step count active instead of assuming one repetition", () => {
     const first = member({ frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"] });
     const next = member({ frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"] });

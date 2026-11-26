@@ -2989,10 +2989,6 @@ function treatmentStepWindow(
       if (!replacement || boundary < replacement) replacement = boundary;
     }
     if (replacement && (!end || replacement < end)) {
-      // A dated successor has already replaced a phase whose only opening
-      // was the query fallback. Resolve its empty window before order checks.
-      if (!clinicalOpening && replacement <= start)
-        return { start: replacement, end: replacement, capClock, administrations: [] };
       end = replacement;
       completionPoint = undefined;
     }
@@ -3021,6 +3017,10 @@ function treatmentStepWindow(
       }
     }
   }
+  // A known end can already precede the query fallback without an authored
+  // opening. Resolve that empty window before checking clinical stage order.
+  if (end && !clinicalOpening && end <= start)
+    return { start: end, end, capClock, administrations: [] };
   // Inferred windows include an absolute event's actual lead. Authored stage
   // bounds and the nominal member recurrence origins remain unchanged.
   let actualStart = start;
