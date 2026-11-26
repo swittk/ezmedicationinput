@@ -7011,7 +7011,7 @@ describe("round49 primary administration condition placement", () => {
   it.each([
     ["en", "literal"], ["en", "default"], ["th", "literal"], ["th", "default"],
     ["en", "formatDefault"], ["th", "formatDefault"],
-  ] as const)("preserves custom formatter predicate visibility without duplicating it (%s, %s)", (locale, mode) => {
+  ] as const)("preserves guarded defaults and exact custom formatter wording (%s, %s)", (locale, mode) => {
     const parsed = parseSig(source);
     const native = importCanonicalCourse(parsed.fhirNext);
     const defaults: string[] = [];
@@ -7026,13 +7026,12 @@ describe("round49 primary administration condition placement", () => {
     } };
     const text = formatCanonicalCourse(native, "long", options);
     const guard = locale === "en" ? "only if BP > 160" : "เฉพาะเมื่อ BP > 160";
-    const expected = mode === "literal" ? "Clinic-selected administration " + guard + "." :
+    const expected = mode === "literal" ? "Clinic-selected administration." :
       "Take 1 tablet orally twice daily " + guard + ". Otherwise hold.";
-    expect(text.split(guard)).toHaveLength(2);
-    // A literal sentence owns its complete guard. Returning the known default
-    // instead keeps the condition on the dose before the independent hold.
-    if (mode === "literal") expect(text.endsWith(guard + ".")).toBe(true);
-    else expect(text).toContain("Otherwise hold");
+    expect(text.split(guard)).toHaveLength(mode === "literal" ? 1 : 2);
+    // Custom wording is authoritative; the complete default keeps the condition
+    // on the dose before the independent hold.
+    if (mode !== "literal") expect(text).toContain("Otherwise hold");
     expect(text).toBe(expected);
     expect(defaults).toEqual(["Take 1 tablet orally twice daily " + guard + ". Otherwise hold."]);
     expect(formatCanonicalCourse(native, "short", options)).toBe(
