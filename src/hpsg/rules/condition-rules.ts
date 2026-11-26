@@ -740,8 +740,11 @@ function selectedClinicalGuardSign(
   const lead = context.tokens[start];
   if (!guard || lead.sourceStart < guard.start || lead.sourceStart >= guard.markerEnd) return undefined;
   // Only an activity wholly owned by this antecedent needs graph exclusion.
-  // Ordinary guards keep their existing clinical path without extra scope data.
-  if (!frames.some(candidate => candidate.span.start >= guard.start && candidate.span.end <= guard.end)) return undefined;
+  // The default cached guard already has its ordinary clinical lexical path.
+  // A locally selected guard uses that same construction without extra scope data.
+  if (!frames.some(candidate => candidate.span.start >= guard.start && candidate.span.end <= guard.end)) {
+    return guard === medicationGuardForContext(context) ? undefined : medicationGuardSign(context, guard);
+  }
   const condition: HpsgConditionFeature = {
     relation, text: guard.text,
     fullText: context.state.input.slice(Math.min(guard.start, frame.span.start), Math.max(guard.end, frame.span.end)).trim(),
@@ -830,20 +833,11 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     let guard = medicationGuardForContext(context);
     const markerEnd = lexicalConditional?.start === 0
       ? lead.sourceStart + lexicalConditional.end : lead.sourceEnd;
-    if (!guard || guard.end <= lead.sourceStart) {
-      const delimiter = context.tokens.find(token => token.sourceStart >= markerEnd &&
-        /^[,;:.!?]$/u.test(token.original));
-      if (delimiter && /^[,:]$/u.test(delimiter.original) && frames.some(frame =>
-          frame.span.start >= markerEnd && frame.span.start < delimiter.sourceStart)) {
-        const consequent = frames.find(frame => frame.span.start >= delimiter.sourceEnd &&
-          !hasStrongBoundary(context.state.input.slice(delimiter.sourceEnd, frame.span.start)));
-        if (consequent) {
-          // A complete admitted predicate before the delimiter owns its activity;
-          // the separately selected action after it is the consequent.
-          guard = parseMedicationGuard(context.state.input, context.tokens, undefined, context.options,
-            { relation, start: lead.sourceStart, markerEnd, end: delimiter.sourceStart });
-        }
-      }
+    if (!guard || lead.sourceStart < guard.start || lead.sourceStart >= guard.markerEnd) {
+      // The registered conditional lead uses the same predicate/consequent
+      // composition as other clinical guards, with or without an activity.
+      guard = parseMedicationGuard(context.state.input, context.tokens, undefined, context.options,
+        { relation, start: lead.sourceStart, markerEnd });
     }
     let nextIndex = -1;
     for (let index = 0; index < frames.length; index++) {

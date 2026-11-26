@@ -824,11 +824,11 @@ function guardPredicateConstituent(
  * @param existingTokens Already-lexed tokens when the caller has a source context.
  * @param withholdingConsequent License supplied only by a typed medication-withholding action daughter.
  * @param options Registered action vocabulary used by the enclosing clause.
- * @param scope An already selected conditional relation and closed predicate span.
+ * @param scope An already selected conditional relation and optional closed predicate span.
  */
 export function parseMedicationGuard(
   source: string, existingTokens?: Token[], withholdingConsequent?: true, options?: ParseOptions,
-  scope?: { relation: AdviceRelation; start: number; markerEnd: number; end: number }
+  scope?: { relation: AdviceRelation; start: number; markerEnd: number; end?: number }
 ): ParsedMedicationGuard | undefined {
   const lead = scope ? { start: scope.start, end: scope.markerEnd,
     marker: scope.relation === AdviceRelation.Unless ? "unless" as const : "if" as const }
@@ -852,7 +852,7 @@ export function parseMedicationGuard(
     synsem: { head: {}, valence: {}, cont: { guard: { marker: lead.marker } } }, score: 1 });
   const prefix = source.slice(0, lead.start).trim();
   let scopedGuard: HpsgSign | undefined;
-  if (!scope && (!prefix || /[.;!?]$/u.test(prefix))) {
+  if (scope?.end === undefined && (!prefix || /[.;!?]$/u.test(prefix))) {
     const comma = tail.search(/[,;:]/u);
     end = Math.min(end, lead.end + (comma >= 0 ? comma : tail.length));
     // Registered administration heads and their directive prefixes delimit the
@@ -902,7 +902,7 @@ export function parseMedicationGuard(
       scopedGuard = guard;
       break;
     }
-  } else if (!scope) {
+  } else if (scope?.end === undefined) {
     end = Math.min(end, lead.end + medicationGuardClauseBoundary(tail));
     const lexicalContext = { tokens, options };
     for (let index = 0; index < tokens.length; index++) {

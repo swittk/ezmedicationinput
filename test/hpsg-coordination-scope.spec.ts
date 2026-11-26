@@ -2375,6 +2375,85 @@ describe("condition and successor timing ownership", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 
+  it.each([
+    ["When", "prefix"], ["If", "prefix"], ["When", "postfix"], ["If", "postfix"]
+  ] as const)("keeps a selected quantitative guard without an antecedent activity: %s %s", (marker, position) => {
+    const source = position === "prefix"
+      ? `${marker} SBP > 160, take 1 tablet at 08:00 daily for 2 days.`
+      : `Take 1 tablet at 08:00 daily for 2 days ${marker.toLowerCase()} SBP > 160.`;
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const predicate = { kind: "measurement", name: "sbp", operation: "gt", value: 160 };
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.instructionGraph?.actions ?? []).toEqual([]);
+    expect(clause.instructionScopes).toBeUndefined();
+    expect(clause.clinicalAdjuncts?.condition).toMatchObject(predicate);
+    expect(clause.prn?.enabled).not.toBe(true);
+    const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 3 };
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject(predicate);
+      expect(members[0].calendarPredicate).toBeUndefined();
+      expect(members[0].schedule?.recurrence).toMatchObject({
+        frequency: 1, period: 1, periodUnit: "d", clocks: ["08:00:00"],
+        courseLength: input === parsed.meta.canonical.course
+          ? { value: 2, unit: "d" }
+          : { value: 2, unit: "days", system: "http://unitsofmeasure.org", code: "d" }
+      });
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => true })).toEqual([
+        "2026-12-01T08:00:00+00:00", "2026-12-02T08:00:00+00:00"
+      ]);
+      let rejected = 0;
+      expect(nextDueDoses(input, { ...query, evaluateCondition: condition => {
+        expect(condition).toMatchObject(predicate); rejected += 1; return false;
+      } })).toEqual([]);
+      expect(rejected).toBeGreaterThan(0);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Take 1 tablet orally once daily at 8:00 am for 2 days only if SBP > 160.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("รับประทานครั้งละ 1 เม็ด วันละครั้ง เวลา 08:00 เป็นเวลา 2 วัน เฉพาะเมื่อ SBP > 160.");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("keeps a quantitative WHEN guard independent of matching later IF counseling", () => {
+    const source = "When SBP > 160, take 1 tablet at 08:00 daily for 2 days; call the clinic if SBP > 160.";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const predicate = { kind: "measurement", name: "sbp", operation: "gt", value: 160 };
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.clinicalAdjuncts?.condition).toMatchObject(predicate);
+    expect(clause.clinicalAdjuncts?.localRanges).toEqual([{ start: 0, end: source.indexOf(",") }]);
+    expect(clause.prn?.enabled).not.toBe(true);
+    expect(clause.instructionGraph?.actions.map(action => action.predicate.lemma)).toEqual(["call"]);
+    expect(clause.instructionGraph?.relations).toContainEqual(expect.objectContaining({
+      kind: "if", toActionIndex: 0, text: "if SBP > 160"
+    }));
+    const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 3 };
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject(predicate);
+      expect(members[0].schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d", clocks: ["08:00:00"] });
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => true })).toEqual([
+        "2026-12-01T08:00:00+00:00", "2026-12-02T08:00:00+00:00"
+      ]);
+      let rejected = 0;
+      expect(nextDueDoses(input, { ...query, evaluateCondition: condition => {
+        expect(condition).toMatchObject(predicate); rejected += 1; return false;
+      } })).toEqual([]);
+      expect(rejected).toBeGreaterThan(0);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Take 1 tablet orally once daily at 8:00 am for 2 days only if SBP > 160. Call the clinic if SBP > 160.");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
   it("keeps Hold unless ability as a positive permission beside independent counseling", () => {
     const source = "Take 1 tablet at 08:00 daily for 2 days; hold the morning dose unless you are able to swallow; call the clinic.";
     const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
