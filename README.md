@@ -406,48 +406,6 @@ language. Lexer, relation/action terminology and suggestion registrations keep
 their existing roles. This boundary lets a future language-pack installer group
 those registrations without changing the shared clinical engine.
 
-## Public API performance comparisons
-
-`bench/public-api.mjs` measures the established public surface, including
-suggestions, asynchronous parse/lint, FHIR import/export, structured formatting,
-calendar/supply calculations, terminology getters and locale registration.
-
-```sh
-npm run build
-node --expose-gc bench/public-api.mjs \
-  --baseline /path/to/built-master/dist/index.js \
-  --rounds 17 --target-ms 24 --json public-api-results.json
-```
-
-Build the baseline separately from a compatible revision. The known-compatible
-master revision is `7d628239dc1cb5695c5fe1d8b9150682fe4d1adb`. Fixture setup
-requires its `parseSig` result to include R5 `fhir` rows, a current R6
-`fhirNext.step[].component[]` structure, and a canonical instruction graph.
-It also calls the instruction-graph, action/concept/symptom terminology,
-body-site relation, dosage condition/exclusion/choice, and lexer locale-pack
-helpers before scenario classification. An older baseline lacking those fixture
-APIs or the current R6 structure stops during setup; candidate-only classification
-does not supply those prerequisites.
-
-The default run measures a representative subset. Add `--all` to check that
-every exported function has a fixture or an explicit new-API classification.
-Each scenario is measured independently
-with paired alternating runs; faster scheduling cannot hide slower suggestions
-or conversion. Helper exports are captured before timing, so repeated module
-namespace lookups are not mistaken for the cost of a named function call.
-Timing-sensitive thresholds are kept out of clinical unit tests. Reports include
-build hashes, runtime details, raw paired samples, timing spread and the
-per-scenario gate. Cases with an independent edited-dose oracle record whether
-both versions perform the same clinical work. Incorrect baseline wording keeps
-its raw timing but receives no regression verdict. APIs missing from the baseline
-receive an explicit candidate-only measurement. After the entry paths have been
-validated, an incomplete report is saved atomically before imports and fixture
-setup, then after each finished scenario. An interruption after that checkpoint
-leaves an explicitly incomplete report. Use a fresh report path for each run and
-check its timestamp and the process exit status: an earlier path-validation
-failure cannot replace a previous run's report. Host/JIT noise still requires
-repeated runs for borderline or sub-microsecond results.
-
 ## Formal HPSG substrate
 
 The HPSG core now uses an actual typed-feature-structure runtime on the live parse path. Signs participate in a subtype hierarchy, feature appropriateness is validated, general feature unification preserves reentrancy/structure sharing, and phrase mothers unify daughter `SYNSEM` structures rather than relying only on flat TypeScript object merging. Structural AVMs are immutable and memoized because the medication grammar reuses a small number of SYNSEM shapes heavily.

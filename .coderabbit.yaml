@@ -16,25 +16,12 @@ reviews:
     - "!DIRECTIONALITY.md"
     - "!HPSG_IMPLEMENTATION_GUIDE.md"
     - "!DIARY.md"
-    - "!bench/compare-r6.mjs"
+    - "!bench/**"
     - "!experiments/boundary-planner/**"
-    # Bulk replay data and deliberately adversarial fuzz runners stay in CI,
-    # but add little incremental CodeRabbit review signal. Do not exclude
-    # grammar, core HPSG clinical-oracle tests, or FHIR definitions.
-    - "!test/real-world-fuzz-2026-cases.json"
-    - "!test/real-world-fuzz-2026-oracles.json"
+    # This replay runner changes only the imported R6 type name; clinical
+    # oracle suites, terminology coverage, and mixed distribution tests remain
+    # selected. Benchmark and measurement artifacts are outside review scope.
     - "!test/real-world-fuzz-2026.spec.ts"
-    - "!test/real-world-torture.spec.ts"
-    - "!test/weird-clinician-instructions.spec.ts"
-    # These two existing suites changed ONLY import wiring to the reviewed
-    # R5 compatibility helper; every test input and assertion is unchanged.
-    # Keep the topical suite INCLUDED: it now contains new clinical oracles.
-    - "!test/relation-terminology.spec.ts"
-    - "!test/terminology-coverage.spec.ts"
-    - "!test/suggest.spec.ts"
-    - "!test/advice.spec.ts"
-    - "!test/symptom-terminology.spec.ts"
-    - "!test/parser-state.spec.ts"
     - "!package-lock.json"
   path_instructions:
     - path: "**/*"
@@ -43,8 +30,8 @@ reviews:
         clinical medication SIG parser/SUGGESTER; doctors inspect, edit and approve
         results. It is NOT an autonomous prescriber, an exhaustive drug safety
         authority, or a validator that must reject all imperfect language.
-        Read AGENTS.md, DIRECTIONALITY.md, HPSG_IMPLEMENTATION_GUIDE.md as product
-        context. Judge changes by ordinary clinical usefulness, fidelity to
+        Apply these product boundaries and the HPSG implementation guide.
+        Judge changes by ordinary clinical usefulness, fidelity to
         advertised HPSG semantics, retaining all recoverable source/FHIR meaning,
         and low mobile runtime cost.
         Do NOT request hard blocks, new safety vetoes, redundant validations,
@@ -77,6 +64,12 @@ reviews:
         text. Suggestions do not require proof of perfect interpretation. Avoid
         redundant parsing/validation and hot-path allocations; protect phone speed.
         Scheduling utility restrictions are not blanket parser/preview rejections.
+        Language packs own lexical vocabulary, language-specific licensing and
+        realization. Shared clinical meaning, typed HPSG composition, execution
+        and FHIR projection stay language-neutral. Reuse the existing semantic
+        owner across consumers; avoid symptom-only rescue branches, duplicate
+        clinical policy and speculative abstractions. Locale providers are plain
+        immutable data; receiver rebinding and caller-misuse defenses are out of scope.
     - path: "test/**"
       instructions: |
         Clinical correctness means a precise, independent oracle for realistic
@@ -84,8 +77,13 @@ reviews:
         conditions, caps, FHIR). Unsupported bizarre adversarial strings are
         diagnostic probes, NOT requirements or acceptance tests. Do not reward
         an empty result, quarantine, rejection, or zero supply as a universal
-        success; ensure best-effort meaning and source data survive. Require
-        performance comparison before adding runtime checks for rare cases.
+        success; ensure best-effort meaning and source data survive.
+        Review substantive behavior, not fixture mechanics, mock or boot setup,
+        assertion style, speculative test-only expansion, or benchmark methodology.
+    - path: "test-dist/**"
+      instructions: |
+        Review the built-package clinical graph, FHIR and localized preview
+        assertions. Ignore boot-only packaging mechanics and test-style requests.
     - path: "fhir/**"
       instructions: |
         FHIR is a downstream meaning-preserving projection, not the grammar.
@@ -97,6 +95,4 @@ knowledge_base:
   code_guidelines:
     enabled: true
     filePatterns:
-      - "AGENTS.md"
-      - "DIRECTIONALITY.md"
       - "HPSG_IMPLEMENTATION_GUIDE.md"

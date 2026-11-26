@@ -234,11 +234,6 @@ export function getRegisteredSigLocalizations(): SigLocalization[] {
   return Array.from(REGISTERED_LOCALIZATIONS.values());
 }
 
-/** Retain the ordinary provider receiver when selecting an inherited dose facet. */
-function doseFormatterFrom(provider: SigLocalization | SigLocalizationConfig | undefined): SigLocalization["formatDose"] {
-  return provider?.formatDose?.bind(provider);
-}
-
 /** Each regional facet overrides only its matching base-language facet.
  * Complete registrations keep their allocation-free common path; partial
  * regional compositions are refreshed lazily after explicit registration. */
@@ -254,7 +249,7 @@ function registeredLocalization(key: string | undefined): SigLocalization | unde
   if (cached?.exact === exact && cached.base === base) return cached.localization;
   const resolved: SigLocalization = {
     locale: exact.locale,
-    formatDose: doseFormatterFrom(exact.formatDose ? exact : base),
+    formatDose: exact.formatDose ?? base.formatDose,
     formatShort: exact.formatShort ?? base.formatShort,
     formatLong: exact.formatLong ?? base.formatLong,
     course: exact.course ?? base.course,
@@ -296,7 +291,7 @@ export function resolveSigLocalization(
       ? {course:config?.course ?? inherited?.course ?? base?.course} : {})
   };
 
-  result.formatDose = doseFormatterFrom(config.formatDose ? config : inherited?.formatDose ? inherited : base);
+  result.formatDose = config.formatDose ?? inherited?.formatDose ?? base?.formatDose;
   result.formatShort = config.formatShort ?? inherited?.formatShort ?? base?.formatShort;
   result.formatLong = config.formatLong ?? inherited?.formatLong ?? base?.formatLong;
 

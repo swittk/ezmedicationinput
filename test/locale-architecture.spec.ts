@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveSigLocalization, registerSigLocalization } from "../src/i18n";
+import { resolveSigLocalization } from "../src/i18n";
 import {
   localizedConfig,
   localizedValue
@@ -9,7 +9,7 @@ import {
   resolveMedicationInstructionAction
 } from "../src/instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../src/instruction-concept-terminology";
-import { AdviceArgumentRole, AdviceRelation, EventTiming, RouteCode, FhirPeriodUnit, type CanonicalDoseExpr, type FhirDosage, type FhirR6DosageInstruction, type FormatOptions } from "../src/types";
+import { AdviceArgumentRole, AdviceRelation, EventTiming, RouteCode, FhirPeriodUnit, type FhirDosage, type FhirR6DosageInstruction, type FormatOptions } from "../src/types";
 import { suggestSig } from "../src/suggest";
 import { localizeAdviceRelation } from "../src/relation-terminology";
 import { shouldJoinAdjacentSourceTokens } from "../src/locale-detection";
@@ -442,27 +442,6 @@ describe("independent cadence and preview condition owners", () => {
       expect(text).toContain("Swallow 1 tablet whole " + (locale === "en" ? "only if" : "เฉพาะเมื่อ") + " SBP > 160.");
       expect(text).toContain(locale === "en" ? style === "short" ? "1x/d" : "once daily" : "วันละครั้ง");
     }
-    expect(JSON.stringify(source)).toBe(before);
-  });
-
-  it("retains the supplying plain dose provider through regional and per-call composition", () => {
-    const english = resolveSigLocalization("en")!;
-    const provider = { ...english, locale: "facetdose", unitLabels: { tab: "custom tablets" },
-      formatDose(dose: CanonicalDoseExpr | string) {
-        return typeof dose === "string" ? dose : dose.value + " " + this.unitLabels[dose.unit as "tab"];
-      }
-    };
-    registerSigLocalization(provider);
-    registerSigLocalization({ locale: "facetdose-region", course: english.course });
-    const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: ["ordered", "calculated"].map(code => ({
-      type: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/dose-rate-type", code }] }, ...tablet
-    })) }] }] };
-    const before = JSON.stringify(source);
-    const options: FormatOptions[] = [{ locale: "facetdose" }, { locale: "facetdose-region" },
-      { locale: "facetdose", i18n: { course: english.course } },
-      { locale: "other-facet", i18n: { inherit: "facetdose-region", course: english.course } }];
-    for (const option of options) expect(formatSig(source, "long", { ...option, realizationMode: "normalized" }))
-      .toBe("Use; Ordered dose: 1 custom tablets; Calculated dose: 1 custom tablets");
     expect(JSON.stringify(source)).toBe(before);
   });
 });
