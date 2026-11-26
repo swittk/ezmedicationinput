@@ -1,3 +1,4 @@
+import { numericAdministrationLimits } from "../src/canonical/course";
 import { simpleQuantityForR5, getQuantityComparator } from "../src/fhir-quantity-operator";
 import { cloneStructuredValue } from "../src/stable-structure";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
@@ -2958,10 +2959,36 @@ describe("coded presentation quantity identity", () => {
         timeOfDay: ["08:00:00", "20:00:00"] } },
       maxDosePerLifetime: { value: 2, ...unit, [field]: field === "system" ? "urn:other:dose-unit" : "cap" },
     };
-    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])])
+    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+      const member = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(numericAdministrationLimits(member)).toMatchObject({ lifetime: undefined, multiple: true });
       expect(calculateTotalUnits({ dosage, ...options, durationValue: 2, durationUnit: "d" }))
         .toMatchObject({ totalUnits: 4, quantityKind: "maximum",
           explanation: expect.stringContaining("an unevaluable maximum-dose constraint") });
+    }
+  });
+
+  it.each(["administration", "lifetime"] as const)("keeps the coded dose as the %s comparison basis", scope => {
+    const unit = { system: "urn:clinic:dose-unit", code: "tab" };
+    const compatible = { value: 2, ...unit };
+    const incompatible = { value: 1, ...unit, system: "urn:other:dose-unit" };
+    for (const amounts of [[incompatible, compatible], [compatible, incompatible]]) {
+      const input: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, ...unit } }],
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["08:00:00", "20:00:00"] } },
+        safety: { doseLimit: amounts.map(valueQuantity => ({ scope, valueQuantity })) },
+      }] }] };
+      const before = structuredClone(input);
+      for (const dosage of [input, toFhirR5Dosages(input), importCanonicalCourse(input)]) {
+        const member = importCanonicalCourse(dosage).stages[0].administrations[0];
+        expect(numericAdministrationLimits(member)).toMatchObject({ [scope]: compatible, multiple: true });
+        expect(calculateTotalUnits({ dosage, ...options, durationValue: 2, durationUnit: "d" }).totalUnits)
+          .toBe(scope === "lifetime" ? 2 : 4);
+        expect(member.limits?.map(limit => limit.amount)).toEqual(amounts);
+      }
+      expect(input).toEqual(before);
+    }
   });
 
   it.each([false, true])("applies a coded administration ceiling across optional range labels (upper endpoint: %s)", upper => {

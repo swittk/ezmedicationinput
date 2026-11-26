@@ -1,3 +1,5 @@
+import { getDoseQuantityUnit } from "../maps";
+
 export const MASS_UNITS: Record<string, number> = {
     kg: 1000000,
     g: 1000,
@@ -82,4 +84,38 @@ export function convertValue(
     }
 
     return null;
+}
+
+type QuantityUnit = { system?: string; code?: string; unit?: string };
+
+/** Normalize equivalent count-unit labels before dimensional conversion. */
+export function normalizeQuantityCapUnit(unit: string): string {
+    const text = unit.trim().toLowerCase();
+    switch (text) {
+        case "tab": case "tabs": case "tablet": case "tablets": return "tab";
+        case "cap": case "caps": case "capsule": case "capsules": return "cap";
+        case "drop": case "drops": return "drop";
+        case "nebule": case "nebules": case "respule": case "respules": return "nebule";
+        default: return text;
+    }
+}
+
+/** Exact coding compares quantities without assigning an opaque code a dimension. */
+export function sameCodedQuantityUnit(left: QuantityUnit | undefined, right: QuantityUnit | undefined): boolean {
+    return Boolean(left?.system && left.code && left.system === right?.system && left.code === right.code);
+}
+
+/** Compare quantity identities before resolving their supported dimensional or
+ * plain-label units. Missing labels never make distinct coded quantities equal. */
+export function convertQuantityValue(
+    value: number,
+    from: QuantityUnit | undefined,
+    to: QuantityUnit | undefined,
+    strength?: Parameters<typeof convertValue>[3]
+): number | null {
+    if (sameCodedQuantityUnit(from, to)) return value;
+    const fromUnit = normalizeQuantityCapUnit(getDoseQuantityUnit(from, false));
+    const toUnit = normalizeQuantityCapUnit(getDoseQuantityUnit(to, false));
+    if (!fromUnit || !toUnit) return null;
+    return convertValue(value, fromUnit, toUnit, strength);
 }

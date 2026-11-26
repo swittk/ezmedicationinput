@@ -29,9 +29,7 @@ import {
   DurationUnit,
   TimingEvent,
   numericAdministrationLimits,
-  sameCodedQuantityUnit,
   administrationHasDatedStart,
-  normalizeQuantityCapUnit,
   hasPeriodLimits,
   measureOperator as getQuantityComparator,
   administrationCondition as getDosageCondition,
@@ -75,7 +73,7 @@ import type {
   TotalUnitsResult,
 } from "../types";
 import { arrayIncludes } from "../utils/array";
-import { convertValue, getBaseUnitFactor, getUnitCategory } from "../utils/units";
+import { convertValue, convertQuantityValue, normalizeQuantityCapUnit, getBaseUnitFactor, getUnitCategory } from "../utils/units";
 import { parseStrengthIntoRatio } from "../utils/strength";
 import { getDoseQuantityUnit } from "../maps";
 import { getDoseUnitSemantics, getQuantityDurationUnit } from "../unit-lexicon";
@@ -2023,10 +2021,6 @@ function measuredRateDurationRange(
   if ((range.low && !low) || (range.high && !high)) return undefined;
   return { ...(low ? { low } : {}), ...(high ? { high } : {}) };
 }
-/** Numeric cap compatibility must not borrow an opaque code's display label. */
-function capQuantityUnit(quantity: CanonicalMeasure | undefined): string {
-  return getDoseQuantityUnit(quantity, false);
-}
 function executableQuantityCaps(
   dosage: CanonicalAdministration,
   context?: MedicationContext,
@@ -2035,6 +2029,7 @@ function executableQuantityCaps(
 ): CanonicalOccurrenceCapExpr[] {
   const limits = dosage.limits ?? [];
   if (!limits.length) return [];
+  let strength: ReturnType<typeof measuredStrengthRatio>;
   let dose: CanonicalMeasure | undefined;
   let hasNumericDose = false;
   let doseMeasured = false;
@@ -2042,6 +2037,7 @@ function executableQuantityCaps(
   for (const limit of limits) {
     if (limit.scope !== "period" || limit.expression) continue;
     if (!doseMeasured) {
+      strength = measuredStrengthRatio(context);
       // Only an executable periodic limit needs a dose-count conversion.
       // Retained lifetime/per-administration/expression limits do not.
       const first = dosage.amounts?.length === 1 ? dosage.amounts[0] : undefined;
@@ -2085,18 +2081,7 @@ function executableQuantityCaps(
     ) {
       continue;
     }
-    // Exact coded identity compares counts without interpreting a local code as a dimension.
-    const sameCodedUnit = sameCodedQuantityUnit(dose, numerator);
-    let perTargetDose: number | null = dose.value;
-    if (!sameCodedUnit) {
-      const actualUnit = capQuantityUnit(dose);
-      const maximumUnit = capQuantityUnit(numerator);
-      if ((!actualUnit && dose.code) || (!maximumUnit && numerator?.code)) continue;
-      const normalizedActual = normalizeQuantityCapUnit(actualUnit);
-      const normalizedMaximum = normalizeQuantityCapUnit(maximumUnit);
-      perTargetDose = normalizedActual === normalizedMaximum ? dose.value
-        : convertValue(dose.value, normalizedActual, normalizedMaximum, measuredStrengthRatio(context));
-    }
+    const perTargetDose = convertQuantityValue(dose.value, dose, numerator, strength);
     if (perTargetDose === null || !Number.isFinite(perTargetDose) || perTargetDose <= 0) {
       continue;
     }
@@ -2141,10 +2126,8 @@ function executableDoseRange(
   if (!range || !high?.value) return undefined;
   const highOperator = getQuantityComparator(high);
   if (highOperator && highOperator !== "~" && highOperator !== "<=" && highOperator !== "<") return undefined;
-  const unit = getDoseQuantityUnit(high), lowUnit = getDoseQuantityUnit(range.low);
   const low = range.low?.value === undefined ? 0
-    : sameCodedQuantityUnit(range.low, high) || normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(lowUnit)
-      ? range.low.value : convertValue(range.low.value, normalizeQuantityCapUnit(lowUnit), normalizeQuantityCapUnit(unit), measuredStrengthRatio(context));
+    : convertQuantityValue(range.low.value, range.low, high, measuredStrengthRatio(context));
   if (low === null || !Number.isFinite(low) || low < 0 || low > high.value) return undefined;
   const strictLow = range.low?.comparator === ">";
   const caps = executableQuantityCaps(dosage, context, true, requireExactPeriod).filter(cap =>
@@ -6621,6 +6604,7 @@ function maximumChronologicalSupplyCourse(
   let alteredStages: CanonicalStage[] | undefined;
   let hasClockAlternative = false;
   const originalOf = new Map<CanonicalAdministration, CanonicalAdministration>();
+  const strength = measuredStrengthRatio(options.context);
   for (let i = 0; i < course.stages.length; i++) {
     const stage = course.stages[i];
     let members: CanonicalAdministration[] | undefined;
@@ -6632,7 +6616,7 @@ function maximumChronologicalSupplyCourse(
         const authored = source.schedule!.recurrence!;
         // Measure the upper infusion amount, but keep the authored duration
         // bounds for the planner's independent exact-completion decision.
-        generated = prepareMeasuredDose(generated, options);
+        generated = prepareMeasuredDose(generated, options, strength);
         generated = { ...generated, schedule: { ...generated.schedule, recurrence: {
           ...generated.schedule!.recurrence,
           occurrenceDuration: authored.occurrenceDuration,
@@ -6653,7 +6637,7 @@ function maximumChronologicalSupplyCourse(
             ((amounts[0].rate || amounts[0].rateRatio) && generated.schedule?.recurrence?.occurrenceDurationRange))) ||
             options.patientWeightKg !== undefined) &&
           hasPeriodLimits(generated))
-        generated = prepareMeasuredDose(generated, options);
+        generated = prepareMeasuredDose(generated, options, strength);
       if ((maximal.frequencyMaximum || maximal.periodMinimum) && !preserveClocks) {
         const repeat = generated.schedule!.recurrence!;
         hasClockAlternative ||= !!(generated.schedule!.code ||
@@ -6694,7 +6678,8 @@ function maximumChronologicalSupplyCourse(
 }
 function prepareMeasuredDose(
   dosage: CanonicalAdministration,
-  options: CanonicalSupplyOptions
+  options: CanonicalSupplyOptions,
+  strength: ReturnType<typeof measuredStrengthRatio>
 ): CanonicalAdministration {
   const weight = options.patientWeightKg;
   if (weight !== undefined && Number.isFinite(weight) && weight > 0)
@@ -6762,16 +6747,13 @@ function prepareMeasuredDose(
     const low = range.low;
     const measured = range === first.range ? dosage :
       { ...dosage, amounts: [{ ...first, range }] };
-    const maximum = numericAdministrationLimits(measured, measuredStrengthRatio(options.context), capQuantityUnit).administration;
+    const maximum = numericAdministrationLimits(measured, strength).administration;
     const operator = maximum?.comparator;
     quantity = high?.value !== undefined && Number.isFinite(high.value) && high.value > 0
       ? high : undefined;
     if (!quantity && low?.value !== undefined && Number.isFinite(low.value) && low.value > 0) {
       if (maximum?.value !== undefined && (!operator || operator === "~" || operator === "<=")) {
-        const unit = capQuantityUnit(low), maxUnit = capQuantityUnit(maximum);
-        const amount = sameCodedQuantityUnit(low, maximum) ||
-          normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(maxUnit)
-          ? maximum.value : convertValue(maximum.value, normalizeQuantityCapUnit(maxUnit), normalizeQuantityCapUnit(unit), measuredStrengthRatio(options.context));
+        const amount = convertQuantityValue(maximum.value, maximum, low, strength);
         const value = amount === null ? undefined : amount / getAdministrationTargetMultiplier(dosage, options.context);
         if (value !== undefined && (low.comparator === ">" ? value > low.value : value >= low.value))
           quantity = { ...low, value, comparator: undefined };
@@ -6781,15 +6763,10 @@ function prepareMeasuredDose(
     }
     if (quantity) {
       if (maximum?.value !== undefined && (!operator || operator === "~" || operator === "<=")) {
-        const unit = capQuantityUnit(quantity), maxUnit = capQuantityUnit(maximum);
-        const converted = sameCodedQuantityUnit(quantity, maximum) ||
-          normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(maxUnit)
-          ? maximum.value : convertValue(maximum.value, normalizeQuantityCapUnit(maxUnit), normalizeQuantityCapUnit(unit), measuredStrengthRatio(options.context));
+        const converted = convertQuantityValue(maximum.value, maximum, quantity, strength);
         const bound = converted === null ? undefined : converted / getAdministrationTargetMultiplier(dosage, options.context);
-        const lowUnit = capQuantityUnit(low);
         const minimum = low?.value === undefined ? 0 :
-          sameCodedQuantityUnit(low, quantity) || normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(lowUnit) ? low.value :
-            convertValue(low.value, normalizeQuantityCapUnit(lowUnit), normalizeQuantityCapUnit(unit), measuredStrengthRatio(options.context));
+          convertQuantityValue(low.value, low, quantity, strength);
         if (bound !== undefined && minimum !== null && bound < quantity.value! &&
             (low?.comparator === ">" ? bound > minimum : bound >= minimum))
           quantity = { ...quantity, value: bound, comparator: undefined };
@@ -7064,11 +7041,7 @@ function remainingLifetimeSupply(
   if (lifetime.value === undefined || !Number.isFinite(lifetime.value) || lifetime.value < 0 ||
       (operator && operator !== "~" && operator !== "<=")) return undefined;
   const dose = dosage.amounts?.[0]?.quantity;
-  const doseUnit = capQuantityUnit(dose), lifetimeUnit = capQuantityUnit(lifetime);
-  const converted = sameCodedQuantityUnit(lifetime, dose) ||
-    normalizeQuantityCapUnit(lifetimeUnit) === normalizeQuantityCapUnit(doseUnit)
-    ? lifetime.value
-    : convertValue(lifetime.value, normalizeQuantityCapUnit(lifetimeUnit), normalizeQuantityCapUnit(doseUnit), strength);
+  const converted = convertQuantityValue(lifetime.value, lifetime, dose, strength);
   if (converted === null || !Number.isFinite(converted)) return undefined;
   const knownPrior = actualPriorCount * (dose?.value ?? 0) * getAdministrationTargetMultiplier(dosage, options.context);
   return Math.max(0, converted - knownPrior - usedQuantity);
@@ -7147,10 +7120,10 @@ function calculateTotalUnitsSingle(
   // before unrelated dose details can mask an invalid dispensing window.
   let endDay = calculationHorizon(options, timeZone);
   const maximalTiming = prepareMaximumSupplyTiming(sourceDosage, true);
-  const dosage = prepareMeasuredDose(maximalTiming.dosage, options);
-  const rangePlan = dosage.amounts?.[0]?.range ? executableDoseRange(dosage, context) : undefined;
   const strength = measuredStrengthRatio(context);
-  const numericLimits = numericAdministrationLimits(dosage, strength, capQuantityUnit);
+  const dosage = prepareMeasuredDose(maximalTiming.dosage, options, strength);
+  const rangePlan = dosage.amounts?.[0]?.range ? executableDoseRange(dosage, context) : undefined;
+  const numericLimits = numericAdministrationLimits(dosage, strength);
   // Applicable maxima intersect; retained incomplete bounds still explain
   // why only part of the authored constraints could be evaluated.
   let unevaluatedMaximumDose = numericLimits.multiple;
@@ -7174,12 +7147,7 @@ function calculateTotalUnitsSingle(
     ) {
       unevaluatedMaximumDose = true;
     } else {
-      const fromUnit = capQuantityUnit(dose);
-      const limitUnit = capQuantityUnit(limit);
-      const perTarget =
-        sameCodedQuantityUnit(dose, limit) || normalizeQuantityCapUnit(fromUnit) === normalizeQuantityCapUnit(limitUnit)
-          ? dose.value
-          : convertValue(dose.value, normalizeQuantityCapUnit(fromUnit), normalizeQuantityCapUnit(limitUnit), strength);
+      const perTarget = convertQuantityValue(dose.value, dose, limit, strength);
       if (perTarget === null || !Number.isFinite(perTarget)) {
         unevaluatedMaximumDose = true;
       } else {

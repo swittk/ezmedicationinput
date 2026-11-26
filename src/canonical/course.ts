@@ -11,7 +11,7 @@
  * A caller editing clinical fields creates the next authoritative course;
  * adapters serialize those fields and preserve unrelated source metadata.
  */
-import { convertValue } from "../utils/units";
+import { convertQuantityValue } from "../utils/units";
 import { AdviceArgumentRole, AdvicePolarity } from "../types";
 import { buildAdditionalInstructionFramesFromCoding } from "../advice";
 import type {
@@ -310,30 +310,12 @@ export function administrationHasDatedClockStart(a: CanonicalAdministration): bo
   return Boolean(a.schedule?.recurrence?.clocks?.length && administrationHasDatedStart(a));
 }
 
-/** Normalize equivalent count-unit labels before dimensional conversion. */
-export function normalizeQuantityCapUnit(unit: string): string {
-  const text = unit.trim().toLowerCase();
-  switch (text) {
-    case "tab": case "tabs": case "tablet": case "tablets": return "tab";
-    case "cap": case "caps": case "capsule": case "capsules": return "cap";
-    case "drop": case "drops": return "drop";
-    case "nebule": case "nebules": case "respule": case "respules": return "nebule";
-    default: return text;
-  }
-}
-
-/** Exact coding compares quantities without assigning an opaque code a dimension. */
-export function sameCodedQuantityUnit(left: CanonicalMeasure | undefined, right: CanonicalMeasure | undefined): boolean {
-  return Boolean(left?.system && left.code && left.system === right?.system && left.code === right.code);
-}
-
 /** Intersect usable scoped maxima in the administration's quantity unit.
  * Incomplete or incomparable retained constraints do not erase another
  * known maximum. `multiple` records constraints still requiring evaluation. */
 export function numericAdministrationLimits(
   a: CanonicalAdministration,
-  strength?: Parameters<typeof convertValue>[3],
-  unitOf: (measure: CanonicalMeasure | undefined) => string = measureUnit
+  strength?: Parameters<typeof convertQuantityValue>[3]
 ): {
   administration?: CanonicalMeasure;
   lifetime?: CanonicalMeasure;
@@ -342,10 +324,10 @@ export function numericAdministrationLimits(
   let administration: CanonicalMeasure | undefined;
   let lifetime: CanonicalMeasure | undefined;
   let administrationValue = Infinity, lifetimeValue = Infinity;
-  let administrationUnit: string | undefined, lifetimeUnit: string | undefined;
+  let administrationUnit: CanonicalMeasure | undefined, lifetimeUnit: CanonicalMeasure | undefined;
   let multiple = false;
   let dose: CanonicalMeasure | undefined;
-  let doseUnit: string | undefined;
+  let doseResolved = false;
   for (const limit of a.limits ?? []) {
     if (limit.scope !== "administration" && limit.scope !== "lifetime") continue;
     const bound = limit.amount;
@@ -355,7 +337,7 @@ export function numericAdministrationLimits(
       multiple = true;
       continue;
     }
-    if (doseUnit === undefined) {
+    if (!doseResolved) {
       const amount = a.amounts?.[0];
       const high = amount?.range?.high;
       // Metadata alone does not make the upper endpoint measurable. Match
@@ -363,37 +345,27 @@ export function numericAdministrationLimits(
       dose = amount?.quantity ??
         (high?.value !== undefined && Number.isFinite(high.value) && high.value > 0
           ? high : amount?.range?.low);
-      doseUnit = unitOf(dose);
+      doseResolved = true;
     }
-    const sameCodedUnit = sameCodedQuantityUnit(bound, dose);
-    const source = unitOf(bound);
-    const sourceUnit = normalizeQuantityCapUnit(source);
-    // A local coded dose needs the same identity when no dimension is known.
-    // Another limit cannot lend its own mass/volume unit to that dose.
-    if (!sameCodedUnit && (!sourceUnit || (!doseUnit && dose?.code))) {
-      multiple = true;
-      continue;
-    }
-    // Keep every comparison in the same unit even when the winning original
-    // bound uses a different unit. Returning that original preserves metadata.
-    const target = limit.scope === "administration"
-      ? (administrationUnit ??= doseUnit || source)
-      : (lifetimeUnit ??= doseUnit || source);
-    const targetUnit = normalizeQuantityCapUnit(target);
-    const value = sameCodedUnit || sourceUnit === targetUnit
-      ? bound.value : convertValue(bound.value, sourceUnit, targetUnit, strength);
+    // A coded dose remains the comparison basis even without a display label.
+    // When no dose unit was supplied, the first usable bound owns that scope's
+    // basis. Keep returning the original winning quantity and its metadata.
+    const target = (dose?.code || dose?.unit ? dose : undefined) ??
+      (limit.scope === "administration" ? administrationUnit : lifetimeUnit) ?? bound;
+    const value = convertQuantityValue(bound.value, bound, target, strength);
     if (value === null || !Number.isFinite(value)) {
       multiple = true;
       continue;
     }
     if (limit.scope === "administration") {
+      administrationUnit ??= target;
       if (value < administrationValue) { administration = bound; administrationValue = value; }
-    } else if (value < lifetimeValue) { lifetime = bound; lifetimeValue = value; }
+    } else {
+      lifetimeUnit ??= target;
+      if (value < lifetimeValue) { lifetime = bound; lifetimeValue = value; }
+    }
   }
   return { administration, lifetime, multiple };
-}
-function measureUnit(measure: CanonicalMeasure | undefined): string {
-  return measure?.unit ?? measure?.code ?? "";
 }
 
 /** Choose the last fully numeric source constraint where the clinical API

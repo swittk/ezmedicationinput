@@ -37,7 +37,8 @@ import type {
   FhirR6Extension,
   FormatOptions,
 } from "../types";
-import { administrationHasAmountFacts, sameCodedQuantityUnit } from "../canonical/course";
+import { administrationHasAmountFacts } from "../canonical/course";
+import { sameCodedQuantityUnit } from "../utils/units";
 import type {
   CanonicalMeasure,
   CanonicalAmount,
