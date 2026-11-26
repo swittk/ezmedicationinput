@@ -24,6 +24,9 @@ export const VOLUME_UNITS: Record<string, number> = {
     tbsp: 15
 };
 
+const VOLUME_PER_WEIGHT_UNITS: Record<string, number> = {};
+for (const unit in VOLUME_UNITS) VOLUME_PER_WEIGHT_UNITS[unit + "/kg"] = VOLUME_UNITS[unit];
+
 export function getUnitCategory(unit?: string): "mass" | "volume" | "other" {
     if (!unit) return "other";
     const u = unit.toLowerCase();
@@ -33,16 +36,19 @@ export function getUnitCategory(unit?: string): "mass" | "volume" | "other" {
 }
 
 /** Conversion groups retain the patient-weight denominator as a separate dimension. */
-export function getUnitComparisonCategory(unit?: string): ReturnType<typeof getUnitCategory> | "mass-per-weight" {
+export function getUnitComparisonCategory(unit?: string): ReturnType<typeof getUnitCategory> | "mass-per-weight" | "volume-per-weight" {
     const category = getUnitCategory(unit);
-    return category === "other" && unit && MASS_PER_WEIGHT_UNITS[unit.toLowerCase()] !== undefined
-        ? "mass-per-weight" : category;
+    if (category !== "other" || !unit) return category;
+    const normalized = unit.toLowerCase();
+    if (MASS_PER_WEIGHT_UNITS[normalized] !== undefined) return "mass-per-weight";
+    if (VOLUME_PER_WEIGHT_UNITS[normalized] !== undefined) return "volume-per-weight";
+    return category;
 }
 
 export function getBaseUnitFactor(unit?: string): number {
     if (!unit) return 1;
     const u = unit.toLowerCase();
-    return MASS_UNITS[u] ?? VOLUME_UNITS[u] ?? MASS_PER_WEIGHT_UNITS[u] ?? 1;
+    return MASS_UNITS[u] ?? VOLUME_UNITS[u] ?? MASS_PER_WEIGHT_UNITS[u] ?? VOLUME_PER_WEIGHT_UNITS[u] ?? 1;
 }
 
 export function convertValue(

@@ -1617,7 +1617,8 @@ function fixedCapacityQuantities(
     epsilon * (exact.infinitesimal[index + 1] - exact.infinitesimal[index]));
   return { quantity, values, attained: true };
 }
-function elapsedCapMilliseconds(cap: CanonicalOccurrenceCapExpr): number | undefined {
+function elapsedPeriodMilliseconds(cap: Pick<CanonicalRecurrence, "period" | "periodUnit">): number | undefined {
+  if (cap.period === undefined) return undefined;
   switch (cap.periodUnit) {
     case DurationUnit.Second: return cap.period * 1000;
     case DurationUnit.Minute: return cap.period * 60000;
@@ -1646,7 +1647,7 @@ function maximumRangedCapacity(
   if (quotaLimits) for (const interval of intervals) end = Math.max(end, interval.end);
   let upper = slotBudget * range.high;
   for (const limit of quantityCaps) {
-    const width = elapsedCapMilliseconds(limit);
+    const width = elapsedPeriodMilliseconds(limit);
     if (width) {
       const blocks = Math.ceil((end - from) / width);
       upper = Math.min(upper, blocks * limit.max);
@@ -1691,7 +1692,7 @@ function maximumRangedCapacity(
   }
   const expiries = (oldest: number, out: Set<number>) => {
     for (const limit of quantityCaps) {
-      const width = elapsedCapMilliseconds(limit);
+      const width = elapsedPeriodMilliseconds(limit);
       if (width) {
         const at = oldest + width;
         if (eligible(at)) out.add(at);
@@ -2670,7 +2671,8 @@ function resolveAdministrationWindow(
       treatmentRelativeInstant(administration.phaseEnd, anchor, timeZone, sourceClock));
   if (replacementEnd) endExclusive = earlierDate(endExclusive, replacementEnd);
   let completionPoint: Date | undefined;
-  if (administration.schedule?.explicitEvents?.length) {
+  const hasCountCompletion = finiteCompletionCount(recurrence) !== undefined;
+  if (administration.schedule?.explicitEvents?.length && !hasCountCompletion) {
     // Absolute events belong to the cycle containing their authored instant.
     // A later cycle's event cannot complete this cycle's predecessor early.
     const completion = explicitAdministrationCompletion(administration, cadence.origin,
@@ -2690,7 +2692,6 @@ function resolveAdministrationWindow(
   // an uncapped loading phase must finish from its actual administration when
   // a later capped component selects this route. Without history or a shared
   // cap, counted loading still completes locally.
-  const hasCountCompletion = finiteCompletionCount(recurrence) !== undefined;
   const deferCount = deferFiniteCompletion && hasCountCompletion &&
     Boolean(options?.priorDoseTimes?.length || getTimingOccurrenceCap(recurrence) ||
       (hasPeriodLimits(administration) &&
@@ -2789,7 +2790,7 @@ function datedSuccessorBoundary(
   if (!successor.schedule?.recurrence?.clocks?.length) return bounds.start;
   const execution = { ...successor, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined,
     phaseOriginIssue: undefined, phasePredecessors: undefined };
-  const first = nextDueDosesSingle(execution, {
+  const first = nextDueDoses(execution, {
     ...options, from: bounds.start, orderedAt: bounds.nominalStart, timeZone: zone, limit: 1,
     // This is the independently authored phase opening, not the next query
     // opportunity after prior use. History still belongs to actual execution.
@@ -3745,7 +3746,7 @@ function maximumTimedRangePlan(
   const futureBuckets = occurrence ? new Map<string, number>() : undefined;
   const capPartitions: Array<{ width: number; maximum: number; bucket: number; slots: number; last: number; total: number }> = [];
   for (const cap of range.caps) {
-    const width = elapsedCapMilliseconds(cap);
+    const width = elapsedPeriodMilliseconds(cap);
     if (width) capPartitions.push({ width, maximum: cap.max, bucket: 0, slots: 0, last: 0, total: 0 });
   }
   const partitionSupply = (partition: typeof capPartitions[number]) => {
@@ -4990,7 +4991,10 @@ function generateWakingHoursIntervalSeries(
   const firstWindowDay = overnight && orderedAt
     ? addLocalDays(startOfLocalDay(orderedAt, timeZone), -1, timeZone) : null;
   const calendarCadence = normalizedCalendarInterval(repeat.period, repeat.periodUnit);
-  const cadenceAnchor = calendarCadence ? resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from : undefined;
+  const elapsedPeriod = calendarCadence ? undefined : elapsedPeriodMilliseconds(repeat);
+  const continuousElapsed = elapsedPeriod !== undefined && elapsedPeriod >= MINUTES_PER_DAY * 60000;
+  const cadenceAnchor = calendarCadence || continuousElapsed
+    ? resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from : undefined;
   const results: string[] = [];
   let currentDay = startOfLocalDay(from, timeZone);
   if (overnight) currentDay = addLocalDays(currentDay, -1, timeZone);
@@ -5000,7 +5004,7 @@ function generateWakingHoursIntervalSeries(
     if (
       (!firstWindowDay || currentDay >= firstWindowDay) &&
       matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
-      (!cadenceAnchor || clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter))
+      (!calendarCadence || !cadenceAnchor || clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter))
     ) {
       const wake = makeZonedDateFromDay(currentDay, timeZone, wakeClock);
       const sleepDay = overnight ? addLocalDays(currentDay, 1, timeZone) : currentDay;
@@ -5009,7 +5013,9 @@ function generateWakingHoursIntervalSeries(
         throw new Error("Cannot execute a waking-hours interval unless configured WAKE precedes HS");
       }
       if (wake && sleep) {
-        let candidate = wake;
+        let candidate = continuousElapsed && cadenceAnchor
+          ? seekIntervalNearQuery(cadenceAnchor, wake, repeat, timeZone) : wake;
+        if (candidate < wake) candidate = advance(candidate) ?? sleep;
         let intervalIterations = 0;
         while (
           (candidate < sleep || (includeEnd && candidate.getTime() === sleep.getTime())) &&
@@ -6908,24 +6914,25 @@ function prepareMeasuredDose(
     quantity = high?.value !== undefined && Number.isFinite(high.value) && high.value > 0
       ? high : undefined;
     if (!quantity && low?.value !== undefined && Number.isFinite(low.value) && low.value > 0) {
-      if (maximum?.value !== undefined && (!operator || operator === "~" || operator === "<=")) {
+      if (maximum?.value !== undefined && (!operator || operator === "~" || operator === "<=" || operator === "<")) {
         const amount = convertQuantityValue(maximum.value, maximum, low, strength);
         const value = amount === null ? undefined : amount / getAdministrationTargetMultiplier(dosage, options.context);
-        if (value !== undefined && (low.comparator === ">" ? value > low.value : value >= low.value))
-          quantity = { ...low, value, comparator: undefined };
+        if (value !== undefined && (low.comparator === ">" || operator === "<" ? value > low.value : value >= low.value))
+          quantity = { ...low, value, comparator: operator === "<" ? "<" : undefined };
       }
       if (!quantity) throw new MedicationQuantityCalculationError("dose-amount-lower-bound",
         "The prescribed dose range has no finite upper bound. Provide the applicable dose or a compatible administration maximum before calculating supply.");
     }
     if (quantity) {
-      if (maximum?.value !== undefined && (!operator || operator === "~" || operator === "<=")) {
+      if (maximum?.value !== undefined && (!operator || operator === "~" || operator === "<=" || operator === "<")) {
         const converted = convertQuantityValue(maximum.value, maximum, quantity, strength);
         const bound = converted === null ? undefined : converted / getAdministrationTargetMultiplier(dosage, options.context);
         const minimum = low?.value === undefined ? 0 :
           convertQuantityValue(low.value, low, quantity, strength);
-        if (bound !== undefined && minimum !== null && bound < quantity.value! &&
-            (low?.comparator === ">" ? bound > minimum : bound >= minimum))
-          quantity = { ...quantity, value: bound, comparator: undefined };
+        if (bound !== undefined && minimum !== null &&
+            (bound < quantity.value! || operator === "<" && bound === quantity.value) &&
+            (low?.comparator === ">" || operator === "<" ? bound > minimum : bound >= minimum))
+          quantity = { ...quantity, value: bound, comparator: operator === "<" ? "<" : undefined };
       }
     }
   }
@@ -7005,7 +7012,8 @@ function weightResolvedAdministration(
   if (first && (first.quantity !== authored?.quantity || first.range !== authored?.range)) {
     const maximum = numericAdministrationLimits(resolved, strength).administration;
     const maximumValue = maximum?.value;
-    if (maximum && maximumValue !== undefined) {
+    // Open range ceilings are selected after measurement, where attainability is evaluated.
+    if (maximum && maximumValue !== undefined && maximum.comparator !== "<") {
       const multiplier = getAdministrationTargetMultiplier(resolved, context);
       const boundedComputedQuantity = (
         quantity: CanonicalMeasure | undefined, source: CanonicalMeasure | undefined
@@ -7333,7 +7341,7 @@ function calculateTotalUnitsSingle(
       limit.value === undefined ||
       !Number.isFinite(limit.value) ||
       limit.value < 0 ||
-      (limitOperator && limitOperator !== "~" && limitOperator !== "<=")
+      (limitOperator && limitOperator !== "~" && limitOperator !== "<=" && limitOperator !== "<")
     ) {
       unevaluatedMaximumDose = true;
     } else {
@@ -7342,7 +7350,8 @@ function calculateTotalUnitsSingle(
         unevaluatedMaximumDose = true;
       } else {
         const actual = perTarget * getAdministrationTargetMultiplier(dosage, context);
-        if (actual > limit.value + 1e-9) unevaluatedMaximumDose = true;
+        if (actual > limit.value + 1e-9 || limitOperator === "<" &&
+            actual >= limit.value - 1e-9 && getQuantityComparator(dose) !== "<") unevaluatedMaximumDose = true;
       }
     }
   }
@@ -7878,7 +7887,7 @@ function attainedChronologicalSupplyBound(
   const multiplier = getAdministrationTargetMultiplier(member, options.context);
   const caps = range?.caps ?? executableQuantityCaps(member, options.context);
   for (const cap of caps) {
-    const width = elapsedCapMilliseconds(cap);
+    const width = elapsedPeriodMilliseconds(cap);
     if (!width || !Number.isFinite(width) || !Number.isFinite(cap.max) || cap.max <= 0) continue;
     let bound = Math.ceil((end.getTime() - start.getTime()) / width) * cap.max *
       (range ? 1 : quantity.value!) * multiplier;

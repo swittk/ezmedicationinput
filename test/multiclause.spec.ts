@@ -3050,7 +3050,7 @@ describe("round34 successor and member origins", () => {
   });
 
   it.each(["mixed", "elapsed", "day-start"] as const)("keeps the first civil-day clock for %s member origins", kind => {
-    const administrations = [8, 14].map((hour, index) => ({
+    const administrations = [8, kind === "mixed" ? 10 : 14].map((hour, index) => ({
       kind: "administration" as const, onsetDays: 1,
       ...(kind === "day-start" || kind === "mixed" && index === 0
         ? { onsetReference: "treatment-day-start" as const } : {}),
@@ -3063,6 +3063,7 @@ describe("round34 successor and member origins", () => {
     const wire = courseToR6(native);
     const expected = kind === "elapsed"
       ? ["2026-11-22T14:00:00+00:00", "2026-11-23T08:00:00+00:00"]
+      : kind === "mixed" ? ["2026-11-22T08:00:00+00:00", "2026-11-23T10:00:00+00:00"]
       : ["2026-11-22T08:00:00+00:00", "2026-11-22T14:00:00+00:00"];
     for (const input of [native, wire, JSON.parse(JSON.stringify(toFhirR5Dosages(wire)))])
       expect(nextDueDoses(input, { orderedAt: "2026-11-21T12:00:00Z", from: "2026-11-21T12:00:00Z",

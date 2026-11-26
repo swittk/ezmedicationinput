@@ -5484,6 +5484,9 @@ describe("authored immediate start and integer sequence execution", () => {
     expect(nextDueDoses(dosage, query)).toEqual([
       "2026-01-01T09:00:00+00:00", "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00"]);
     expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(7);
+    expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(3);
+    expect(calculateTotalUnits({ dosage, ...query, from: "2026-01-02T00:00:00Z",
+      durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(4);
     expect(dosage.map(item => item.sequence)).toEqual([first + 2, first, first]);
   });
 });

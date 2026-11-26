@@ -335,9 +335,12 @@ export function numericAdministrationLimits(
   for (const limit of a.limits ?? []) {
     if (limit.scope !== "administration" && limit.scope !== "lifetime") continue;
     const bound = limit.amount;
+    // An open ceiling can bound a range endpoint, but cannot replace a known scalar dose.
+    const strictRangeMaximum = limit.scope === "administration" && bound?.comparator === "<" &&
+      a.amounts?.length === 1 && Boolean(a.amounts[0].range);
     if (limit.period || limit.expression || bound?.value === undefined ||
         !Number.isFinite(bound.value) || bound.value < 0 ||
-        (bound.comparator && bound.comparator !== "~" && bound.comparator !== "<=")) {
+        (bound.comparator && bound.comparator !== "~" && bound.comparator !== "<=" && !strictRangeMaximum)) {
       multiple = true;
       continue;
     }
@@ -364,7 +367,9 @@ export function numericAdministrationLimits(
     }
     if (limit.scope === "administration") {
       administrationUnit ??= target;
-      if (value < administrationValue) { administration = bound; administrationValue = value; }
+      if (value < administrationValue || value === administrationValue && strictRangeMaximum && administration?.comparator !== "<") {
+        administration = bound; administrationValue = value;
+      }
     } else {
       lifetimeUnit ??= target;
       if (value < lifetimeValue) { lifetime = bound; lifetimeValue = value; }

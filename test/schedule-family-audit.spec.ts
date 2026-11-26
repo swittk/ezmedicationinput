@@ -7003,3 +7003,101 @@ describe("standard coded bedtime execution", () => {
     }
   });
 });
+
+
+describe("current execution boundaries and dimensional maxima", () => {
+  const start = "2027-01-01T00:00:00Z";
+  const query = { from: start, orderedAt: start, timeZone: "UTC" };
+  const note = { url: "urn:clinic:current-quantity", valueString: "Keep the authored quantity and this note" };
+  const forms = (course: CanonicalCourse) => [course, courseToR5(course), courseToR6(course)];
+  const tablet = (value = 1): CanonicalAdministration => ({ kind: "administration", text: `Take ${value} tablet daily.`,
+    amounts: [{ quantity: { value, unit: "tab" } }],
+    schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: ["08:00:00"] } } });
+
+  it.each(["rejected", "admitted", "authored boundary"] as const)("keeps counted loading completion tied to admission: %s", kind => {
+    const loading = tablet();
+    loading.schedule = { explicitEvents: ["2027-01-01T08:00:00Z"], recurrence: { count: 1 } };
+    loading.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 24, unit: "h" } }];
+    const maintenance = tablet(2); maintenance.schedule!.recurrence!.clocks = ["20:00:00"];
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [loading],
+      ...(kind === "authored boundary" ? { end: { anchor: "treatment-start" as const, displacement: { value: 16, unit: "h" } } } : {})
+    }, { administrations: [maintenance] }] };
+    const options = { ...query, limit: 2, ...(kind !== "admitted" ? { priorDoseTimes: ["2026-12-31T20:00:00Z"] } : {}) };
+    for (const dosage of forms(course)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(kind === "rejected" ? [] : kind === "admitted"
+        ? ["2027-01-01T08:00:00+00:00", "2027-01-01T20:00:00+00:00"]
+        : ["2027-01-01T20:00:00+00:00", "2027-01-02T20:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: kind === "rejected" ? 0 : kind === "admitted" ? 3 : 2, unit: "tab" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each([
+    [48, FhirPeriodUnit.Hour, ["01T08", "03T08", "05T08", "07T08"], 2],
+    [30, FhirPeriodUnit.Hour, ["01T08", "02T14", "03T20", "06T08"], 3],
+    [6, FhirPeriodUnit.Hour, ["01T08", "01T14", "01T20", "02T08"], 9],
+    [2, FhirPeriodUnit.Day, ["01T08", "03T08", "05T08", "07T08"], 2],
+  ] as const)("keeps elapsed grids and civil windows separate for %s %s", (period, periodUnit, expected, total) => {
+    const administration = tablet(); administration.schedule = { recurrence: { frequency: 1, period, periodUnit,
+      clockWindow: { start: "08:00", end: "20:00", endInclusive: true } } };
+    const options = { ...query, from: "2027-01-01T08:00:00Z", orderedAt: "2027-01-01T08:00:00Z", limit: 4 };
+    for (const dosage of forms({ kind: "course", stages: [{ administrations: [administration] }] })) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(expected.map(value => "2027-01-" + value + ":00:00+00:00"));
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: total, unit: "tab" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each([[0.01, "L/kg", 10], [10, "mL/kg", 10], [0.01, "L", 20]] as const)(
+    "compares volume per patient weight without dropping its denominator: %s %s", (maximum, code, expected) => {
+      const ucum = "http://unitsofmeasure.org";
+      const quantity = { value: 10, system: ucum, code: "mL/kg", id: "dose", extension: [note] };
+      const cap = { value: maximum, system: ucum, code, id: "maximum", extension: [note] };
+      const administration = tablet(); administration.amounts = [{ quantity }];
+      administration.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        clocks: ["08:00:00", "20:00:00"] };
+      administration.limits = [{ scope: "period", amount: cap, period: { value: 24, unit: "h" } }];
+      for (const dosage of forms({ kind: "course", stages: [{ administrations: [administration] }] })) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, { ...query, limit: 2 })).toEqual([
+          "2027-01-01T08:00:00+00:00", code === "L" ? "2027-01-01T20:00:00+00:00" : "2027-01-02T08:00:00+00:00"]);
+        const result = calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day });
+        expect(result).toMatchObject({ totalUnits: expected, unit: "mL/kg" });
+        if (code === "L") expect(result.explanation).toContain("unevaluable maximum-dose");
+        else expect(result.explanation).not.toContain("unevaluable maximum-dose");
+        const projected = courseToR6(importCanonicalCourse(dosage)).step[0].component[0];
+        expect(projected.doseAndRate?.[0].doseQuantity).toEqual(quantity);
+        expect(projected.safety?.doseLimit?.[0].valueQuantity).toEqual(cap);
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
+
+  it.each(["strict", "closed", "strict first", "strict last", "interior", "weighted", "weighted interior"] as const)(
+    "retains strict administration ceiling attainability for %s ranges", kind => {
+      const weighted = kind.startsWith("weighted");
+      const quantity = (value: number, comparator?: "<" | "<=") => ({ value, unit: "mL", ...(comparator ? { comparator } : {}), extension: [note] });
+      const administration = tablet(); administration.amounts = [{ range: {
+        low: { ...quantity(1), unit: weighted ? "mL/kg" : "mL" }, high: { ...quantity(5), unit: weighted ? "mL/kg" : "mL" }
+      } }]; administration.schedule!.recurrence!.count = 1;
+      const tight = quantity(weighted ? 8 : 4, kind === "closed" ? "<=" : "<");
+      const loose = quantity(weighted ? 10 : kind.startsWith("strict ") ? 4 : 5, "<=");
+      const bounds = kind === "strict last" ? [loose, tight] : [tight, loose];
+      administration.limits = bounds.map(amount => ({ scope: "administration", amount }));
+      const interior = kind.endsWith("interior");
+      if (interior) administration.limits.push({ scope: "lifetime", amount: quantity(weighted ? 6 : 3) });
+      for (const dosage of forms({ kind: "course", stages: [{ administrations: [administration] }] })) {
+        const before = JSON.stringify(dosage);
+        const calculate = () => calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day,
+          ...(weighted ? { patientWeightKg: 2 } : {}) });
+        if (kind === "closed" || interior)
+          expect(calculate()).toMatchObject({ totalUnits: kind === "closed" ? 4 : weighted ? 6 : 3, unit: "mL" });
+        else expect(calculate).toThrowError(expect.objectContaining({ code: "ranged-capacity-open-maximum" }));
+        expect(JSON.stringify(dosage)).toBe(before);
+        expect(before).toContain(note.valueString);
+      }
+    });
+});

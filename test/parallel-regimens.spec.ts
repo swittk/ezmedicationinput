@@ -5343,6 +5343,29 @@ describe("dated replacement boundaries retain their successor owner", () => {
     expect(JSON.stringify(input)).toBe(original);
   });
 
+  it.each(["date", "weekday"] as const)("keeps exclusion-aware replacements after the predecessor's remaining doses (%s)", exclusion => {
+    const successor: CanonicalAdministration = { kind: "administration", amounts: [{ quantity: { value: 3, unit: "tab" } }],
+      ...(exclusion === "date" ? { excludedDates: ["2027-01-04"] } : { excludedWeekdays: ["mon"] }),
+      schedule: { recurrence: { frequency: 1, period: 1,
+        periodUnit: exclusion === "date" ? Unit.Week : Unit.Day,
+        dayOfWeek: exclusion === "date" ? ["mon"] : ["mon", "tue"], clocks: ["08:00:00"],
+        calendarWindow: { start: "2027-01-03" } } } };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [predecessor()] }, { administrations: [successor] }] };
+    const successorDay = exclusion === "date" ? "11" : "05";
+    for (const version of versions) {
+      const input = wire(course, version), before = JSON.stringify(input);
+      const query = { dosage: input, orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-04T00:00:00Z",
+        timeZone: "UTC", durationValue: 1, durationUnit: Unit.Day };
+      expect(nextDueDoses(input, { ...query, limit: 2 })).toEqual([
+        "2027-01-04T08:00:00+00:00", "2027-01-04T20:00:00+00:00"]);
+      expect(calculateTotalUnits(query).totalUnits).toBe(2);
+      const after = { ...query, from: `2027-01-${successorDay}T00:00:00Z` };
+      expect(nextDueDoses(input, { ...after, limit: 1 })).toEqual([`2027-01-${successorDay}T08:00:00+00:00`]);
+      expect(calculateTotalUnits(after).totalUnits).toBe(3);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
   it("uses the existing exact-clock gap policy for the replacement boundary", () => {
     const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [predecessor()] },
       { administrations: [{ kind: "administration", amounts: [{ quantity: { value: 3, unit: "tab" } }], schedule: { recurrence: {
