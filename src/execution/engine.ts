@@ -1318,7 +1318,7 @@ function requireConsistentTimingCode(timing: CanonicalTiming | undefined): void 
       const maximum = Math.min(repeat.frequencyMax ?? repeat.frequency,
         Math.floor(daily * (repeat.periodMax ?? repeat.period) * seconds! / 86400));
       if (minimum <= maximum) continue;
-    } else if (seconds && daily * repeat.period * seconds === repeat.frequency * 86400) continue;
+    } else if (matchesDailyCodeCadence(daily, repeat)) continue;
     throw new MedicationQuantityCalculationError("timing-code-repeat-conflict",
       "The timing code conflicts with the complete repeat recurrence. Resolve the conflicting schedule before scheduling or calculating supply.");
   }
