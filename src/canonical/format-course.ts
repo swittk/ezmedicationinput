@@ -21,7 +21,7 @@ import { preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingC
 import { canonicalClauseHasAdministrationSemantics } from "../ir";
 import { getDoseQuantityUnit } from "../maps";
 import { getQuantityDurationUnit } from "../unit-lexicon";
-import { doseUnitUsesTargetScope, formatCanonicalClause, formatDoseEnglish, timingCodeMatchesRecurrence, independentTimingText } from "../format";
+import { doseUnitUsesTargetScope, formatCanonicalClause, formatNativeCanonicalClause, composeNativePrimaryDirections, formatDoseEnglish, timingCodeMatchesRecurrence, independentTimingText } from "../format";
 import { resolveBodySitePhrase } from "../body-site-grammar";
 import {
   resolveSigLocalization,
@@ -602,9 +602,12 @@ function administrationOwnsSourceDirections(
     (graph.sourceText === sourceText || sourceText === administration.text && administration.provenance?.sourceTextAgreed === true);
 }
 function courseNeedsAuthoredHeader(course: CanonicalCourse): boolean {
-  for (const stage of course.stages) for (const administration of stage.administrations)
-    if (administrationOwnsSourceDirections(administration, administration.syntax?.instructionGraph, course.instruction) ||
-        administration.text === course.instruction) return false;
+  if (course.provenance?.sourceTextAgreed === true) return false;
+  for (const stage of course.stages) for (const administration of stage.administrations) {
+    const graph = administration.syntax?.instructionGraph;
+    if (administration.text === course.instruction ||
+        graph?.coverage?.complete && graph.sourceText === course.instruction) return false;
+  }
   return true;
 }
 function courseHasClinicalFacts(course: CanonicalCourse): boolean {
@@ -651,6 +654,22 @@ function formatCanonicalBase(
   authored?: AuthoredDirectionsState,
   deferredDirections?: { text?: string }
 ): string {
+  const env = environment ?? courseEnvironment(options);
+  const clause = compiled ?? clauseForAdministration(a, options);
+  return formatCanonicalClause(clause, style, env.localization, options, target =>
+    formatCanonicalBaseNative(a, target, options, clause, env, source, authored, deferredDirections));
+}
+
+function formatCanonicalBaseNative(
+  a: CanonicalAdministration,
+  style: "short" | "long",
+  options?: FormatOptions,
+  compiled?: CanonicalSigClause,
+  environment?: CourseFormatEnvironment,
+  source: CanonicalAdministration = a,
+  authored?: AuthoredDirectionsState,
+  deferredDirections?: { text?: string }
+): string {
   // Member bounds and safety limits qualify the directions; they cannot
   // replace the only authored dose, manner and cadence.
   const authoredDirectionsOnly = a.text?.trim() && !administrationHasClinicalFacts(source, false, false, false);
@@ -661,7 +680,7 @@ function formatCanonicalBase(
     words = env.words;
   if (authoredDirectionsOnly) {
     const advice = a.additionalInstructions?.length || a.patientInstruction
-      ? formatCanonicalClause(compiled ?? clauseForAdministration(a, options), style, env.localization, options) : "";
+      ? formatNativeCanonicalClause(compiled ?? clauseForAdministration(a, options), style, env.localization, options) : "";
     return appendDoseLimits(joinGeneratedClauses([a.text!, advice].filter(Boolean)), a.limits, words, undefined, a.safety?.ifExceeded);
   }
   const primary = a.amounts?.[0];
@@ -693,20 +712,27 @@ function formatCanonicalBase(
   // the administration and must not acquire that guard. Do not parse the text.
   const authoredQualifiers = (a.predicate || a.excludedDates?.length || a.excludedWeekdays?.length) && a.text?.trim() &&
     !canonicalClauseHasAdministrationSemantics(clause) && !clause.instructionGraph?.actions.length;
+  const sourceOwnsPrimary = !administrationOwnsSourceDirections(source, clause.instructionGraph, a.text);
+  const graphOwnsDirections = clause.instructionGraph?.coverage?.complete &&
+    clause.instructionGraph.sourceText === a.text;
   const partialAuthoredDirections = !authoredQualifiers && a.text?.trim() &&
-    !administrationOwnsSourceDirections(source, clause.instructionGraph, a.text);
+    (sourceOwnsPrimary || source.provenance?.sourceTextVerified === false &&
+      source.provenance.sourceTextAgreed !== true && !graphOwnsDirections);
   if ((authoredQualifiers || partialAuthoredDirections) && authored && authored.text === a.text) authored.rendered = true;
-  const displayClause = (authoredQualifiers || partialAuthoredDirections && style === "long") && a.predicate
+  const displayClause = authoredQualifiers && a.predicate
     ? Object.assign({}, clause, { clinicalAdjuncts: Object.assign({}, clause.clinicalAdjuncts, { condition: undefined }) })
     : clause;
-  let rendered = formatCanonicalClause(displayClause, style, env.localization, options);
+  const authoredPrimary = partialAuthoredDirections && sourceOwnsPrimary && (!deferredDirections || a.predicate)
+    ? a.text : undefined;
+  let rendered = formatNativeCanonicalClause(displayClause, style, env.localization, options,
+    style === "long" ? authoredPrimary : undefined);
   if (authoredQualifiers) {
     const directions = a.predicate ? appendMedicationConditionText(a.text!, a.predicate, options, env) : a.text!;
     rendered = a.additionalInstructions?.length || a.patientInstruction
       ? directions + " " + rendered : directions;
   }
-  if (a.predicate && style !== "long" && !authoredQualifiers && !partialAuthoredDirections)
-    rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
+  if (style !== "long" && !authoredQualifiers)
+    rendered = composeNativePrimaryDirections(rendered, authoredPrimary, a.predicate, words);
   // The clause's calendar view needs a complete civil date. Partial FHIR
   // dateTimes (for example YYYY-MM) remain useful authored information; show
   // their original values instead of inventing a missing month/day or hiding
@@ -771,11 +797,12 @@ function formatCanonicalBase(
   // Partial method, route, timing or guard facts cannot replace source-only
   // dose directions. A typed amount or graph retains its established owner;
   // do not infer missing semantics by comparing localized renderings.
-  if (partialAuthoredDirections) {
-    const directions = a.predicate
-      ? appendMedicationConditionText(a.text!, a.predicate, options, env) : a.text!;
-    if (deferredDirections) deferredDirections.text = directions;
-    else rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), directions);
+  if (partialAuthoredDirections && !authoredPrimary) {
+    const directions = a.text!;
+    if (rendered.trim().replace(/[.!?]+$/u, "") !== directions.trim().replace(/[.!?]+$/u, "")) {
+      if (deferredDirections) deferredDirections.text = directions;
+      else rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), directions);
+    }
   }
   return rendered;
 }
@@ -919,251 +946,255 @@ export function formatCanonicalCourse(
     let rendered = formatCourseChoices(
       step.administrations,
       (component) => {
-        const repeat = component.schedule?.recurrence;
-        const hasOffsets = repeat?.startOffset !== undefined || repeat?.endOffset !== undefined;
-        let display = component;
-        const origin = component.phaseOrigin, length = repeat?.courseLength;
-        if (origin && length && !component.phaseStart && !component.delayMinutes &&
-            !repeat?.calendarWindow && !repeat?.courseLengthRange &&
-            step.end?.anchor === "treatment-start" &&
-            (!step.start || step.start.anchor === "treatment-start") &&
-            !getQuantityComparator(origin) && !getQuantityComparator(length)) {
-          const end = treatmentStepOffsetQuantity(step.end);
-          const from = treatmentPosition(origin), duration = treatmentPosition(length);
-          const until = end && !getQuantityComparator(end) ? treatmentPosition(end) : undefined;
-          // Reuse the same conservative position arithmetic as parallel stages.
-          // Month additions remain unresolved because their clamping depends on the date.
-          const ownEnd = from?.value === 0 ? duration :
-            from?.unit === "d" && duration?.unit === "d"
-              ? { unit: "d" as const, value: from.value + duration.value } : undefined;
-          const order = until && ownEnd ? compareRegimenPositions(until, ownEnd) : undefined;
-          const start = step.start && treatmentStepOffsetQuantity(step.start);
-          const stageOrigin = start && !getQuantityComparator(start) ? treatmentPosition(start) : undefined;
-          const startsHere = from && (stageOrigin ? compareRegimenPositions(from, stageOrigin) === 0 :
-            !step.start && from.value === 0);
-          // A first-stage authored week must not disappear behind a derived day heading.
-          const distinctAuthoredUnit = startsHere && order === 0 &&
-            (length.code ?? length.unit) !== (end?.code ?? end?.unit);
-          if ((order === 0 || order === -1 && !startsHere) && !distinctAuthoredUnit) {
-            // The matching end, or a later copied phase, is bounded by its heading.
-            // A length beginning here remains visible across an earlier global cut.
-            const { courseLength: _length, ...cadence } = repeat!;
-            display = { ...display, schedule: { ...display.schedule, recurrence: cadence } };
+        const clause = compiled?.get(component) ?? clauseForAdministration(component, options);
+        const nativeDefault = (style: "short" | "long"): string => {
+          const repeat = component.schedule?.recurrence;
+          const hasOffsets = repeat?.startOffset !== undefined || repeat?.endOffset !== undefined;
+          let display = component;
+          const origin = component.phaseOrigin, length = repeat?.courseLength;
+          if (origin && length && !component.phaseStart && !component.delayMinutes &&
+              !repeat?.calendarWindow && !repeat?.courseLengthRange &&
+              step.end?.anchor === "treatment-start" &&
+              (!step.start || step.start.anchor === "treatment-start") &&
+              !getQuantityComparator(origin) && !getQuantityComparator(length)) {
+            const end = treatmentStepOffsetQuantity(step.end);
+            const from = treatmentPosition(origin), duration = treatmentPosition(length);
+            const until = end && !getQuantityComparator(end) ? treatmentPosition(end) : undefined;
+            // Reuse the same conservative position arithmetic as parallel stages.
+            // Month additions remain unresolved because their clamping depends on the date.
+            const ownEnd = from?.value === 0 ? duration :
+              from?.unit === "d" && duration?.unit === "d"
+                ? { unit: "d" as const, value: from.value + duration.value } : undefined;
+            const order = until && ownEnd ? compareRegimenPositions(until, ownEnd) : undefined;
+            const start = step.start && treatmentStepOffsetQuantity(step.start);
+            const stageOrigin = start && !getQuantityComparator(start) ? treatmentPosition(start) : undefined;
+            const startsHere = from && (stageOrigin ? compareRegimenPositions(from, stageOrigin) === 0 :
+              !step.start && from.value === 0);
+            // A first-stage authored week must not disappear behind a derived day heading.
+            const distinctAuthoredUnit = startsHere && order === 0 &&
+              (length.code ?? length.unit) !== (end?.code ?? end?.unit);
+            if ((order === 0 || order === -1 && !startsHere) && !distinctAuthoredUnit) {
+              // The matching end, or a later copied phase, is bounded by its heading.
+              // A length beginning here remains visible across an earlier global cut.
+              const { courseLength: _length, ...cadence } = repeat!;
+              display = { ...display, schedule: { ...display.schedule, recurrence: cadence } };
+            }
           }
-        }
-        // Once R6 offsets restrict the active window, a plain R5 formatter
-        // cannot safely describe the entire period as the dose cadence.
-        // The read-only display copy drops that misleading interpretation.
-        if (hasOffsets && display.schedule?.recurrence) {
-          const {
-            frequency: _frequency,
-            frequencyMax: _frequencyMax,
-            period: _period,
-            periodMax: _periodMax,
-            periodUnit: _periodUnit,
-            ...rest
-          } = display.schedule.recurrence;
-          // A structured count owns cadence. Its stale code must not restore
-          // the full-period frequency that this offset-only preview omits.
-          const structuredCount = _frequency !== undefined || _frequencyMax !== undefined;
-          const { code: timingCode, ...withoutCode } = display.schedule;
-          const coding = preferredTimingCoding(display.schedule);
-          const literalCode = coding !== undefined && !isPreviewTimingCoding(coding);
-          const codeAgrees = !(_period === undefined && _periodMax !== undefined) &&
-            timingCodeMatchesRecurrence(display.schedule.recurrence,
-              coding?.code ?? timingCode?.text);
-          const independentText = independentTimingText(timingCode?.text, display.schedule.recurrence);
-          display = { ...display, schedule: {
-            ...(!literalCode && (structuredCount || !codeAgrees)
-              ? { ...withoutCode, ...(independentText ? { code: { text: independentText } } : {}) }
-              : display.schedule), recurrence: rest
-          } };
-        }
-        // The clause owns one untyped dose, including its qualifier and target.
-        // Multiple or role-bearing amounts and rate qualifiers remain labelled
-        // native entries rather than an unqualified positional dose.
-        if (
-          display.amounts &&
-          component.amounts?.some(
-            (amount, index) =>
-              amount.rate?.comparator ||
-              amount.rateRatio?.numerator?.comparator === "~"
-          )
-        ) {
-          display = {
-            ...display,
-            amounts: display.amounts.map((amount, i) => {
-              const source = component.amounts?.[i];
-              const clean = { ...amount };
-              if (source?.rate?.comparator) delete clean.rate;
-              if (source?.rateRatio?.numerator?.comparator === "~") delete clean.rateRatio;
-              return clean;
-            }),
-          };
-        }
-        // Rich rates and expressions belong to the current member. Append
-        // its separate original directions after those current facts.
-        const deferredDirections: { text?: string } | undefined = component.text ? {} : undefined;
-        const recognized = formatCanonicalBase(
-          display,
-          style,
-          hasOffsets ? { ...options, includeTimesPerDaySummary: false } : options,
-          display === component ? compiled?.get(component) : undefined,
-          environment,
-          component,
-          authored,
-          deferredDirections
-        );
-        const expressions: string[] = [];
-        if (hasOffsets && repeat) {
-          const periodUnit = repeat.periodUnit;
-          const period =
-            periodUnit && repeat.period !== undefined
-              ? repeat.periodMax !== undefined
-                ? `${repeat.period}–${formatCourseTimeQuantity(
+          // Once R6 offsets restrict the active window, a plain R5 formatter
+          // cannot safely describe the entire period as the dose cadence.
+          // The read-only display copy drops that misleading interpretation.
+          if (hasOffsets && display.schedule?.recurrence) {
+            const {
+              frequency: _frequency,
+              frequencyMax: _frequencyMax,
+              period: _period,
+              periodMax: _periodMax,
+              periodUnit: _periodUnit,
+              ...rest
+            } = display.schedule.recurrence;
+            // A structured count owns cadence. Its stale code must not restore
+            // the full-period frequency that this offset-only preview omits.
+            const structuredCount = _frequency !== undefined || _frequencyMax !== undefined;
+            const { code: timingCode, ...withoutCode } = display.schedule;
+            const coding = preferredTimingCoding(display.schedule);
+            const literalCode = coding !== undefined && !isPreviewTimingCoding(coding);
+            const codeAgrees = !(_period === undefined && _periodMax !== undefined) &&
+              timingCodeMatchesRecurrence(display.schedule.recurrence,
+                coding?.code ?? timingCode?.text);
+            const independentText = independentTimingText(timingCode?.text, display.schedule.recurrence);
+            display = { ...display, schedule: {
+              ...(!literalCode && (structuredCount || !codeAgrees)
+                ? { ...withoutCode, ...(independentText ? { code: { text: independentText } } : {}) }
+                : display.schedule), recurrence: rest
+            } };
+          }
+          // The clause owns one untyped dose, including its qualifier and target.
+          // Multiple or role-bearing amounts and rate qualifiers remain labelled
+          // native entries rather than an unqualified positional dose.
+          if (
+            display.amounts &&
+            component.amounts?.some(
+              (amount, index) =>
+                amount.rate?.comparator ||
+                amount.rateRatio?.numerator?.comparator === "~"
+            )
+          ) {
+            display = {
+              ...display,
+              amounts: display.amounts.map((amount, i) => {
+                const source = component.amounts?.[i];
+                const clean = { ...amount };
+                if (source?.rate?.comparator) delete clean.rate;
+                if (source?.rateRatio?.numerator?.comparator === "~") delete clean.rateRatio;
+                return clean;
+              }),
+            };
+          }
+          // Rich rates and expressions belong to the current member. Append
+          // its separate original directions after those current facts.
+          const deferredDirections: { text?: string } | undefined = component.text ? {} : undefined;
+          const recognized = formatCanonicalBaseNative(
+            display,
+            style,
+            hasOffsets ? { ...options, includeTimesPerDaySummary: false } : options,
+            display === component ? clause : undefined,
+            environment,
+            component,
+            authored,
+            deferredDirections
+          );
+          const expressions: string[] = [];
+          if (hasOffsets && repeat) {
+            const periodUnit = repeat.periodUnit;
+            const period =
+              periodUnit && repeat.period !== undefined
+                ? repeat.periodMax !== undefined
+                  ? `${repeat.period}–${formatCourseTimeQuantity(
+                      {
+                        value: repeat.periodMax,
+                        code: periodUnit,
+                        unit: periodUnit,
+                      },
+                      words
+                    )}`
+                  : formatCourseTimeQuantity(
+                      {
+                        value: repeat.period,
+                        code: periodUnit,
+                        unit: periodUnit,
+                      },
+                      words
+                    )
+                : periodUnit && repeat.periodMax !== undefined
+                ? words.upTo(formatCourseTimeQuantity(
                     {
                       value: repeat.periodMax,
                       code: periodUnit,
                       unit: periodUnit,
                     },
                     words
-                  )}`
-                : formatCourseTimeQuantity(
-                    {
-                      value: repeat.period,
-                      code: periodUnit,
-                      unit: periodUnit,
-                    },
-                    words
-                  )
-              : periodUnit && repeat.periodMax !== undefined
-              ? words.upTo(formatCourseTimeQuantity(
-                  {
-                    value: repeat.periodMax,
-                    code: periodUnit,
-                    unit: periodUnit,
-                  },
-                  words
-                ))
-              : undefined;
-          const frequency =
-            repeat.frequency !== undefined
-              ? repeat.frequencyMax !== undefined
-                ? `${repeat.frequency}–${repeat.frequencyMax}`
-                : String(repeat.frequency)
-              : repeat.frequencyMax !== undefined
-              ? words.upTo(String(repeat.frequencyMax))
-              : undefined;
-          if (frequency) expressions.push(words.administrations(frequency, period));
-          else if (period && repeat.periodMax !== undefined) expressions.push(words.dosingPeriod(period));
-          const periodContext = period ? words.periodContext(period) : "";
-          if (repeat.startOffset) {
-            const offset = formatCourseTimeQuantity(repeat.startOffset, words);
-            expressions.push(words.startsWithinPeriod(offset, periodContext));
+                  ))
+                : undefined;
+            const frequency =
+              repeat.frequency !== undefined
+                ? repeat.frequencyMax !== undefined
+                  ? `${repeat.frequency}–${repeat.frequencyMax}`
+                  : String(repeat.frequency)
+                : repeat.frequencyMax !== undefined
+                ? words.upTo(String(repeat.frequencyMax))
+                : undefined;
+            if (frequency) expressions.push(words.administrations(frequency, period));
+            else if (period && repeat.periodMax !== undefined) expressions.push(words.dosingPeriod(period));
+            const periodContext = period ? words.periodContext(period) : "";
+            if (repeat.startOffset) {
+              const offset = formatCourseTimeQuantity(repeat.startOffset, words);
+              expressions.push(words.startsWithinPeriod(offset, periodContext));
+            }
+            if (repeat.endOffset) {
+              const offset = formatCourseTimeQuantity(repeat.endOffset, words);
+              expressions.push(words.endsWithinPeriod(offset, periodContext));
+            }
           }
-          if (repeat.endOffset) {
-            const offset = formatCourseTimeQuantity(repeat.endOffset, words);
-            expressions.push(words.endsWithinPeriod(offset, periodContext));
+          for (let amountIndex = 0; amountIndex < (component.amounts?.length ?? 0); amountIndex++) {
+            const amount = component.amounts![amountIndex];
+            // Native R6 Quantity comparators are absent from R5 SimpleQuantity.
+            // Keep their actual amount visible in source-less R6 suggestions,
+            // without introducing invalid R5 dose/rate choices.
+            if (amount.rate && (amount.rate.value !== undefined || amount.rate.unit || amount.rate.code)) {
+              const rate = amount.rate;
+              const unit = rate.unit ?? rate.code;
+              expressions.push(
+                amountLabel(amount, "rate", words) +
+                  (rate.value === undefined
+                    ? words.unspecified
+                    : (getQuantityComparator(rate) ?? "") + rate.value) +
+                  (unit ? " " + unit : "")
+              );
+            }
+            const numerator = amount.rateRatio?.numerator;
+            const denominator = amount.rateRatio?.denominator;
+            const numeratorUnit = numerator?.unit ?? numerator?.code;
+            const denominatorUnit = denominator?.unit ?? denominator?.code;
+            const carrierMaterial = component.syntax?.clinicalQuantity?.carrierMaterial?.text;
+            const hasNumerator = numerator?.value !== undefined || Boolean(numeratorUnit);
+            const hasDenominator = denominator?.value !== undefined || Boolean(denominatorUnit);
+            if (hasNumerator || hasDenominator) {
+              const unspecified = words.unspecified;
+              const numeratorValue =
+                numerator?.value === undefined
+                  ? unspecified
+                  : (getQuantityComparator(numerator) ?? "") + numerator.value;
+              const denominatorValue =
+                denominator?.value === undefined
+                  ? unspecified
+                  : (getQuantityComparator(denominator) ?? "") + denominator.value;
+              expressions.push(
+                amountLabel(amount, "rate", words) +
+                  numeratorValue +
+                  (numeratorUnit ? " " + numeratorUnit : "") +
+                  (carrierMaterial ? " " + carrierMaterial : "") +
+                  (hasDenominator
+                    ? " / " + denominatorValue + (denominatorUnit ? " " + denominatorUnit : "")
+                    : "")
+              );
+            }
+            if (amount.expression)
+              expressions.push((hasAmountRole(amount.role) ? amountLabel(amount, "dose", words) : "") +
+                unevaluatedExpressionText(amount.expression, "dose", words));
+            if (amount.rateExpression)
+              expressions.push((hasAmountRole(amount.role) ? amountLabel(amount, "rate", words) : "") +
+                unevaluatedExpressionText(amount.rateExpression, "rate", words));
           }
-        }
-        for (let amountIndex = 0; amountIndex < (component.amounts?.length ?? 0); amountIndex++) {
-          const amount = component.amounts![amountIndex];
-          // Native R6 Quantity comparators are absent from R5 SimpleQuantity.
-          // Keep their actual amount visible in source-less R6 suggestions,
-          // without introducing invalid R5 dose/rate choices.
-          if (amount.rate && (amount.rate.value !== undefined || amount.rate.unit || amount.rate.code)) {
-            const rate = amount.rate;
-            const unit = rate.unit ?? rate.code;
-            expressions.push(
-              amountLabel(amount, "rate", words) +
-                (rate.value === undefined
-                  ? words.unspecified
-                  : (getQuantityComparator(rate) ?? "") + rate.value) +
-                (unit ? " " + unit : "")
-            );
+          let body = joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
+          if (deferredDirections?.text)
+            body = words.withAuthoredDirections(body.replace(/\.\s*$/u, ""), deferredDirections.text);
+          let memberTiming = component.phasePredecessors?.length && !component.phaseStart && !origin
+            ? words.afterPreviousPhase : undefined;
+          let memberStartPoint: string | undefined;
+          if (component.phaseStart) {
+            const boundary = component.phaseStart;
+            const quantity = treatmentStepOffsetQuantity(boundary);
+            const days = boundary.anchor === "treatment-day-start" ? exactCourseDays(quantity) : undefined;
+            const point = treatmentBoundaryRangeText(boundary, words, cycleStart) ??
+              courseBoundaryPoint(quantity, boundary.anchor, words, cycleStart) ?? boundaryEventText(boundary, words, cycleStart);
+            const knownOrigin = boundary.anchor === "treatment-start" || boundary.anchor === "treatment-day-start" ||
+              (boundary.anchor === "previous-phase-next-day" && (index > 0 || Boolean(component.phasePredecessors?.length)));
+            if (knownOrigin) memberStartPoint = point ??
+              (boundary.anchor === "treatment-start" ? cycleStart ?? words.treatmentStart : words.treatmentDayStart);
+            memberTiming = knownOrigin
+              ? component.phaseEnd ? memberStartPoint
+                : days !== undefined ? words.fromDay(days + 1) : words.calendarWindow(memberStartPoint)
+              : words.reviewTiming(point ?? boundary.description);
           }
-          const numerator = amount.rateRatio?.numerator;
-          const denominator = amount.rateRatio?.denominator;
-          const numeratorUnit = numerator?.unit ?? numerator?.code;
-          const denominatorUnit = denominator?.unit ?? denominator?.code;
-          const carrierMaterial = component.syntax?.clinicalQuantity?.carrierMaterial?.text;
-          const hasNumerator = numerator?.value !== undefined || Boolean(numeratorUnit);
-          const hasDenominator = denominator?.value !== undefined || Boolean(denominatorUnit);
-          if (hasNumerator || hasDenominator) {
-            const unspecified = words.unspecified;
-            const numeratorValue =
-              numerator?.value === undefined
-                ? unspecified
-                : (getQuantityComparator(numerator) ?? "") + numerator.value;
-            const denominatorValue =
-              denominator?.value === undefined
-                ? unspecified
-                : (getQuantityComparator(denominator) ?? "") + denominator.value;
-            expressions.push(
-              amountLabel(amount, "rate", words) +
-                numeratorValue +
-                (numeratorUnit ? " " + numeratorUnit : "") +
-                (carrierMaterial ? " " + carrierMaterial : "") +
-                (hasDenominator
-                  ? " / " + denominatorValue + (denominatorUnit ? " " + denominatorUnit : "")
-                  : "")
-            );
+          if (!memberTiming && origin && origin.value !== undefined && origin.value !== 0) {
+            const stageOrigin = treatmentStepOffsetQuantity(step.start);
+            let stageCoversOrigin = false;
+            if (step.start?.anchor === "treatment-start" && stageOrigin &&
+                !getQuantityComparator(stageOrigin) && !getQuantityComparator(origin)) {
+              const memberPosition = treatmentPosition(origin), stagePosition = treatmentPosition(stageOrigin);
+              const order = memberPosition && stagePosition ? compareRegimenPositions(stagePosition, memberPosition) : undefined;
+              const stageUnit = getQuantityDurationUnit(stageOrigin);
+              stageCoversOrigin = order === 0 || order === 1 ||
+                stageUnit !== undefined && stageUnit === getQuantityDurationUnit(origin) &&
+                stageOrigin.value !== undefined && stageOrigin.value >= origin.value;
+            }
+            if (!stageCoversOrigin) {
+              memberStartPoint = afterCourseStart(formatCourseTimeQuantity(origin, words), words, cycleStart);
+              memberTiming = component.phaseEnd ? memberStartPoint : words.calendarWindow(memberStartPoint);
+            }
           }
-          if (amount.expression)
-            expressions.push((hasAmountRole(amount.role) ? amountLabel(amount, "dose", words) : "") +
-              unevaluatedExpressionText(amount.expression, "dose", words));
-          if (amount.rateExpression)
-            expressions.push((hasAmountRole(amount.role) ? amountLabel(amount, "rate", words) : "") +
-              unevaluatedExpressionText(amount.rateExpression, "rate", words));
-        }
-        let body = joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
-        if (deferredDirections?.text)
-          body = words.withAuthoredDirections(body.replace(/\.\s*$/u, ""), deferredDirections.text);
-        let memberTiming = component.phasePredecessors?.length && !component.phaseStart && !origin
-          ? words.afterPreviousPhase : undefined;
-        let memberStartPoint: string | undefined;
-        if (component.phaseStart) {
-          const boundary = component.phaseStart;
-          const quantity = treatmentStepOffsetQuantity(boundary);
-          const days = boundary.anchor === "treatment-day-start" ? exactCourseDays(quantity) : undefined;
-          const point = treatmentBoundaryRangeText(boundary, words, cycleStart) ??
-            courseBoundaryPoint(quantity, boundary.anchor, words, cycleStart) ?? boundaryEventText(boundary, words, cycleStart);
-          const knownOrigin = boundary.anchor === "treatment-start" || boundary.anchor === "treatment-day-start" ||
-            (boundary.anchor === "previous-phase-next-day" && (index > 0 || Boolean(component.phasePredecessors?.length)));
-          if (knownOrigin) memberStartPoint = point ??
-            (boundary.anchor === "treatment-start" ? cycleStart ?? words.treatmentStart : words.treatmentDayStart);
-          memberTiming = knownOrigin
-            ? component.phaseEnd ? memberStartPoint
-              : days !== undefined ? words.fromDay(days + 1) : words.calendarWindow(memberStartPoint)
-            : words.reviewTiming(point ?? boundary.description);
-        }
-        if (!memberTiming && origin && origin.value !== undefined && origin.value !== 0) {
-          const stageOrigin = treatmentStepOffsetQuantity(step.start);
-          let stageCoversOrigin = false;
-          if (step.start?.anchor === "treatment-start" && stageOrigin &&
-              !getQuantityComparator(stageOrigin) && !getQuantityComparator(origin)) {
-            const memberPosition = treatmentPosition(origin), stagePosition = treatmentPosition(stageOrigin);
-            const order = memberPosition && stagePosition ? compareRegimenPositions(stagePosition, memberPosition) : undefined;
-            const stageUnit = getQuantityDurationUnit(stageOrigin);
-            stageCoversOrigin = order === 0 || order === 1 ||
-              stageUnit !== undefined && stageUnit === getQuantityDurationUnit(origin) &&
-              stageOrigin.value !== undefined && stageOrigin.value >= origin.value;
+          if (component.phaseEnd) {
+            const boundary = component.phaseEnd;
+            const point = treatmentBoundaryRangeText(boundary, words, cycleStart) ??
+              courseBoundaryPoint(treatmentStepOffsetQuantity(boundary), boundary.anchor, words, cycleStart) ??
+              boundaryEventText(boundary, words, cycleStart);
+            const endTiming = point ? words.calendarWindow(undefined, point) : words.reviewTiming(boundary.description, "end");
+            memberTiming = memberStartPoint && point ? words.calendarWindow(memberStartPoint, point)
+              : memberTiming ? memberTiming + "; " + endTiming : endTiming;
           }
-          if (!stageCoversOrigin) {
-            memberStartPoint = afterCourseStart(formatCourseTimeQuantity(origin, words), words, cycleStart);
-            memberTiming = component.phaseEnd ? memberStartPoint : words.calendarWindow(memberStartPoint);
-          }
-        }
-        if (component.phaseEnd) {
-          const boundary = component.phaseEnd;
-          const point = treatmentBoundaryRangeText(boundary, words, cycleStart) ??
-            courseBoundaryPoint(treatmentStepOffsetQuantity(boundary), boundary.anchor, words, cycleStart) ??
-            boundaryEventText(boundary, words, cycleStart);
-          const endTiming = point ? words.calendarWindow(undefined, point) : words.reviewTiming(boundary.description, "end");
-          memberTiming = memberStartPoint && point ? words.calendarWindow(memberStartPoint, point)
-            : memberTiming ? memberTiming + "; " + endTiming : endTiming;
-        }
-        return memberTiming ? memberTiming + ": " + body : body;
+          return memberTiming ? memberTiming + ": " + body : body;
+        };
+        return formatCanonicalClause(clause, style, environment.localization, options, nativeDefault);
       },
       (member) => member.choice,
       words,
@@ -1268,6 +1299,13 @@ export function formatCanonicalCourse(
         courseBoundaryPoint(quantity, startAnchor, words, cycleStart) ??
         (step.start?.anchor === "previous-phase-next-day" ? boundaryEventText(step.start, words, cycleStart) : undefined);
       if (point) timing = point;
+    }
+    if (datedEnd && step.end) {
+      const point = treatmentBoundaryRangeText(step.end, words, cycleStart) ??
+        courseBoundaryPoint(treatmentStepOffsetQuantity(step.end), step.end.anchor, words, cycleStart) ??
+        boundaryEventText(step.end, words, cycleStart);
+      const limit = point ? words.upTo(point) : words.reviewTiming(step.end.description, "end");
+      timing = timing ? timing + "; " + limit : limit;
     }
     const stageCount = step.count !== undefined ? words.phaseCount(step.count) : "";
     const heading = [timing, stageCount].filter(Boolean).join("; ");

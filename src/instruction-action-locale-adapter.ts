@@ -347,20 +347,20 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       const relationTarget = c.time ?? c.activity;
       const manner = c.manner ? ` ${c.manner}` : "";
       const substance = c.substance ? ` with ${c.substance}` : "";
+      const elapsed = c.duration ? ` for ${c.duration}` : "";
       if (relationTarget) {
         if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
         const target = object && (!c.site || !suppressSite(c)) ? ` ${object}` : "";
         if (c.time && relationHasGrammarFeature(c.timeRelation, "directTimeRealization")) {
           const timePhrase = englishDirectTime(c.time);
-          return `${c.label}${target}${manner}${substance} ${timePhrase}`;
+          return `${c.label}${target}${manner}${elapsed}${substance} ${timePhrase}`;
         }
         const semanticRelation = relationForSite(c);
         const profile = getAdviceRelationDefinition(semanticRelation)?.grammar.timeRealizationProfile ?? "default";
         const relation = localizeAdviceRelation(semanticRelation, c.locale, profile) ?? semanticRelation;
-        return `${c.label}${target}${manner}${substance} ${relation} ${relationTarget}`;
+        return `${c.label}${target}${manner}${elapsed}${substance} ${relation} ${relationTarget}`;
       }
       const result = c.result ? ` until ${c.result}` : "";
-      const elapsed = c.duration ? ` for ${c.duration}` : "";
       if (object) return `${c.label} ${object}${manner}${elapsed}${substance}${result}`;
       return `${c.label}${manner}${elapsed}${substance}${result}`;
     }
@@ -509,20 +509,20 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const relationTarget = c.time ?? c.activity;
       const manner = c.manner ?? "";
       const substance = c.substance ? `ด้วย${c.substance}` : "";
+      const elapsed = c.duration ? `เป็นเวลา ${c.duration}` : "";
       if (relationTarget) {
         if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
         const target = object && (!c.site || !suppressSite(c)) ? object : "";
         if (c.time && relationHasGrammarFeature(c.timeRelation, "directTimeRealization")) {
           const timePhrase = thaiDirectTime(c.time);
-          return `${c.label}${target}${manner}${substance}${timePhrase}`;
+          return `${c.label}${target}${manner}${elapsed}${substance}${timePhrase}`;
         }
         const semanticRelation = relationForSite(c);
         const profile = getAdviceRelationDefinition(semanticRelation)?.grammar.timeRealizationProfile ?? "default";
         const relation = localizeAdviceRelation(semanticRelation, c.locale, profile) ?? semanticRelation;
-        return `${c.label}${target}${manner}${substance}${relation}${relationTarget}`;
+        return `${c.label}${target}${manner}${elapsed}${substance}${relation}${relationTarget}`;
       }
       const result = c.result ? `ให้${c.result}` : "";
-      const elapsed = c.duration ? `เป็นเวลา ${c.duration}` : "";
       if (object) return `${c.label}${object}${manner}${elapsed}${substance}${result}`;
       return `${c.label}${manner}${elapsed}${substance}${result}`;
     }

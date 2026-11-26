@@ -10,7 +10,7 @@ import {
   type LocalizedTimingGrammar
 } from "./localized-timing";
 import { ParserState } from "./parser-state";
-import { appendClinicalConditionText, type SigLocalization, type SigLongContext, type SigShortContext, type SigDoseScope } from "./i18n";
+import { appendClinicalConditionText, resolveNativeClauseRendering, type SigLocalization, type SigLongContext, type SigShortContext, type SigDoseScope } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { composedCodedWarningActionSources } from "./advice";
@@ -22,6 +22,7 @@ import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
   instructionGraphPrimarySiteRelation,
+  canonicalSiteOwnsPrimaryPhrase,
   instructionGraphRichPrimaryAction,
   realizeRichPrimaryWithCanonicalDose,
   instructionGraphSourceConflictsWithDose,
@@ -1494,7 +1495,6 @@ export function appendLongAdministrationTiming(
 export function richGraphAdministrationTail(
   clause: CanonicalSigClause,
   action: AdviceFrame,
-  words: CourseLanguage,
   timing: LongAdministrationTimingParts,
   parts: RichAdministrationParts
 ): string[] {
@@ -1502,12 +1502,9 @@ export function richGraphAdministrationTail(
   if (parts.route) result.push(parts.route);
   appendLongAdministrationTiming(result, timing, parts);
   if (parts.asNeeded) result.push(parts.asNeeded);
-  const actionHasSite = !clause.site?.spatialRelation && !clause.site?.restrictions?.length &&
+  const actionHasSite = !canonicalSiteOwnsPrimaryPhrase(clause) &&
     action.args.some((arg) => arg.role === AdviceArgumentRole.Site);
   if (parts.site && !actionHasSite) result.push(parts.site);
-  else if (actionHasSite && clause.site?.administrationTargetCount !== undefined &&
-      clause.site.administrationTargetCount > 1)
-    result.push(words.applicationSites(clause.site.administrationTargetCount));
   return result;
 }
 
@@ -1685,8 +1682,26 @@ function applyEnglishAdministrationModality(verb: string, clause: CanonicalSigCl
   return `${prefix}${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
 }
 
+/** A source-only primary and its recognized cadence describe one medication.
+ * Guard that complete primary before independent advice is composed. */
+export function composeNativePrimaryDirections(
+  rendered: string, authored: string | undefined,
+  condition: MedicationCondition | undefined, words: CourseLanguage
+): string {
+  if (!authored) return condition ? appendClinicalConditionText(rendered, condition, words) : rendered;
+  const current = rendered.trim().replace(/[.!?]+$/u, "");
+  const source = authored.trim().replace(/[.!?]+$/u, "");
+  if (!current) return condition ? appendClinicalConditionText(authored, condition, words)
+    : /[.!?]$/u.test(authored.trim()) ? authored.trim() : authored.trim() + ".";
+  if (current === source) return condition ? appendClinicalConditionText(rendered, condition, words) : rendered;
+  const directions = words.withAuthoredDirections(current, source) + ".";
+  if (!condition) return directions;
+  const lead = appendClinicalConditionText("", condition, words).replace(/[.!?]+$/u, "");
+  return lead.charAt(0).toUpperCase() + lead.slice(1) + ": " + directions;
+}
+
 function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | undefined, words: CourseLanguage,
-  resolvedMethod?: SigLongContext["resolvedMethod"], condition?: MedicationCondition): string {
+  resolvedMethod?: SigLongContext["resolvedMethod"], condition?: MedicationCondition, authoredPrimary?: string): string {
   const hasCanonicalAdministration = canonicalClauseHasAdministrationSemantics(clause);
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
@@ -1833,7 +1848,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     : undefined;
   const richPrimaryCoversSingleEvent = richPrimaryCoverage?.singleScheduledEvent === true;
   const graphRegimenTail = richPrimaryGraphText && richPrimaryGraphAction
-    ? richGraphAdministrationTail(clause, richPrimaryGraphAction, words, timingParts, {
+    ? richGraphAdministrationTail(clause, richPrimaryGraphAction, timingParts, {
         route: routePart, frequencyWithoutEvent: frequencyPart,
         independentTiming: timingText, clock: clockPart, asNeeded: asNeededPart, site: sitePart,
         coversSingleEvent: richPrimaryCoversSingleEvent
@@ -1872,6 +1887,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         instructionGraphRealizesWarningText(clause.instructionGraph, text));
     })
   );
+  const primaryConditions: InstructionGraphPrimaryCondition[] | undefined =
+    clause.instructionGraph?.relations?.length ? [] : undefined;
   const positionedRoundTrip = Boolean(roundTrip && positionedGraph);
   const graphWholeInstruction = clause.instructionGraph &&
     !positionedGraph &&
@@ -1884,7 +1901,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
           preferSourceText: roundTrip,
           roundtripSafe: roundTrip,
           omitSourceTexts: additionalSemanticSourceTexts,
-          omitRenderedAction: richPrimaryGraphAction
+          omitRenderedAction: richPrimaryGraphAction,
+          primaryConditions
         })
       : undefined;
   if (!graphWholeInstruction) {
@@ -1914,8 +1932,6 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const representedInstructionTexts = additionalForDirectRendering
     .map((instruction) => instruction.text)
     .filter((text): text is string => Boolean(text));
-  const primaryConditions: InstructionGraphPrimaryCondition[] | undefined =
-    positionedGraph && clause.instructionGraph?.relations?.length ? [] : undefined;
   const preGraphInstruction = positionedGraph && clause.instructionGraph
     ? realizeInstructionGraph(clause.instructionGraph, "en", {
         includeWarnings: true,
@@ -1953,7 +1969,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
           preferSourceText: roundTrip,
           roundtripSafe: roundTrip,
           omitSourceTexts: additionalSemanticSourceTexts,
-          omitRenderedAction: graphPrimaryForOmission
+          omitRenderedAction: graphPrimaryForOmission,
+          primaryConditions
         })
       : undefined
   );
@@ -1982,7 +1999,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
   const hasExplicitMethod = hasExplicitAdministrationMethod(clause);
   if (
-    roundTrip && (!hasExplicitMethod || primaryGraphAction && !needsCurrentPrimary) && graphSourceIsEnglish &&
+    !authoredPrimary && roundTrip && (!hasExplicitMethod || primaryGraphAction && !needsCurrentPrimary) && graphSourceIsEnglish &&
     clause.instructionGraph?.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options) &&
     (!condition || clause.sourceProjectionVerified !== false)
   ) {
@@ -2008,7 +2025,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       })) continue;
       parts.push(value);
     }
-    if (condition) parts.unshift(appendClinicalConditionText(verb, condition, words));
+    if (authoredPrimary || condition)
+      parts.unshift(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary, condition, words));
     return parts.join(" ").trim() || `${verb}.`;
   }
   const leadingInstructionText = preFlowsIntoAdministration
@@ -2020,7 +2038,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     clause, timingText, graphRepresentsDose, richPrimaryGraphAction,
     trailingInstructionText, primaryConditions
   );
-  if (graphCanStandAlone) return condition
+  if (graphCanStandAlone && !authoredPrimary) return condition
     ? appendClinicalConditionText(trailingInstructionText as string, condition, words)
     : trailingInstructionText as string;
   const primarySourceSentence = primaryGraphAction && !needsCurrentPrimary
@@ -2041,11 +2059,11 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const sequenceSurface = localizeAdviceRelation(sequenceRelation, "en") ?? sequenceRelation;
   const compose = (base: string): string => {
     let effectiveBase = richGraphAdministrationSentence ?? primarySourceSentence ?? base;
-    if (condition) effectiveBase = appendClinicalConditionText(effectiveBase, condition, words);
+    effectiveBase = composeNativePrimaryDirections(effectiveBase, authoredPrimary, condition, words);
     // Independent graph conditions remain attached to this administration
     // alongside its current structured clinical guard.
     if (primaryConditions?.length)
-      effectiveBase = attachInstructionGraphPrimaryConditions(effectiveBase, primaryConditions, "en");
+      effectiveBase = attachInstructionGraphPrimaryConditions(effectiveBase, primaryConditions, "en", Boolean(condition));
     if (preFlowsIntoAdministration && preGraphInstruction) {
       const rawPre = preGraphInstruction.replace(/[.!?]+$/, "");
       const pre = rawPre ? rawPre.charAt(0).toUpperCase() + rawPre.slice(1) : rawPre;
@@ -2069,7 +2087,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     return [leadingInstructionText, effectiveBase, effectiveTrailing].filter(Boolean).join(" ").trim();
   };
   if (!body) {
-    if (!trailingInstructionText && !leadingInstructionText && !primaryConditions?.length)
+    if (!authoredPrimary && !trailingInstructionText && !leadingInstructionText && !primaryConditions?.length)
       return condition ? appendClinicalConditionText(`${verb}.`, condition, words) : `${verb}.`;
     return hasExplicitMethod ? compose(`${verb}.`) : compose("");
   }
@@ -2135,11 +2153,12 @@ function firstCanonicalClause(internal: ParserState): CanonicalSigClause {
   };
 }
 
-export function formatCanonicalClause(
+export function formatNativeCanonicalClause(
   clause: CanonicalSigClause,
   style: "short" | "long",
   localization?: SigLocalization,
-  options?: TimingSummaryOptions
+  options?: TimingSummaryOptions,
+  authoredPrimary?: string
 ): string {
   // Per-call vocabulary can declare method identities beyond the built-in
   // compiler dictionary. Resolve that head for every locale's display view
@@ -2150,6 +2169,7 @@ export function formatCanonicalClause(
     if (resolvedMethod && resolvedMethod.display !== clause.method.text)
       clause = { ...clause, method: { ...clause.method, text: resolvedMethod.display } };
   }
+  const native = resolveNativeClauseRendering(localization);
   const cycle = clause.schedule?.cycleDayConstraint;
   if (cycle) {
     const retainedQualifier = cycle.sourceText.trim();
@@ -2160,12 +2180,12 @@ export function formatCanonicalClause(
       // Current typed cycle fields own display after a source disagreement.
       // Keep their old wording in source, including a duplicate advice entry,
       // but do not replay that entry alongside the edited cycle.
-      const rendered = formatCanonicalClause({ ...clause,
+      const rendered = formatNativeCanonicalClause({ ...clause,
         additionalInstructions: clause.sourceProjectionVerified === false && retainedQualifier
           ? clause.additionalInstructions?.filter(instruction => instruction.text?.trim() !== retainedQualifier)
           : clause.additionalInstructions,
         schedule: { ...clause.schedule, cycleDayConstraint: undefined }
-      }, style, localization, options);
+      }, style, localization, options, authoredPrimary);
       let qualifier = sourceQualifier;
       if (!qualifier) {
         let days = "";
@@ -2186,14 +2206,10 @@ export function formatCanonicalClause(
   const clockWindow = clause.schedule?.clockWindow;
   if (clockWindow) {
     const schedule = { ...clause.schedule, clockWindow: undefined };
-    const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+    const rendered = formatNativeCanonicalClause({ ...clause, schedule }, style, localization, options, authoredPrimary);
     const start = clockWindow.start.slice(0, 5);
     const end = clockWindow.end.slice(0, 5);
-    const thai = localization?.locale.startsWith("th");
-    const range = thai ? `เฉพาะช่วงเวลา ${start}–${end} ทุกวัน` :
-      `only between ${start} and ${end} each day`;
-    const boundary = clockWindow.endInclusive ? "" : thai ? " (ไม่รวมเวลาสิ้นสุด)" : " (end excluded)";
-    return `${rendered.replace(/[.。]$/u, "")} ${range}${boundary}.`;
+    return `${rendered.replace(/[.。]$/u, "")} ${native.timing.clockWindow(start, end, Boolean(clockWindow.endInclusive))}.`;
   }
   const offset = clause.schedule?.administrationOffsetMinutes;
   if (offset !== undefined && Number.isFinite(offset)) {
@@ -2209,39 +2225,41 @@ export function formatCanonicalClause(
       return { day, clock: `${hour < 10 ? "0" : ""}${hour}:${minute < 10 ? "0" : ""}${minute}` +
         (second ? `:${second < 10 ? "0" : ""}${second}` : "") };
     });
-    const thai = localization?.locale.startsWith("th");
-    const minutes = Math.abs(offset);
-    const offsetNote = offset < 0
-      ? thai ? "เร็วกว่าเวลาเดิมแต่ละครั้ง " + minutes + " นาที"
-        : minutes + " minutes earlier each time"
-      : thai ? "ช้ากว่าเวลาเดิมแต่ละครั้ง " + minutes + " นาที"
-        : minutes + " minutes later each time";
+    const offsetNote = native.timing.offset(offset);
     if (clocks?.length && !schedule.when?.length && clocks.every(value => Number.isFinite(value.day))) {
       const sameDayShift = clocks.every(value => value.day === clocks[0].day) ? clocks[0].day : undefined;
       if (sameDayShift === undefined) {
         // Mixed-day clocks cannot safely be displayed as an unqualified
         // same-day list. Retain their original times and state the actual
         // elapsed offset once, without fabricating an event chronology.
-        const original = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+        const original = formatNativeCanonicalClause({ ...clause, schedule }, style, localization, options, authoredPrimary);
         return original.replace(/[.。]$/u, "") + " (" + offsetNote + ").";
       }
       schedule.timeOfDay = clocks.map(value => value.clock);
-      const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+      const rendered = formatNativeCanonicalClause({ ...clause, schedule }, style, localization, options, authoredPrimary);
       if (sameDayShift === 0) return rendered;
-      const note = sameDayShift === 1
-        ? thai ? "ในวันถัดไป" : "the following day"
-        : sameDayShift === -1
-          ? thai ? "ในวันก่อนหน้า" : "the previous day"
-          : sameDayShift < 0
-            ? thai ? "ก่อนรอบต้นทาง " + Math.abs(sameDayShift) + " วัน"
-              : Math.abs(sameDayShift) + " days earlier"
-            : thai ? "หลังรอบต้นทาง " + sameDayShift + " วัน"
-              : sameDayShift + " days later";
+      const note = native.timing.dayShift(sameDayShift);
       return rendered.replace(/[.。]$/u, "") + " (" + note + ").";
     }
-    const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+    const rendered = formatNativeCanonicalClause({ ...clause, schedule }, style, localization, options, authoredPrimary);
     return rendered.replace(/[.。]$/u, "") + " (" + offsetNote + ").";
   }
+  const words = localization?.course ?? ENGLISH_COURSE;
+  return style === "short"
+    ? native.short ? native.short(clause, words, resolvedMethod) : formatShort(clause, words)
+    : native.long ? native.long(clause, options, words, resolvedMethod, authoredPrimary)
+      : formatLong(clause, options, words, resolvedMethod, clause.clinicalAdjuncts?.condition, authoredPrimary);
+}
+
+export function formatCanonicalClause(
+  clause: CanonicalSigClause,
+  style: "short" | "long",
+  localization?: SigLocalization,
+  options?: TimingSummaryOptions,
+  nativeDefault?: (target: "short" | "long") => string
+): string {
+  const resolvedMethod = options?.instructionActionMap && clause.method
+    ? resolveMedicationInstructionActionForMethod(clause.method, options) : undefined;
   let shortDefault: string | undefined;
   let longDefault: string | undefined;
 
@@ -2249,13 +2267,12 @@ export function formatCanonicalClause(
     switch (target) {
       case "short":
         if (shortDefault === undefined) {
-          shortDefault = formatShort(clause, localization?.course ?? ENGLISH_COURSE);
+          shortDefault = nativeDefault ? nativeDefault("short") : formatNativeCanonicalClause(clause, "short", localization, options);
         }
         return shortDefault;
       case "long":
         if (longDefault === undefined) {
-          longDefault = formatLong(clause, options, localization?.course ?? ENGLISH_COURSE, resolvedMethod,
-            clause.clinicalAdjuncts?.condition);
+          longDefault = nativeDefault ? nativeDefault("long") : formatNativeCanonicalClause(clause, "long", localization, options);
         }
         return longDefault;
     }

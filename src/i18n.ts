@@ -1,7 +1,7 @@
 import { THAI_DAY_NAMES, joinLocalizedList } from "./locales/course/types";
 import type { CourseLanguage } from "./locales/course/types";
-import { ENGLISH_COURSE } from "./locales/course/en";
-import { THAI_COURSE } from "./locales/course/th";
+import { ENGLISH_COURSE, ENGLISH_CLAUSE_TIMING } from "./locales/course/en";
+import { THAI_COURSE, THAI_CLAUSE_TIMING } from "./locales/course/th";
 export type { CourseLanguage } from "./locales/course/types";
 import { localizedValue, quantityComparatorText } from "./localization";
 import {
@@ -10,6 +10,7 @@ import {
   formatDurationShort as formatDurationShortThai, alternateDayEvent, standaloneOccurrenceCount,
   describeDuration, describeAdministrationDuration, type DurationWording,
   appendLongAdministrationTiming,
+  composeNativePrimaryDirections,
   richGraphAdministrationTail,
   instructionGraphMatchesDose,
   normalizeInstructionText,
@@ -199,7 +200,18 @@ const THAI_ADMINISTRATION_WINDOW_TRANSLATIONS = new Map(
     .map((entry) => [entry.text.toLowerCase().trim(), entry.i18n!.th!] as const)
 );
 
-const REGISTERED_LOCALIZATIONS = new Map<string, SigLocalization>();
+interface NativeClauseRendering {
+  long?: typeof formatLongThai;
+  short?: typeof formatShortThai;
+  timing: typeof ENGLISH_CLAUSE_TIMING;
+}
+const NATIVE_CLAUSE_RENDERING = Symbol("native-clause-rendering");
+type NativeLocalization = SigLocalization & { [NATIVE_CLAUSE_RENDERING]?: NativeClauseRendering };
+const ENGLISH_NATIVE_RENDERING: NativeClauseRendering = { timing: ENGLISH_CLAUSE_TIMING };
+const REGISTERED_LOCALIZATIONS = new Map<string, {
+  localization: SigLocalization;
+  native?: NativeClauseRendering;
+}>();
 // An inherited regional view is valid while BOTH its exact registration and
 // base registration still have the same identity. No invalidation walk or
 // generation increment is required for an ordinary locale registration.
@@ -210,11 +222,13 @@ const RESOLVED_REGIONAL_LOCALIZATIONS = new Map<string, {
 }>();
 
 export function registerSigLocalization(localization: SigLocalization): void {
-  REGISTERED_LOCALIZATIONS.set(localization.locale.toLowerCase(), localization);
+  const key = localization.locale.toLowerCase();
+  const native = (localization as NativeLocalization)[NATIVE_CLAUSE_RENDERING] ?? REGISTERED_LOCALIZATIONS.get(key)?.native;
+  REGISTERED_LOCALIZATIONS.set(key, { localization, native });
 }
 
 export function getRegisteredSigLocalizations(): SigLocalization[] {
-  return Array.from(REGISTERED_LOCALIZATIONS.values());
+  return Array.from(REGISTERED_LOCALIZATIONS.values(), entry => entry.localization);
 }
 
 /** Each regional facet overrides only its matching base-language facet.
@@ -222,16 +236,18 @@ export function getRegisteredSigLocalizations(): SigLocalization[] {
  * regional compositions are refreshed lazily after explicit registration. */
 function registeredLocalization(key: string | undefined): SigLocalization | undefined {
   if (!key) return undefined;
-  const exact = REGISTERED_LOCALIZATIONS.get(key);
+  const exact = REGISTERED_LOCALIZATIONS.get(key)?.localization;
   if (exact?.formatShort && exact.formatLong && exact.course && exact.formatDose) return exact;
   const separator = key.indexOf("-");
   if (separator < 0) return exact;
-  const base = REGISTERED_LOCALIZATIONS.get(key.slice(0, separator));
+  const base = REGISTERED_LOCALIZATIONS.get(key.slice(0, separator))?.localization;
   if (!exact || !base) return exact ?? base;
   const cached = RESOLVED_REGIONAL_LOCALIZATIONS.get(key);
   if (cached?.exact === exact && cached.base === base) return cached.localization;
-  const resolved: SigLocalization = {
+  const resolved: NativeLocalization = {
     locale: exact.locale,
+    [NATIVE_CLAUSE_RENDERING]: REGISTERED_LOCALIZATIONS.get(key)?.native ??
+      (base as NativeLocalization)[NATIVE_CLAUSE_RENDERING] ?? REGISTERED_LOCALIZATIONS.get(key.slice(0, separator))?.native,
     formatDose: exact.formatDose ?? base.formatDose,
     formatShort: exact.formatShort ?? base.formatShort,
     formatLong: exact.formatLong ?? base.formatLong,
@@ -243,6 +259,19 @@ function registeredLocalization(key: string | undefined): SigLocalization | unde
     localization: resolved,
   });
   return resolved;
+}
+
+/** Native defaults belong to the registered language implementation, while
+ * public format callbacks remain complete-clause overrides. */
+export function resolveNativeClauseRendering(localization?: SigLocalization): NativeClauseRendering {
+  const native = (localization as NativeLocalization | undefined)?.[NATIVE_CLAUSE_RENDERING];
+  if (native) return native;
+  const key = localization?.locale.toLowerCase();
+  if (!key) return ENGLISH_NATIVE_RENDERING;
+  const exact = REGISTERED_LOCALIZATIONS.get(key)?.native;
+  if (exact) return exact;
+  const separator = key.indexOf("-");
+  return (separator < 0 ? undefined : REGISTERED_LOCALIZATIONS.get(key.slice(0, separator))?.native) ?? ENGLISH_NATIVE_RENDERING;
 }
 
 export function resolveSigLocalization(
@@ -268,8 +297,11 @@ export function resolveSigLocalization(
     targetKey ??
     "custom";
 
-  const result: SigLocalization = {
+  const result: NativeLocalization = {
     locale: resolvedLocale,
+    [NATIVE_CLAUSE_RENDERING]: (config as NativeLocalization)[NATIVE_CLAUSE_RENDERING] ??
+      (inherited ? resolveNativeClauseRendering(inherited) : undefined) ??
+      (base ? resolveNativeClauseRendering(base) : ENGLISH_NATIVE_RENDERING),
     ...(config?.course ?? inherited?.course ?? base?.course
       ? {course:config?.course ?? inherited?.course ?? base?.course} : {})
   };
@@ -292,6 +324,8 @@ registerSigLocalization({
   formatShort: ({ defaultText }) => defaultText,
   formatLong: ({ defaultText }) => defaultText
 });
+REGISTERED_LOCALIZATIONS.get("en")!.native = ENGLISH_NATIVE_RENDERING;
+(REGISTERED_LOCALIZATIONS.get("en")!.localization as NativeLocalization)[NATIVE_CLAUSE_RENDERING] = ENGLISH_NATIVE_RENDERING;
 
 /** Resolve the course facet once at a public formatting boundary. Reuse the
  * existing registry and inheritance contract; no new pack registry or parser. */
@@ -329,28 +363,17 @@ function createThaiLocalization(): SigLocalization {
         : style === "short" ? formatDoseThaiShort(dose) : formatDoseThaiLong(dose);
       return amount && scope ? (scope.site?.perTargetI18n?.th ?? "แต่ละจุด") + " " + amount : amount;
     },
-    formatShort: ({ clause, course, resolvedMethod }) => formatShortThai(clause, course, resolvedMethod),
-    formatLong: ({
-      clause,
-      course,
-      groupMealTimingsByRelation,
-      includeTimesPerDaySummary,
-      realizationMode,
-      sitePlacement,
-      instructionActionMap,
-      resolvedMethod
-    }) =>
-      formatLongThai(clause, {
-        groupMealTimingsByRelation,
-        includeTimesPerDaySummary,
-        realizationMode,
-        sitePlacement,
-        instructionActionMap
-      }, course, resolvedMethod)
+    formatShort: ({ defaultText }) => defaultText,
+    formatLong: ({ defaultText }) => defaultText
   };
 }
 
 registerSigLocalization(createThaiLocalization());
+const THAI_NATIVE_RENDERING: NativeClauseRendering = {
+  long: formatLongThai, short: formatShortThai, timing: THAI_CLAUSE_TIMING
+};
+REGISTERED_LOCALIZATIONS.get("th")!.native = THAI_NATIVE_RENDERING;
+(REGISTERED_LOCALIZATIONS.get("th")!.localization as NativeLocalization)[NATIVE_CLAUSE_RENDERING] = THAI_NATIVE_RENDERING;
 
 // Thai formatting helpers
 const ROUTE_SHORT: Partial<Record<RouteCode, string>> = {
@@ -2046,10 +2069,11 @@ function formatLongThai(
   clause: CanonicalSigClause,
   options?: TimingSummaryOptions,
   words: CourseLanguage = THAI_COURSE,
-  resolvedMethod?: MedicationInstructionActionDefinition
+  resolvedMethod?: MedicationInstructionActionDefinition,
+  authoredPrimary?: string
 ): string {
   if (
-    options?.realizationMode === "roundtrip" &&
+    !authoredPrimary && options?.realizationMode === "roundtrip" &&
     clause.instructionGraph?.sourceLocale?.toLowerCase().startsWith("th") &&
     clause.instructionGraph.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options) &&
     (!clause.clinicalAdjuncts?.condition || clause.sourceProjectionVerified !== false)
@@ -2236,7 +2260,7 @@ function formatLongThai(
       : undefined
   );
   const graphRegimenTail = richPrimaryGraphText && richPrimaryGraphAction
-    ? richGraphAdministrationTail(clause, richPrimaryGraphAction, words, timingParts, {
+    ? richGraphAdministrationTail(clause, richPrimaryGraphAction, timingParts, {
         route: richRoutePart, frequencyWithoutEvent: frequencyPart,
         independentTiming: timingText, clock: clockPart, asNeeded: asNeeded, site: sitePart,
         coversSingleEvent: richPrimaryCoversSingleEvent
@@ -2256,7 +2280,7 @@ function formatLongThai(
   const additionalSemanticSourceTexts = instructionGraphAdviceSourceTexts(clause, directAdditional);
   const graphRealizationOmissions = [...additionalSemanticSourceTexts, ...codedWarningSources];
   const primaryConditions: InstructionGraphPrimaryCondition[] | undefined =
-    positionedGraph && clause.instructionGraph?.relations?.length ? [] : undefined;
+    clause.instructionGraph?.relations?.length ? [] : undefined;
   const graphRealizationOptions = {
     primaryConditions,
     includeWarnings: true,
@@ -2356,8 +2380,9 @@ function formatLongThai(
       })) continue;
       parts.push(value);
     }
-    if (clause.clinicalAdjuncts?.condition)
-      parts.unshift(appendClinicalConditionText(verb, clause.clinicalAdjuncts.condition, words));
+    if (authoredPrimary || clause.clinicalAdjuncts?.condition)
+      parts.unshift(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary,
+        clause.clinicalAdjuncts?.condition, words));
     return parts.join(" ").trim() || `${verb}.`;
   }
 
@@ -2366,7 +2391,7 @@ function formatLongThai(
     clause, timingText, graphRepresentsDose, richPrimaryGraphAction,
     wholeGraphInstruction, primaryConditions
   );
-  if (graphCanStandAlone) {
+  if (graphCanStandAlone && !authoredPrimary) {
     const text = [directInstruction, graphInstructionText, fallbackPatientInstruction]
       .filter(Boolean).join(" ").trim();
     return clause.clinicalAdjuncts?.condition
@@ -2375,12 +2400,11 @@ function formatLongThai(
 
   let administrationText = richGraphAdministrationText ??
     joinThaiVerbAndBody(verb, body, Boolean(qualifierSuffix));
-  if (clause.clinicalAdjuncts?.condition)
-    administrationText = appendClinicalConditionText(administrationText, clause.clinicalAdjuncts.condition, words)
-      .replace(/[.!?]+$/u, "");
+  administrationText = composeNativePrimaryDirections(administrationText, authoredPrimary,
+    clause.clinicalAdjuncts?.condition, words).replace(/[.!?]+$/u, "");
   // Independent graph conditions remain alongside the structured guard.
   if (primaryConditions?.length)
-    administrationText = attachInstructionGraphPrimaryConditions(administrationText, primaryConditions, "th");
+    administrationText = attachInstructionGraphPrimaryConditions(administrationText, primaryConditions, "th", Boolean(clause.clinicalAdjuncts?.condition));
   if (preFlowsIntoAdministration && preGraphInstruction) {
     administrationText = `${preGraphInstruction} ${sequenceSurface}${administrationText}`;
   }

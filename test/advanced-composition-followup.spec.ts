@@ -2928,7 +2928,8 @@ describe("round 24: live projection and course boundaries", () => {
     ]) {
       expect(preview).toMatch(oneDrop);
       expect(preview).toContain("left eye");
-      expect(preview).not.toContain("right eye");
+      expect(preview.split("; original directions:")[0]).not.toContain("right eye");
+      expect(preview).toContain("; original directions: " + wire.renderedInstruction);
     }
     const saved = courseToR6(inputToCanonical(JSON.parse(JSON.stringify(courseToR5(course)))));
     expect(saved.step[0].component![0].site?.reference).toEqual(reference);
@@ -3506,9 +3507,11 @@ it.each(["fresh", "persisted"] as const)("keeps %s clinician text edits and hono
   expect(formatSig(structuredClone(row), "long", options)).toBe(replacement);
   expect(fromFhirDosage(structuredClone(row), options).longText).toBe(replacement);
   const normalized = formatSig(structuredClone(row), "long", { ...options, realizationMode: "normalized" });
-  expect(normalized).toContain("1 tablet");
-  expect(normalized).toMatch(/bedtime|on sleep/u);
-  expect(normalized).not.toContain("discussion with the clinician");
+  const current = normalized.split("; original directions:")[0];
+  expect(current).toContain("1 tablet");
+  expect(current).toMatch(/bedtime|on sleep/u);
+  expect(current).not.toContain("discussion with the clinician");
+  expect(normalized).toContain("; original directions: " + replacement);
   row.text = "";
   for (const text of [formatSig(structuredClone(row), "long", options), fromFhirDosage(structuredClone(row), options).longText]) {
     expect(text).not.toContain("per the agreed plan");
@@ -3953,8 +3956,10 @@ describe("round35 partial authored directions and sequential previews", () => {
     }] }] };
     for (const text of [formatSig(raw, "long", options), fromFhir(raw, options).longText]) {
       expect(text).toContain("2 tablets twice daily");
-      expect(text).not.toContain("1 tablet");
-      expect(text).not.toContain("once daily");
+      const current = text.split("; original directions:")[0];
+      expect(current).not.toContain("1 tablet");
+      expect(current).not.toContain("once daily");
+      expect(text).toContain("; original directions: Take 1 tablet once daily");
     }
   });
 
@@ -4641,10 +4646,11 @@ describe("course locale boundary", () => {
     );
   });
   it("adds a third language through the same registration including clauses, stages, rates and conditions", () => {
-    let checkMethod = false, methodChecks = 0;
+    let checkMethod = false, methodChecks = 0, nativeDefault = "";
     registerSigLocalization({
       locale: "course-test",
-      formatLong: ({ clause }) => {
+      formatLong: ({ clause, defaultText }) => {
+        nativeDefault = defaultText;
         if (checkMethod) {
           expect(clause.method?.text).toBe("Apply");
           expect(clause.schedule).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
@@ -4678,7 +4684,8 @@ describe("course locale boundary", () => {
         "long",
         { locale: "course-test" }
       )
-    ).toContain("Débit: non spécifié mL/h");
+    ).toBe("Dose locale.");
+    expect(nativeDefault).toContain("Débit: non spécifié mL/h");
     expect(
       appendMedicationConditionText(
         "Dose.",
@@ -4708,14 +4715,14 @@ describe("course locale boundary", () => {
     ]) {
       for (const input of [fresh(methodRow), fresh(methodR6), fresh(toFhirR5Dosages(methodR6))]) {
         const before = fresh(input), previousChecks = methodChecks;
-        expect(formatSig(input, "long", options)).toBe("Current: Dose locale; original directions: Dose locale.");
+        expect(formatSig(input, "long", options)).toBe("Dose locale.");
         expect(methodChecks).toBeGreaterThan(previousChecks);
         expect(input).toEqual(before);
       }
       expect(formatCanonicalAdministration({
         kind: "administration", text: methodRow.text, method: methodRow.method,
         schedule: { recurrence: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } }
-      }, "long", options)).toBe("Current: Dose locale; original directions: Dose locale.");
+      }, "long", options)).toBe("Dose locale.");
     }
     checkMethod = false;
     expect(toDosageDetails(fresh(toFhirR5Dosages(methodR6)))).toEqual(methodR6);
@@ -4772,7 +4779,7 @@ describe("round 28 complete-value locale facets", () => {
   it("passes a complete count and period to a suffix-language upper-bound template", () => {
     registerSigLocalization({
       locale: "course-suffix-bound",
-      formatLong: () => "Dose locale.",
+      formatLong: ({ defaultText }) => defaultText,
       course: { ...ENGLISH_COURSE, upTo: value => value + "以下" }
     });
     const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{
@@ -5655,7 +5662,9 @@ describe("round51 relative phase cutoffs and route-only source", () => {
     for (const input of [edited, toFhirR5Dosages(edited)]) {
       const rendered = formatSig(input, "long", { locale, realizationMode: "normalized" });
       expect(rendered).toMatch(locale === "en" ? /2 tablets/u : /2 เม็ด/u);
-      expect(rendered).not.toContain(text);
+      const label = locale === "en" ? "; original directions: " : "; ข้อความเดิม: ";
+      expect(rendered.split(label)[0]).not.toContain(text);
+      expect(rendered).toContain(label + text);
     }
     const timingOnly: FhirR6DosageInstruction = { step: [{ component: [{
       text, timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } }
@@ -5741,6 +5750,35 @@ describe("round64 independent endpoint and authored direction ownership", () => 
     expect(current).toContain("over 60 minutes");
     expect(toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(replaced))))
       .step![0].component[0].timing!.repeat!.duration).toBe(60);
+  });
+
+  it.each(["en", "th"] as const)("keeps source-only infusion directions in complete native defaults: %s", locale => {
+    const text = "Infuse through a central line";
+    const note = { url: "https://example.test/infusion-note", valueString: "Keep the authored route" };
+    const row = { text, extension: [note], doseAndRate: [{ rateRatio: {
+      numerator: { value: 100, unit: "mL" }, denominator: { value: 2, unit: "h" }
+    } }] };
+    const native: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+    for (const input of [row, native]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const before = JSON.stringify(input);
+      const plain = formatSig(input, "long", { locale, realizationMode });
+      expect(plain).toContain(text);
+      expect(plain).toContain("100 mL / 2 h");
+      let calls = 0;
+      expect(formatSig(input, "long", { locale, realizationMode, i18n: {
+        formatLong: context => {
+          calls++;
+          expect(context.defaultText).toBe(plain);
+          expect(context.formatDefault("long")).toBe(plain);
+          return "Infusion clinic wording.";
+        }
+      } })).toBe("Infusion clinic wording.");
+      expect(calls).toBe(1);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const saved = toDosageDetails(toFhirR5Dosages(native)).step![0].component[0];
+    expect(saved.text).toBe(text);
+    expect(saved.extension).toContainEqual(note);
   });
 
   it("supplies only a primitive companion for a missing R5 period minimum", () => {

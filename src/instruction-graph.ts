@@ -4622,6 +4622,13 @@ function timeArgumentCoveredBySchedule(
 
 const KNOWN_EVENT_TIMINGS = new Set<string>(objectValues(EventTiming));
 
+/** Counted or qualified sites use the canonical site's complete dose scope. */
+export function canonicalSiteOwnsPrimaryPhrase(clause: CanonicalSigClause): boolean {
+  const site = clause.site;
+  return Boolean(site?.spatialRelation || site?.restrictions?.length ||
+    site?.administrationTargetCount !== undefined && site.administrationTargetCount > 1);
+}
+
 /** Apply the selected primary's live schedule/site in one display-only pass.
  * A source graph clock is independent unless the wire source established
  * structured clock ownership. Source arguments and other actions stay intact. */
@@ -4665,7 +4672,7 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
     // or restrictions. The canonical site phrase owns this primary display;
     // other actions and the saved graph keep their authored sites.
     if (arg.role === AdviceArgumentRole.Site &&
-        (site?.spatialRelation || site?.restrictions?.length || !site && clause.sourceHasStructuredSite === true)) {
+        (canonicalSiteOwnsPrimaryPhrase(clause) || !site && clause.sourceHasStructuredSite === true)) {
       changed = true;
       continue;
     }
@@ -5192,20 +5199,21 @@ function instructionGraphCondition(
 export function attachInstructionGraphPrimaryConditions(
   text: string,
   conditions: InstructionGraphPrimaryCondition[] | undefined,
-  locale: string
+  locale: string,
+  guardedPrimary = false
 ): string {
   if (!text || !conditions?.length) return text;
   const adapter = getInstructionActionLocaleAdapter(locale);
   const ending = text.match(/[.!?]+$/u)?.[0] ?? "";
   let body = ending ? text.slice(0, -ending.length) : text;
   if (conditions.length > 1) conditions.sort((a, b) => a.start - b.start);
-  for (const condition of conditions) if (condition.position === "post") {
+  for (const condition of conditions) if (condition.position === "post" && !guardedPrimary) {
     const continuation = adapter.postposedCondition(condition.text);
     body += /^\s/u.test(continuation) ? continuation : " " + continuation;
   }
   for (let index = conditions.length - 1; index >= 0; index -= 1) {
     const condition = conditions[index];
-    if (condition.position === "pre") {
+    if (condition.position === "pre" || guardedPrimary) {
       const continuation = adapter.conditionalContinuation(body, condition.imperative);
       body = condition.text + (/^[\s,;:]/u.test(continuation) ? "" : " ") + continuation;
     }

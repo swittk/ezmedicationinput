@@ -94,3 +94,12 @@ export const ENGLISH_COURSE: CourseLanguage = {
       : `Repeat-cycle interval: ${interval}${iterations}.`;
   },
 };
+
+/** Native clause timing wording; shared formatting supplies resolved clock shifts. */
+export const ENGLISH_CLAUSE_TIMING = {
+  clockWindow: (start: string, end: string, inclusive: boolean) =>
+    `only between ${start} and ${end} each day${inclusive ? "" : " (end excluded)"}`,
+  offset: (minutes: number) => Math.abs(minutes) + (minutes < 0 ? " minutes earlier each time" : " minutes later each time"),
+  dayShift: (days: number) => days === 1 ? "the following day" : days === -1 ? "the previous day"
+    : Math.abs(days) + (days < 0 ? " days earlier" : " days later")
+};

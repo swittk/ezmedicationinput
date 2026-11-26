@@ -101,3 +101,12 @@ export const THAI_COURSE: CourseLanguage = {
       : `ระยะรอบการใช้ยา: ${interval}${iterations}.`;
   },
 };
+
+/** Native clause timing wording; shared formatting supplies resolved clock shifts. */
+export const THAI_CLAUSE_TIMING = {
+  clockWindow: (start: string, end: string, inclusive: boolean) =>
+    `เฉพาะช่วงเวลา ${start}–${end} ทุกวัน${inclusive ? "" : " (ไม่รวมเวลาสิ้นสุด)"}`,
+  offset: (minutes: number) => (minutes < 0 ? "เร็วกว่าเวลาเดิมแต่ละครั้ง " : "ช้ากว่าเวลาเดิมแต่ละครั้ง ") + Math.abs(minutes) + " นาที",
+  dayShift: (days: number) => days === 1 ? "ในวันถัดไป" : days === -1 ? "ในวันก่อนหน้า"
+    : (days < 0 ? "ก่อนรอบต้นทาง " : "หลังรอบต้นทาง ") + Math.abs(days) + " วัน"
+};

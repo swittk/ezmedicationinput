@@ -356,8 +356,9 @@ Whole-course wording is a typed optional `course` facet on the existing
 The `formatLong` callback receives the complete clause, `defaultText`, and
 `formatDefault(style)`. Its returned string is the final clause wording: custom
 formatters may wrap or replace the whole clause and are responsible for that
-wording. Built-in defaults compose medication conditions and independent advice
-from typed facts.
+wording. Defaults use the resolved locale and include the clause's native timing
+qualifiers, authored directions, and independent advice. Built-in defaults compose
+medication conditions and independent advice from typed facts.
 
 ```ts
 import {

@@ -1946,8 +1946,9 @@ describe("negative meal accompaniment ownership", () => {
     }
     for (const input of [parsed.fhir, parsed.fhirNext]) {
       expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(expected);
-      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
-        .not.toContain("พร้อมอาหาร");
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain(source.includes("with water") ? "โดยไม่ food" : "Without food");
+      expect(thai).not.toContain("พร้อมอาหาร");
     }
   });
 

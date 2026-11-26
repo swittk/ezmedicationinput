@@ -4852,8 +4852,9 @@ describe("round68 preparation quantities beside independent clinical limits", ()
     const material = clause.instructionGraph!.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Substance)!;
     expect(material.quantity).toEqual({ value: 100, unit: "mL", ...(materialComparator ? { comparator: materialComparator } : {}) });
     const text = formatSig(parsed.meta.canonical.course, "long", { locale: "en", realizationMode: "normalized" });
-    expect(text).toContain(doseComparator ? "at most 2 tablets" : "2 tablets");
-    expect(text).toContain(materialComparator ? "at most 100 mL" : "100 mL");
+    expect(text).toContain(doseComparator ? "Dissolve at most 2 tablets in 100 mL" : "Dissolve 2 tablets in at most 100 mL");
+    if (materialComparator) expect(text).not.toContain("at most 2 tablets");
+    if (doseComparator) expect(text).not.toContain("at most 100 mL");
   });
 });
 
@@ -5625,7 +5626,7 @@ describe("required graph conditions beside independent Boolean guards", () => {
   it.each([
     ["standalone", sbp, "Take 1 tablet orally only if SBP > 160."],
     ["conjunction", { kind: "all", conditions: [sbp, pulse] }, "Take 1 tablet orally only if SBP > 160 and pulse > 100."],
-    ["disjunction", { kind: "any", conditions: [sbp, pulse] }, "Take 1 tablet orally only if SBP > 160 or pulse > 100 if SBP > 160."],
+    ["disjunction", { kind: "any", conditions: [sbp, pulse] }, "If SBP > 160, take 1 tablet orally only if SBP > 160 or pulse > 100."],
     ["negated disjunction", { kind: "not", condition: { kind: "any", conditions: [
       { kind: "not", condition: sbp }, { kind: "not", condition: pulse }
     ] } }, "Take 1 tablet orally unless not (SBP > 160) or not (pulse > 100)."],
@@ -5645,6 +5646,75 @@ describe("required graph conditions beside independent Boolean guards", () => {
       const before = JSON.stringify(input);
       expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(expected);
       expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+});
+
+
+describe("independent primary graph rendering owners", () => {
+  it.each(["clock", "event", "duration only", "clock only"] as const)("retains Rinse duration and %s independently", kind => {
+    const source = "Rinse the mouth for 1 minute at 08:00";
+    const frame: AdviceFrame = { ...parseInstructionActions("Rinse mouth")[0], sourceText: "", args: [
+      { role: AdviceArgumentRole.Site, text: "mouth", normalized: "mouth", i18n: { th: "ปาก" } },
+      ...(kind === "clock only" ? [] : [{ role: AdviceArgumentRole.Duration, text: "1 minute", quantity: { value: 1, unit: "min" } }]),
+      ...(kind === "duration only" ? [] : [{ role: AdviceArgumentRole.Time,
+        text: kind === "event" ? "breakfast" : "08:00", normalized: kind === "event" ? EventTiming.Breakfast : "08:00",
+        relation: kind === "event" ? AdviceRelation.Before : AdviceRelation.At }])
+    ] };
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: [frame] })!] };
+    for (const input of [[row], toDosageDetails([row])]) for (const locale of ["en", "th"]) {
+      const before = JSON.stringify(input), text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain(locale === "en" ? "Rinse mouth" : "บ้วนปาก");
+      if (kind !== "clock only") expect(text).toContain(locale === "en" ? "for 1 minute" : "นาน 1 นาที");
+      if (kind === "event") expect(text).toContain(locale === "en" ? "before breakfast" : "ก่อนอาหารเช้า");
+      else if (kind !== "duration only") expect(text).toMatch(/0?8[:.]00/u);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([false, true])("attaches an unpositioned primary guard once with independent advice %s", independent => {
+    const action = parseInstructionActions("Swallow 1 tablet whole")[0];
+    const call = { ...parseInstructionActions("Call the clinic")[0], span: { start: 40, end: 55 } };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en",
+        actions: independent ? [action, call] : [action],
+        primaryOwnership: { administrationActionIndex: 0, dose: { actionIndex: 0,
+          argumentIndex: action.args.findIndex(arg => arg.role === AdviceArgumentRole.Amount) } },
+        relations: [{ kind: AdviceRelation.If, toActionIndex: 0, text: "if SBP > 160" },
+          ...(independent ? [{ kind: AdviceRelation.If, toActionIndex: 1, text: "if dizzy" }] : [])]
+      })!] };
+    for (const input of [[row], toDosageDetails([row])]) for (const locale of ["en", "th"]) {
+      const before = JSON.stringify(input), text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(text.match(/SBP > 160/gu)).toHaveLength(1);
+      expect(text).toMatch(locale === "en" ? /Swallow 1 tablet whole if SBP > 160/u : /กลืน.*1 เม็ด.*SBP > 160/u);
+      if (independent) {
+        expect(text).toMatch(locale === "en" ? /Call the clinic if dizzy/iu : /Call the clinicถ้าเวียนศีรษะ/u);
+        expect(text.indexOf("160")).toBeLessThan(text.indexOf("Call"));
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each(["spray", "mL"])("keeps the proper paired-site scope of a rich %s amount", unit => {
+    const action = parseInstructionActions("Spray 1 spray into both nostrils gently")[0];
+    const amount = action.args.find(arg => arg.role === AdviceArgumentRole.Amount)!;
+    const frame: AdviceFrame = { ...action, sourceText: "", args: action.args.map(arg => arg === amount
+      ? { ...arg, text: "1 " + unit, normalized: unit, quantity: { value: 1, unit } } : arg) };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit } }], method: { text: "Spray" },
+      site: { text: "both nostrils" }, extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en",
+        actions: [frame], primaryAdministrationSpan: frame.span })!] };
+    for (const input of [[row], toDosageDetails([row])]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      if (unit === "spray") {
+        expect(en).toContain("each nostril"); expect(en).not.toContain("across 2 sites");
+        expect(th).toContain("ข้างละ");
+      } else {
+        expect(en).toContain("both nostrils"); expect(en).not.toContain("each nostril");
+        expect(th).not.toContain("ข้างละ");
+      }
+      expect(en).toContain("1 " + (unit === "spray" ? "spray" : "mL"));
+      expect(en.toLowerCase()).toContain("gently");
     }
   });
 });

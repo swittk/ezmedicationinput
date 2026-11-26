@@ -634,12 +634,16 @@ describe("round 23 public boundary corrections", () => {
       for (const style of ["short", "long"] as const) {
         const text = formatSig(input, style, options);
         expect(text.match(/(?:^|[^\p{L}\p{N}.,+\-])2\s*(?:tablets?|tabs?|เม็ด)(?![\p{L}\p{N}])/gu)).toHaveLength(1);
-        expect(text).not.toMatch(/(?:^|[^0-9])1\s*(?:tab|tablet|เม็ด)/u);
+        expect(text.split(/; (?:original directions|ข้อความเดิม):/u)[0])
+          .not.toMatch(/(?:^|[^0-9])1\s*(?:tab|tablet|เม็ด)/u);
+        expect(text).toContain("Take 1 tablet daily");
       }
       const imported = fromFhir(input, options);
       for (const text of [imported.shortText, imported.longText, imported.items[0].shortText, imported.items[0].longText]) {
         expect(text.match(/(?:^|[^\p{L}\p{N}.,+\-])2\s*(?:tablets?|tabs?|เม็ด)(?![\p{L}\p{N}])/gu)).toHaveLength(1);
-        expect(text).not.toMatch(/(?:^|[^0-9])1\s*(?:tab|tablet|เม็ด)/u);
+        expect(text.split(/; (?:original directions|ข้อความเดิม):/u)[0])
+          .not.toMatch(/(?:^|[^0-9])1\s*(?:tab|tablet|เม็ด)/u);
+        expect(text).toContain("Take 1 tablet daily");
       }
       expect(imported.fhirNext.renderedInstruction).toBe("Take 1 tablet daily");
       expect(courseToR6(importCanonicalCourse(input)).renderedInstruction).toBe("Take 1 tablet daily");
@@ -657,8 +661,10 @@ describe("round 23 public boundary corrections", () => {
       imported.shortText, imported.longText, imported.items[0].shortText, imported.items[0].longText]) {
       expect(text).toMatch(/(?:^|[^0-9.])2\s*mg\b/u);
       expect(text).toMatch(/(?:^|[^0-9.])5\s*mL\/h\b/u);
-      expect(text).not.toMatch(/(?:^|[^0-9.])1\s*mg\b/u);
-      expect(text).not.toMatch(/(?:^|[^0-9.])4\s*mL\/h\b/u);
+      const current = text.split("; original directions:")[0];
+      expect(current).not.toMatch(/(?:^|[^0-9.])1\s*mg\b/u);
+      expect(current).not.toMatch(/(?:^|[^0-9.])4\s*mL\/h\b/u);
+      expect(text).toContain("; original directions: Infuse 1 mg at 4 mL/h");
     }
     expect(imported.fhirNext.step![0].component[0].text).toBe("Infuse 1 mg at 4 mL/h");
   });
@@ -2893,11 +2899,12 @@ describe("round62 reviewed interchange ownership", () => {
         const options = { locale: "en", realizationMode };
         const imported = fromFhirDosage(current, options);
         for (const preview of [formatSig(current, "long", options), imported.longText]) {
-          expect(preview).toMatch(/\b2 tablets\b/u);
-          expect(preview).toMatch(expectedClock);
-          expect(preview).not.toMatch(otherClock);
-          expect(preview).toContain("slowly");
-          expect(preview).toContain("water");
+          const active = preview.split("; original directions:")[0];
+          expect(active).toMatch(/\b2 tablets\b/u);
+          expect(active).toMatch(expectedClock);
+          expect(active).not.toMatch(otherClock);
+          expect(active).toContain("slowly");
+          expect(active).toContain("water");
         }
         expect(imported.fhir).toEqual(before);
       }
@@ -3770,7 +3777,7 @@ describe("round72 reviewed completion and batch directions", () => {
   });
 
   it("keeps separator joining for independent imported components with clinical facts", () => {
-    const source: FhirR6DosageInstruction = { renderedInstruction: "Retained source heading", step: [{ component: [
+    const source: FhirR6DosageInstruction = { step: [{ component: [
       { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily } },
       { doseAndRate: [{ doseQuantity: q(2) }], timing: { repeat: daily } },
     ] }] };
@@ -3778,7 +3785,16 @@ describe("round72 reviewed completion and batch directions", () => {
     for (const style of ["short", "long"] as const) {
       const values = batch.items.map(item => style === "short" ? item.shortText : item.longText);
       expect(formatParseBatch(batch, style, " / ")).toBe(values.join(" / "));
-      expect(formatParseBatch(batch, style)).not.toContain(source.renderedInstruction);
+      expect(formatParseBatch(batch, style)).toBe(values.join(", "));
+    }
+    const labelled = fromFhir({ ...source, renderedInstruction: "Retained source heading" },
+      { locale: "en", realizationMode: "normalized" });
+    for (const style of ["short", "long"] as const) {
+      const text = formatParseBatch(labelled, style, " / ");
+      expect(text).toBe(style === "short" ? labelled.shortText : labelled.longText);
+      expect(text.match(/Retained source heading/gu)).toHaveLength(1);
+      expect(text).toContain(style === "short" ? "1 tab" : "1 tablet");
+      expect(text).toContain(style === "short" ? "2 tab" : "2 tablets");
     }
   });
 });
@@ -4149,7 +4165,7 @@ describe("round74 ancillary advice and independent authored directions", () => {
       expect(text.split(header).length - 1).toBe(1);
       const current = text.split("; original directions:")[0];
       expect(current).toMatch(/twice daily/iu);
-      expect(current).toMatch(/shake well/iu);
+      expect(text.match(/shake well/giu)).toHaveLength(1);
       if (dose) {
         expect(current).toMatch(/2 tablets/iu);
         expect(current).not.toContain("1 tablet");
@@ -4185,7 +4201,9 @@ describe("round74 ancillary advice and independent authored directions", () => {
       const text = formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" });
       expect(text).toMatch(/2 tablets.*twice daily/iu);
       expect(text).toMatch(/shake well/iu);
-      expect(text).not.toContain(header);
+      expect(text).toContain("; original directions: " + header);
+      expect(text.split(header)).toHaveLength(2);
+      expect(text.split("; original directions:")[0]).not.toContain("1 tablet");
     }
   });
 });
@@ -4853,10 +4871,12 @@ describe("round77 independent advice and selected Time ownership", () => {
     const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
     expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Time)).toHaveLength(0);
     expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Activity, text: "breakfast or dinner" }));
+    expect(frame.relation).toBe(AdviceRelation.After);
+    expect(parsed.meta.canonical.clauses[0].schedule?.when ?? []).not.toContain(EventTiming["After Breakfast"]);
     for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext), persist(toFhirR5Dosages(parsed.fhirNext))]) {
       for (const locale of ["en", "th"] as const) {
         const text = current(formatSig(input, "long", { locale, realizationMode: "normalized" }), locale);
-        expect(text).toContain("breakfast or dinner");
+        expect(text).toContain((locale === "en" ? "after " : "หลัง") + "breakfast or dinner");
         expect(text).toContain(locale === "en" ? "15 mL" : "15 มิลลิลิตร");
       }
       expect(importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!.sourceText).toBe(source);

@@ -662,11 +662,11 @@ describe("round63 imported member preview ownership", () => {
     const structured = fresh(source);
     structured.step![0].component[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
     const rendered = formatSig(structured, style, { locale: "en" });
-    expect(rendered).toMatch(style === "short" ? /2 tab\b/u : /2 tablets/u);
-    expect(rendered).not.toContain("Take 1 tablet in the morning");
-    expect(rendered).toMatch(style === "short"
-      ? /2 tab\.? or Take 1 tablet at bedtime/u
-      : /2 tablets\.? or Take 1 tablet at bedtime/u);
+    expect(rendered).toMatch(style === "short" ? /(?:^|[^0-9.])2 tab\b/u : /(?:^|[^0-9.])2 tablets\b/u);
+    expect(rendered).toContain("original directions: Take 1 tablet in the morning");
+    expect(rendered).toMatch(/original directions: Take 1 tablet in the morning\.? or Take 1 tablet at bedtime/u);
+    expect(rendered.split("; original directions: ")[0]).not.toContain("1 tablet");
+    expect(structured.step![0].component[0].timing).toBeUndefined();
     expect(source).toEqual(before);
   });
 
@@ -1051,11 +1051,12 @@ describe("round23 external R6 wording across R5", () => {
       // show the explicit replacement separately, without certifying its graph.
       for (const realizationMode of ["normalized", "roundtrip"] as const) {
         const current = "Take 1 tablet orally once daily; Rate: 5 mL/h";
-        const expected = realizationMode === "roundtrip"
-          ? "Current: " + current + "; original directions: " + replacement : current;
-        expect(formatSig(rows[0], "long", { locale: "en", realizationMode })).toBe(expected);
+        const preview = formatSig(rows[0], "long", { locale: "en", realizationMode });
+        const [active, original] = preview.split("; original directions: ");
+        expect(active.replace(/^Current: /u, "")).toBe(current);
+        if (original !== undefined) expect(original).toBe(replacement);
         const imported = fromFhirDosage(rows[0], { locale: "en", realizationMode });
-        expect(imported.longText).toBe(expected);
+        expect(imported.longText).toBe(preview);
         expect(imported.fhir).toEqual(submitted[0]);
         expect(imported.meta.canonical.clauses[0].rawText).toBe(replacement);
       }
@@ -1076,8 +1077,7 @@ describe("round23 external R6 wording across R5", () => {
     expect(dosageMatchesSavedProjection(rows[1])).toBe(false);
     for (const realizationMode of ["normalized", "roundtrip"] as const) {
       const current = "Take 2 tablets orally once daily; Rate: 5 mL/h";
-      const expected = realizationMode === "roundtrip"
-        ? "Current: " + current + "; original directions: " + rows[1].text : current;
+      const expected = "Current: " + current + "; original directions: " + rows[1].text;
       expect(formatSig(rows[1], "long", { locale: "en", realizationMode })).toBe(expected);
       const imported = fromFhirDosage(rows[1], { locale: "en", realizationMode });
       expect(imported.longText).toBe(expected);
@@ -4641,8 +4641,7 @@ describe("round44 interop ownership", () => {
     expect(dosageMatchesSavedProjection(row)).toBe(false);
     const expected = "Infuse 20 mg once over 2 hours; max per period: 100 mg / 1 d; Rate: 100 mL dextrose / 2 h";
     for (const realizationMode of ["normalized", "roundtrip"] as const) {
-      const preview = realizationMode === "roundtrip"
-        ? "Current: " + expected + "; original directions: " + row.text : expected;
+      const preview = "Current: " + expected + "; original directions: " + row.text;
       expect(formatSig(row, "long", { locale: "en", realizationMode })).toBe(preview);
       const imported = fromFhirDosage(row, { locale: "en", realizationMode });
       expect(imported.longText).toBe(preview);

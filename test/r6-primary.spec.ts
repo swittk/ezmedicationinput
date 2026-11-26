@@ -1950,19 +1950,22 @@ it("normalizes editable R5 and R6 course previews while retaining original wordi
   const text = formatSigBatch(r5, "long");
   expect(text).toMatch(/every 2 hours[\s\S]*four times daily/iu);
   expect(text).toContain("right eye");
-  const phases = formatSig(parsed.fhirNext, "long").split(/\bthen\b/iu);
-  expect(phases).toHaveLength(2);
-  expect(phases[0]).toMatch(/Instill 1 drop every 2 hours[\s\S]*in the right eye/iu);
-  expect(phases[1]).toMatch(/Instill 1 drop four times daily[\s\S]*in the right eye/iu);
-  for (const phase of phases) {
-    expect(phase.match(/\bInstill\b/giu)).toHaveLength(1);
-    expect(phase).not.toMatch(/\b(?:left|both) eyes?\b|\bbilateral\b/iu);
+  for (const input of [parsed.fhirNext, toDosageDetails(parsed.fhir)]) {
+    const phases = formatSig(input, "long", { locale: "en", realizationMode: "normalized" }).split(/\bthen\b/iu);
+    expect(phases).toHaveLength(2);
+    expect(phases[0]).toMatch(/Instill 1 drop every 2 hours[\s\S]*in the right eye/iu);
+    expect(phases[1]).toMatch(/Instill 1 drop four times daily[\s\S]*in the right eye/iu);
+    for (const phase of phases) {
+      expect(phase.match(/\bInstill\b/giu)).toHaveLength(1);
+      expect(phase).not.toMatch(/\b(?:left|both) eyes?\b|\bbilateral\b/iu);
+    }
+    const thaiPhases = formatSig(input, "long", { locale: "th", realizationMode: "normalized" }).split("จากนั้น");
+    expect(thaiPhases).toHaveLength(2);
+    expect(thaiPhases[0]).toMatch(/หยอดตาขวา ครั้งละ 1 หยด ทุก 2 ชั่วโมง/u);
+    expect(thaiPhases[1]).toMatch(/หยอดตาขวา ครั้งละ 1 หยด วันละ 4 ครั้ง/u);
+    for (const phase of thaiPhases) expect(phase).not.toMatch(/ตาซ้าย|ทั้งสอง|สองข้าง/u);
+    expect(input.renderedInstruction).toBe(source);
   }
-  const thaiPhases = formatSig(parsed.fhirNext, "long", { locale: "th" }).split("จากนั้น");
-  expect(thaiPhases).toHaveLength(2);
-  expect(thaiPhases[0]).toMatch(/หยอดตาขวา ครั้งละ 1 หยด ทุก 2 ชั่วโมง/u);
-  expect(thaiPhases[1]).toMatch(/หยอดตาขวา ครั้งละ 1 หยด วันละ 4 ครั้ง/u);
-  for (const phase of thaiPhases) expect(phase).not.toMatch(/ตาซ้าย|ทั้งสอง|สองข้าง/u);
   expect(parsed.fhirNext.renderedInstruction).toBe(source);
   expect(formatSigBatch(r5, "long", { locale: "th" })).toContain("ตาขวา");
 });
@@ -3162,7 +3165,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(fromFhir(course, { locale: "en" }).items[0].longText).toBe(en);
     expect(fromFhir(course, { locale: "th" }).items[0].longText).toBe(th);
     const authored = { ...course, renderedInstruction: "Take as directed by prescriber." };
-    expect(formatSig(authored, "long")).toBe(en);
+    expect(formatSig(authored, "long")).toBe("Current: " + en + "; original directions: " + authored.renderedInstruction);
     expect(fromFhir(authored).fhirNext.renderedInstruction).toBe(authored.renderedInstruction);
   });
 
@@ -7030,14 +7033,14 @@ describe("round49 primary administration condition placement", () => {
     } };
     const text = formatCanonicalCourse(native, "long", options);
     const guard = locale === "en" ? "only if BP > 160" : "เฉพาะเมื่อ BP > 160";
-    const expected = mode === "literal" ? "Clinic-selected administration." :
-      "Take 1 tablet orally twice daily " + guard + ". Otherwise hold.";
+    const defaultText = generated(locale, "normalized");
+    const expected = mode === "literal" ? "Clinic-selected administration." : defaultText;
     expect(text.split(guard)).toHaveLength(mode === "literal" ? 1 : 2);
     // Custom wording is authoritative; the complete default keeps the condition
     // on the dose before the independent hold.
-    if (mode !== "literal") expect(text).toContain("Otherwise hold");
+    if (mode !== "literal") expect(text).toMatch(/Otherwise hold/iu);
     expect(text).toBe(expected);
-    expect(defaults).toEqual(["Take 1 tablet orally twice daily " + guard + ". Otherwise hold."]);
+    expect(defaults).toEqual([defaultText]);
     expect(formatCanonicalCourse(native, "short", options)).toBe(
       locale === "en" ? "1 tab PO BID only if BP > 160." : "1 เม็ด PO วันละ 2 ครั้ง เฉพาะเมื่อ BP > 160.");
 
@@ -7051,9 +7054,10 @@ describe("round49 primary administration condition placement", () => {
     for (const input of [parsed.fhir[0], parsed.fhir])
       expect(formatSig(input, "long", roundtrip)).toBe(source);
     expect(fromFhirDosage(parsed.fhir[0], roundtrip).longText).toBe(source);
+    const roundtripExpected = mode === "literal" ? expected : generated(locale, "roundtrip");
     for (const input of [parsed.fhirNext, native])
-      expect(formatSig(input, "long", roundtrip)).toBe(expected);
-    expect(fromFhir(parsed.fhirNext, roundtrip).longText).toBe(expected);
+      expect(formatSig(input, "long", roundtrip)).toBe(roundtripExpected);
+    expect(fromFhir(parsed.fhirNext, roundtrip).longText).toBe(roundtripExpected);
     expect(JSON.stringify([parsed.fhir, parsed.fhirNext, native])).toBe(saved);
   });
 });
@@ -7165,11 +7169,14 @@ describe("round58 partial facts and independent timing text", () => {
         for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
           const rendered = formatSig(value, style, { locale, realizationMode: "normalized" });
           expect(rendered).toContain(locale === "en" ? "left forearm" : "ปลายแขนซ้าย");
-          if (kind !== "structured dose") expect(rendered).toContain("Apply a thin layer");
-          else expect(rendered).not.toContain("Apply a thin layer");
-          if (kind === "structured dose") expect(rendered).toBe(locale === "en"
-            ? style === "short" ? "2 g to the left forearm" : "Use 2 g to the left forearm."
-            : style === "short" ? "2 g ที่ปลายแขนซ้าย" : "ใช้ครั้งละ 2 g ที่ปลายแขนซ้าย.");
+          expect(rendered).toContain("Apply a thin layer");
+          if (kind === "structured dose") {
+            const native = locale === "en"
+              ? style === "short" ? "2 g to the left forearm" : "Use 2 g to the left forearm"
+              : style === "short" ? "2 g ที่ปลายแขนซ้าย" : "ใช้ครั้งละ 2 g ที่ปลายแขนซ้าย";
+            expect(rendered.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: "))
+              .toEqual([(locale === "en" ? "Current: " : "ปัจจุบัน: ") + native, "Apply a thin layer"]);
+          }
         }
       expect(input).toEqual(before);
       expect(toDosageDetails(rows)).toEqual(input);
@@ -7746,5 +7753,54 @@ describe("R6 stage safety in individual previews", () => {
       expect(text).not.toContain("Call the clinic");
     }
     expect(imported.fhirNext.step![1].safety).toEqual(safety);
+  });
+});
+
+
+describe("independent authored header and phase limits", () => {
+  it.each([false, true])("retains a header warning with matching component text %s", matchingText => {
+    const instruction = "Take 1 tablet daily. Do not crush.";
+    const source: FhirR6DosageInstruction = { renderedInstruction: instruction, step: [{ component: [{
+      ...(matchingText ? { text: instruction } : {}),
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      extension: [{ url: "https://example.test/header-note", valueString: "Keep this annotation" }]
+    }] }] };
+    for (const input of [source, toFhirR5Dosages(source)]) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text.match(/Do not crush/gu)).toHaveLength(1);
+        expect(text).toContain(locale === "en" ? "1 tablet once daily" : "1 เม็ด วันละครั้ง");
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(toDosageDetails(toFhirR5Dosages(source)).renderedInstruction).toBe(instruction);
+  });
+
+  it.each(["2027-01-03", "2027-01-07"])("retains the first phase upper limit before a %s successor", start => {
+    const boundary = (value: number) => ({ contextCode: { coding: [{
+      system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+    }] }, offsetDuration: { value, unit: "d", code: "d" } });
+    const course: FhirR6DosageInstruction = { step: [
+      { end: boundary(4), component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] } } }] },
+      { end: boundary(8), component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["09:00:00"], boundsPeriod: { start } } } }] }
+    ] };
+    for (const input of [course, toFhirR5Dosages(course), importCanonicalCourse(course)]) {
+      const en = formatSig(input, "long", { locale: "en" });
+      expect(en).toContain("up to 4 days after treatment start");
+      expect(en).toContain("starting " + (start.endsWith("03") ? "3" : "7") + " Jan 2027");
+      expect(en).not.toContain("From 4 days after treatment start");
+      const th = formatSig(input, "long", { locale: "th" });
+      expect(th).toContain("4 วัน");
+      const options = { dosage: input, orderedAt: "2027-01-01T00:00:00Z", timeZone: "UTC",
+        from: "2027-01-03T00:00:00Z", durationValue: 1, durationUnit: FhirPeriodUnit.Day };
+      expect(calculateTotalUnits(options).totalUnits).toBe(start.endsWith("03") ? 1 : 2);
+      if (start.endsWith("07")) expect(calculateTotalUnits({ ...options,
+        from: "2027-01-05T00:00:00Z", durationValue: 2 }).totalUnits).toBe(0);
+    }
   });
 });

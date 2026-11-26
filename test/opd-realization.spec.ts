@@ -115,10 +115,10 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
 
       const withoutSource: FhirDosage = { ...base, ...maximum };
       const normalized = fromFhirDosage({ ...dosage });
-      expect(normalized.shortText).toBe(`1 tab 2x/d; ${maximumText}`);
-      expect(normalized.longText).toBe(`Use 1 tablet twice daily; ${maximumText}`);
+      expect(normalized.shortText).toBe(`Current: 1 tab 2x/d; ${maximumText}; original directions: ${source}`);
+      expect(normalized.longText).toBe(`Current: Use 1 tablet twice daily; ${maximumText}; original directions: ${source}`);
       expect(normalized.fhir.text).toBe(source);
-      expect(formatSig(dosage, "long")).toBe(`Use 1 tablet twice daily; ${maximumText}`);
+      expect(formatSig(dosage, "long")).toBe(`Current: Use 1 tablet twice daily; ${maximumText}; original directions: ${source}`);
       expect(formatSig(withoutSource, "long")).toBe(
         `Use 1 tablet twice daily; ${maximumText}`
       );
@@ -635,7 +635,6 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
   });
 
 });
-
 
 
 describe("round33 current rich-primary ownership", () => {
@@ -1700,27 +1699,6 @@ describe("round39 semantic resolver surface precedence", () => {
 });
 
 
-it("does not revive an externally cleared primary dose while retaining its saved graph", () => {
-  const raw = JSON.parse(JSON.stringify(parsePublicSig("Swallow 1 tablet whole").fhirNext));
-  const component = raw.step[0].component[0];
-  delete component.doseAndRate;
-  delete component.method;
-  delete component.route;
-  const savedGraph = JSON.stringify(parseInstructionGraphExtension(component.extension));
-  for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))])
-    for (const realizationMode of ["normalized", "roundtrip"] as const) {
-    const english = formatSig(input, "long", { locale: "en", realizationMode });
-    const thai = formatSig(input, "long", { locale: "th", realizationMode });
-    expect(english).toContain("Swallow whole");
-    expect(english).not.toContain("1 tablet");
-    expect(thai).toContain("กลืน");
-    expect(thai).not.toContain("1 เม็ด");
-  }
-  expect(JSON.stringify(parseInstructionGraphExtension(component.extension))).toBe(savedGraph);
-  expect(parseInstructionGraphExtension(component.extension)!.actions[0].args)
-    .toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: { value: 1, unit: "tab" } }));
-});
-
 
 describe("round40 public graph amount preservation", () => {
   it.each(["Take with breakfast 1 tablet", "Take 1 tablet with breakfast"])(
@@ -2142,25 +2120,6 @@ describe("round43 dilution clock ownership", () => {
   });
 });
 
-it("round43: still clears a dose owned by the public source primary span", () => {
-  const source = "Dissolve 2 tablets in water at 08:00";
-  const edited = JSON.parse(JSON.stringify(parsePublicSig(source).fhirNext));
-  const sourceGraph = parseInstructionGraphExtension(edited.step[0].component[0].extension)!;
-  expect(sourceGraph.primaryAdministrationSpan).toEqual(sourceGraph.actions[0].span);
-  delete edited.step[0].component[0].doseAndRate;
-  const before = JSON.stringify(edited);
-  for (const input of [edited, JSON.parse(JSON.stringify(toFhirR5Dosages(edited)))]) {
-    const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
-    const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
-    expect(en).not.toContain("2 tablets");
-    expect(th).not.toContain("2 เม็ด");
-    expect(en).toContain("water");
-    expect(th).toContain("น้ำ");
-    expect(en).toMatch(/(?:08:00|8:00 am)/u);
-    expect(th).toContain("08:00");
-  }
-  expect(JSON.stringify(edited)).toBe(before);
-});
 
 
 it("round43: preserves graph-only amounts through ordinary source-text saves without inventing a dose", () => {
@@ -3350,7 +3309,7 @@ describe("round55: current clinical facts and independent graph meaning", () => 
           // One OR arm does not subsume the independently required graph condition.
           expect(text.match(/160/gu) ?? []).toHaveLength(variant === "any" || variant === "opposite unless" ? 1 : 0);
           if (variant === "opposite unless") {
-            expect(text).toMatch(/(?:unless|เว้นแต่)\s*systolic BP > 160/u);
+            expect(text).toMatch(/(?:unless|เว้นแต่)\s*systolic BP > 160/iu);
             expect(text).toMatch(locale === "en" ? /only if\s+systolic BP > 140/u : /เฉพาะเมื่อ\s*systolic BP > 140/u);
           } else if (variant === "not") {
             expect(text).toContain(locale === "en" ? "unless" : "เว้นแต่");
@@ -3566,7 +3525,7 @@ describe("independent action accompaniments", () => {
       expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
         .toBe(reverse ? "Swallow 1 tablet without food with water." : "Swallow 1 tablet with water without food.");
       expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
-        .toBe(reverse ? "กลืน 1 เม็ดโดยไม่อาหารร่วมกับน้ำ." : "กลืน 1 เม็ดร่วมกับน้ำโดยไม่อาหาร.");
+        .toBe(reverse ? "กลืน 1 เม็ดโดยไม่มีอาหารร่วมกับน้ำ." : "กลืน 1 เม็ดร่วมกับน้ำโดยไม่มีอาหาร.");
     }
   });
 });

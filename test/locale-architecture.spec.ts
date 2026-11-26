@@ -1,5 +1,7 @@
+import { cycleDayConstraintExtension, TIMING_CLOCK_WINDOW_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL } from "../src/fhir";
+import { toFhirR5Dosages, toDosageDetails } from "../src/index";
 import { describe, expect, it } from "vitest";
-import { resolveSigLocalization } from "../src/i18n";
+import { resolveSigLocalization, registerSigLocalization } from "../src/i18n";
 import {
   localizedConfig,
   localizedValue
@@ -443,7 +445,7 @@ describe("independent cadence and preview condition owners", () => {
     const nativeDose = locale === "en" ? "Use 1 tablet" : "ใช้ครั้งละ 1 เม็ด";
     expect(formatSig(source, "long", { locale, realizationMode: "normalized" }))
       .toBe(`${nativeDose} ${guardText} SBP > 160. ${advice}.`);
-    const expectedDefault = `Use 1 tablet ${guardText} SBP > 160. ${advice}.`;
+    const expectedDefault = `${nativeDose} ${guardText} SBP > 160. ${advice}.`;
     for (const prefix of ["", "Directions: "]) {
       let calls = 0;
       const text = formatSig(source, "long", { locale, realizationMode: "normalized", i18n: {
@@ -455,7 +457,7 @@ describe("independent cadence and preview condition owners", () => {
           expect(context.clause.dose).toMatchObject({ value: 1, unit: "tab" });
           expect(context.clause.clinicalAdjuncts?.condition).toMatchObject({ kind: "measurement", operation: "gt", value: 160 });
           expect(context.clause.additionalInstructions).toEqual(expect.arrayContaining([expect.objectContaining({ text: advice })]));
-          return prefix + context.defaultText.replace(`Use 1 tablet ${guardText} SBP > 160.`, dose + ".");
+          return prefix + context.defaultText.replace(`${nativeDose} ${guardText} SBP > 160.`, dose + ".");
         }
       } });
       expect(text).toBe(`${prefix}${dose}. ${advice}.`);
@@ -463,7 +465,7 @@ describe("independent cadence and preview condition owners", () => {
     }
     expect(formatSig(source, "long", { locale, realizationMode: "normalized", i18n: {
       formatLong: context => "Directions: " + context.formatDefault("long")
-        .replace(`Use 1 tablet ${guardText} SBP > 160.`, dose + ".")
+        .replace(`${nativeDose} ${guardText} SBP > 160.`, dose + ".")
         .replace("Recheck BP", "Repeat B.P.") + " Call clinic if needed."
     } })).toBe(`Directions: ${dose}. ${advice.replace("Recheck BP", "Repeat B.P.")}. Call clinic if needed.`);
     expect(JSON.stringify(source)).toBe(before);
@@ -477,9 +479,137 @@ describe("independent cadence and preview condition owners", () => {
     for (const style of ["short", "long"] as const) {
       const text = formatSig(source, style, { locale, realizationMode: "normalized" });
       expect(text.match(/SBP > 160/gu)).toHaveLength(1);
-      expect(text).toContain("Swallow 1 tablet whole " + (locale === "en" ? "only if" : "เฉพาะเมื่อ") + " SBP > 160.");
+      expect(text).toContain("Swallow 1 tablet whole");
+      const active = text.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0];
+      expect(active).toMatch(new RegExp((locale === "en" ? "only if" : "เฉพาะเมื่อ") + " SBP > 160", "iu"));
       expect(text).toContain(locale === "en" ? style === "short" ? "1x/d" : "once daily" : "วันละครั้ง");
     }
     expect(JSON.stringify(source)).toBe(before);
+  });
+});
+
+
+describe("complete native clause defaults", () => {
+  const guard = { code: { coding: [{ system: "http://loinc.org", code: "8480-6" }], text: "sbp" },
+    operation: "gt" as const, valueQuantity: { value: 160 }, text: "SBP > 160" };
+  const dose = { doseQuantity: { value: 1, unit: "tab" } };
+  const note = { url: "https://example.test/preview-note", valueString: "Retain this note" };
+
+  it.each(["en", "th"] as const)("keeps the guard on the complete authored primary in %s", locale => {
+    for (const text of [locale === "en" ? "Use the medication once daily." : "ใช้ยา วันละครั้ง.",
+      "Swallow 1 tablet whole"]) {
+      const source: FhirR6DosageInstruction = { step: [{ component: [{ text, condition: [guard],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+        additionalInstruction: [{ text: "Call the clinic" }], extension: [note]
+      }] }] };
+      for (const input of [source, toFhirR5Dosages(source)]) {
+        const before = JSON.stringify(input);
+        const native = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(native.match(/SBP > 160/gu)).toHaveLength(1);
+        expect(native).toContain(text.replace(/\.$/u, ""));
+        expect(native).toContain(locale === "en" ? "once daily" : "วันละครั้ง");
+        if (text.startsWith("Swallow"))
+          expect(native).toMatch(locale === "en"
+            ? /^Only if SBP > 160: Current: .*; original directions: Swallow 1 tablet whole\. Call the clinic\.$/u
+            : /^เฉพาะเมื่อ SBP > 160: ปัจจุบัน: .*; ข้อความเดิม: Swallow 1 tablet whole\. Call the clinic\.$/u);
+        else expect(native).toBe(text.replace(/\.$/u, "") +
+          (locale === "en" ? " only if" : " เฉพาะเมื่อ") + " SBP > 160. Call the clinic.");
+        let calls = 0;
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized", i18n: {
+          formatLong: context => {
+            calls++;
+            expect(context.clause.clinicalAdjuncts?.condition).toMatchObject({ kind: "measurement", value: 160 });
+            expect(context.clause.schedule?.frequency).toBe(1);
+            expect(context.defaultText).toBe(native);
+            expect(context.formatDefault("long")).toBe(native);
+            expect(context.clause.additionalInstructions?.[0].text).toBe("Call the clinic");
+            return "Clinic wording, unchanged!";
+          }
+        } })).toBe("Clinic wording, unchanged!");
+        expect(calls).toBe(1);
+        expect(JSON.stringify(input)).toBe(before);
+        expect(toDosageDetails(Array.isArray(input) ? input : toFhirR5Dosages(input)).step![0].component[0].extension)
+          .toContainEqual(note);
+      }
+    }
+  });
+
+  it.each(["en", "th"] as const)("lets a full-clause callback replace authored-only guarded wording in %s", locale => {
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ text: "Swallow 1 tablet whole",
+      condition: [guard], additionalInstruction: [{ text: "Otherwise hold" }] }] }] };
+    const native = formatSig(input, "long", { locale, realizationMode: "normalized" });
+    expect(native).toContain("Swallow 1 tablet whole " + (locale === "en" ? "only if" : "เฉพาะเมื่อ") + " SBP > 160");
+    let calls = 0;
+    const actual = formatSig(input, "long", { locale, realizationMode: "normalized", i18n: { formatLong: context => {
+      calls++;
+      expect(context.defaultText).toBe(native);
+      expect(context.formatDefault("long")).toBe(native);
+      expect(context.clause.clinicalAdjuncts?.condition).toMatchObject({ kind: "measurement", value: 160 });
+      return "Clinic: " + context.formatDefault("long");
+    } } });
+    expect(actual).toBe("Clinic: " + native);
+    expect(calls).toBe(1);
+  });
+
+  it.each(["cycle", "clock window", "offset"] as const)("composes the complete %s before the callback", kind => {
+    const component: NonNullable<FhirR6DosageInstruction["step"]>[number]["component"][number] = {
+      doseAndRate: [dose], timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["09:00:00"] } }, extension: [note]
+    };
+    if (kind === "cycle") component.modifierExtension = [cycleDayConstraintExtension({
+      days: [1, 2, 3, 4, 5], periodDays: 28, reason: "unresolved-cycle-eligibility", sourceText: ""
+    })];
+    if (kind === "clock window") component.timing!.repeat!.extension = [{
+      url: TIMING_CLOCK_WINDOW_EXTENSION_URL, extension: [{ url: "start", valueTime: "08:00:00" },
+        { url: "end", valueTime: "18:00:00" }, { url: "endInclusive", valueBoolean: false }]
+    }];
+    if (kind === "offset") component.modifierExtension = [{ url: ADMINISTRATION_OFFSET_EXTENSION_URL,
+      valueQuantity: { value: 30, unit: "min", code: "min", system: "http://unitsofmeasure.org" } }];
+    const input: FhirR6DosageInstruction = { step: [{ component: [component] }] };
+    for (const locale of ["en", "th"]) {
+      const before = JSON.stringify(input), native = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(native).toContain(locale === "en" ? "1 tablet" : "1 เม็ด");
+      if (kind === "cycle") { expect(native).toContain("1-5"); expect(native).toContain("28"); }
+      if (kind === "clock window") { expect(native).toContain("08:00"); expect(native).toContain("18:00"); }
+      if (kind === "offset") expect(native).toMatch(/0?9[:.]30/u);
+      for (const wrapper of [false, true]) {
+        let calls = 0;
+        const actual = formatSig(input, "long", { locale, realizationMode: "normalized", i18n: { formatLong: context => {
+          calls++;
+          const timing = context.clause.schedule!;
+          if (kind === "cycle") expect(timing.cycleDayConstraint).toMatchObject({ days: [1, 2, 3, 4, 5], periodDays: 28 });
+          if (kind === "clock window") expect(timing.clockWindow).toEqual({ start: "08:00:00", end: "18:00:00", endInclusive: false });
+          if (kind === "offset") expect(timing.administrationOffsetMinutes).toBe(30);
+          expect(context.defaultText).toBe(native);
+          expect(context.formatDefault("long")).toBe(native);
+          return wrapper ? "Clinic: " + context.formatDefault("long") : "Clinic wording, unchanged!";
+        } } });
+        expect(actual).toBe(wrapper ? "Clinic: " + native : "Clinic wording, unchanged!");
+        expect(calls).toBe(1);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("preserves a native locale through ordinary copied providers and inheritance", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [dose], condition: [guard],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } } }] }] };
+    const thai = resolveSigLocalization("th")!;
+    const copied = { ...thai, locale: "clinic-th-copy" };
+    const keys = Reflect.ownKeys(copied);
+    registerSigLocalization(copied);
+    const expected = "ใช้ครั้งละ 1 เม็ด วันละครั้ง เฉพาะเมื่อ SBP > 160.";
+    for (const options of [{ locale: copied.locale }, { i18n: { ...thai, locale: "clinic-th-call" } },
+      { locale: "en", i18n: { inherit: copied.locale } }, { locale: "en", i18n: { inherit: "th" } }])
+      expect(formatSig(source, "long", options)).toBe(expected);
+    expect(Reflect.ownKeys(copied)).toEqual(keys);
+    let calls = 0;
+    expect(formatSig(source, "long", { i18n: { ...thai, locale: "clinic-th-hook", formatLong: context => {
+      calls++;
+      expect(context.defaultText).toBe(expected);
+      expect(context.formatDefault("long")).toBe(expected);
+      return "Clinic: " + context.defaultText;
+    } } })).toBe("Clinic: " + expected);
+    expect(calls).toBe(1);
   });
 });
