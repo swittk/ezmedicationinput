@@ -1,3 +1,4 @@
+import { resolveActionRelationSurface } from "../../relation-terminology";
 import { routeLexicalRule } from "./core-rules";
 import { LexKind } from "../../lexer/token-types";
 import { getRouteMeaning, hasPrnMeaning, hasTimingAbbreviationMeaning } from "../../lexer/meaning";
@@ -6,7 +7,7 @@ import { normalizeUnit } from "../../unit-lexicon";
 import {
   HpsgClauseContext, lexicalRule, maximumDosePerPeriodAt, normalizeTokenLower,
   quantityTokenAvailable as available, doseNumberValue, plainClinicalNumberAt, doseUnitIndexAfter,
-  directDoseUnitAfter, medicationAmountAt, clinicalDurationNumber, clinicalDurationAt
+  directDoseUnitAfter, medicationAmountAt, clinicalDurationNumber, clinicalDurationAt, precedingMethodOwnsAdministrationDuration
 } from "../rule-context";
 import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, mapIntervalUnit } from "../timing-lexicon";
 import {
@@ -417,16 +418,20 @@ function fixedVolumeOverTime(
     /^(?:iv|intravenously)$/u.test(normalizeTokenLower(possibleRouteToken)));
   const shift = (markedIV ? 1 : 0) + unitShift;
   const overToken = context.tokens[start + 2 + shift];
-  if (!unit || !overToken || !INFUSION_DURATION_LEADS.has(normalizeTokenLower(overToken))) return undefined;
+  if (!unit || !overToken) return undefined;
+  const durationLead = normalizeTokenLower(overToken);
+  const dimensionalLead = INFUSION_DURATION_LEADS.has(durationLead);
+  if (!dimensionalLead && !resolveActionRelationSurface(durationLead, ["temporal"])) return undefined;
   const numerator = volumeOrMassTerm(value, unit);
   const duration = infusionDurationAt(context, start + 3 + shift);
-  const durationLead = normalizeTokenLower(overToken);
-  if (!numerator || numerator.dimension !== "volume" || !duration ||
-      // `volume over elapsed-time` is itself a bounded dimensional
-      // constituent. It can therefore be the complement of an inherited
-      // administration head in a later regimen phase. In contrast, `for`
-      // remains ambiguous with course duration and requires a local head.
-      durationLead !== "over" && !hasAdministrationCue(context, phraseStart)) return undefined;
+  if (!numerator || numerator.dimension !== "volume" || !duration) return undefined;
+  const methodOwned = !dimensionalLead && precedingMethodOwnsAdministrationDuration(
+    context, start + 2 + shift, durationLead);
+  if (!dimensionalLead && !methodOwned) return undefined;
+  // `volume over elapsed-time` is itself a bounded dimensional constituent.
+  // Other duration relations require the selected local administration head;
+  // its registered valence keeps runtime distinct from a later course length.
+  if (durationLead !== "over" && !methodOwned && !hasAdministrationCue(context, phraseStart)) return undefined;
   const durationQualifier = duration.comparator ? { comparator: duration.comparator } : {};
   const clinicalQuantity: HpsgClinicalQuantityFeature = {
     representation: "dose-with-rate-ratio",

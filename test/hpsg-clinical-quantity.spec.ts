@@ -4938,3 +4938,58 @@ describe("authored fixed-rate numeric periods", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 });
+
+
+describe("registered infusion-duration ownership", () => {
+  it.each([
+    ["Infuse 100 mL in 1 hour daily for 2 days", 1, "h", 2, 200],
+    ["Infuse 100 mL over 1 hour daily for 2 days", 1, "h", 2, 200],
+    ["Infuse 100 mL IV in 30 minutes daily for 3 days", 30, "min", 3, 300]
+  ] as const)("separates the licensed runtime and finite treatment course: %s", (source, runtime, runtimeUnit, days, totalUnits) => {
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      administrationDuration: runtime, administrationDurationUnit: runtimeUnit,
+      frequency: 1, period: 1, periodUnit: "d", duration: days, durationUnit: "d"
+    });
+    expect(parsed.meta.canonical.clauses[0].schedule?.administrationOffsetMinutes).toBeUndefined();
+    for (const course of [parsed.meta.canonical.course!, importCanonicalCourse(parsed.fhir),
+        importCanonicalCourse(parsed.fhirNext)]) {
+      expect(course.stages).toHaveLength(1);
+      const administration = course.stages[0].administrations[0];
+      expect(administration.amounts?.[0]).toMatchObject({
+        quantity: { value: 100, unit: "mL" },
+        rateRatio: { numerator: { value: 100, unit: "mL" }, denominator: { value: runtime, unit: runtimeUnit } }
+      });
+      expect(administration.schedule?.recurrence).toMatchObject({
+        occurrenceDuration: runtime, occurrenceDurationUnit: runtimeUnit,
+        courseLength: { value: days }, frequency: 1, period: 1, periodUnit: "d"
+      });
+      expect(["d", "days"]).toContain(administration.schedule?.recurrence?.courseLength?.unit);
+      expect(calculateTotalUnits({ dosage: course, from: "2027-01-01T00:00:00Z",
+        orderedAt: "2027-01-01T00:00:00Z", timeZone: "UTC", durationValue: 5, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits, unit: "mL" });
+    }
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.timing?.repeat).toMatchObject({
+        duration: runtime, durationUnit: runtimeUnit, boundsDuration: { value: days, code: "d" }
+      });
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 100, unit: "mL" });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("retains one-infusion duration and an ordinary delayed tablet as distinct meanings", () => {
+    const infusion = parsePublicSig("Infuse 100 mL in 1 hour");
+    expect(infusion.meta.canonical.clauses[0].schedule).toMatchObject({
+      administrationDuration: 1, administrationDurationUnit: "h", count: 1
+    });
+    expect(infusion.meta.canonical.clauses[0].schedule?.administrationOffsetMinutes).toBeUndefined();
+    const tablet = parsePublicSig("Take 1 tablet in 1 hour");
+    expect(tablet.meta.canonical.clauses[0].schedule).toMatchObject({ administrationOffsetMinutes: 60, count: 1 });
+    expect(tablet.meta.canonical.clauses[0].schedule?.administrationDuration).toBeUndefined();
+    expect(nextDueDoses(tablet.fhirNext, { from: "2027-01-01T00:00:00Z",
+      orderedAt: "2027-01-01T00:00:00Z", timeZone: "UTC", limit: 2 })).toEqual(["2027-01-01T01:00:00+00:00"]);
+  });
+});

@@ -1,3 +1,4 @@
+import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
 import { Token, ParserState } from "../parser-state";
 import { shouldJoinAdjacentSourceTokens } from "../locale-detection";
 import { FhirPeriodUnit, ParseOptions } from "../types";
@@ -118,6 +119,24 @@ export function sourceRangeOverlapsContextDate(
 
 export function isPunctuation(lower: string): boolean {
   return !lower || /^[;:(),.]+$/.test(lower) || lower === "!" || lower === "?";
+}
+
+/** The selected action lexicon licenses its elapsed-duration complement. */
+export function precedingMethodOwnsAdministrationDuration(
+  context: HpsgClauseContext,
+  start: number,
+  relation: string
+): boolean {
+  for (let index = start - 1; index >= 0 && index >= start - 6; index -= 1) {
+    const candidate = context.tokens[index];
+    if (!candidate) break;
+    const lower = normalizeTokenLower(candidate);
+    if (isPunctuation(lower) || ACTION_SEQUENCE_MARKERS.has(lower)) break;
+    const definition = resolveMedicationInstructionAction(lower, context.options);
+    const introducers = definition?.administrationDurationIntroducers;
+    if (introducers && introducers.indexOf(relation) !== -1) return true;
+  }
+  return false;
 }
 
 export function isClockLikeLower(lower: string): boolean {

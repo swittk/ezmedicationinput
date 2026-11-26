@@ -103,6 +103,7 @@ import {
   isPunctuation,
   lexicalRule,
   normalizeTokenLower,
+  precedingMethodOwnsAdministrationDuration,
   parseClockToken,
   splitByLexicalSeparators,
   tokensAvailable
@@ -2685,23 +2686,6 @@ function fixedIntervalMinutes(value: number, unit: FhirPeriodUnit): number | und
     : undefined;
   if (factor === undefined || !Number.isFinite(value) || value <= 0) return undefined;
   return Math.round(value * factor * 1_000_000) / 1_000_000;
-}
-
-function precedingMethodOwnsAdministrationDuration(
-  context: HpsgClauseContext,
-  start: number,
-  relation: string
-): boolean {
-  for (let index = start - 1; index >= 0 && index >= start - 6; index -= 1) {
-    const candidate = context.tokens[index];
-    if (!candidate) break;
-    const lower = normalizeTokenLower(candidate);
-    if (isPunctuation(lower) || ACTION_SEQUENCE_MARKERS.has(lower)) break;
-    const definition = resolveMedicationInstructionAction(lower, context.options);
-    const introducers = definition?.administrationDurationIntroducers;
-    if (introducers && introducers.indexOf(relation) !== -1) return true;
-  }
-  return false;
 }
 
 /** A relation plus a fixed interval denotes a delayed administration, not
