@@ -339,6 +339,7 @@ export function courseFromPartialParallel(
       const phase = track.phases[index];
       const phaseStart = administrations.length;
       let predecessors: number[] | undefined;
+      let calendarPredecessors: number[] | undefined;
       let finitePredecessors: boolean | undefined;
       let datedReplacement = false;
       for (const item of phase.members) {
@@ -393,6 +394,23 @@ export function courseFromPartialParallel(
           dependsOnPrevious = true;
           datedReplacement = true;
         }
+        if (!dependsOnPrevious && index > 0 && a.schedule?.explicitEvents?.length) {
+          // Retain only the calendar replacement edges already selected by
+          // normalization; an unrelated explicit event creates no dependency.
+          if (!calendarPredecessors) {
+            calendarPredecessors = [];
+            for (let parent = priorStart; parent < priorEnd; parent++) {
+              if (track.phases[index - 1].members[parent - priorStart].boundsEndBasis !== "next-phase-start") continue;
+              const previous = administrations[parent];
+              previous.phasePredecessors ??= [];
+              calendarPredecessors.push(previous.sourceMember!);
+            }
+          }
+          if (calendarPredecessors.length) {
+            a.phasePredecessors = calendarPredecessors;
+            datedReplacement = true;
+          }
+        }
         if (dependsOnPrevious) {
           if (!predecessors) {
             predecessors = [];
@@ -408,11 +426,12 @@ export function courseFromPartialParallel(
       }
       // Undated members of this selected replacement share its predecessor
       // dependency. Their own clocks remain local to the resolved phase floor.
-      if (datedReplacement && predecessors) for (let member = phaseStart; member < administrations.length; member++) {
+      const replacementPredecessors = predecessors ?? calendarPredecessors;
+      if (datedReplacement && replacementPredecessors) for (let member = phaseStart; member < administrations.length; member++) {
         const a = administrations[member];
         if (a.phaseStart?.anchor === "unresolved") {
           a.phaseStart = undefined;
-          a.phasePredecessors = predecessors;
+          a.phasePredecessors = replacementPredecessors;
         }
       }
       priorStart = phaseStart;

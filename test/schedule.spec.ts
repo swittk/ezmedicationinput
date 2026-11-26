@@ -5525,3 +5525,82 @@ describe("configured clocks within elapsed frequency periods", () => {
     }
   });
 });
+
+
+describe("untimed one-use allowances and supply explanations", () => {
+  const versions = ["native", "R5", "R6"] as const;
+  const wire = (course: CanonicalCourse, version: typeof versions[number]) =>
+    version === "native" ? course : version === "R5" ? courseToR5(course) : courseToR6(course);
+  const options = { orderedAt: "2027-01-01T08:00:00Z", from: "2027-01-01T08:00:00Z", timeZone: "UTC" };
+
+  it.each(versions)("keeps one untimed PRN use available until actual consumption (%s)", version => {
+    const member: CanonicalAdministration = { kind: "administration", asNeeded: true,
+      amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { recurrence: { count: 1 } } };
+    const input = wire({ kind: "course", stages: [{ administrations: [member] }] }, version);
+    const original = JSON.stringify(input);
+    expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual([]);
+    const query = { ...options, dosage: input, from: "2027-01-01T12:00:00Z", durationValue: 1, durationUnit: Unit.Day };
+    expect(calculateTotalUnits(query)).toMatchObject({ totalUnits: 1, quantityKind: "maximum" });
+    expect(calculateTotalUnits({ ...query, priorDoseTimes: ["2027-01-01T09:00:00Z"] }).totalUnits).toBe(0);
+    expect(calculateTotalUnits({ ...query, priorCount: 1 }).totalUnits).toBe(0);
+    expect(JSON.stringify(input)).toBe(original);
+    const scheduled = wire({ kind: "course", stages: [{ administrations: [{ ...member, asNeeded: false }] }] }, version);
+    expect(nextDueDoses(scheduled, { ...options, limit: 1 })).toEqual(["2027-01-01T08:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: scheduled }).totalUnits).toBe(0);
+  });
+
+  it.each(versions)("uses the same supported unit normalization for course comparison and conversion (%s)", version => {
+    const member = (value: number, unit: string): CanonicalAdministration => ({ kind: "administration",
+      amounts: [{ quantity: { value, unit } }], schedule: { recurrence: { count: 1 } } });
+    const input = wire({ kind: "course", stages: [{ administrations: [member(1, "g "), member(500, "mg")] }] }, version);
+    const original = JSON.stringify(input);
+    const query = { ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day };
+    expect(calculateTotalUnits(query)).toMatchObject({ totalUnits: 1.5, unit: "g " });
+    expect(JSON.stringify(input)).toBe(original);
+    const incompatible = wire({ kind: "course", stages: [{ administrations: [member(1, "g "), member(500, "mL")] }] }, version);
+    expect(() => calculateTotalUnits({ ...query, dosage: incompatible }))
+      .toThrow(expect.objectContaining({ code: "incompatible-dose-units" }));
+  });
+
+  it.each(versions)("qualifies a frequency maximum without claiming the inferred clocks supplied the total (%s)", version => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { recurrence: {
+        frequency: 1, frequencyMax: 2, period: 1, periodUnit: Unit.Day, clocks: ["06:00:00"] } } }] }] };
+    const input = wire(course, version), original = JSON.stringify(input);
+    const query = { dosage: input, orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T06:00:00Z",
+      timeZone: "UTC", durationValue: 1, durationUnit: Unit.Hour };
+    const total = calculateTotalUnits(query);
+    expect(total).toMatchObject({ totalUnits: 1, quantityKind: "maximum" });
+    expect(total.explanation).toContain("frequency range was evaluated for maximum supply");
+    expect(total.explanation).not.toContain("upper bound of the prescribed frequency range was used");
+    expect(calculateTotalUnits({ ...query, from: query.orderedAt, durationUnit: Unit.Day }).totalUnits).toBe(2);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+});
+
+
+describe("standard and typed infusion-duration successor uncertainty", () => {
+  it.each(["native", "R5", "R6"] as const)("uses one completion rule while preserving determinate windows (%s)", version => {
+    for (const variant of ["standard", "typed", "exact"] as const) {
+      const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+        amounts: [{ rate: { value: 10, unit: "mL/h" } }], schedule: { recurrence: { count: 1, clocks: ["09:00:00"],
+          ...(variant === "typed" ? { occurrenceDurationRange: { low: { value: 1, unit: "h" }, high: { value: 2, unit: "h" } } }
+            : { occurrenceDuration: 1, occurrenceDurationUnit: Unit.Hour,
+              ...(variant === "standard" ? { occurrenceDurationMax: 2 } : {}) }) } } }] },
+        { administrations: [{ kind: "administration", amounts: [{ quantity: { value: 100, unit: "mL" } }],
+          schedule: { recurrence: { count: 1, clocks: ["10:30:00"] } } }] }] };
+      const input = version === "native" ? course : version === "R5" ? courseToR5(course) : courseToR6(course);
+      const original = JSON.stringify(input);
+      const query = { dosage: input, orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T09:00:00Z",
+        timeZone: "UTC", durationValue: 3, durationUnit: Unit.Hour };
+      expect(calculateTotalUnits({ ...query, durationValue: 1.5 }).totalUnits).toBe(variant === "exact" ? 10 : 20);
+      if (variant === "exact") {
+        expect(calculateTotalUnits(query).totalUnits).toBe(110);
+        expect(nextDueDoses(input, { ...query, limit: 2 })).toEqual([
+          "2027-01-01T09:00:00+00:00", "2027-01-01T10:30:00+00:00"
+        ]);
+      } else expect(() => calculateTotalUnits(query)).toThrow(expect.objectContaining({ code: "course-duration-unresolved" }));
+      expect(JSON.stringify(input)).toBe(original);
+    }
+  });
+});

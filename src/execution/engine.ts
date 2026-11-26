@@ -2623,8 +2623,10 @@ function resolveAdministrationWindow(
         componentClock,
         ownPredecessor?.end ?? (index > 0 ? previousEnd : undefined)
       );
+  const initialStart = index === 0 && !stage.start && !implicitPredecessor
+    ? absoluteEventCycleBoundary(administration, implicitStart) ?? implicitStart : implicitStart;
   const stageStart = index === 0 && !stage.start && recurrence?.calendarWindow
-    ? actualStart ?? implicitStart : implicitStart;
+    ? actualStart ?? initialStart : initialStart;
   let eligibleFrom = actualStart && actualStart > stageStart ? actualStart : stageStart;
   if (cadence.hasPhaseOrigin && cadence.origin > eligibleFrom) eligibleFrom = cadence.origin;
   if (successorFloor && successorFloor > eligibleFrom &&
@@ -2694,7 +2696,7 @@ function resolveAdministrationWindow(
       {
         recurrenceOrigin: cadence.origin,
         eligibleFrom: countOrigin,
-        endExclusive: earlierDate(endExclusive, absoluteEventCycleEnd(administration, cycleEnd) ?? null),
+        endExclusive: earlierDate(endExclusive, absoluteEventCycleBoundary(administration, cycleEnd) ?? null),
         countEligibilityStart,
       },
       countOptions ?? { from: cadence.origin, orderedAt: cadence.origin, timeZone },
@@ -2756,14 +2758,28 @@ function completePhaseDependency(
  * Resolve clocks with the ordinary admission owner in the requested zone;
  * inferred event clocks and conditional opportunities prove no boundary. */
 function datedSuccessorBoundary(
-  successor: CanonicalAdministration, precedingStart: Date,
+  successor: CanonicalAdministration, precedingStart: Date | undefined,
   zone: string, options?: NextDueDoseOptions
 ): Date | undefined {
-  if (!administrationHasDatedStart(successor)) return undefined;
+  if (!administrationHasDatedStart(successor)) {
+    // A selected same-track calendar cut may be carried by a date list.
+    // Its day boundary is already owned by that dependency, not by a clock
+    // inferred from the event or by the predecessor's administration delay.
+    if (!successor.phasePredecessors?.length) return undefined;
+    let firstDate: string | undefined;
+    for (const event of successor.schedule?.explicitEvents ?? []) {
+      if (event.length !== 10) return undefined;
+      if (!firstDate || event < firstDate) firstDate = event;
+    }
+    if (!firstDate) return undefined;
+    const start = resolveRepeatBoundsStart({ calendarWindow: { start: firstDate } }, zone);
+    return start && (!precedingStart || getLocalDayNumber(start, zone) >= getLocalDayNumber(precedingStart, zone))
+      ? start : undefined;
+  }
   const bounds = resolveRepeatBoundsPeriod(successor.schedule?.recurrence, zone,
     (getAdministrationOffsetMinutes(successor) ?? 0) * 60000);
   if (!bounds.start || !bounds.nominalStart ||
-      getLocalDayNumber(bounds.start, zone) < getLocalDayNumber(precedingStart, zone)) return undefined;
+      precedingStart && getLocalDayNumber(bounds.start, zone) < getLocalDayNumber(precedingStart, zone)) return undefined;
   if (!successor.schedule?.recurrence?.clocks?.length) return bounds.start;
   const execution = { ...successor, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined,
     phaseOriginIssue: undefined, phasePredecessors: undefined };
@@ -2775,8 +2791,7 @@ function datedSuccessorBoundary(
     countEligibilityStart: undefined, countedActualTimes: undefined,
     prnOpportunityFrom: undefined, explicitEventStatus: undefined, roundingLimits: undefined,
   } as PhaseCountOptions)[0];
-  const at = first ? new Date(first) : undefined;
-  return at && getLocalDayNumber(at, zone) === getLocalDayNumber(bounds.start, zone) ? at : undefined;
+  return first ? new Date(first) : undefined;
 }
 
 /** Existing predecessor links distinguish replacement from intentional parallel
@@ -2789,10 +2804,7 @@ function datedMemberReplacementEnds(
   let ends: Map<number, Date> | undefined;
   for (const successor of stage.administrations) {
     if (!successor.phasePredecessors?.length) continue;
-    const start = resolveRepeatBoundsPeriod(successor.schedule?.recurrence, zone,
-      (getAdministrationOffsetMinutes(successor) ?? 0) * 60000).start;
-    if (!start) continue;
-    const end = datedSuccessorBoundary(successor, start, zone, options);
+    const end = datedSuccessorBoundary(successor, undefined, zone, options);
     if (!end) continue;
     if (!members) {
       members = new Map();
@@ -2991,12 +3003,17 @@ function treatmentStepWindow(
       }
     }
   }
-  if (end && end <= start && !emptyAtKnownOrigin)
+  // Inferred windows include an absolute event's actual lead. Authored stage
+  // bounds and the nominal member recurrence origins remain unchanged.
+  let actualStart = start;
+  if (!stage.start && !stage.end && !repetitionWindow)
+    for (const member of administrations) if (member.eligibleFrom < actualStart) actualStart = member.eligibleFrom;
+  if (end && end <= actualStart && !emptyAtKnownOrigin)
     throw new MedicationQuantityCalculationError(
       "invalid-stage-order",
       "R6 treatment step end must be after its start"
     );
-  return { start, end, completionPoint, capClock, administrations,
+  return { start: actualStart, end, completionPoint, capClock, administrations,
     ...(!stage.end && !repetitionWindow && completionPending ? { completionPending: true } : {}),
     ...(dependencies ? { dependencies } : {}) };
 }
@@ -3340,14 +3357,31 @@ function trimRollingCycleHistory<T extends string | SupplyAllocation>(
   }
 }
 
-/** The cycle owns the nominal absolute event. Its execution fence follows
- * the same displacement as that event. */
-function absoluteEventCycleEnd(
-  administration: CanonicalAdministration, cycleEnd?: Date
+/** Absolute-event ownership stays nominal; both execution fences follow
+ * the event's elapsed displacement. Relative recurrence keeps its own origin. */
+function absoluteEventCycleDisplacement(administration: CanonicalAdministration): number | undefined {
+  return administration.schedule?.explicitEvents?.length
+    ? (getAdministrationOffsetMinutes(administration) ?? 0) * 60000 : undefined;
+}
+function absoluteEventCycleBoundary(
+  administration: CanonicalAdministration, boundary?: Date
 ): Date | undefined {
-  if (!cycleEnd || !administration.schedule?.explicitEvents?.length) return undefined;
-  const delay = getAdministrationOffsetMinutes(administration) ?? 0;
-  return delay ? new Date(cycleEnd.getTime() + delay * 60000) : cycleEnd;
+  const displacement = absoluteEventCycleDisplacement(administration);
+  return boundary && displacement !== undefined
+    ? displacement ? new Date(boundary.getTime() + displacement) : boundary : undefined;
+}
+/** A later nominal cycle may already own an actual event before its start. */
+function absoluteEventCycleLead(course: CanonicalCourse): number {
+  let lead = 0;
+  for (const stage of course.stages) for (const administration of stage.administrations) {
+    const displacement = absoluteEventCycleDisplacement(administration);
+    if (displacement !== undefined && displacement < lead) lead = displacement;
+  }
+  return lead;
+}
+function cycleOwnedAdministrationStart(member: ResolvedAdministrationWindow, cycleStart: Date): Date {
+  const ownedStart = absoluteEventCycleBoundary(member.administration, cycleStart) ?? cycleStart;
+  return member.eligibleFrom > ownedStart ? member.eligibleFrom : ownedStart;
 }
 
 /** Absolute events use one cycle interval even when a separate authored
@@ -3356,7 +3390,7 @@ function cycleOwnedAdministrationEnd(
   window: TreatmentStepWindow, member: ResolvedAdministrationWindow, cycleEnd?: Date
 ): Date | null {
   return earlierDate(earlierDate(window.end ?? null, member.endExclusive),
-    absoluteEventCycleEnd(member.administration, cycleEnd) ?? null);
+    absoluteEventCycleBoundary(member.administration, cycleEnd) ?? null);
 }
 
 /** A resolved phase keeps its nominal grid after calendar eligibility has
@@ -3447,8 +3481,8 @@ function scheduleTreatmentRelativeCourse(
           (deferred ? undefined : cycleDefaultEnd);
         if (effectiveEnd && from >= effectiveEnd) return;
         const original = member.administration;
-        const replayFrom = phaseReplayFrom(original, options,
-          Math.max(member.eligibleFrom.getTime(), anchor.getTime()), effectiveEnd?.getTime());
+        const memberStart = cycleOwnedAdministrationStart(member, anchor);
+        const replayFrom = phaseReplayFrom(original, options, memberStart.getTime(), effectiveEnd?.getTime());
         const requestedFrom = replayFrom && replayFrom > from ? replayFrom : from;
         const effectiveFrom = requestedFrom > member.eligibleFrom ? requestedFrom : member.eligibleFrom;
         if (effectiveEnd && effectiveFrom >= effectiveEnd) return;
@@ -3466,7 +3500,7 @@ function scheduleTreatmentRelativeCourse(
         if (collect && (quota.remaining !== undefined || options.priorDoseTimes?.length)) {
           // Absolute calendar eligibility may predate this repeated cycle.
           // Its earlier records still constrain rolling caps, not this quota.
-          quota.historyStart = Math.max(member.eligibleFrom.getTime(), anchor.getTime());
+          quota.historyStart = memberStart.getTime();
           quota.historyEnd = effectiveEnd?.getTime();
         }
         // Only the acceptor can spend an overlapping phase's count/caps.
@@ -4039,6 +4073,7 @@ function chronologicalRepeatedEvents(
     parseBoundsDurationUnit(course.cycleInterval)
   );
   const singleCycle = { ...course, cycleInterval: undefined };
+  const cycleLead = absoluteEventCycleLead(course);
   const queue = new ChronologicalQueue<UncommittedCycleEvent>();
   const results: UncommittedCycleEvent[] = [];
   const prior: number[] = [];
@@ -4132,7 +4167,7 @@ function chronologicalRepeatedEvents(
     cycleIndex = 0;
   while (
     cycleIndex < (advance ? Math.min(10000, positiveInteger(course.cycleCount) ?? Infinity) : 1) &&
-    (!until || cycleStart < until)
+    (!until || cycleStart.getTime() + cycleLead < until.getTime())
   ) {
     const next = advance?.(cycleStart);
     if (advance && (!next || next <= cycleStart)) break;
@@ -4141,7 +4176,7 @@ function chronologicalRepeatedEvents(
       singleCycle,
       {
         ...options,
-        from: cycleStart,
+        from: cycleLead ? new Date(cycleStart.getTime() + cycleLead) : cycleStart,
         orderedAt: cycleStart,
         priorCount: undefined,
         limit: 10000,
@@ -4155,7 +4190,7 @@ function chronologicalRepeatedEvents(
       from,
       until
     );
-    drain(next?.getTime() ?? until?.getTime() ?? Number.POSITIVE_INFINITY);
+    drain(next ? next.getTime() + cycleLead : until?.getTime() ?? Number.POSITIVE_INFINITY);
     if (!next) break;
     cycleStart = next;
     cycleIndex++;
@@ -4218,6 +4253,7 @@ function scheduleRepeatedCourse(
   }
   if (rollingUsage) options = withActualReplayHistory(options, from);
   const cyclePriorCount = singleCyclePriorCount(course, options.priorCount);
+  const cycleLead = absoluteEventCycleLead(course);
   let cycleStart = anchor;
   let guard = 0;
   const historicalOrdinal = cycleOrdinalNearQuery(course.cycleInterval, anchor, from, timeZone);
@@ -4257,6 +4293,7 @@ function scheduleRepeatedCourse(
     const cycleEnd = advance(cycleStart);
     if (!cycleEnd || cycleEnd <= cycleStart) break;
     const sourceClock = repeatedCycleWallClock(calendarCycle, firstClock, cycleStart, timeZone);
+    const actualStart = cycleLead ? new Date(cycleStart.getTime() + cycleLead) : cycleStart;
     const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, timeZone, sourceClock, options, guard);
     if (horizon > from || rollingUsage) {
       const candidates = scheduleTreatmentRelativeCourse(
@@ -4265,7 +4302,7 @@ function scheduleRepeatedCourse(
           ...options,
           // Earlier administrations are history for a rolling limit, not
           // results requested by the caller. Only capped courses do this.
-          from: rollingUsage ? cycleStart : from > cycleStart ? from : cycleStart,
+          from: rollingUsage ? actualStart : from > actualStart ? from : actualStart,
           ...(rollingUsage ? { prnOpportunityFrom: from } : {}),
           orderedAt: cycleStart,
           priorCount: cyclePriorCount,
@@ -4287,9 +4324,9 @@ function scheduleRepeatedCourse(
     if(rollingUsage)trimRollingCycleHistory(singleCycle,rollingUsage,cycleEnd,timeZone);
     cycleStart = cycleEnd;
     guard += 1;
-    // A future cycle cannot precede its own start. Stop only after all cycles
-    // that could contribute an earlier occurrence than the last result ran.
-    if (results.length === limit && cycleStart.getTime() > Date.parse(results[limit - 1])) break;
+    // A future cycle's absolute-event lead can precede its nominal start.
+    // Stop only after every cycle that could improve the requested result ran.
+    if (results.length === limit && cycleStart.getTime() + cycleLead > Date.parse(results[limit - 1])) break;
   }
   return results;
 }
@@ -5202,7 +5239,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   }
   const effectiveLimit = remainingCount !== undefined ? Math.min(limit, remainingCount) : limit;
   if (isSingleAdministrationRepeat(repeat, dosage.schedule?.explicitEvents)) {
-    if (parseActivityTimingExtensions(repeat)?.length) {
+    if (dosage.asNeeded || parseActivityTimingExtensions(repeat)?.length) {
       return [];
     }
     // A single future-dated administration is anchored to the later of
@@ -6247,9 +6284,9 @@ function countScheduleEvents(
   }
   const hardLimit = Number.isFinite(countLimit) ? countLimit : 365 * 31;
   if (isSingleAdministrationRepeat(repeat, dosage.schedule?.explicitEvents)) {
-    if (parseActivityTimingExtensions(repeat)?.length) {
-      // A one-time activity trigger has no executable timestamp. Supply may
-      // still need one administration after the order, but never before it.
+    if (dosage.asNeeded || parseActivityTimingExtensions(repeat)?.length) {
+      // An untimed PRN use or activity trigger has no executable timestamp.
+      // Its remaining allowance is available after the order, never before it.
       return orderedAt && to <= orderedAt ? 0 : 1;
     }
     const anchor = orderedAt ?? baseTime;
@@ -6480,6 +6517,20 @@ function calculationHorizon(options: CanonicalSupplyOptions, zone: string): Date
     );
   return end;
 }
+/** Read the existing typed or standard occurrence-duration range once.
+ * The upper-only allowance remains a distinct supply policy. */
+function readOccurrenceDurationRange(repeat: CanonicalRecurrence | undefined): CanonicalRange | undefined {
+  if (repeat?.occurrenceDurationRange) return repeat.occurrenceDurationRange;
+  if (repeat?.occurrenceDurationMax === undefined || !repeat.occurrenceDurationUnit) return undefined;
+  const low = repeat.occurrenceDuration === 0 ? 0 : positiveNumber(repeat.occurrenceDuration);
+  const high = positiveNumber(repeat.occurrenceDurationMax);
+  if (low === undefined || high === undefined || high <= low) return undefined;
+  return {
+    low: { value: low, unit: repeat.occurrenceDurationUnit,
+      ...(repeat.occurrenceDurationComparator ? { comparator: repeat.occurrenceDurationComparator } : {}) },
+    high: { value: high, unit: repeat.occurrenceDurationUnit }
+  };
+}
 function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCadence = false): {
   dosage: CanonicalAdministration;
   maximumRecurrence?: CanonicalRecurrence;
@@ -6549,27 +6600,17 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
   }
   const first = dosage.amounts?.length === 1 ? dosage.amounts[0] : undefined;
   const isRateDose = !!first && !first.quantity && !first.range && !!(first.rate || first.rateRatio);
-  if (isRateDose && repeat.occurrenceDurationRange) {
+  const durationRange = isRateDose ? readOccurrenceDurationRange(repeat) : undefined;
+  if (durationRange) {
     // Endpoint units remain authored. prepareMeasuredDose multiplies each
     // duration independently, then uses the existing ranged quantity planner.
+    if (!repeat.occurrenceDurationRange) nextRepeat = { ...nextRepeat, occurrenceDurationRange: durationRange };
     infusionDurationMaximum = true;
   } else if (isRateDose && repeat.occurrenceDurationMax !== undefined) {
     const duration = repeat.occurrenceDuration === 0 ? 0 : positiveNumber(repeat.occurrenceDuration);
     const durationMax = positiveNumber(repeat.occurrenceDurationMax);
-    if (
-      durationMax &&
-      (duration === undefined || durationMax >= duration) &&
-      repeat.occurrenceDurationUnit &&
-      durationMax !== duration
-    ) {
-      // Standard duration/durationMax has the same attainable amounts as
-      // the typed range. Preserve both endpoints for the existing cap planner;
-      // this shallow supply projection never changes the authored recurrence.
-      nextRepeat = duration !== undefined ? { ...nextRepeat, occurrenceDurationRange: {
-        low: { value: duration, unit: repeat.occurrenceDurationUnit,
-          ...(repeat.occurrenceDurationComparator ? { comparator: repeat.occurrenceDurationComparator } : {}) },
-        high: { value: durationMax, unit: repeat.occurrenceDurationUnit }
-      } } : { ...nextRepeat, occurrenceDuration: durationMax,
+    if (duration === undefined && durationMax && repeat.occurrenceDurationUnit) {
+      nextRepeat = { ...nextRepeat, occurrenceDuration: durationMax,
         occurrenceDurationComparator: undefined, occurrenceDurationMax: undefined };
       infusionDurationMaximum = true;
     }
@@ -6991,11 +7032,13 @@ function sumCourseUnits(
         throw new MedicationQuantityCalculationError("incompatible-dose-units",
           "Cannot sum medication supply with both a nonzero unitless amount and a measured quantity.");
       hasQuantity = true;
-      if (commonUnit !== undefined && unit !== undefined && normalizeQuantityCapUnit(commonUnit) !== normalizeQuantityCapUnit(unit)) {
+      const targetUnit = commonUnit === undefined ? undefined : normalizeQuantityCapUnit(commonUnit);
+      const sourceUnit = unit === undefined ? undefined : normalizeQuantityCapUnit(unit);
+      if (targetUnit !== undefined && sourceUnit !== undefined && targetUnit !== sourceUnit) {
         const translated = convertValue(
           quantity,
-          unit,
-          commonUnit,
+          sourceUnit,
+          targetUnit,
           measuredStrengthRatio(options.context)
         );
         if (translated === null)
@@ -7583,7 +7626,7 @@ function calculateTotalUnitsSingle(
     maximumExplanations.push("PRN doses may be used less frequently than the available opportunities");
   if (maximalTiming.countMaximum) maximumExplanations.push("the upper count bound was used");
   if (maximalTiming.frequencyMaximum)
-    maximumExplanations.push("the upper bound of the prescribed frequency range was used");
+    maximumExplanations.push("the prescribed frequency range was evaluated for maximum supply");
   if (maximalTiming.periodMinimum) maximumExplanations.push("the shortest executable period bound was used");
   if (maximalTiming.infusionDurationMaximum)
     maximumExplanations.push("the upper bound of the infusion-duration range was used");
@@ -8047,17 +8090,19 @@ function calculateCourseTotalUnits(
     if (priorCycleUsage) options = { ...withActualReplayHistory(options, queryStart),
       prnOpportunityFrom: queryStart } as CanonicalSupplyOptions & PhaseCountOptions;
     const cyclePriorCount = singleCyclePriorCount(course, options.priorCount);
+    const cycleLead = absoluteEventCycleLead(course);
     let cycleStart = anchor;
     let guard = 0;
     while (
-      cycleStart < queryEnd &&
+      cycleStart.getTime() + cycleLead < queryEnd.getTime() &&
       guard < Math.min(10000, positiveInteger(course.cycleCount) ?? Infinity)
     ) {
       const cycleEnd = cycleAdvance(cycleStart);
       if (!cycleEnd || cycleEnd <= cycleStart) break;
       const originalClock = repeatedCycleWallClock(calendarCycle, firstClock, cycleStart, zone);
       const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, zone, originalClock, options, guard);
-      const windowStart = cycleStart > queryStart ? cycleStart : queryStart;
+      const actualStart = cycleLead ? new Date(cycleStart.getTime() + cycleLead) : cycleStart;
+      const windowStart = actualStart > queryStart ? actualStart : queryStart;
       const windowEnd = horizon < queryEnd ? horizon : queryEnd;
       if (priorCycleUsage && cycleStart < queryStart) {
         // Establish the existing rolling history from the same maximum
@@ -8121,10 +8166,6 @@ function calculateCourseTotalUnits(
       if (!window.dependencies?.pending) for (const member of window.administrations) {
         let end = member.endExclusive;
         if (!end) {
-          if (!member.administration.schedule?.recurrence?.occurrenceDurationRange) {
-            earliestCompletion = undefined;
-            break;
-          }
           const completion = finiteAdministrationCompletion(member.administration, member,
             member.priorCount === options.priorCount ? options : { ...options, priorCount: member.priorCount },
             zone, "earliest");
@@ -8164,8 +8205,8 @@ function calculateCourseTotalUnits(
         ? member.administration : prepareBestEffortTiming(member.administration);
       const nativeEnd = cycleOwnedAdministrationEnd(window, member, eventCycleEnd);
       const end = minDate(queryEnd, nativeEnd ?? cycleDefaultEnd ?? null);
-      const replayFrom = phaseReplayFrom(dosage, options,
-        Math.max(member.eligibleFrom.getTime(), treatmentStart.getTime()), end.getTime());
+      const memberStart = cycleOwnedAdministrationStart(member, treatmentStart);
+      const replayFrom = phaseReplayFrom(dosage, options, memberStart.getTime(), end.getTime());
       const begin = replayFrom && replayFrom > member.eligibleFrom ? replayFrom : member.eligibleFrom;
       if (capacityOnly && !unscheduledOccurrenceCapacity(dosage)) continue;
       if (end <= begin || end <= queryStart) continue;
@@ -8537,7 +8578,7 @@ function explicitAdministrationCompletion(
     schedule: { ...dosage.schedule, recurrence: repeat
       ? { ...repeat, count: undefined, countMax: undefined } : undefined },
   });
-  const ownedEnd = absoluteEventCycleEnd(dosage, cycleEnd);
+  const ownedEnd = absoluteEventCycleBoundary(dosage, cycleEnd);
   const eventStatus: ExplicitEventStatus = { possible: false, end: ownedEnd };
   const due = nextDueDoses(raw, { ...options, from: eligibleFrom, orderedAt: start,
     candidateOnly: true, explicitEventStatus: eventStatus,
@@ -8567,6 +8608,8 @@ function finiteAdministrationCompletion(
   if (!repeat) return undefined;
   const count = finiteCompletionCount(repeat);
   if (count === undefined) return undefined;
+  const durationRange = purpose === "earliest" ? readOccurrenceDurationRange(repeat) : undefined;
+  if (purpose === "earliest" && !durationRange) return undefined;
   const { recurrenceOrigin: start, eligibleFrom, endExclusive, countEligibilityStart } = window;
   // The enclosing course has already supplied the predecessor/cycle context
   // and resolved this component's cadence origin. Count only this local
@@ -8587,7 +8630,7 @@ function finiteAdministrationCompletion(
   if (actual.length >= count) {
     const last = new Date(actual[count - 1]);
     return !endExclusive || last < endExclusive
-      ? completionAfterAcceptedAdministration(dosage, last, zone, purpose) : undefined;
+      ? completionAfterAcceptedAdministration(dosage, last, zone, purpose, durationRange) : undefined;
   }
   // Supplied consumption and PRN use do not imply nominal past events.
   // A count alone reduces the allowance without supplying a completion time.
@@ -8612,18 +8655,19 @@ function finiteAdministrationCompletion(
   if (due.length !== remaining) return undefined;
   const last = new Date(due[due.length - 1]);
   return !endExclusive || last < endExclusive
-    ? completionAfterAcceptedAdministration(dosage, last, zone, purpose) : undefined;
+    ? completionAfterAcceptedAdministration(dosage, last, zone, purpose, durationRange) : undefined;
 }
 
 /** The occurrence's duration extends its final accepted point. Both local
  * finite phases and the chronological ledger use this same completion rule. */
 function completionAfterAcceptedAdministration(
   dosage: CanonicalAdministration, last: Date, zone: string,
-  purpose: "exact" | "earliest" = "exact"
+  purpose: "exact" | "earliest" = "exact",
+  durationRange = readOccurrenceDurationRange(dosage.schedule?.recurrence)
 ): { end: Date; point: boolean } | undefined {
   const repeat = dosage.schedule?.recurrence;
-  if (repeat?.occurrenceDurationRange) {
-    const { low, high } = repeat.occurrenceDurationRange;
+  if (durationRange) {
+    const { low, high } = durationRange;
     const lowUnit = getQuantityDurationUnit(low), highUnit = getQuantityDurationUnit(high);
     if (!low?.value || !high?.value || getQuantityComparator(low) || getQuantityComparator(high) ||
         !lowUnit || !highUnit) return undefined;

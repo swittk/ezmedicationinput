@@ -365,7 +365,7 @@ describe("schedule/supply audit regressions", () => {
       totalUnits: 4,
       unit: "tab",
       quantityKind: "maximum",
-      explanation: expect.stringMatching(/upper bound.*frequency range/i)
+      explanation: expect.stringMatching(/frequency range was evaluated for maximum supply/i)
     });
   });
 
@@ -387,7 +387,7 @@ describe("schedule/supply audit regressions", () => {
       totalUnits: 4,
       unit: "tab",
       quantityKind: "maximum",
-      explanation: expect.stringMatching(/upper bound.*frequency range/i)
+      explanation: expect.stringMatching(/frequency range was evaluated for maximum supply/i)
     });
   });
 
