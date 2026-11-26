@@ -1044,7 +1044,7 @@ export interface FhirProjectionOptions {
   includeTranslationExtensions?: boolean;
 }
 
-function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {
+export function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {
   return {
     kind: "administration",
     rawText,

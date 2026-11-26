@@ -116,11 +116,12 @@ import {
 } from "./regimen/regimen";
 import {
   administrationTargetProjections,
+  cloneSiteRestrictions,
   projectAdministrationTargetClauses
 } from "./hpsg/projection";
 import { formatCanonicalClause, independentTimingText } from "./format";
 import { preferredTimingCoding } from "./timing-summary";
-import { canonicalFromFhir, canonicalToFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
+import { canonicalFromFhir, canonicalToFhir, createEmptyCanonicalClause, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
 import { resolveSigLocalization, resolveCourseLanguage, type CourseLanguage } from "./i18n";
 import { ParserState } from "./parser-state";
@@ -1577,21 +1578,6 @@ export function fromFhirDosage(
   return fromFhirDosageInternal(dosage, options);
 }
 
-function createEmptyCanonicalClause(rawText: string): CanonicalSigClause {
-  return {
-    kind: "administration",
-    rawText,
-    raw: {
-      start: 0,
-      end: rawText.length,
-      text: rawText
-    },
-    leftovers: [],
-    evidence: [],
-    confidence: 1
-  };
-}
-
 function getPrimaryClause(
   clauses: CanonicalSigClause[],
   rawText: string
@@ -1676,15 +1662,7 @@ function buildNormalizedMetaFromClause(
           coding: siteCoding,
           spatialRelation: cloneBodySiteSpatialRelation(clause.site?.spatialRelation),
           ...(clause.site?.restrictions?.length ? {
-            restrictions: clause.site.restrictions.map(restriction => ({
-              ...restriction,
-              range: restriction.range ? { ...restriction.range } : undefined,
-              markerRange: restriction.markerRange ? { ...restriction.markerRange } : undefined,
-              predicate: {
-                ...restriction.predicate,
-                range: restriction.predicate.range ? { ...restriction.predicate.range } : undefined
-              }
-            }))
+            restrictions: cloneSiteRestrictions(clause.site.restrictions)
           } : {}),
           administrationTargetCount: clause.site?.administrationTargetCount
         }

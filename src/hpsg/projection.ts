@@ -255,7 +255,7 @@ function cloneClinicalQuantity(value: HpsgClinicalQuantityFeature): HpsgClinical
   };
 }
 
-function cloneSiteRestrictions(
+export function cloneSiteRestrictions(
   restrictions: NonNullable<HpsgSign["synsem"]["valence"]["site"]>["restrictions"]
 ) {
   return restrictions?.map((restriction) => ({
@@ -755,15 +755,7 @@ function cloneAdministrationTarget(site: CanonicalSiteExpr): CanonicalSiteExpr {
     } : undefined,
     spatialRelation: site.spatialRelation ? { ...site.spatialRelation } : undefined,
     ...(site.restrictions?.length ? {
-      restrictions: site.restrictions.map(restriction => ({
-        ...restriction,
-        range: restriction.range ? { ...restriction.range } : undefined,
-        markerRange: restriction.markerRange ? { ...restriction.markerRange } : undefined,
-        predicate: {
-          ...restriction.predicate,
-          range: restriction.predicate.range ? { ...restriction.predicate.range } : undefined
-        }
-      }))
+      restrictions: cloneSiteRestrictions(site.restrictions)
     } : {}),
     evidence: site.evidence?.map((item) => ({
       ...item,

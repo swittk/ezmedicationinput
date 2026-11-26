@@ -340,22 +340,11 @@ export function resolveAdviceRelationSurface(surface: string): AdviceRelation | 
   return ADVICE_RELATION_BY_SURFACE.get(normalize(surface));
 }
 
+/** Vocabulary definitions are borrowed under the immutable-output contract. */
 export function getAdviceRelationDefinition(
   relation: AdviceRelation
 ): AdviceRelationDefinition | undefined {
-  const definition = ADVICE_BY_RELATION.get(relation);
-  if (!definition) return undefined;
-  return {
-    ...definition,
-    grammar: { ...definition.grammar },
-    actionSurfaces: [...definition.actionSurfaces],
-    adviceSurfaces: [...definition.adviceSurfaces],
-    sequenceMarkerSurfaces: [...definition.sequenceMarkerSurfaces],
-    sequenceRelationSurfaces: [...definition.sequenceRelationSurfaces],
-    localeLexemes: cloneLocaleLexemes(definition.localeLexemes),
-    realization: { ...definition.realization },
-    realizationProfiles: cloneRealizationProfiles(definition.realizationProfiles)
-  };
+  return ADVICE_BY_RELATION.get(relation);
 }
 
 export function relationHasGrammarFeature(
@@ -447,17 +436,7 @@ export function localizeAdviceRelation(
 }
 
 export function listAdviceRelationDefinitions(): AdviceRelationDefinition[] {
-  return ADVICE_DEFINITIONS.map((definition) => ({
-    ...definition,
-    grammar: { ...definition.grammar },
-    actionSurfaces: [...definition.actionSurfaces],
-    adviceSurfaces: [...definition.adviceSurfaces],
-    sequenceMarkerSurfaces: [...definition.sequenceMarkerSurfaces],
-    sequenceRelationSurfaces: [...definition.sequenceRelationSurfaces],
-    localeLexemes: cloneLocaleLexemes(definition.localeLexemes),
-    realization: { ...definition.realization },
-    realizationProfiles: cloneRealizationProfiles(definition.realizationProfiles)
-  }));
+  return ADVICE_DEFINITIONS;
 }
 
 const BODY_SITE_DEFINITIONS: BodySiteRelationDefinition[] = (rawSource.bodySiteRelations ?? []).map((entry) => ({
