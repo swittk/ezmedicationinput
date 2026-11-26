@@ -1865,7 +1865,7 @@ describe("round41 graph duration endpoints", () => {
   it("preserves independent duration range endpoints beside a graph-only action", () => {
     const frame = parseInstructionActions("Wash hands")[0];
     frame.sourceText = "";
-    const range = { low: { value: 30, unit: "min", code: "min" }, high: { value: 1, unit: "h", code: "h" } };
+    const range = { low: { value: 30, unit: "min", code: "min" }, high: { value: 60, unit: "min", code: "min" } };
     const row: FhirDosage = {
       timing: { repeat: { extension: [{ url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, valueRange: range }] } },
       extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!]
@@ -1879,9 +1879,18 @@ describe("round41 graph duration endpoints", () => {
     for (const input of [row, r6, saved])
       for (const locale of ["en", "th"]) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
-        expect(text).toContain(locale === "en" ? "30 minutes to 1 hour" : "30 นาที ถึง 1 ชั่วโมง");
+        expect(text).toContain(locale === "en" ? "30 minutes to 60 minutes" : "30 นาที ถึง 60 นาที");
         expect(text).toContain(locale === "en" ? "Wash hands" : "ล้างมือ");
       }
+    const authored = { low: { value: 30, unit: "min", code: "min" }, high: { value: 1, unit: "h", code: "h" } };
+    const native = importCanonicalCourse(row);
+    native.stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationRange = authored;
+    for (const locale of ["en", "th"]) {
+      const text = formatSig(native, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain(locale === "en" ? "30 minutes to 1 hour" : "30 นาที ถึง 1 ชั่วโมง");
+      expect(text).toContain(locale === "en" ? "Wash hands" : "ล้างมือ");
+    }
+    expect(native.stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationRange).toEqual(authored);
     expect(JSON.stringify(row)).toBe(original);
   });
 });

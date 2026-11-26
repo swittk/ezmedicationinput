@@ -195,6 +195,8 @@ describe("published package entrypoints", () => {
           roundTripDoseCount: reparsed.fhirNext.step[0]?.component[0]?.doseAndRate?.length ?? 0,
           roundTripSiteCode: reparsed.fhirNext.step[0]?.component[0]?.site?.concept?.coding?.[0]?.code,
           roundTripFrequency: reparsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.frequency,
+          roundTripPeriod: reparsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.period,
+          roundTripPeriodUnit: reparsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.periodUnit,
           roundTripAnchors: reparsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.when,
           longText: reparsed.longText
         }));
@@ -207,7 +209,7 @@ describe("published package entrypoints", () => {
     expect(result.roundTripAdministrationCount).toBe(1);
     expect(result.roundTripDoseCount).toBe(0);
     expect(result.roundTripSiteCode).toBe("1290032005");
-    expect(result.roundTripFrequency).toBe(4);
+    expect(result).toMatchObject({ roundTripFrequency: 4, roundTripPeriod: 1, roundTripPeriodUnit: "d" });
     expect(result.roundTripAnchors).toEqual(["MORN", "NOON", "EVE", "HS"]);
     expect(result.longText).toBe("หยอดตาขวา วันละ 4 ครั้ง ตอนเช้า, ตอนเที่ยง, ตอนเย็น และ ก่อนนอน.");
   });

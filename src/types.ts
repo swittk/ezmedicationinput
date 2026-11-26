@@ -785,11 +785,14 @@ export interface FhirR6Dosage extends Omit<FhirDosage,
 export interface FhirR6RelativeTime extends FhirR6BackboneElement {
   contextReference?: FhirR6Reference;
   contextDefinition?: string;
+  _contextDefinition?: FhirR6PrimitiveElement;
   contextPath?: string;
+  _contextPath?: FhirR6PrimitiveElement;
   contextCode?: FhirR6CodeableConcept;
   offsetDuration?: FhirR6Quantity;
   offsetRange?: FhirR6Range;
   text?: string;
+  _text?: FhirR6PrimitiveElement;
 }
 
 export interface FhirR6DosageStep extends FhirR6Element {

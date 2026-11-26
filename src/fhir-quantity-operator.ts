@@ -124,8 +124,9 @@ function editedOperator(
 }
 
 /** Quantity annotations and typed Ratio/Range endpoints share their owner's operator bridge.
- * Other Extension value choices remain opaque; this is not a general
- * extension-version converter or an object-tree normalizer. */
+ * Coding annotations use that same bridge without interpreting the Coding.
+ * Other Extension value choices remain opaque. */
+const codingPrimitiveFields = ["_system", "_version", "_code", "_display", "_userSelected"] as const;
 const extensionPrimitiveFields = ["_valueCode", "_valueString", "_valueDecimal", "_valueTime", "_valueInteger", "_valueBoolean"] as const;
 export function quantityAnnotationExtensions(
   source: FhirR6Extension[], target: "r5" | "r6"
@@ -163,12 +164,24 @@ export function quantityAnnotationExtensions(
         ...(extension !== range.extension ? { extension } : {})
       };
     }
+    let coding = item.valueCoding;
+    if (coding) {
+      const extension = coding.extension ? quantityAnnotationExtensions(coding.extension, target) : undefined;
+      if (extension !== coding.extension) coding = { ...coding, extension };
+      for (const field of codingPrimitiveFields) {
+        const primitive = quantityPrimitiveForWire(coding[field], target);
+        if (primitive === coding[field]) continue;
+        if (coding === item.valueCoding) coding = { ...coding };
+        coding[field] = primitive;
+      }
+    }
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
     let current = quantity === item.valueQuantity && ratio === item.valueRatio &&
-      range === item.valueRange && children === item.extension ? item : {
+      range === item.valueRange && coding === item.valueCoding && children === item.extension ? item : {
       ...item, ...(quantity !== item.valueQuantity ? { valueQuantity: quantity } : {}),
       ...(ratio !== item.valueRatio ? { valueRatio: ratio } : {}),
       ...(range !== item.valueRange ? { valueRange: range } : {}),
+      ...(coding !== item.valueCoding ? { valueCoding: coding } : {}),
       ...(children !== item.extension ? { extension: children } : {}),
     };
     for (const field of extensionPrimitiveFields) {

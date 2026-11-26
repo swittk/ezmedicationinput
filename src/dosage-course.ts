@@ -744,7 +744,8 @@ function conditionFromR6(value: FhirR6DosageCondition): MedicationCondition {
     problem = definition?.text ?? definition?.coding?.display;
     if (problem !== undefined) break;
   }
-  const name = problem ?? value.code?.text ?? value.code?.coding?.[0]?.display;
+  problem ??= value.code?.text;
+  const name = problem ?? value.code?.coding?.[0]?.display;
   if (problem && value.valueBoolean !== undefined &&
       (!value.operation || value.operation === "eq" || value.operation === "ne")) {
     for (const coding of value.code?.coding ?? []) {

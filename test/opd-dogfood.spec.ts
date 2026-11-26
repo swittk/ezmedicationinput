@@ -1682,15 +1682,21 @@ describe("round29 interchange ownership", () => {
 
 describe("round30 interchange meaning", () => {
   it("keeps numeric phase origin and supplied phase identity together across R5 saves", () => {
-    const marker: FhirExtension = { url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
-      valueQuantity: { value: 3, unit: "d" }, extension: [{ url: "sourceMember", valueInteger: 7 }] };
+    const marker = encodeR6SourceMetadata(PARALLEL_COMPONENT_PHASE_ORIGIN_URL, { start: {
+      contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+      offsetDuration: { value: 3, unit: "d" }
+    } }, "step");
+    marker.extension!.push({ url: "sourceMember", valueInteger: 7 });
     let wire = course({ modifierExtension: [marker] });
     for (let save = 0; save < 3; save++) {
       const rows = persist(toFhirR5Dosages(wire));
       expect(rows[0].modifierExtension).toContainEqual(marker);
+      const savedMarker = rows[0].modifierExtension!.find(item => item.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL)!;
+      expect(Object.keys(savedMarker).filter(key => /^value[A-Z]/.test(key))).toEqual([]);
       const native = courseFromR5(rows);
       expect(native.stages[0].administrations[0]).toMatchObject({
-        phaseOrigin: { value: 3, unit: "d" }, sourceMember: 7, phasePredecessors: [], phaseOriginIssue: false,
+        phaseStart: { anchor: "treatment-start", displacement: { value: 3, unit: "d" } },
+        sourceMember: 7, phasePredecessors: [], phaseOriginIssue: false,
       });
       wire = projectCanonicalCourse(native).fhirNext;
       expect(wire.step![0].component[0].modifierExtension).toContainEqual(marker);

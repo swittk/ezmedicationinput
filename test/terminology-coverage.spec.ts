@@ -537,7 +537,8 @@ describe("single-delimiter SNOMED postcoordination parsing", () => {
     const rules = await import("../src/snomed-postcoordination");
     const site = "67890:12345=45678";
     const code = rules.buildSnomedFindingSitePostcoordinationCode("12345", site);
-    expect(rules.parseSnomedFindingSitePostcoordinationCode(code))
+    expect(code).toBe("12345:363698007=(67890:12345=45678)");
+    expect(rules.parseSnomedFindingSitePostcoordinationCode("12345:363698007=(67890:12345=45678)"))
       .toEqual({ focusCode: "12345", siteCode: site });
   });
 });

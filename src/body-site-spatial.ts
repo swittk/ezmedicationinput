@@ -235,7 +235,10 @@ export function parseBodySiteSpatialRelationExtension(
   const targetCoding=firstCodingWithCode(targetConcept);
   const targetText=targetConcept?.text??targetTextNode?.valueString;
   const sourceText=sourceNode?.valueString;
-  if (!relationText && !relationCoding?.code && !targetText && !targetCoding?.code && !sourceText) {
+  const retainedTarget = targetConcept && ((targetConcept.coding?.length ?? 0) > 1 ||
+    !targetCoding && targetConcept.coding?.length ||
+    Object.keys(targetConcept).some(key => key !== "coding" && key !== "text")) ? targetConcept : undefined;
+  if (!relationText && !relationCoding?.code && !targetText && !targetCoding?.code && !sourceText && !retainedTarget) {
     return undefined;
   }
   return {
@@ -245,10 +248,7 @@ export function parseBodySiteSpatialRelationExtension(
     targetCoding: targetCoding?.code
       ? { ...targetCoding, code: targetCoding.code }
       : undefined,
-    ...(targetConcept && ((targetConcept.coding?.length ?? 0) > 1 ||
-      !targetCoding && targetConcept.coding?.length ||
-      Object.keys(targetConcept).some(key => key !== "coding" && key !== "text"))
-      ? { targetConcept } : {}),
+    ...(retainedTarget ? { targetConcept: retainedTarget } : {}),
     sourceText
   };
 }

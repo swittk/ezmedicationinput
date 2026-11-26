@@ -450,6 +450,10 @@ export function buildInstructionGraphExtension(
     if (field.url === "sourceText") {
       const { valueString: _sourceText, ...annotations } = field;
       nested[0] = { ...annotations, ...(graph.sourceText ? { valueString: graph.sourceText } : {}) };
+    } else if (field.url === "graphRelation") {
+      // An uninterpreted relation is a complete sibling, not annotations on
+      // the first recognized relation with the same repeated field name.
+      nested.push(field);
     } else (fieldSources ??= []).push(field);
   }
   addFieldSources(nested, fieldSources);
@@ -960,7 +964,12 @@ export function parseInstructionGraphExtension<T extends Pick<FhirExtension,"url
     source:FhirExtension|undefined,locale:FhirExtension|undefined,sourceExtensions:FhirExtension[]|undefined;
   for(const field of graph.extension??[])switch(field.url){
     case "action":{const action=parseActionExtension(field);if(action)actions.push(action);break;}
-    case "graphRelation":{const relation=parseGraphRelation(field);if(relation)relations.push(relation);break;}
+    case "graphRelation": {
+      const relation = parseGraphRelation(field);
+      if (relation) relations.push(relation);
+      else (sourceExtensions ??= []).push(field);
+      break;
+    }
     case "opaque":{const span=parseOpaqueSpan(field);if(span)opaque.push(span);break;}
     case "coverage":if(!coverage)coverage=field;break;
     case "primaryAdministrationStart":

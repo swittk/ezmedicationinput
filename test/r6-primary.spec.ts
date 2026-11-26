@@ -1,4 +1,4 @@
-import { parseBodySiteSpatialRelationExtension, buildBodySiteSpatialRelationExtension } from "../src/body-site-spatial";
+import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL, parseBodySiteSpatialRelationExtension, buildBodySiteSpatialRelationExtension } from "../src/body-site-spatial";
 import { encodeR6SourceMetadata, decodeR6SourceMetadata } from "../src/dosage-course";
 import { R6_SCOPED_SAFETY_MODIFIER_URL } from "../src/adapters/r6-editable-metadata";
 import { ENGLISH_COURSE } from "../src/locales/course/en";
@@ -26,7 +26,7 @@ import {
 } from "../src/fhir";
 import { parseMedicationGuard } from "../src/medication-condition";
 import { courseToR6 } from "../src/adapters/canonical-course";
-import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
+import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import {
   setDosageExcludedDates, getDosageExcludedDates, getDosageExcludedWeekdays, getDosageCalendarDayCondition,
   DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageAlternativeChoice,
@@ -82,11 +82,32 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
   });
 
   it("imports R6 as structured data rather than reparsing generated text", () => {
-    const original = parseSig("1 drop OD q2h x1wk then qid x1wk then bid x1wk").fhirNext;
+    const original: FhirR6DosageInstruction = {
+      renderedInstruction: "Follow the right-eye taper.",
+      step: [
+        { frequency: 1, period: 2, periodUnit: FhirPeriodUnit.Hour },
+        { frequency: 4, period: 1, periodUnit: FhirPeriodUnit.Day },
+        { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day }
+      ].map(repeat => ({ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
+        site: { concept: { text: "right eye", coding: [{ system: "http://snomed.info/sct", code: "1290032005" }] } },
+        timing: { repeat: { ...repeat, boundsDuration: { value: 1, unit: "wk", code: "wk" } } }
+      }] }))
+    };
     const imported = fromFhir(JSON.parse(JSON.stringify(original)));
     expect(imported.fhirNext).toEqual(original);
     expect(imported.fhir.map(v => v.sequence)).toEqual([1, 2, 3]);
     expect(imported.count).toBe(3);
+    expect(imported.fhir.map(row => row.timing?.repeat)).toEqual([
+      expect.objectContaining({ frequency: 1, period: 2, periodUnit: "h" }),
+      expect.objectContaining({ frequency: 4, period: 1, periodUnit: "d" }),
+      expect.objectContaining({ frequency: 2, period: 1, periodUnit: "d" })
+    ]);
+    for (const row of imported.fhir) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "drop" });
+      expect(row.site?.text).toBe("right eye");
+      expect(row.timing?.repeat?.boundsDuration).toMatchObject({ value: 1, code: "wk" });
+    }
     expect(formatSig(imported.fhirNext, "long")).toMatch(/every 2 hours[\s\S]*four times daily[\s\S]*twice daily/iu);
     expect(imported.fhirNext.renderedInstruction).toBe(original.renderedInstruction);
   });
@@ -8456,5 +8477,124 @@ describe("current FHIR primitive and phase annotations", () => {
     expect(argument.extension!.find(item => item.url === "normalized")!.valueString).toBeUndefined();
     expect(argument.extension!.some(item => item.url === "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source")).toBe(false);
     expect(supplied).toEqual(before);
+  });
+});
+
+
+describe("current FHIR condition and annotation meaning", () => {
+  it.each([["eq", false], ["ne", true]] as const)(
+    "uses authored concept text as the Boolean subject (%s)", (operation, expected) => {
+    const condition = { code: { text: "nausea", coding: [{
+      system: "http://hl7.org/fhir/CodeSystem/dosage-condition-code", code: "problem-presents", display: "Problem Presents"
+    }] }, operation, valueBoolean: false, _operation: { id: "condition-operation" },
+      extension: [{ url: "urn:test:condition-note", valueString: "retain this condition" }] };
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], condition: [condition]
+    }] }] };
+    const before = cloneStructuredValue(source);
+    const rows = toFhirR5Dosages(source);
+    for (const input of [source, rows]) {
+      expect(importCanonicalCourse(input).stages[0].administrations[0].predicate)
+        .toMatchObject({ kind: "state", name: "nausea", expected });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toContain(expected ? "only if nausea" : "only if not nausea");
+      expect(courseToR6(importCanonicalCourse(input)).step![0].component[0].condition).toEqual([condition]);
+    }
+    expect(source).toEqual(before);
+  });
+
+  it("retains uninterpreted relation nodes beside a recognized graph edge", () => {
+    const afterEnd: FhirExtension = { url: "graphRelation", id: "after-removal-ends", extension: [
+      { url: "kindCoding", valueCoding: { system: "http://hl7.org/fhir/action-relationship-type", code: "after-end",
+        extension: [{ url: "urn:test:relation-code-note", valueString: "retain" }] } },
+      { url: "fromActionIndex", valueInteger: 1, _valueInteger: { id: "from-action" } },
+      { url: "toActionIndex", valueInteger: 0 },
+      { url: "urn:test:relation-note", valueString: "await completed removal" }
+    ] };
+    const local: FhirExtension = { url: "graphRelation", id: "local-relation", extension: [
+      { url: "kindCoding", valueCoding: { system: "urn:test:clinic-relation", code: "checked-by" } },
+      { url: "fromActionIndex", valueInteger: 0 }, { url: "toActionIndex", valueInteger: 1 }
+    ] };
+    const source: FhirExtension = { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: [
+      { url: "sourceText", valueString: "Remove the old patch, then apply the new patch." },
+      { url: "action", extension: [{ url: "predicateLemma", valueString: "remove" },
+        { url: "force", valueCode: "instruction" }, { url: "sourceText", valueString: "Remove the old patch" },
+        { url: "spanStart", valueInteger: 0 }, { url: "spanEnd", valueInteger: 20 }] },
+      { url: "action", extension: [{ url: "predicateLemma", valueString: "apply" },
+        { url: "force", valueCode: "instruction" }, { url: "sourceText", valueString: "apply the new patch" },
+        { url: "spanStart", valueInteger: 27 }, { url: "spanEnd", valueInteger: 46 }] },
+      { url: "graphRelation", extension: [
+        { url: "kindCoding", valueCoding: { system: "http://hl7.org/fhir/action-relationship-type", code: "before" } },
+        { url: "fromActionIndex", valueInteger: 0 }, { url: "toActionIndex", valueInteger: 1 }
+      ] }, afterEnd, local
+    ] };
+    const before = cloneStructuredValue(source), graph = parseInstructionGraphExtension([source])!;
+    expect(graph.actions).toHaveLength(2);
+    expect(graph.relations).toEqual([expect.objectContaining({ kind: AdviceRelation.Before,
+      fromActionIndex: 0, toActionIndex: 1 })]);
+    expect(graph.sourceExtensions).toEqual([afterEnd, local]);
+    const rebuilt = buildInstructionGraphExtension(graph)!;
+    expect(rebuilt.extension!.filter(field => field.url === "graphRelation")).toHaveLength(3);
+    expect(rebuilt.extension).toEqual(expect.arrayContaining([afterEnd, local]));
+    expect(parseInstructionGraphExtension([rebuilt])!.sourceExtensions).toEqual([afterEnd, local]);
+    expect(source).toEqual(before);
+  });
+
+  it.each(["extension", "primitive"] as const)(
+    "converts current Quantity annotations within a Coding (%s)", location => {
+    const priming: FhirR6Extension = { url: "urn:test:priming-volume", valueQuantity: {
+      value: 5, unit: "mL", system: "http://unitsofmeasure.org", code: "mL", comparator: "~",
+      extension: [{ url: "urn:test:volume-note", valueString: "keep" }]
+    } };
+    const coding = { system: "urn:test:pump-program", code: "maintenance", display: "Maintenance",
+      ...(location === "extension" ? { extension: [priming] } : { _display: { id: "program-display", extension: [priming] } }) };
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [{ rateQuantity: {
+      value: 25, unit: "mL/h", code: "mL/h", extension: [{ url: "urn:test:pump-program", valueCoding: coding }]
+    } }] }] }] };
+    const before = cloneStructuredValue(source), rows = toFhirR5Dosages(source);
+    const saved = rows[0].doseAndRate![0].rateQuantity!.extension![0].valueCoding!;
+    const annotation = (location === "extension" ? saved.extension : saved._display!.extension)![0];
+    expect(annotation.valueQuantity).toMatchObject({ value: 5, unit: "mL", code: "mL" });
+    expect(annotation.valueQuantity!.comparator).toBeUndefined();
+    expect(getEmaQuantityComparator(annotation.valueQuantity)).toBe("~");
+    expect(annotation.valueQuantity!.extension).toContainEqual({ url: "urn:test:volume-note", valueString: "keep" });
+    const restored = toDosageDetails(rows).step[0].component[0].doseAndRate![0].rateQuantity!.extension![0].valueCoding!;
+    expect(restored.system).toBe(coding.system);
+    expect(restored.code).toBe(coding.code);
+    expect(restored.display).toBe(coding.display);
+    const restoredAnnotation = (location === "extension" ? restored.extension : restored._display!.extension)![0];
+    expect(restoredAnnotation.valueQuantity).toEqual(priming.valueQuantity);
+    expect(source).toEqual(before);
+  });
+
+  it("retains a spatial target supplied only through primitive annotations", () => {
+    const target = { id: "translated-target", _text: { id: "target-text", extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/translation", extension: [
+        { url: "lang", valueCode: "th" }, { url: "content", valueString: "บริเวณผื่น" }
+      ]
+    }] }, extension: [{ url: "urn:test:target-note", valueString: "retain" }] };
+    const source = { extension: [{ url: BODY_SITE_SPATIAL_RELATION_EXTENSION_URL,
+      extension: [{ url: "target", valueCodeableConcept: target }] }] };
+    const before = cloneStructuredValue(source), relation = parseBodySiteSpatialRelationExtension(source)!;
+    expect(relation.targetConcept).toEqual(target);
+    expect(relation.targetCoding).toBeUndefined();
+    expect(relation.targetText).toBeUndefined();
+    const rebuilt = buildBodySiteSpatialRelationExtension(relation)!;
+    expect(rebuilt.extension!.find(field => field.url === "target")!.valueCodeableConcept).toEqual(target);
+    expect(source).toEqual(before);
+  });
+
+  it("accepts and retains RelativeTime primitive companions on fresh R6 input", () => {
+    const source: FhirR6DosageInstruction = { step: [{ start: {
+      contextDefinition: "https://example.org/protocol/induction", _contextDefinition: { id: "protocol-reference" },
+      contextPath: "start", _contextPath: { id: "protocol-path" },
+      text: "After the induction starts", _text: { id: "relative-time-label", extension: [{
+        url: "urn:test:relative-time-note", valueString: "retain"
+      }] }
+    }, component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }] }] };
+    const before = cloneStructuredValue(source), native = importCanonicalCourse(source);
+    expect(courseToR6(native).step![0].start).toEqual(source.step[0].start);
+    expect(toDosageDetails(toFhirR5Dosages(source)).step[0].start).toEqual(source.step[0].start);
+    expect(source).toEqual(before);
   });
 });

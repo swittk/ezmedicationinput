@@ -3081,8 +3081,8 @@ describe("round44 supported temporal precision", () => {
     ["scalar civil", at(0, "d"), at(1, "d"), [8, 9, 10]],
     ["range start", between(0, "d", 0, "d"), at(1, "d"), [8, 9, 10]],
     ["range end", at(0, "d"), between(1, "d", 1, "d"), [8, 9, 10]],
-    ["both ranges", between(0, "d", 0, "wk"), between(1, "d", 1, "d"), [8, 9, 10]],
-    ["equivalent week endpoints", at(0, "d"), between(1, "wk", 7, "d"), Array.from({ length: 21 }, (_, i) => i + 8)],
+    ["both ranges", between(0, "d", 0, "d"), between(1, "d", 1, "d"), [8, 9, 10]],
+    ["week boundary represented in days", at(0, "d"), between(7, "d", 7, "d"), Array.from({ length: 21 }, (_, i) => i + 8)],
     ["scalar elapsed", at(0, "h"), at(23, "h"), [8, 9]],
     ["range elapsed", between(0, "h", 0, "h"), between(23, "h", 23, "h"), [8, 9]]
   ] as const)("keeps local repetition on the authored span: %s", (_name, start, end, days) => {
@@ -3102,7 +3102,34 @@ describe("round44 supported temporal precision", () => {
         .toMatchObject({ totalUnits: days.length, unit: "tab" });
       expect(JSON.stringify(dosage)).toBe(before);
     }
-    expect(courseToR6(courseFromR6(raw)).step![0]).toMatchObject({ start, end });
+    const projected = courseToR6(courseFromR6(raw)).step![0];
+    expect(projected).toMatchObject({ start, end });
+    for (const boundary of [projected.start, projected.end]) if (boundary?.offsetRange?.low && boundary.offsetRange.high) {
+      expect(boundary.offsetRange.low.unit).toBe(boundary.offsetRange.high.unit);
+      expect(boundary.offsetRange.low.code).toBe(boundary.offsetRange.high.code);
+    }
+  });
+
+  it.each([
+    [{ low: { value: 0, unit: "d" }, high: { value: 0, unit: "wk" } },
+      { low: { value: 1, unit: "d" }, high: { value: 1, unit: "d" } }, [8, 9, 10]],
+    [undefined, { low: { value: 1, unit: "wk" }, high: { value: 7, unit: "d" } },
+      Array.from({ length: 21 }, (_, i) => i + 8)]
+  ] as const)("keeps equivalent mixed-unit native boundaries across DST (%j)", (startRange, endRange, days) => {
+    const native: CanonicalCourse = { kind: "course", stages: [{ count: 3,
+      start: startRange ? { anchor: "treatment-start", displacementRange: startRange }
+        : { anchor: "treatment-start", displacement: { value: 0, unit: "d" } },
+      end: { anchor: "treatment-start", displacementRange: endRange },
+      administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+        schedule: { recurrence: { frequency: 1, period: 1, periodUnit: "d", clocks: ["08:30:00"] } } }]
+    }] };
+    const before = JSON.stringify(native), query = { orderedAt: "2026-03-07T09:00:00-05:00",
+      from: "2026-03-07T09:00:00-05:00", timeZone: "America/New_York", limit: 24 };
+    expect(nextDueDoses(native, query)).toEqual(days.map(day =>
+      "2026-03-" + String(day).padStart(2, "0") + "T08:30:00-04:00"));
+    expect(calculateTotalUnits({ dosage: native, ...query, durationValue: 22, durationUnit: Unit.Day }))
+      .toMatchObject({ totalUnits: days.length, unit: "tab" });
+    expect(JSON.stringify(native)).toBe(before);
   });
 
   it.each(["unknown", "known empty", "known active"])("distinguishes ranged supply with %s timing", state => {
