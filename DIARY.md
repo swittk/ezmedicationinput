@@ -16277,3 +16277,11 @@ medicines, owned clocks, calendar intervals and unresolved finite cycle counts.
 Fresh independent R5 advice remains visible beside current facts. Existing suites
 cover these clinical cases, supplied annotations and source preservation, including
 independent current-input replacements for obsolete export-edit assertions.
+
+
+## 2026-11-27 — Conditional activity and timing precedence
+
+A predicate’s activity remains inside its typed condition, preserving withholding
+polarity and independent dose/counseling ownership. Configured clocks, clinic
+defaults and registered event meanings retain their existing precedence. Unknown
+timing codes keep the current numeric cadence and their authored data.
