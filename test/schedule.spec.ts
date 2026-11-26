@@ -3059,6 +3059,45 @@ describe("review 24: phase history, dimensions, and independent supply oracles",
       expect(JSON.stringify(input)).toBe(before);
     }
   });
+  it.each([
+    { period: 24, periodUnit: Unit.Hour },
+    { period: 1, periodUnit: Unit.Week },
+    { frequency: 2, periodUnit: Unit.Hour },
+  ])("completes BID by dimensional cadence with partial repeat %j", repeat => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID" }] },
+        repeat } };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: row.doseAndRate, timing: row.timing }] }] };
+    for (const dosage of [row, r6]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(4);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each(["foreign", "conflicting"] as const)("retains the existing %s timing code boundary during cadence completion", variant => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
+      code: { coding: [{ system: variant === "foreign" ? "urn:clinic:timing"
+        : "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID" }] },
+      repeat: { period: 24, periodUnit: Unit.Hour, ...(variant === "conflicting" ? { frequency: 1 } : {}) },
+    } };
+    const before = JSON.stringify(row);
+    if (variant === "foreign") {
+      expect(nextDueDoses(row, { ...options, limit: 2 })).toEqual([
+        "2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage: row, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(2);
+    } else {
+      expect(() => nextDueDoses(row, { ...options, limit: 2 })).toThrow(/timing code.*repeat/i);
+      expect(() => calculateTotalUnits({ ...options, dosage: row, durationValue: 2, durationUnit: Unit.Day }))
+        .toThrow(/timing code.*repeat/i);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
   it("subtracts the upper assumed prior ranged amount from the lifetime ceiling", () => {
     const member = dose();
     member.amounts = [{ range: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } }];

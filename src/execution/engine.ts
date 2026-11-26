@@ -513,9 +513,19 @@ function prepareTimingCodeCadence(dosage: CanonicalAdministration): CanonicalAdm
     recurrence = daily >= 1 ? { ...repeat, frequency: daily, period: 1, periodUnit: DurationUnit.Day }
       : { ...repeat, frequency: 1, period: 1 / daily, periodUnit: DurationUnit.Day };
   }
-  if (repeat && (repeat.frequency !== undefined && repeat.frequency !== recurrence.frequency ||
-      repeat.period !== undefined && repeat.period !== recurrence.period ||
-      repeat.periodUnit !== undefined && repeat.periodUnit !== recurrence.periodUnit)) return dosage;
+  if (repeat && (repeat.frequency !== undefined || repeat.period !== undefined || repeat.periodUnit !== undefined)) {
+    const periodUnit = repeat.periodUnit ?? recurrence.periodUnit!;
+    const seconds = INFUSION_TIME_SECONDS[periodUnit];
+    if (!seconds) return dosage;
+    const daily = recurrence.frequency! * 86400 /
+      (recurrence.period! * INFUSION_TIME_SECONDS[recurrence.periodUnit!]);
+    const frequency = repeat.frequency ?? (repeat.period !== undefined
+      ? daily * repeat.period * seconds / 86400 : recurrence.frequency!);
+    const period = repeat.period ?? frequency * 86400 / (daily * seconds);
+    if (!positiveInteger(frequency) || !positiveNumber(period)) return dosage;
+    recurrence = { ...repeat, frequency, period, periodUnit };
+    if (!matchesDailyCodeCadence(daily, recurrence)) return dosage;
+  }
   return { ...dosage, schedule: { ...timing, recurrence } };
 }
 /**
