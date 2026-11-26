@@ -527,6 +527,7 @@ export function applyAdministrationDurationSemantics(
   if (!introducers.size) return;
 
   let methodEnd = inheritedMethod ? 0 : -1;
+  let doseEnd = -1;
   let durationSpan: { start: number; end: number } | undefined;
   let durationSpanCount = 0;
   let intervalSpan: { start: number; end: number } | undefined;
@@ -536,6 +537,8 @@ export function applyAdministrationDurationSemantics(
       for (const span of item.spans) {
         if (span.end > methodEnd) methodEnd = span.end;
       }
+    } else if (item.lexicalCategory === "dose") {
+      for (const span of item.spans) if (span.end > doseEnd) doseEnd = span.end;
     } else if ((item.scheduleFields?.indexOf("duration") ?? -1) >= 0 &&
                (item.scheduleFields?.indexOf("durationUnit") ?? -1) >= 0) {
       for (const span of item.spans) {
@@ -552,11 +555,12 @@ export function applyAdministrationDurationSemantics(
   if (methodEnd < 0) return;
 
   // An omitted administration head can be selected after the interval daughter.
-  // Its registered introducer owns that already typed interval as run time;
-  // an independent course duration and other temporal relations stay intact.
+  // Its registered introducer owns a following typed interval as run time.
+  // An interval before the dose remains its phase-opening delay.
   let inheritedInterval = false;
   if (inheritedMethod && schedule.administrationOffsetMinutes !== undefined &&
-      intervalSpanCount === 1 && intervalSpan && intervalSpan.start >= methodEnd) {
+      intervalSpanCount === 1 && intervalSpan && doseEnd >= 0 &&
+      intervalSpan.start >= Math.max(methodEnd, doseEnd)) {
     for (const token of state.tokens) {
       if (token.sourceStart !== intervalSpan.start) continue;
       inheritedInterval = introducers.has(token.canonical ?? token.lower);

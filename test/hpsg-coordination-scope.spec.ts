@@ -2787,3 +2787,98 @@ describe("condition and successor timing ownership", () => {
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });
+
+
+describe("sequential temporal ownership", () => {
+  const query = {
+    orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+    timeZone: "UTC", limit: 8
+  };
+
+  it.each([
+    ["in 2 hours 200 mL", true],
+    ["after 2 hours 200 mL", true],
+    ["200 mL in 2 hours", false]
+  ] as const)("keeps a leading interval separate from inherited infusion run time: %s", (tail, delayed) => {
+    const source = "Infuse 100 mL over 30 minutes, then " + tail;
+    const parsed = parsePublicSig(source);
+    const before = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[1].schedule?.administrationOffsetMinutes).toBe(delayed ? 120 : undefined);
+    expect(parsed.meta.canonical.clauses[1].schedule?.administrationDuration).toBe(delayed ? undefined : 120);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const stages = importCanonicalCourse(input).stages;
+      expect(stages).toHaveLength(2);
+      const first = stages[0].administrations[0];
+      const second = stages[1].administrations[0];
+      expect(first.amounts?.[0].quantity).toMatchObject({ value: 100, unit: "mL" });
+      expect(first.schedule?.recurrence).toMatchObject({ occurrenceDuration: 30, occurrenceDurationUnit: "min" });
+      expect(second.amounts?.[0].quantity).toMatchObject({ value: 200, unit: "mL" });
+      expect(second.delayMinutes).toBe(delayed ? 120 : undefined);
+      expect(second.schedule?.recurrence?.occurrenceDuration).toBe(delayed ? undefined : 120);
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-12-01T00:00:00+00:00",
+        delayed ? "2026-12-01T02:30:00+00:00" : "2026-12-01T00:30:00+00:00"
+      ]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
+    ["daily at the same time for 2 days", true],
+    ["from day 32 for 1 month", false]
+  ] as const)("keeps cadence selectors separate from a donated clock: %s", (tail, localDaily) => {
+    const source = "Take 1 tablet at 09:00 on days 1 and 15 of each month for 1 month, then take 2 tablets " + tail;
+    const parsed = parsePublicSig(source);
+    const before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const stages = importCanonicalCourse(input).stages;
+      expect(stages).toHaveLength(2);
+      expect(stages[0].administrations[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      const second = stages[1].administrations[0];
+      expect(second.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      const recurrence = second.schedule?.recurrence;
+      expect(recurrence?.clocks).toEqual(["09:00:00"]);
+      expect(recurrence?.monthDays).toEqual(localDaily ? undefined : [1, 15]);
+      if (localDaily) expect(recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-12-01T09:00:00+00:00", "2026-12-15T09:00:00+00:00",
+        "2027-01-01T09:00:00+00:00",
+        localDaily ? "2027-01-02T09:00:00+00:00" : "2027-01-15T09:00:00+00:00"
+      ]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
+    ["daily", true],
+    ["daily at the same time", true],
+    ["at 08:00 daily", false]
+  ] as const)("keeps an inherited meal event and its offset together: %s", (tail, inherited) => {
+    const source = "Take 1 tablet daily 30 minutes before dinner for 2 days, then take 2 tablets " + tail + " for 2 days";
+    const parsed = parsePublicSig(source);
+    const before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const stages = importCanonicalCourse(input).stages;
+      expect(stages).toHaveLength(2);
+      const second = stages[1].administrations[0];
+      expect(second.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      const recurrence = second.schedule?.recurrence;
+      expect(recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(recurrence?.anchors).toEqual(inherited ? ["ACV"] : undefined);
+      expect(recurrence?.offset).toBe(inherited ? 30 : undefined);
+      expect(recurrence?.clocks).toEqual(inherited ? undefined : ["08:00:00"]);
+      expect(nextDueDoses(input, { ...query, eventClock: { CV: "18:00" } })).toEqual([
+        "2026-12-01T17:30:00+00:00", "2026-12-02T17:30:00+00:00",
+        inherited ? "2026-12-03T17:30:00+00:00" : "2026-12-03T08:00:00+00:00",
+        inherited ? "2026-12-04T17:30:00+00:00" : "2026-12-04T08:00:00+00:00"
+      ]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+});

@@ -599,6 +599,11 @@ export function scopeSequentialPhaseSemantics(
       } else relativePhaseStarts.set(edge.to, null);
     } else relativePhaseStarts.set(edge.to, null);
     const shared = schedules[0];
+    // A recurring event and its offset form one donated anchor in both
+    // explicit timing references and ordinary sequential ellipsis.
+    const recurringAnchors = shared?.when?.filter(event => event !== SequenceEventTiming.Immediate);
+    const eventTiming = recurringAnchors?.length ? { when: recurringAnchors,
+      offset: shared?.offset, offsetMin: shared?.offsetMin, offsetMax: shared?.offsetMax } : undefined;
     const sharedAnchors = schedules.every(schedule =>
       sameSet(schedule?.when, shared?.when) &&
       sameSet(schedule?.timeOfDay, shared?.timeOfDay) &&
@@ -713,17 +718,16 @@ export function scopeSequentialPhaseSemantics(
         // recurrence, not the preceding phase's duration, count or dates.
         // The onset-only construction has one complete cadence antecedent.
         // Explicit local cadence/anchors remain local.
-        const hasLocalAnchor = Boolean(schedule.clockWindow || schedule.eventWindow || schedule.activityTiming?.length);
+        const hasLocalAnchor = Boolean(schedule.clockWindow || schedule.eventWindow || schedule.activityTiming?.length ||
+          schedule.when?.length || schedule.timeOfDay?.length);
+        const hasLocalCadence = cadenceKeys.some(key => schedule[key] !== undefined);
         const recurrence = {
-          ...cadence,
-          when: hasLocalAnchor ? undefined : shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
+          ...(hasLocalCadence ? undefined : cadence),
+          ...(hasLocalAnchor ? undefined : eventTiming),
           timeOfDay: hasLocalAnchor || !matchesSuccessorCadence ? undefined : shared.timeOfDay,
           clockWindow: hasLocalAnchor ? undefined : shared.clockWindow,
           eventWindow: hasLocalAnchor ? undefined : shared.eventWindow,
-          activityTiming: hasLocalAnchor ? undefined : shared.activityTiming,
-          offset: hasLocalAnchor ? undefined : shared.offset,
-          offsetMin: hasLocalAnchor ? undefined : shared.offsetMin,
-          offsetMax: hasLocalAnchor ? undefined : shared.offsetMax
+          activityTiming: hasLocalAnchor ? undefined : shared.activityTiming
         };
         // ParserState setters may create own keys with an undefined value;
         // only an actually defined local value can override inherited recurrence.
@@ -775,12 +779,12 @@ export function scopeSequentialPhaseSemantics(
       // anchor group, so inherited anchors cannot create a mixed local/donor pair.
       if (!schedule.when?.length && !schedule.timeOfDay?.length && !schedule.clockWindow &&
           !schedule.eventWindow && !schedule.activityTiming?.length && sharedAnchors) {
-        // A point event belongs to its administration. A successor may
-        // inherit recurring meal/day anchors, never the predecessor's "now".
-        const recurringAnchors = shared?.when?.filter(event => event !== SequenceEventTiming.Immediate);
-        if (recurringAnchors?.length) {
-          schedule.when = recurringAnchors;
-          fields.push('when');
+        if (eventTiming) for (const key of Object.keys(eventTiming) as (keyof typeof eventTiming)[]) {
+          const inherited = eventTiming[key];
+          if (schedule[key] === undefined && inherited !== undefined) {
+            (schedule as Record<string, unknown>)[key] = cloneStructuredValue(inherited);
+            fields.push(key);
+          }
         }
         if (shared?.timeOfDay?.length && matchesSuccessorCadence) {
           schedule.timeOfDay = [...shared.timeOfDay];

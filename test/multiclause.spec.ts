@@ -5303,17 +5303,16 @@ describe("fronted inherited infusion intervals", () => {
         expect(next.amounts?.[0].quantity).toMatchObject({ value: 200, unit: "mL" });
         expect(next.method?.coding?.[0].code).toBe("764794000");
         expect(next.schedule?.recurrence?.count).toBe(1);
-        if (relation === "after") {
+        if (relation !== "over") {
           expect(next.delayMinutes).toBe(120);
           expect(next.schedule?.recurrence?.occurrenceDuration).toBeUndefined();
         } else {
           expect(next.delayMinutes).toBeUndefined();
-          expect(next.schedule?.recurrence).toMatchObject({ occurrenceDuration: relation === "in" ? 120 : 2,
-            occurrenceDurationUnit: relation === "in" ? "min" : "h" });
+          expect(next.schedule?.recurrence).toMatchObject({ occurrenceDuration: 2, occurrenceDurationUnit: "h" });
         }
         const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 3 };
         expect(nextDueDoses(value, query)).toEqual(["2026-12-01T00:00:00+00:00",
-          relation === "after" ? "2026-12-01T03:00:00+00:00" : "2026-12-01T01:00:00+00:00"]);
+          relation !== "over" ? "2026-12-01T03:00:00+00:00" : "2026-12-01T01:00:00+00:00"]);
         expect(calculateTotalUnits({ dosage: value, ...query, durationValue: 6, durationUnit: "h" }))
           .toMatchObject({ totalUnits: 300, unit: "mL" });
       }
