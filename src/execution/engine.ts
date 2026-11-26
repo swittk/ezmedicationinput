@@ -3338,6 +3338,20 @@ function recurrenceAtResolvedOrigin(
   } : repeat;
 }
 
+/** Reuse a resolved phase origin without reopening its source dependencies. */
+function administrationAtResolvedOrigin(
+  dosage: CanonicalAdministration, origin: Date
+): CanonicalAdministration {
+  const repeat = dosage.schedule?.recurrence;
+  const resolved = recurrenceAtResolvedOrigin(repeat, origin);
+  return dosage.phaseOrigin || dosage.phaseStart || dosage.phaseEnd || dosage.phaseOriginIssue ||
+      dosage.phasePredecessors?.length || resolved !== repeat
+    ? { ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined,
+      phaseOriginIssue: undefined, phasePredecessors: undefined,
+      ...(resolved !== repeat ? { schedule: { ...dosage.schedule, recurrence: resolved } } : {}) }
+    : dosage;
+}
+
 function scheduleTreatmentRelativeCourse(
   course: CanonicalCourse,
   options: NextDueDoseOptions,
@@ -7995,7 +8009,53 @@ function calculateCourseTotalUnits(
   for (const { index, window } of treatmentStepWindows(
     course, treatmentStart, zone, sourceClock, options, false, undefined, eventCycleEnd
   )) {
-    if (!window.end && index + 1 < course.stages.length) assumedOpenTransition = true;
+    if (!window.end && index + 1 < course.stages.length) {
+      assumedOpenTransition = true;
+      // An unresolved finite infusion must not make its dependent successor
+      // contribute an exact zero. Before its earliest possible completion,
+      // however, the current stage's supply remains determinate.
+      let earliestCompletion: Date | undefined;
+      let unresolvedDuration = false;
+      if (!window.dependencies?.pending) for (const member of window.administrations) {
+        let end = member.endExclusive;
+        if (!end) {
+          if (!member.administration.schedule?.recurrence?.occurrenceDurationRange) {
+            earliestCompletion = undefined;
+            break;
+          }
+          const completion = finiteAdministrationCompletion(member.administration, member,
+            member.priorCount === options.priorCount ? options : { ...options, priorCount: member.priorCount },
+            zone, "earliest");
+          if (!completion) {
+            earliestCompletion = undefined;
+            break;
+          }
+          end = completion.end;
+          unresolvedDuration = true;
+        }
+        // Every concurrent member must complete before this stage can end.
+        if (!earliestCompletion || end > earliestCompletion) earliestCompletion = end;
+      }
+      if (unresolvedDuration && earliestCompletion && earliestCompletion < queryEnd) {
+        // The successor's own offset, calendar and clocks can keep every dose
+        // outside this query even after the earliest predecessor completion.
+        // This diagnostic window never becomes the actual phase cutover.
+        const successor = treatmentStepWindow(course, index + 1, treatmentStart, earliestCompletion,
+          zone, sourceClock, window.capClock, options, undefined, false, undefined, undefined, eventCycleEnd);
+        for (const member of successor.administrations) {
+          const end = minDate(queryEnd, cycleOwnedAdministrationEnd(successor, member, eventCycleEnd));
+          if (end <= member.eligibleFrom) continue;
+          const first = nextDueDoses(administrationAtResolvedOrigin(member.administration, member.recurrenceOrigin), {
+            ...options, from: member.eligibleFrom, orderedAt: member.recurrenceOrigin,
+            priorCount: member.priorCount, countEligibilityStart: member.countEligibilityStart,
+            candidateOnly: true, limit: 1
+          } as PhaseCountOptions)[0];
+          if (first && Date.parse(first) < end.getTime())
+            throw new MedicationQuantityCalculationError("course-duration-unresolved",
+              "An administration duration range leaves the next treatment stage's start unresolved within the requested supply window. Resolve that duration before calculating the complete supply; its endpoints and source remain retained.");
+        }
+      }
+    }
     for (let memberIndex=0;memberIndex<window.administrations.length;memberIndex++) {
       const member = window.administrations[memberIndex];
       const dosage = member.administration.schedule?.recurrence
@@ -8392,7 +8452,8 @@ function finiteAdministrationCompletion(
   dosage: CanonicalAdministration,
   window: Pick<ResolvedAdministrationWindow, "recurrenceOrigin" | "eligibleFrom" | "endExclusive" | "countEligibilityStart">,
   options: NextDueDoseOptions,
-  zone: string
+  zone: string,
+  purpose: "exact" | "earliest" = "exact"
 ):
   | {
       end: Date;
@@ -8407,13 +8468,8 @@ function finiteAdministrationCompletion(
   // The enclosing course has already supplied the predecessor/cycle context
   // and resolved this component's cadence origin. Count only this local
   // execution copy, rather than reopening it as an isolated persisted row.
-  const executionRepeat = recurrenceAtResolvedOrigin(repeat, start);
-  const local =
-    dosage.phaseOrigin || dosage.phaseStart || dosage.phaseEnd || dosage.phaseOriginIssue || dosage.phasePredecessors?.length ||
-      executionRepeat !== repeat
-      ? { ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined, phasePredecessors: undefined,
-        ...(executionRepeat !== repeat ? { schedule: { ...dosage.schedule, recurrence: executionRepeat } } : {}) }
-      : dosage;
+  const local = administrationAtResolvedOrigin(dosage, start);
+  const executionRepeat = local.schedule!.recurrence!;
   // Completion is a historical boundary, not the number of doses still due.
   // Only records inside this phase can complete it; older records still belong
   // to the rolling-cap history and can defer its first eligible opportunity.
@@ -8428,7 +8484,7 @@ function finiteAdministrationCompletion(
   if (actual.length >= count) {
     const last = new Date(actual[count - 1]);
     return !endExclusive || last < endExclusive
-      ? completionAfterAcceptedAdministration(dosage, last, zone) : undefined;
+      ? completionAfterAcceptedAdministration(dosage, last, zone, purpose) : undefined;
   }
   // Supplied consumption and PRN use do not imply nominal past events.
   // A count alone reduces the allowance without supplying a completion time.
@@ -8453,13 +8509,14 @@ function finiteAdministrationCompletion(
   if (due.length !== remaining) return undefined;
   const last = new Date(due[due.length - 1]);
   return !endExclusive || last < endExclusive
-    ? completionAfterAcceptedAdministration(dosage, last, zone) : undefined;
+    ? completionAfterAcceptedAdministration(dosage, last, zone, purpose) : undefined;
 }
 
 /** The occurrence's duration extends its final accepted point. Both local
  * finite phases and the chronological ledger use this same completion rule. */
 function completionAfterAcceptedAdministration(
-  dosage: CanonicalAdministration, last: Date, zone: string
+  dosage: CanonicalAdministration, last: Date, zone: string,
+  purpose: "exact" | "earliest" = "exact"
 ): { end: Date; point: boolean } | undefined {
   const repeat = dosage.schedule?.recurrence;
   if (repeat?.occurrenceDurationRange) {
@@ -8480,9 +8537,15 @@ function completionAfterAcceptedAdministration(
         ? low.value * INFUSION_TIME_SECONDS[lowUnit] === high.value * INFUSION_TIME_SECONDS[highUnit]
         : lowDays !== undefined && Number.isInteger(lowDays) && lowDays === highDays;
     // A variable duration cannot supply an exact completion point for an
-    // implicit successor. Equivalent exact endpoints can.
-    if (!sameDuration) return undefined;
-    const end = createIntervalStepper({ period: low.value, periodUnit: lowUnit }, zone)?.(last);
+    // implicit successor. A supply diagnostic may ask for its earliest bound,
+    // but never installs that bound as an actual phase cutover.
+    if (!sameDuration && purpose === "exact") return undefined;
+    let end = createIntervalStepper({ period: low.value, periodUnit: lowUnit }, zone)?.(last);
+    if (!sameDuration && end) {
+      const highEnd = createIntervalStepper({ period: high.value, periodUnit: highUnit }, zone)?.(last);
+      if (!highEnd) return undefined;
+      if (highEnd < end) end = highEnd;
+    }
     return end ? { end, point: false } : undefined;
   }
   if (repeat?.occurrenceDurationComparator ||

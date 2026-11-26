@@ -3542,8 +3542,10 @@ describe("round60 supported execution and quantity boundaries", () => {
       const expected = kind === "equal elapsed"
         ? ["2026-01-01T08:00:00+00:00", "2026-01-01T22:00:00+00:00"] : ["2026-01-01T08:00:00+00:00"];
       expect(nextDueDoses(input, query)).toEqual(expected);
-      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits)
-        .toBe(kind === "equal elapsed" ? 150 : 100);
+      const total = () => calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Day });
+      if (kind === "unequal elapsed")
+        expect(total).toThrowError(expect.objectContaining({ code: "course-duration-unresolved" }));
+      else expect(total().totalUnits).toBe(kind === "equal elapsed" ? 150 : 100);
       expect(importCanonicalCourse(input).stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationRange)
         .toMatchObject(course.stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationRange!);
       expect(nextDueDoses(reopen(input), query)).toEqual(expected);
@@ -3640,14 +3642,26 @@ describe("round61 equivalent civil infusion endpoints", () => {
         ? ["2026-03-01T08:00:00-05:00", "2026-03-08T08:30:00-04:00"]
         : ["2026-03-01T08:00:00-05:00"];
       expect(nextDueDoses(input, query)).toEqual(expected);
-      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: Unit.Day }).totalUnits)
-        .toBe(variant.exact ? 150 : 100);
+      if (variant.name === "unequal civil bounds") {
+        for (const end of ["2026-03-08T08:15:00-04:00", "2026-03-08T08:30:00-04:00"])
+          expect(calculateTotalUnits({ dosage: input, ...query,
+            durationValue: (Date.parse(end) - Date.parse(query.from)) / 60000, durationUnit: Unit.Minute }).totalUnits)
+            .toBe(100);
+      }
+      const total = () => calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: Unit.Day });
+      if (variant.exact) expect(total().totalUnits).toBe(150);
+      else expect(total).toThrowError(expect.objectContaining({ code: "course-duration-unresolved" }));
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits)
+        .toBe(100);
       expect(importCanonicalCourse(input).stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationRange)
         .toEqual(range);
       const saved = freshExecutionInput(toDosageDetails(freshExecutionInput(courseToR5(importCanonicalCourse(input)))));
       expect(nextDueDoses(saved, query)).toEqual(expected);
-      expect(calculateTotalUnits({ dosage: saved, ...query, durationValue: 8, durationUnit: Unit.Day }).totalUnits)
-        .toBe(variant.exact ? 150 : 100);
+      const savedTotal = () => calculateTotalUnits({ dosage: saved, ...query, durationValue: 8, durationUnit: Unit.Day });
+      if (variant.exact) expect(savedTotal().totalUnits).toBe(150);
+      else expect(savedTotal).toThrowError(expect.objectContaining({ code: "course-duration-unresolved" }));
+      expect(calculateTotalUnits({ dosage: saved, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits)
+        .toBe(100);
       expect(importCanonicalCourse(saved).stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationRange)
         .toEqual(range);
       expect(JSON.stringify(input)).toBe(before);
