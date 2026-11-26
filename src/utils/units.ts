@@ -10,6 +10,9 @@ export const MASS_UNITS: Record<string, number> = {
     ng: 0.000001
 };
 
+const MASS_PER_WEIGHT_UNITS: Record<string, number> = {};
+for (const unit in MASS_UNITS) MASS_PER_WEIGHT_UNITS[unit + "/kg"] = MASS_UNITS[unit];
+
 export const VOLUME_UNITS: Record<string, number> = {
     l: 1000,
     dl: 100,
@@ -29,10 +32,17 @@ export function getUnitCategory(unit?: string): "mass" | "volume" | "other" {
     return "other";
 }
 
+/** Conversion groups retain the patient-weight denominator as a separate dimension. */
+export function getUnitComparisonCategory(unit?: string): ReturnType<typeof getUnitCategory> | "mass-per-weight" {
+    const category = getUnitCategory(unit);
+    return category === "other" && unit && MASS_PER_WEIGHT_UNITS[unit.toLowerCase()] !== undefined
+        ? "mass-per-weight" : category;
+}
+
 export function getBaseUnitFactor(unit?: string): number {
     if (!unit) return 1;
     const u = unit.toLowerCase();
-    return MASS_UNITS[u] ?? VOLUME_UNITS[u] ?? 1;
+    return MASS_UNITS[u] ?? VOLUME_UNITS[u] ?? MASS_PER_WEIGHT_UNITS[u] ?? 1;
 }
 
 export function convertValue(
@@ -45,8 +55,8 @@ export function convertValue(
     const t = toUnit.toLowerCase();
     if (f === t) return value;
 
-    const fCat = getUnitCategory(f);
-    const tCat = getUnitCategory(t);
+    const fCat = getUnitComparisonCategory(f);
+    const tCat = getUnitComparisonCategory(t);
 
     // 1. Same category conversion
     if (fCat === tCat && fCat !== "other") {
@@ -55,21 +65,14 @@ export function convertValue(
         return (value * fFactor) / tFactor;
     }
 
-    // The same supported weight denominator cancels before mass-prefix conversion.
-    if (f.endsWith("/kg") && t.endsWith("/kg")) {
-        const fromMass = f.slice(0, -3), toMass = t.slice(0, -3);
-        if (MASS_UNITS[fromMass] !== undefined && MASS_UNITS[toMass] !== undefined)
-            return convertValue(value, fromMass, toMass);
-    }
-
     // 2. Cross-category conversion using strength
     if (strength && ((fCat === "mass" && tCat === "volume") || (fCat === "volume" && tCat === "mass"))) {
         const numUnit = strength.numerator.unit.toLowerCase();
         const denUnit = strength.denominator.unit.toLowerCase();
-        const numCat = getUnitCategory(numUnit);
-        const denCat = getUnitCategory(denUnit);
+        const numCat = getUnitComparisonCategory(numUnit);
+        const denCat = getUnitComparisonCategory(denUnit);
 
-        if (numCat !== denCat && numCat !== "other" && denCat !== "other") {
+        if (numCat === "mass" && denCat === "volume" || numCat === "volume" && denCat === "mass") {
             const massSide = numCat === "mass" ? strength.numerator : strength.denominator;
             const volSide = numCat === "volume" ? strength.numerator : strength.denominator;
 

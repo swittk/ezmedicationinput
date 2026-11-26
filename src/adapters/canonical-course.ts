@@ -38,7 +38,7 @@ import type {
   FormatOptions,
 } from "../types";
 import { administrationHasAmountFacts } from "../canonical/course";
-import { convertQuantityValue, getQuantityComparisonUnit, getUnitCategory, sameCodedQuantityUnit } from "../utils/units";
+import { convertQuantityValue, getQuantityComparisonUnit, getUnitComparisonCategory, sameCodedQuantityUnit } from "../utils/units";
 import type {
   CanonicalMeasure,
   CanonicalAmount,
@@ -1380,7 +1380,7 @@ function maximumUnitKey(quantity: CanonicalMeasure): string | undefined {
 function maximumComparisonUnitKey(quantity: CanonicalMeasure): string | undefined {
   const unit = getQuantityComparisonUnit(quantity);
   if (!unit) return undefined;
-  const category = getUnitCategory(unit);
+  const category = getUnitComparisonCategory(unit);
   return category === "other" ? "l" + unitKeyPart(unit) : "d" + category;
 }
 function preferMaximum(

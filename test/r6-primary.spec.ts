@@ -7948,3 +7948,24 @@ describe("current FHIR graph annotations and compatible dose ceilings", () => {
     }
   });
 });
+
+
+describe("current weight-normalized maximum compatibility", () => {
+  it.each(["administration", "lifetime"] as const)("keeps comparable weight-normalized ceilings in one %s group", scope => {
+    const sameUnit = { value: 2, unit: "mg/kg", system: "http://unitsofmeasure.org", code: "mg/kg", id: "milligram-limit" };
+    const tighter = { value: 0.001, unit: "g/kg", system: "http://unitsofmeasure.org", code: "g/kg", id: "gram-limit" };
+    const absolute = { value: 0.5, unit: "mg", id: "absolute-limit" };
+    for (const quantities of [[sameUnit, tighter], [tighter, sameUnit],
+      [sameUnit, absolute, tighter], [tighter, absolute, sameUnit]]) {
+      const input: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 5, unit: "mg/kg", system: "http://unitsofmeasure.org", code: "mg/kg" } }],
+        safety: { doseLimit: quantities.map(valueQuantity => ({ scope, valueQuantity })) }
+      }] }] };
+      const before = JSON.stringify(input), rows = toFhirR5Dosages(input);
+      expect(scope === "administration" ? rows[0].maxDosePerAdministration : rows[0].maxDosePerLifetime).toEqual(tighter);
+      expect(toDosageDetails(JSON.parse(JSON.stringify(rows))).step![0].component[0].safety?.doseLimit)
+        .toEqual(input.step![0].component[0].safety!.doseLimit);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+});
