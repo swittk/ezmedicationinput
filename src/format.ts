@@ -1267,7 +1267,7 @@ export function independentTimingText(
   if (!code || TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined) return undefined;
   const lower = code.toLowerCase();
   if (timingPreviewDescriptor(code)) return undefined;
-  if (WORD_FREQUENCIES[lower] && recurrence?.periodUnit === WORD_FREQUENCIES[lower].periodUnit &&
+  if (WORD_FREQUENCIES[lower] && recurrence?.periodUnit !== undefined &&
       (recurrence.frequency !== undefined || recurrence.frequencyMax !== undefined ||
        recurrence.period !== undefined || recurrence.periodMax !== undefined)) return undefined;
   // Compact interval shorthand yields only when a typed cadence replaces it.
