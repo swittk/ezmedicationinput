@@ -110,7 +110,7 @@ import { listMedicationInstructionActions, resolveMedicationInstructionAction } 
 import { combineSignFeatureStructures } from "../feature-structure";
 import { medicationInstructionConceptCodings, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { getDoseUnitKind, normalizeUnit } from "../../unit-lexicon";
-import { resolveActionRelationSurface } from "../../relation-terminology";
+import { resolveActionRelationSurface, resolveAdviceRelationSurface } from "../../relation-terminology";
 import lexicalClasses from "../lexical-classes.json";
 
 function timingCodeForDailyFrequency(value: number): string | undefined {
@@ -1504,7 +1504,7 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const when = EVENT_TIMING_TOKENS[lower];
     if (when) {
-      if (isEndBoundDaypartAt(context.tokens, start)) return [];
+      if (isEndBoundDaypartAt(context.tokens, start) || isNegatedEventComplement(context, start)) return [];
       // The same immediate lexeme cannot simultaneously schedule the whole
       // medication STAT and modify an explicit relative event. A typed
       // before/after + event daughter owns that atom compositionally.
@@ -1562,6 +1562,14 @@ function mealTimingForRelation(
 
 function mealRelationFromToken(lower: string): "before" | "after" | "with" | undefined {
   return MEAL_RELATION_BY_TOKEN.get(lower);
+}
+
+/** A negative accompaniment owns its event noun as advice, not a positive
+ * administration anchor. Keep the same admission in the chart and boundary reader. */
+function isNegatedEventComplement(context: HpsgClauseContext, index: number): boolean {
+  const relation = context.tokens[index - 1];
+  return Boolean(relation &&
+    resolveAdviceRelationSurface(normalizeTokenLower(relation)) === AdviceRelation.Without);
 }
 
 const BASE_MEAL_EVENTS = new Set<EventTiming>([
@@ -2156,7 +2164,7 @@ export function eventOffsetRule(): HpsgLexicalRule<HpsgClauseContext> {
 export function eventTimingPhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.eventPhrase", (context, start) => {
     const first = tokensAvailable(context, start, 1)?.[0];
-    if (!first) {
+    if (!first || isNegatedEventComplement(context, start)) {
       return [];
     }
     const firstLower = normalizeTokenLower(first);
@@ -3243,6 +3251,7 @@ export function isScheduleLead(context: HpsgClauseContext, index: number): boole
     return false;
   }
   const lower = normalizeTokenLower(token);
+  if (EVENT_TIMING_TOKENS[lower]) return !isNegatedEventComplement(context, index);
   if (monthlyOrdinalWeekdaySign(context, index)) return true;
   // A licensed IN + measured interval locates the omitted-unit dose.
   // The existing timing sign still excludes procedure-owned durations.
@@ -3277,7 +3286,6 @@ export function isScheduleLead(context: HpsgClauseContext, index: number): boole
   if (
     TIMING_ABBREVIATIONS[lower] ||
     WORD_FREQUENCIES[lower] ||
-    EVENT_TIMING_TOKENS[lower] ||
     EVERY_INTERVAL_TOKENS.has(lower) ||
     FREQUENCY_SIMPLE_WORDS[lower] !== undefined ||
     FREQUENCY_NUMBER_WORDS[lower] !== undefined ||

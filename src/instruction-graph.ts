@@ -1083,6 +1083,11 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     parts, argumentStart, segmentEnd, input, options, relIndex
   );
   if (qualifiedSite) return { args: [qualifiedSite] };
+  // This valence owns one nominal complement. An unparsed negative tail must
+  // remain source-backed rather than inherit the recognized action's coverage.
+  const semanticEnd = relationTargetEnd < segmentEnd &&
+    actionArgumentRelation(key(parts[relationTargetEnd])) === AdviceRelation.Without
+      ? relationTargetEnd : undefined;
   let objectEnd = separableParticleIndex !== undefined
     ? separableParticleIndex
     : relIndex >= 0 ? relIndex : segmentEnd;
@@ -1134,7 +1139,7 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     const times = c.relationTimes;
     if (times) {
       for (const time of times) pushArgument(args, time);
-      return { args };
+      return { args, semanticEnd };
     }
     const relationDuration = relationHasGrammarFeature(relation, "durationComplement")
       ? parseAnyDurationArgument(parts, relIndex + 1, relationTargetEnd, input, offset)
@@ -1152,7 +1157,7 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     if (argument && accompaniment) argument.relation = relation;
     pushArgument(args, argument);
   }
-  return { args };
+  return { args, semanticEnd };
 };
 const CONTAINER_ACTIVITY_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { parts, argumentStart, segmentEnd, input, options, relIndex } = c;

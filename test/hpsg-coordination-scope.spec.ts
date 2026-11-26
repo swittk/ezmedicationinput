@@ -1762,3 +1762,42 @@ describe("round76 timing-reference clock compatibility", () => {
     }
   });
 });
+
+
+describe("negative meal accompaniment ownership", () => {
+  it.each([
+    ["Swallow 1 tablet without food", "Swallow 1 tablet. Without food."],
+    ["Swallow 1 tablet with water without food", "Swallow 1 tablet with water. Take without food."]
+  ])("keeps the negative meal instruction in %s", (source, expected) => {
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toEqual({ value: 1, unit: "tab" });
+    expect(clause.raw?.text).toBe(source);
+    expect(clause.schedule?.when).toBeUndefined();
+    for (const rows of [parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(rows).toHaveLength(1);
+      expect(rows[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(rows[0].timing?.repeat?.when).toBeUndefined();
+    }
+    for (const input of [parsed.fhir, parsed.fhirNext]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(expected);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .not.toContain("พร้อมอาหาร");
+    }
+  });
+
+  it("retains positive meal timing and independent empty-stomach and fasting advice", () => {
+    const meal = parsePublicSig("Swallow 1 tablet with food");
+    expect(meal.fhir[0].timing?.repeat?.when).toEqual(["C"]);
+    expect(formatSig(meal.fhirNext, "long", { locale: "en", realizationMode: "normalized" }))
+      .toBe("Swallow 1 tablet with meals.");
+    const empty = parsePublicSig("Take 1 tablet on an empty stomach with water");
+    expect(empty.fhir[0].timing?.repeat?.when).toBeUndefined();
+    expect(formatSig(empty.fhirNext, "long", { locale: "en", realizationMode: "normalized" }))
+      .toBe("Take 1 tablet orally. On an empty stomach. Take with water.");
+    const fasting = parsePublicSig("Take 1 tablet daily while fasting");
+    expect(fasting.fhir[0].timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(formatSig(fasting.fhirNext, "long", { locale: "en", realizationMode: "normalized" }))
+      .toBe("Take 1 tablet orally once daily. While fasting.");
+  });
+});
