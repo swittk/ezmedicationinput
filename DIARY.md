@@ -16325,3 +16325,11 @@ counseling stays visible, including when a calendar evaluator rejects the dose.
 Core dose, rate and duration range annotations use the existing Quantity bridge
 at import and R5 serialization. Exact endpoints, current annotations, source and
 localized previews remain intact.
+
+
+## 2026-11-27 — Quantitative conditional ownership
+
+Registered conditional relations reuse the shared prefix and postfix guard
+construction for quantitative predicates. Medication conditions remain distinct
+from independently conditional counseling. Ordinary guard selection and explicit
+closed withholding spans retain their existing paths.
