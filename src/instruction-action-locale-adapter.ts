@@ -1,4 +1,4 @@
-import { medicationInstructionActionLocaleRealizerConfig } from "./instruction-action-terminology";
+import { getMedicationInstructionAction, medicationInstructionActionLocaleRealizerConfig } from "./instruction-action-terminology";
 import { INSTRUCTION_QUANTITY_UNIT_LABELS } from "./hpsg/lexical-classes";
 import {
   getAdviceRelationDefinition,
@@ -98,6 +98,47 @@ function suppressActivity(input: InstructionActionRealizationInput): boolean {
   return Boolean(arg?.conceptId &&
     (medicationInstructionActionLocaleRealizerConfig(input.realizerConfig, input.locale)
       ?.suppressActivityConcepts?.indexOf(arg.conceptId) ?? -1) !== -1);
+}
+
+export function instructionActionDefinitionForRealization(frame: AdviceFrame): MedicationInstructionActionDefinition | undefined {
+  const fallback = getMedicationInstructionAction(frame.predicate.lemma);
+  // A selected custom head may share a default code without sharing its
+  // wording or attachment. Its persisted realizer and configuration own both.
+  return !frame.predicate.display || frame.predicate.display === fallback?.display ? fallback : undefined;
+}
+
+/** The selected valence determines which daughter owns the frame relation. */
+export function instructionFrameRelationOwnsTemporalArgument(frame: AdviceFrame, arg: AdviceArgument): boolean {
+  if (!frame.relation) return false;
+  const realizer = frame.predicate.realizer ?? instructionActionDefinitionForRealization(frame)?.realizer;
+  if (realizer === "site-relation" && relationHasGrammarFeature(frame.relation, "rinseTimeComplement")) {
+    return (arg.role === AdviceArgumentRole.Time || arg.role === AdviceArgumentRole.Activity) &&
+      (!arg.relation || arg.relation === frame.relation);
+  }
+  return arg.role === AdviceArgumentRole.Time && !arg.relation &&
+    relationHasGrammarFeature(frame.relation, "timeComplement");
+}
+
+/** Resolve Site attachment before locale realization or Time consumption. */
+export function instructionFrameSiteRelation(frame: AdviceFrame, site?: AdviceArgument): AdviceRelation | undefined {
+  const target = site ?? frame.args.find(arg => arg.role === AdviceArgumentRole.Site);
+  const relation = target?.relation ?? frame.relation;
+  if (!relation || !relationHasSemanticClass(relation, "locative")) return undefined;
+  if (!target?.relation && frame.args.some(arg => instructionFrameRelationOwnsTemporalArgument(frame, arg)))
+    return undefined;
+  return relation;
+}
+
+export function instructionSiteRelation(
+  input: InstructionActionRealizationInput, site?: AdviceArgument
+): string | undefined {
+  const relation = instructionFrameSiteRelation(input.frame, site);
+  return relation ? localizeAdviceRelation(relation, input.locale) ?? relation : undefined;
+}
+
+function siteRelationObject(input: InstructionActionRealizationInput): string | undefined {
+  const object = input.site ?? input.theme ?? input.container;
+  return object ? joinLocalizedTokens(input.locale, [instructionSiteRelation(input), object]) : undefined;
 }
 
 function relationForSite(input: InstructionActionRealizationInput): AdviceRelation {
@@ -372,7 +413,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       return `${c.label}${themeText}${substance || substanceAmount ? ` ${materialRelation} ${amountText}${substance ?? ""}` : ""}${companionsText}${c.time ? ` ${timeRelation} ${c.time}` : ""}`;
     }
     case "site-relation": {
-      const object = c.site ?? c.theme ?? c.container;
+      const object = siteRelationObject(c);
       const relationTarget = c.time ?? c.activity;
       const manner = c.manner ? ` ${c.manner}` : "";
       const substance = renderEnglishAccompaniment(c);
@@ -534,7 +575,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       return `${c.label}${themeText}${substanceText}${companionsText}${c.time ? `${timeRelation}${c.time}` : ""}`;
     }
     case "site-relation": {
-      const object = c.site ?? c.theme ?? c.container;
+      const object = siteRelationObject(c);
       const relationTarget = c.time ?? c.activity;
       const manner = c.manner ?? "";
       const substance = renderThaiAccompaniment(c);

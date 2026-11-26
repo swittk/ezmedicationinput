@@ -27,6 +27,10 @@ import { inferMedicationLocale, shouldJoinAdjacentSourceTokens, withMedicationSo
 import {
   getInstructionActionLocaleAdapter,
   instructionArgumentNeedsAuthoredDirections,
+  instructionSiteRelation,
+  instructionFrameSiteRelation,
+  instructionFrameRelationOwnsTemporalArgument,
+  instructionActionDefinitionForRealization,
   quantityOnlyInstructionArgument,
   realizeTimeArgument,
   InstructionActionRealizationInput
@@ -418,7 +422,8 @@ function clockArgumentFromParts(
 }
 
 function timeArgumentFromParts(
-  parts: Lexeme[], start: number, endExclusive: number, input: string, complete = false
+  parts: Lexeme[], start: number, endExclusive: number, input: string, complete = false, options?: ParseOptions,
+  nominalComplement = false
 ): AdviceArgument | undefined {
   ({ start, endExclusive } = semanticArgumentBounds(parts, start, endExclusive));
   const clock = clockArgumentFromParts(parts, start, endExclusive, input);
@@ -427,7 +432,7 @@ function timeArgumentFromParts(
   // A coordinated nominal must consume its complete daughter; the bounded
   // single-complement path retains its existing event search.
   let first = 0;
-  if (complete) while (EVENT_ARTICLE_TOKENS.has(canonicalParts[first])) first++;
+  while (EVENT_ARTICLE_TOKENS.has(canonicalParts[first])) first++;
   let event: EventTiming | undefined;
   for (let index = first; index < canonicalParts.length; index += 1) {
     const candidate = resolveEventTimingExpression(canonicalParts, index);
@@ -440,6 +445,12 @@ function timeArgumentFromParts(
   if (!event) return undefined;
   const text = trimSemanticText(sourceFor(parts, start, endExclusive, input));
   if (!text) return undefined;
+  // Site-relation valence keeps its existing single nominal complement;
+  // event adjuncts and coordinated daughters retain canonical EventTiming.
+  if (nominalComplement) {
+    const nominal = internalArgument(canonicalParts.slice(first).join(" "), text, options);
+    if (nominal?.role === AdviceArgumentRole.Time) return nominal;
+  }
   return {
     role: AdviceArgumentRole.Time,
     text,
@@ -598,7 +609,8 @@ function argumentCoordinationMembers(parts: Lexeme[], start: number, endExclusiv
 
 function timeArgumentsFromParts(
   parts: Lexeme[], start: number, endExclusive: number, input: string,
-  offset: number, relation: AdviceRelation | undefined, singleEnd = endExclusive
+  offset: number, relation: AdviceRelation | undefined, singleEnd = endExclusive, options?: ParseOptions,
+  nominalComplement = false
 ): AdviceArgument[] | undefined {
   const members = argumentCoordinationMembers(parts, start, endExclusive);
   // A choice is not a list of conjunctive event obligations. Preserve its
@@ -612,7 +624,7 @@ function timeArgumentsFromParts(
       const overt = resolveActionRelationSurfaceByGrammarFeature(key(parts[begin]), "timeComplement");
       if (overt) { inheritedRelation = overt; begin++; }
       const bounds = semanticArgumentBounds(parts, begin, member.end);
-      const time = timeArgumentFromParts(parts, bounds.start, bounds.endExclusive, input, true);
+      const time = timeArgumentFromParts(parts, bounds.start, bounds.endExclusive, input, true, options);
       if (!time) {
         // A later independently marked complement belongs to the caller's
         // next relation, not to this already complete temporal conjunction.
@@ -625,7 +637,7 @@ function timeArgumentsFromParts(
     // Every daughter in this relation scope was consumed completely.
     return times;
   }
-  const single = timeArgumentFromParts(parts, start, singleEnd, input);
+  const single = timeArgumentFromParts(parts, start, singleEnd, input, false, options, nominalComplement);
   return single ? [single] : undefined;
 }
 
@@ -1238,7 +1250,7 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   while (targetIndex >= 0 && targetIndex + 1 < targetEnd) {
     const temporal = relationHasSemanticClass(targetRelation, "temporal");
     const times = relationHasGrammarFeature(targetRelation, "timeComplement")
-      ? timeArgumentsFromParts(parts, targetIndex + 1, targetEnd, input, offset, targetRelation) : undefined;
+      ? timeArgumentsFromParts(parts, targetIndex + 1, targetEnd, input, offset, targetRelation, targetEnd, options) : undefined;
     if (temporal) tailRelationIndex = -1;
     if (times) {
       // Each bounded clock or event remains with this action while later
@@ -1321,7 +1333,8 @@ function quantifiedEntityArgument(
   input: string,
   offset: number,
   role: AdviceArgumentRole,
-  options?: ParseOptions
+  options?: ParseOptions,
+  selectedNominal?: AdviceArgument
 ): AdviceArgument | undefined {
   if (end <= start) return undefined;
   const quantity = parseQuantityArgument(parts, start, end, input, offset, options);
@@ -1338,7 +1351,7 @@ function quantifiedEntityArgument(
       entity = argumentFromParts(parts, quantityEnd, end, input, role, options);
     }
   } else {
-    entity = argumentFromParts(parts, start, end, input, role, options);
+    entity = selectedNominal ?? argumentFromParts(parts, start, end, input, role, options);
   }
   const text = trimSemanticText(sourceFor(parts, start, end, input));
   if (!entity && !quantity) return undefined;
@@ -1359,6 +1372,20 @@ function quantifiedEntityArgument(
   const last = parts[end - 1];
   if (first && last) result.span = { start: offset + first.sourceStart, end: offset + last.sourceEnd };
   return result;
+}
+
+/** A measured nominal owns its quantity; a bare quantity remains the head Amount. */
+function nominalAccompanimentArgument(
+  parts: Lexeme[], start: number, end: number, input: string, offset: number,
+  relation: AdviceRelation | undefined, options?: ParseOptions
+): AdviceArgument | undefined {
+  if (!relationHasSemanticClass(relation, "accompaniment")) return undefined;
+  const nominal = argumentFromParts(parts, start, end, input, AdviceArgumentRole.Substance, options);
+  const companion = quantifiedEntityArgument(parts, start, end, input, offset,
+    nominal?.role ?? AdviceArgumentRole.Substance, options, nominal);
+  if (!companion || quantityOnlyInstructionArgument(companion)) return undefined;
+  companion.relation = relation;
+  return companion;
 }
 
 function trailingTimeArgument(
@@ -1591,8 +1618,15 @@ const SITE_RELATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       ? durationArgumentAt(parts, relIndex, semanticEnd, input, c.offset)
       : undefined;
   if (elapsed) pushArgument(args, elapsed);
-  else if (relIndex >= 0 && relIndex < semanticEnd) pushArgument(args, argumentFromParts(
-    parts, relIndex + 1, Math.min(c.relationTargetEnd, semanticEnd), input, preferredRinseRole(relation), options));
+  else if (c.accompaniment) pushArgument(args, c.accompaniment);
+  else if (c.relationTimes) for (const time of c.relationTimes) pushArgument(args, time);
+  else if (relIndex >= 0 && relIndex < semanticEnd) {
+    const target = argumentFromParts(parts, relIndex + 1, Math.min(c.relationTargetEnd, semanticEnd),
+      input, preferredRinseRole(relation), options);
+    if (target?.role === AdviceArgumentRole.Site && relationHasSemanticClass(relation, "locative"))
+      target.relation = relation;
+    pushArgument(args, target);
+  }
   else pushArgument(args, argumentFromParts(
     parts, argumentStart, semanticEnd, input, preferredRinseRole(relation), options));
   pushArgument(args, resultTail?.argument);
@@ -1722,7 +1756,7 @@ function buildActionFrame(
   const nextRelationIndex = relIndex >= 0 && !conditionalTail
     ? relationIndex(parts, relIndex + 1, segmentEnd) : -1;
   const nextRelation = nextRelationIndex >= 0
-    ? resolveActionRelationSurface(
+    ? actionArgumentRelation(
         key(parts[nextRelationIndex]),
         definition.preferredRelationSemanticClasses
       )
@@ -1759,23 +1793,15 @@ function buildActionFrame(
   // Resolve the typed event daughter once, before deciding which complement
   // owns a quantity. WITH breakfast is temporal; WITH 200 mL water owns its
   // own amount. The default argument parser reuses this same daughter.
-  const relationTimes = (directObjectValence || definition.argumentParser === "amount-duration") &&
+  const nominalAccompanimentValence = definition.argumentParser === "amount-duration" ||
+    definition.argumentParser === "site-relation";
+  const relationTimes = (directObjectValence || nominalAccompanimentValence) &&
     relIndex >= 0 && !conditionalTail && relationHasGrammarFeature(relation, "timeComplement")
-    ? timeArgumentsFromParts(parts, relIndex + 1, semanticEnd, input, offset, relation, relationTargetEnd) : undefined;
-  let accompaniment: AdviceArgument | undefined;
-  if (definition.argumentParser === "amount-duration" && !relationTimes && relIndex >= 0 &&
-      relationHasSemanticClass(relation, "accompaniment")) {
-    const nominal = argumentFromParts(parts, relIndex + 1, relationTargetEnd,
-      input, AdviceArgumentRole.Substance, options);
-    const companion = quantifiedEntityArgument(parts, relIndex + 1, relationTargetEnd,
-      input, offset, nominal?.role ?? AdviceArgumentRole.Substance, options);
-    // WITH a bare quantity remains the administered amount; a separate
-    // measured nominal owns its own quantity and cannot supply the head dose.
-    if (companion && !quantityOnlyInstructionArgument(companion)) {
-      companion.relation = relation;
-      accompaniment = companion;
-    }
-  }
+    ? timeArgumentsFromParts(parts, relIndex + 1, semanticEnd, input, offset, relation, relationTargetEnd, options,
+        definition.argumentParser === "site-relation") : undefined;
+  const accompaniment = nominalAccompanimentValence && !relationTimes && relIndex >= 0
+    ? nominalAccompanimentArgument(parts, relIndex + 1, relationTargetEnd, input, offset, relation, options)
+    : undefined;
   const headOwnsAmount = accompaniment !== undefined || directObjectValence && !relationTimes &&
       relationHasGrammarFeature(relation, "accompanimentComplement") ||
     (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
@@ -1785,27 +1811,32 @@ function buildActionFrame(
   // A leading temporal adjunct does not transfer ownership of a later
   // material/destination quantity to the head. Follow the same typed valence
   // through later relations while retaining post-temporal head amounts.
-  if (!headOwnsAmount && definition.acceptsAmount && relIndex >= argumentStart &&
+  if (!headOwnsAmount && (definition.acceptsAmount || nominalAccompanimentValence) && relIndex >= argumentStart &&
       (relationTimes || relationHasSemanticClass(relation, "temporal"))) {
     let index = nextRelationIndex, current = nextRelation;
     while (index >= 0 && index < semanticEnd) {
       const following = relationIndex(parts, index + 1, semanticEnd);
-      const ownsQuantity = directObjectValence
+      const complementEnd = following < 0 ? semanticEnd : following;
+      const nominal = nominalAccompanimentValence
+        ? nominalAccompanimentArgument(parts, index + 1, complementEnd, input, offset, current, options)
+        : undefined;
+      const ownsQuantity = nominal !== undefined || (directObjectValence
         ? relationHasGrammarFeature(current, "accompanimentComplement") &&
-          !timeArgumentFromParts(parts, index + 1, following < 0 ? semanticEnd : following, input)
+          !timeArgumentFromParts(parts, index + 1, complementEnd, input, false, options)
         : (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
-          !relationHasSemanticClass(current, "temporal");
+          !relationHasSemanticClass(current, "temporal"));
       if (ownsQuantity) {
         amountEnd = index;
-        if (directObjectValence) {
+        if (nominal) laterAccompaniment = nominal;
+        else if (directObjectValence) {
           laterAccompaniment = quantifiedEntityArgument(parts, index + 1,
-            following < 0 ? semanticEnd : following, input, offset, AdviceArgumentRole.Substance, options);
+            complementEnd, input, offset, AdviceArgumentRole.Substance, options);
           if (laterAccompaniment) laterAccompaniment.relation = current;
         }
         break;
       }
       index = following;
-      current = index >= 0 ? resolveActionRelationSurface(key(parts[index]),
+      current = index >= 0 ? actionArgumentRelation(key(parts[index]),
         definition.preferredRelationSemanticClasses) : undefined;
     }
   }
@@ -1850,7 +1881,7 @@ function buildActionFrame(
   // earlier complement, including a material amount or procedure duration.
   const nextTimes = relationTimes && relationTimes.length > 1 ? relationTimes
     : temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "timeComplement")
-      ? timeArgumentsFromParts(parts, temporalIndex + 1, semanticEnd, input, offset, temporalRelation) : undefined;
+      ? timeArgumentsFromParts(parts, temporalIndex + 1, semanticEnd, input, offset, temporalRelation, semanticEnd, options) : undefined;
   if (nextTimes) {
     const bounds = semanticArgumentBounds(parts, temporalIndex + 1, semanticEnd);
     const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
@@ -2168,7 +2199,7 @@ function attachPreposedActionRelation(
   if (frame.relation !== undefined) return;
   frame.relation = attachment.relation;
   const times = timeArgumentsFromParts(parts, attachment.targetStart, attachment.targetEnd,
-    sourceText, baseOffset, attachment.relation);
+    sourceText, baseOffset, attachment.relation, attachment.targetEnd, options);
   const fallbackRole = relationHasGrammarFeature(attachment.relation, "activityFallback")
     ? AdviceArgumentRole.Activity
     : undefined;
@@ -3915,10 +3946,7 @@ const DEFAULT_ACTION_REALIZER = (
     : undefined;
   const siteArgument = objectArg?.role === AdviceArgumentRole.Site ? objectArg
     : c.site ? c.frame.args.find(arg => arg.role === AdviceArgumentRole.Site) : undefined;
-  const siteRelation = siteArgument?.relation ?? c.frame.relation;
-  const locativeRelation = c.site && siteRelation && relationHasSemanticClass(siteRelation, "locative")
-    ? localizeAdviceRelation(siteRelation, c.locale) ?? siteRelation
-    : undefined;
+  const locativeRelation = c.site ? instructionSiteRelation(c, siteArgument) : undefined;
   const resultRelation = c.result && c.frame.relation
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
@@ -4121,10 +4149,7 @@ function realizeAction(
     const arg = firstArguments[role];
     return arg ? translatedArgument(arg, locale) : undefined;
   };
-  const fallback = getMedicationInstructionAction(frame.predicate.lemma);
-  // A selected custom head may share a default code without sharing its
-  // wording or attachment. Its persisted realizer and configuration own both.
-  const definition = !frame.predicate.display || frame.predicate.display === fallback?.display ? fallback : undefined;
+  const definition = instructionActionDefinitionForRealization(frame);
   const label = actionLabel(frame, locale, definition, roundtripSafe);
   const amount = first(AdviceArgumentRole.Amount);
   const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
@@ -4670,7 +4695,7 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
   // method edit cannot revoke its current schedule/site ownership.
   if (clause.sourceProjectionVerified !== false && !ownsEvents && !ownsClocks && !hasClocks && !ownsSite) return frame;
   const args: AdviceArgument[] = [];
-  let changed = false;
+  let changed = false, removedFrameTime = false, retainedFrameTime = false;
   for (const arg of frame.args) {
     if (arg.role === AdviceArgumentRole.Time && arg.normalized) {
       const clock = /^[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?$/.test(arg.normalized);
@@ -4687,8 +4712,10 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
       if (directClock && (ownsClocks || mirrorsClock) || event &&
           (hasOffset || (schedule?.when?.length ?? 0) > 1 || !timeArgumentCoveredBySchedule(frame, arg, clause, event))) {
         changed = true;
+        if (instructionFrameRelationOwnsTemporalArgument(frame, arg)) removedFrameTime = true;
         continue;
       }
+      if (instructionFrameRelationOwnsTemporalArgument(frame, arg)) retainedFrameTime = true;
     }
     // The graph's plain Site argument cannot express live spatial relations
     // or restrictions. The canonical site phrase owns this primary display;
@@ -4737,7 +4764,11 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
   // A failed proof forbids old raw wording, even when a graph-only clock
   // survives as an independent typed argument.
   if (!changed && clause.sourceProjectionVerified !== false && !ownsEvents && !ownsClocks) return frame;
-  return { ...frame, sourceText: "", args: changed ? args : frame.args };
+  // A consumed Time must not donate its owned frame relation to an unmarked
+  // Site in this display copy. Explicit Site attachments remain on the child.
+  const relation = removedFrameTime && !retainedFrameTime &&
+    relationHasSemanticClass(frame.relation, "locative") ? undefined : frame.relation;
+  return { ...frame, relation, sourceText: "", args: changed ? args : frame.args };
 }
 
 /**
@@ -4789,6 +4820,11 @@ function primaryActionCoveredByCanonicalClause(
     }
     if (first !== sourceFrame) return false;
   }
+  // Site and schedule equality do not represent this valence's direct
+  // object beside its temporal complement. Keep their composition together.
+  const realizer = frame.predicate.realizer ?? instructionActionDefinitionForRealization(frame)?.realizer;
+  if (realizer === "site-relation" && frame.args.some(arg => arg.role === AdviceArgumentRole.Site) &&
+      frame.args.some(arg => instructionFrameRelationOwnsTemporalArgument(frame, arg))) return false;
   return frame.args.every((arg) =>
     (arg.role === AdviceArgumentRole.Site && siteArgumentCoveredByClause(arg, clause)) ||
     (arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, clause.dose)) ||
@@ -5050,20 +5086,22 @@ export function instructionGraphPrimarySiteRelation(
   const graph = clause.instructionGraph;
   const primary = graph?.primaryAdministrationSpan;
   if (!graph || !primary || !clause.site) return undefined;
-  return graph.actions
-    .filter((action) =>
-      action.polarity !== AdvicePolarity.Negate &&
-      action.relation !== undefined &&
-      relationHasSemanticClass(action.relation, "locative") &&
-      action.span.start < primary.end && primary.start < action.span.end &&
-      actionMatchesCanonicalMethod(action, clause) &&
-      action.args.some((arg) =>
-        arg.role === AdviceArgumentRole.Site && siteArgumentCoveredByClause(arg, clause)
-      )
-    )
-    .sort((left, right) =>
-      left.span.start - right.span.start || left.span.end - right.span.end
-    )[0]?.relation;
+  let selected: AdviceFrame | undefined, selectedRelation: AdviceRelation | undefined;
+  for (const action of graph.actions) {
+    if (action.polarity === AdvicePolarity.Negate || action.span.start >= primary.end ||
+        primary.start >= action.span.end || !actionMatchesCanonicalMethod(action, clause)) continue;
+    for (const arg of action.args) {
+      if (arg.role !== AdviceArgumentRole.Site || !siteArgumentCoveredByClause(arg, clause)) continue;
+      const relation = instructionFrameSiteRelation(action, arg);
+      if (relation && (!selected || action.span.start < selected.span.start ||
+          action.span.start === selected.span.start && action.span.end < selected.span.end)) {
+        selected = action;
+        selectedRelation = relation;
+      }
+      break;
+    }
+  }
+  return selectedRelation;
 }
 
 export function instructionGraphPrimaryAdministrationModality(

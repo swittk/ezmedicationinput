@@ -5687,6 +5687,138 @@ describe("independent primary graph rendering owners", () => {
     }
   );
 
+  it.each([
+    ["Rinse mouth", "with water", "before breakfast", "water", AdviceRelation.With, AdviceRelation.Before,
+      undefined, "Rinse mouth with water before breakfast.", "บ้วนปากด้วยน้ำก่อนอาหารเช้า."],
+    ["Rinse the mouth", "with water", "before breakfast", "water", AdviceRelation.With, AdviceRelation.Before,
+      undefined, "Rinse the mouth with water before breakfast.", "ล้างmouthด้วยน้ำก่อนอาหารเช้า."],
+    ["Rinse the mouth", "without mouthwash", "before breakfast", "mouthwash", AdviceRelation.Without, AdviceRelation.Before,
+      undefined, "Rinse the mouth without mouthwash before breakfast.", "ล้างmouthโดยไม่ใช้mouthwashก่อนอาหารเช้า."],
+    ["Gargle", "with 10 mL water", "after breakfast", "water", AdviceRelation.With, AdviceRelation.After,
+      10, "Gargle with 10 mL water after breakfast.", "กลั้วคอด้วย10 มิลลิลิตรน้ำหลังอาหารเช้า."],
+    ["Rinse mouth", "without mouthwash", "before breakfast", "mouthwash", AdviceRelation.Without, AdviceRelation.Before,
+      undefined, "Rinse mouth without mouthwash before breakfast.", "บ้วนปากโดยไม่ใช้mouthwashก่อนอาหารเช้า."]
+  ] as const)("keeps %s %s independent of meal-adjunct order",
+    (head, companionText, eventText, nominal, companionRelation, eventRelation, quantity, en, th) => {
+      for (const source of [`${head} ${companionText} ${eventText}`, `${head} ${eventText} ${companionText}`]) {
+        const action = parseInstructionActions(source)[0];
+        const companion = action.args.find(arg => arg.role === AdviceArgumentRole.Substance)!;
+        expect(companion).toMatchObject({ normalized: nominal, relation: companionRelation });
+        expect(companion.quantity).toEqual(quantity === undefined ? undefined : { value: quantity, unit: "mL" });
+        expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Amount)).toEqual([]);
+        const time = action.args.find(arg => arg.role === AdviceArgumentRole.Time)!;
+        expect(time.normalized).toBe(EventTiming.Breakfast);
+        expect(time.relation ?? action.relation).toBe(eventRelation);
+        const parsed = parsePublicSig(source);
+        expect(parsed.meta.canonical.clauses).toHaveLength(1);
+        expect(parsed.meta.canonical.clauses[0].dose).toBeUndefined();
+        const marker = { url: "urn:clinic:procedure-note", valueString: "Keep this annotation" };
+        const fresh: FhirDosage = { extension: [marker, buildInstructionGraphExtension({
+          sourceText: source, sourceLocale: "en", actions: [action]
+        })!] };
+        const freshR6 = toDosageDetails([fresh]);
+        for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext, [fresh], freshR6]) {
+          const before = JSON.stringify(input);
+          expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(en);
+          expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(th);
+          expect(JSON.stringify(input)).toBe(before);
+        }
+        const returned = toFhirR5Dosages(freshR6)[0];
+        expect(returned.extension).toContainEqual(marker);
+        expect(parseInstructionGraphExtension(returned.extension)?.sourceText).toBe(source);
+        expect(parsed.input).toBe(source);
+        expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      }
+    }
+  );
+
+  it("keeps a bare procedure volume as the head Amount on either side of the meal adjunct", () => {
+    for (const source of ["Gargle with 10 mL after breakfast", "Gargle after breakfast with 10 mL"]) {
+      const action = parseInstructionActions(source)[0];
+      expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Amount,
+        quantity: { value: 10, unit: "mL" } }));
+      expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Substance)).toEqual([]);
+      const time = action.args.find(arg => arg.role === AdviceArgumentRole.Time)!;
+      expect(time.normalized).toBe(EventTiming.Breakfast);
+      expect(time.relation ?? action.relation).toBe(AdviceRelation.After);
+      const parsed = parsePublicSig(source);
+      expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 10, unit: "mL" });
+      for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+          .toMatch(/^Gargle 10 mL after breakfast\.$/u);
+        expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+          .toMatch(/^กลั้วคอ.*10 มิลลิลิตร.*หลังอาหารเช้า\.$/u);
+      }
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    }
+  });
+
+  it.each([
+    ["Wash the face at 08:00", false, false],
+    ["Wash on the face at 08:00", true, false],
+    ["Rinse the mouth at 08:00", false, false],
+    ["Rinse the mouth at 08:00 with 10 mL water", false, true],
+    ["Rinse the mouth with 10 mL water at 08:00", false, true]
+  ] as const)("keeps the clock's relation off the direct Site: %s", (source, siteOn, material) => {
+    const action = parseInstructionActions(source)[0];
+    const site = action.args.find(arg => arg.role === AdviceArgumentRole.Site)!;
+    expect(site.relation).toBe(siteOn ? AdviceRelation.On : undefined);
+    expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Time)).toHaveLength(1);
+    const parsed = parsePublicSig(source);
+    if (siteOn) {
+      const currentSite = parsed.meta.canonical.clauses[0].site!;
+      expect(currentSite.text).toMatch(/^(?:the )?face$/u);
+      if (currentSite.range) expect(source.slice(currentSite.range.start, currentSite.range.end)).not.toContain("at");
+    }
+    if (material) {
+      expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Substance,
+        normalized: "water", relation: AdviceRelation.With, quantity: { value: 10, unit: "mL" } }));
+      expect(parsed.meta.canonical.clauses[0].dose).toBeUndefined();
+    }
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+      for (const locale of ["en", "th"]) {
+        const before = JSON.stringify(input), text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(source.startsWith("Wash") ? locale === "en" ? "face" : "ใบหน้า" : "mouth");
+        expect(text.match(/(?:^|[^0-9:])(?:08:00(?::00)?|8:00\s*am)(?![0-9:])/giu)).toHaveLength(1);
+        if (siteOn) expect(text).toMatch(locale === "en" ? /on (?:the )?face/u : /บนใบหน้า/u);
+        else expect(text).not.toMatch(locale === "en" ? /(?:Wash|Rinse) on /u : /ล้าง(?:บน|บริเวณ)/u);
+        expect(text).not.toMatch(/at at|เวลา\s*เวลา/u);
+        if (material) expect(text).toContain(locale === "en" ? "with 10 mL water" : "ด้วย10 มิลลิลิตรน้ำ");
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([
+    ["Rinse the mouth at breakfast", [EventTiming.Breakfast]],
+    ["Rinse the mouth at 08:00 and at 20:00", ["08:00:00", "20:00:00"]],
+    ["Rinse the mouth at breakfast and at bedtime", [EventTiming.Breakfast, EventTiming["Before Sleep"]]]
+  ] as const)("keeps event and clock relations off the direct Site: %s", (source, times) => {
+    const action = parseInstructionActions(source)[0];
+    expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Time).map(arg => arg.normalized)).toEqual(times);
+    expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Time)
+      .every(arg => (arg.relation ?? action.relation) === AdviceRelation.On)).toBe(true);
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+      for (const locale of ["en", "th"]) {
+        const before = JSON.stringify(input);
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        if (locale === "en") expect(text).toMatch(/^Rinse (?:the )?mouth(?:[ .])/u);
+        else expect(text).toContain("mouth");
+        expect(text).not.toMatch(locale === "en" ? /Rinse on /u : /ล้าง(?:บน|บริเวณ)/u);
+        if (times[0] === "08:00:00") {
+          expect(text.match(/(?:^|[^0-9:])(?:08:00(?::00)?|8:00\s*am)(?![0-9:])/giu)).toHaveLength(1);
+          expect(text.match(/(?:^|[^0-9:])(?:20:00(?::00)?|8:00\s*pm)(?![0-9:])/giu)).toHaveLength(1);
+        } else {
+          expect(text.match(locale === "en" ? /breakfast/gu : /อาหารเช้า/gu)).toHaveLength(1);
+          if (times.length > 1) expect(text.match(locale === "en" ? /bedtime/gu : /ก่อนนอน/gu)).toHaveLength(1);
+        }
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
   it("retains the administered rinse volume and elapsed minute", () => {
     const source = "Rinse mouth 10 mL for 1 minute", parsed = parsePublicSig(source);
     const action = parseInstructionActions(source)[0];
@@ -5769,17 +5901,22 @@ describe("independent primary graph rendering owners", () => {
       const site = { role: AdviceArgumentRole.Site, text: "left forearm", normalized: "left forearm",
         i18n: { th: "แขนซ้าย" }, ...(variant === "site-first explicit" ? { relation: AdviceRelation.On } : {}) };
       const theme = { role: AdviceArgumentRole.Theme, text: "cream", normalized: "cream", i18n: { th: "ครีม" } };
-      const frame: AdviceFrame = { ...parseInstructionActions("Apply cream to the left forearm")[0],
-        sourceText: "", relation: AdviceRelation.On,
-        args: variant === "theme-first inherited" ? [theme, site] : [site, theme] };
-      const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: "", actions: [frame] })!] };
-      for (const locale of ["en", "th"]) {
-        const expected = locale === "en" ? "Apply cream on left forearm" : "ทาครีมบนแขนซ้าย";
-        expect(realizeInstructionAction(frame, locale)).toBe(expected);
-        for (const input of [[row], toDosageDetails([row]), importCanonicalCourse([row])]) {
-          const before = JSON.stringify(input);
-          expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toBe(expected + ".");
-          expect(JSON.stringify(input)).toBe(before);
+      for (const withClock of [false, true]) {
+        const ordered = variant === "theme-first inherited" ? [theme, site] : [site, theme];
+        const frame: AdviceFrame = { ...parseInstructionActions("Apply cream to the left forearm")[0],
+          sourceText: "", relation: AdviceRelation.On,
+          args: [...ordered, ...(withClock ? [{ role: AdviceArgumentRole.Time, text: "08:00",
+            normalized: "08:00", relation: AdviceRelation.On }] : [])] };
+        const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: "", actions: [frame] })!] };
+        for (const locale of ["en", "th"]) {
+          const expected = (locale === "en" ? "Apply cream on left forearm" : "ทาครีมบนแขนซ้าย") +
+            (withClock ? locale === "en" ? " at 08:00" : " เวลา 08:00" : "");
+          expect(realizeInstructionAction(frame, locale)).toBe(expected);
+          for (const input of [[row], toDosageDetails([row]), importCanonicalCourse([row])]) {
+            const before = JSON.stringify(input);
+            expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toBe(expected + ".");
+            expect(JSON.stringify(input)).toBe(before);
+          }
         }
       }
     }
