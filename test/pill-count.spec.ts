@@ -1802,3 +1802,85 @@ describe("recorded daily-cycle use replaces nominal history", () => {
     check(source(true), ["2027-01-01T09:00:00Z"]);
   });
 });
+
+
+describe("recognized duration labels and qualified scheduling quantities", () => {
+  it.each([
+    [undefined, "urn:clinic:time", true],
+    ["d", "http://unitsofmeasure.org", true],
+    ["d", "urn:clinic:time", false]
+  ] as const)("resolves duration labels without reinterpreting a foreign code (%s, %s)", (code, system, resolved) => {
+    const unit = { unit: "days", system, ...(code ? { code } : {}) };
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00"], boundsRange: { low: { value: 5, ...unit }, high: { value: 7, ...unit } } } }
+    };
+    const before = JSON.stringify(dosage);
+    const query = () => nextDueDoses(dosage, { orderedAt: "2026-11-01T00:00:00Z",
+      from: "2026-11-01T00:00:00Z", timeZone: "UTC", limit: 10 });
+    if (resolved) {
+      expect(query()).toEqual([
+        "2026-11-01T08:00:00+00:00", "2026-11-02T08:00:00+00:00", "2026-11-03T08:00:00+00:00",
+        "2026-11-04T08:00:00+00:00", "2026-11-05T08:00:00+00:00", "2026-11-06T08:00:00+00:00",
+        "2026-11-07T08:00:00+00:00"
+      ]);
+    } else {
+      expect(query).toThrowError(expect.objectContaining({ code: "course-duration-unresolved" }));
+    }
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+  it.each(["not greater than", "not more than"])("keeps a PRN dose and its %s daily maximum", lead => {
+    const source = "Take 1 tablet every 6 hours as needed for pain; " + lead + " 4 tablets per day";
+    const parsed = parseBatch(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      period: 6, periodUnit: "h", maxDosePerPeriod: [{ amount: 4, unit: "tab", period: 1, periodUnit: "d" }]
+    });
+    for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(row.asNeeded).toBe(true);
+      expect(row.maxDosePerPeriod).toMatchObject([
+        { numerator: { value: 4, unit: "tab" }, denominator: { value: 1, unit: "d" } }
+      ]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([
+    ["no more than", " per 2 hours"], ["no more than", " per 2h"],
+    ["no more than", "/2h"], ["maximum", " per 2 hours"]
+  ])("keeps a numeric-window %s ceiling%s on a PRN dose", (lead, period) => {
+    const source = "Give 5 mg as needed, " + lead + " 10 mg" + period;
+    const parsed = parseBatch(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 5, unit: "mg" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.maxDosePerPeriod)
+      .toEqual([{ amount: 10, unit: "mg", period: 2, periodUnit: "h" }]);
+    for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(row.asNeeded).toBe(true);
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 5, unit: "mg" });
+      expect(row.doseAndRate?.[0].rateQuantity).toBeUndefined();
+      expect(row.doseAndRate?.[0].rateRatio).toBeUndefined();
+      expect(row.maxDosePerPeriod).toMatchObject([
+        { numerator: { value: 10, unit: "mg" }, denominator: { value: 2, unit: "h" } }
+      ]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([["2.30", "14:30:00"], ["2", "14:00:00"]])(
+    "keeps the comparative clock %s pm out of the dose quantity", (clock, expected) => {
+      const source = "Take around " + clock + " pm", parsed = parseBatch(source);
+      expect(parsed.meta.canonical.clauses[0].dose).toBeUndefined();
+      for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+        expect(row.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+        expect(row.timing?.repeat?.timeOfDay).toEqual([expected]);
+        expect(row.timing?.repeat?.when).toBeUndefined();
+      }
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    }
+  );
+});

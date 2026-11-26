@@ -264,7 +264,7 @@ export function getQuantityDurationUnit(
 ): FhirPeriodUnit | undefined {
   // A local code belongs to its stated terminology, even if it spells a
   // familiar UCUM symbol. Keep unknown durations available without guessing.
-  if (quantity?.system && quantity.system !== "http://unitsofmeasure.org") return undefined;
+  if (quantity?.code && quantity.system && quantity.system !== "http://unitsofmeasure.org") return undefined;
   let candidate = quantity?.code?.trim() ?? quantity?.unit?.trim();
   // Explicit UCUM codes are case-sensitive (S is conductance; s is time).
   // Uncoded labels and the supported systemless shorthand remain permissive.

@@ -3569,3 +3569,21 @@ describe("independent action accompaniments", () => {
     }
   });
 });
+
+
+describe("negative meal complements with articles", () => {
+  it.each(["without a meal", "without the meal"])("retains %s without inventing a meal anchor", accompaniment => {
+    const source = "Take 1 tablet daily " + accompaniment, parsed = parseCompleteSig(source);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.when).toBeUndefined();
+    for (const input of [parsed.fhir, parsed.fhirNext]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toContain(accompaniment);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .not.toContain("with meals");
+    }
+    expect(parsed.fhir[0].timing?.repeat?.when).toBeUndefined();
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+});

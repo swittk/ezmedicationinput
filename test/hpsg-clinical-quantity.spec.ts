@@ -4588,3 +4588,25 @@ describe("explicit maximum ownership beside a trailing route", () => {
     }
   });
 });
+
+
+describe("qualified minute infusion durations", () => {
+  it.each([["about 30m", 30], ["about 30 min", 30], ["about one and a half m", 1.5]] as const)(
+    "keeps %s on its rate administration", (duration, amount) => {
+      const source = "Infuse 100 mL/hr for " + duration, parsed = parsePublicSig(source);
+      expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+        administrationDuration: amount, administrationDurationUnit: "min", administrationDurationComparator: "~", count: 1
+      });
+      for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+        expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
+        expect(row.doseAndRate?.[0].doseQuantity).toBeUndefined();
+        expect(row.asNeeded).not.toBe(true);
+        const quantity = row.timing?.repeat?.extension?.find(extension =>
+          extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)?.valueQuantity;
+        expect(quantity).toMatchObject({ value: amount, code: "min" });
+        expect(getQuantityComparator(quantity)).toBe("~");
+      }
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    }
+  );
+});

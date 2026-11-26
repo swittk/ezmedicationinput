@@ -50,6 +50,7 @@ import {
   DAYPART_INTERVAL_TOKENS,
   CALENDAR_MONTH_DAY_FRAMES,
   DOSE_TARGET_EVENT_MEMBERS,
+  DOSE_FRACTION_ARTICLES,
   DURATION_LEAD_TOKENS,
   INSTRUCTION_DURATION_UNITS,
   COURSE_DURATION_UNITS,
@@ -1567,9 +1568,15 @@ function mealRelationFromToken(lower: string): "before" | "after" | "with" | und
 /** A negative accompaniment owns its event noun as advice, not a positive
  * administration anchor. Keep the same admission in the chart and boundary reader. */
 function isNegatedEventComplement(context: HpsgClauseContext, index: number): boolean {
-  const relation = context.tokens[index - 1];
-  return Boolean(relation &&
-    resolveAdviceRelationSurface(normalizeTokenLower(relation)) === AdviceRelation.Without);
+  let relation = context.tokens[index - 1];
+  if (!relation) return false;
+  let lower = normalizeTokenLower(relation);
+  if (EVENT_ARTICLE_TOKENS.has(lower) || DOSE_FRACTION_ARTICLES.has(lower)) {
+    relation = context.tokens[index - 2];
+    if (!relation) return false;
+    lower = normalizeTokenLower(relation);
+  }
+  return resolveAdviceRelationSurface(lower) === AdviceRelation.Without;
 }
 
 const BASE_MEAL_EVENTS = new Set<EventTiming>([

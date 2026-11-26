@@ -1,6 +1,6 @@
 import { routeLexicalRule } from "./core-rules";
 import { LexKind } from "../../lexer/token-types";
-import { getRouteMeaning, hasTimingAbbreviationMeaning } from "../../lexer/meaning";
+import { getRouteMeaning, hasPrnMeaning, hasTimingAbbreviationMeaning } from "../../lexer/meaning";
 import { FhirPeriodUnit, RouteCode } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
@@ -180,19 +180,19 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number, allowP
   const first = Math.max(0, before - 8);
   const maximum = allowPrecedingDose &&
     MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(normalizeTokenLower(context.tokens[before]));
-  let precedingAmount = false, precedingCadence = false;
+  let precedingAmount = false, precedingSchedule = false;
   for (let index = before - 1; index >= first; index -= 1) {
     const token = context.tokens[index];
     const lower = normalizeTokenLower(token);
-    if (maximum && (EVERY_INTERVAL_TOKENS.has(lower) || hasTimingAbbreviationMeaning(token)))
-      precedingCadence = true;
+    if (maximum && (EVERY_INTERVAL_TOKENS.has(lower) ||
+        hasTimingAbbreviationMeaning(token) || hasPrnMeaning(token))) precedingSchedule = true;
     // An administration head owns its nearest numeric argument. A later
     // cumulative limit cannot borrow it across the already administered dose.
     if (/^(?:infuse|infusion|run|administer|give)$/u.test(lower)) {
       if (!precedingAmount) return true;
-      // A recurring dose keeps its own administration head. A later limit
+      // A scheduled or as-needed dose keeps its administration head. A later limit
       // cannot borrow that head as an infusion-rate instruction.
-      if (!allowPrecedingDose || precedingCadence) return false;
+      if (!allowPrecedingDose || precedingSchedule) return false;
       // A borrowed administration head still belongs to its typed route.
       // Reuse the route constituent so multiword and configured routes retain
       // the same ownership as a single annotated route token.
@@ -406,7 +406,7 @@ function infusionDurationAt(context: HpsgClauseContext, start: number) {
   const token = context.tokens[start];
   if (!token || !available(context, start)) return undefined;
   const qualified = token.kind === LexKind.Number ? undefined :
-    doseComparatorNumberAt(context.tokens, start, context.limit, normalizeTokenLower(token));
+    doseComparatorNumberAt(context.tokens, start, context.limit, normalizeTokenLower(token), false);
   const articleFraction = !qualified && DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(token)) &&
     available(context, start + 1)
     ? DOSE_FRACTION_WORDS.get(normalizeTokenLower(context.tokens[start + 1])) : undefined;
@@ -417,7 +417,7 @@ function infusionDurationAt(context: HpsgClauseContext, start: number) {
     ? DOSE_FRACTION_DENOMINATOR_WORDS.get(normalizeTokenLower(context.tokens[start + 1])) : undefined;
   const exact = cardinal === undefined ? undefined : denominator === undefined ? cardinal : cardinal * denominator;
   const mixed = exact === undefined || denominator !== undefined ? undefined :
-    additiveDoseNumberAt(context.tokens, start, context.limit, exact);
+    additiveDoseNumberAt(context.tokens, start, context.limit, exact, false);
   let unitIndex = (qualified?.numericIndex ?? mixed?.numericIndex ??
     (articleFraction === undefined && denominator === undefined ? start : start + 1)) + 1;
   const value = qualified?.value ?? mixed?.value ?? exact;

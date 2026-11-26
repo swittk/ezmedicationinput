@@ -821,7 +821,7 @@ export const DOSE_COMPARATOR_SYMBOLS =
  * caller still owns its medication unit; this cannot swallow two independently
  * unit-bearing coordinated doses. Returns the last number token it owns. */
 export function additiveDoseNumberAt(
-  tokens: readonly LexToken[], start: number, limit: number, whole: number
+  tokens: readonly LexToken[], start: number, limit: number, whole: number, allowMillion = true
 ): { value: number; numericIndex: number } | undefined {
   const connector = start + 1 < limit ? tokens[start + 1] : undefined;
   if (!Number.isInteger(whole) || whole <= 0 || !connector ||
@@ -847,7 +847,7 @@ export function additiveDoseNumberAt(
   const amount = whole + fraction;
   // Both plain and comparator-qualified mixed numbers can be scaled:
   // 'two and a half million units' is 2,500,000 units, not 0.5 or 2.5.
-  return millionDoseNumberAt(tokens, cursor, limit, amount) ??
+  return (allowMillion ? millionDoseNumberAt(tokens, cursor, limit, amount) : undefined) ??
     { value: amount, numericIndex: cursor };
 }
 
@@ -892,20 +892,22 @@ export function compactMillionDoseNumber(lower: string): number | undefined {
 
 /** A denominator word belongs to the numeric head before its unit connector. */
 export function fractionalDoseNumberAt(
-  tokens: readonly LexToken[], start: number, limit: number, value: number
+  tokens: readonly LexToken[], start: number, limit: number, value: number, allowMillion = true
 ): { value: number; numericIndex: number } | undefined {
   const denominator = start + 1 < limit ? tokens[start + 1] : undefined;
   const fraction = denominator && DOSE_FRACTION_DENOMINATOR_WORDS.get(
     denominator.canonical ?? denominator.lower);
   if (fraction === undefined) return undefined;
   const amount = value * fraction, numericIndex = start + 1;
-  return millionDoseNumberAt(tokens, numericIndex, limit, amount) ?? { value: amount, numericIndex };
+  return (allowMillion ? millionDoseNumberAt(tokens, numericIndex, limit, amount) : undefined) ??
+    { value: amount, numericIndex };
 }
 
 /** One bounded quantity-prefix lexeme shared by scalar and dimensional
- * rules. It identifies source tokens; it does not assign a unit or dose. */
+ * rules. It identifies source tokens; it does not assign a unit or dose.
+ * Duration daughters disable medication scaling so m remains their unit. */
 export function doseComparatorNumberAt(
-  tokens: readonly LexToken[], start: number, limit: number, lower: string
+  tokens: readonly LexToken[], start: number, limit: number, lower: string, allowMillion = true
 ): { comparator: "<" | "<=" | ">" | ">=" | "~";
   value: number; numericIndex: number; rawUnit?: string } | undefined {
   if (!DOSE_COMPARATOR_PREFIXES.has(lower) &&
@@ -917,14 +919,14 @@ export function doseComparatorNumberAt(
       Number(glued[2].slice(0, slash)) / Number(glued[2].slice(slash + 1));
     // Never turn '≤1/0' into an infinite dose or numeric advice.
     if (!Number.isFinite(value)) return undefined;
-    const compactMillion = glued[3] === "m";
+    const compactMillion = allowMillion && glued[3] === "m";
     const million = compactMillion
       ? { value: value * 1_000_000, numericIndex: start }
-      : glued[3] ? undefined : millionDoseNumberAt(tokens, start, limit, value);
+      : glued[3] || !allowMillion ? undefined : millionDoseNumberAt(tokens, start, limit, value);
     const mixed = !glued[3] && !million
-      ? additiveDoseNumberAt(tokens, start, limit, value) : undefined;
+      ? additiveDoseNumberAt(tokens, start, limit, value, allowMillion) : undefined;
     const fraction = !glued[3] && !million && !mixed
-      ? fractionalDoseNumberAt(tokens, start, limit, value) : undefined;
+      ? fractionalDoseNumberAt(tokens, start, limit, value, allowMillion) : undefined;
     return { comparator: DOSE_COMPARATOR_SYMBOLS[glued[1]],
       value: million?.value ?? mixed?.value ?? fraction?.value ?? value,
       numericIndex: million?.numericIndex ?? mixed?.numericIndex ?? fraction?.numericIndex ?? start,
@@ -953,18 +955,18 @@ export function doseComparatorNumberAt(
   const attached = token.kind !== LexKind.Number ? attachedNumberUnitAt(word) : undefined;
   let value = token.kind === LexKind.Number ? token.value :
     attached?.value ?? DOSE_NUMBER_WORDS.get(word) ?? DOSE_FRACTION_WORDS.get(word);
-  const embeddedMillion = compactMillionDoseNumber(word);
+  const embeddedMillion = allowMillion ? compactMillionDoseNumber(word) : undefined;
   // The million suffix belongs to the numeric head, not the unit slot.
   if (embeddedMillion !== undefined) return { comparator, value: embeddedMillion, numericIndex };
   if (value === undefined) return undefined;
   if (attached) return { comparator, value, numericIndex, rawUnit: attached.rawUnit };
-  const million = millionDoseNumberAt(tokens, numericIndex, limit, value);
+  const million = allowMillion ? millionDoseNumberAt(tokens, numericIndex, limit, value) : undefined;
   if (million) return { comparator, ...million };
-  const mixed = additiveDoseNumberAt(tokens, numericIndex, limit, value);
+  const mixed = additiveDoseNumberAt(tokens, numericIndex, limit, value, allowMillion);
   if (mixed) return { comparator, ...mixed };
   // The existing fraction vocabulary also licenses "a quarter" or
   // "two thirds". Keep those tokens within the qualified quantity head.
-  const fraction = fractionalDoseNumberAt(tokens, numericIndex, limit, value);
+  const fraction = fractionalDoseNumberAt(tokens, numericIndex, limit, value, allowMillion);
   return { comparator, ...(fraction ?? { value, numericIndex }) };
 }
 
