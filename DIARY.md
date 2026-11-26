@@ -16145,3 +16145,20 @@ Twenty-eight representative paired workloads found no reproducible meaningful
 regression above 4%; the small scheduling difference was assessed by absolute
 latency and measurement spread. The concurrent-dose fixture now supplies equal
 sequence values, preserving every existing assertion.
+
+
+## 2026-11-26 — Shared cadence and instruction owners
+
+Ordinary interval labels, qualified single doses, explicit maximum rates and
+site-first medication arguments retain their clinical owners. Dated switches,
+shifted absolute events, configured elapsed clocks and equivalent coded units
+produce consistent previews, due times and supply totals. Stage safety and
+native R6 nested annotations remain visible and typed.
+
+Common clock/frequency selection, duration and frequency previews, graph timing
+and warning ownership, limit conversion and lexical metadata now use shared
+owners. Language wording stays in the existing realization seams. Authored
+quantities, units and source remain intact.
+
+Validation passed 8,827 normal tests, strict types, build and four
+distribution tests. Twenty-four representative paired workloads found no reproducible meaningful regression above 4%; the initial import timing flag did not reproduce in a focused repeat with reversed starting order.
