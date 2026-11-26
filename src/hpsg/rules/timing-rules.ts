@@ -835,16 +835,7 @@ export function separatedFrequencyRangeRule(): HpsgLexicalRule<HpsgClauseContext
     let unit: FhirPeriodUnit | undefined;
     const next = context.tokens[cursor];
     const nextLower = next ? normalizeTokenLower(next) : "";
-    if (next && SCHEDULE_UNIT_SEPARATOR_TOKENS.has(nextLower)) {
-      const unitToken = context.tokens[cursor + 1];
-      const mapped = unitToken
-        ? mapIntervalUnit(normalizeTokenLower(unitToken)) ?? mapFrequencyAdverb(normalizeTokenLower(unitToken))
-        : undefined;
-      if (mapped && unitToken) {
-        consumed.push(next, unitToken);
-        unit = mapped;
-      }
-    } else if (next && FREQUENCY_CONNECTOR_WORDS.has(nextLower)) {
+    if (next && (SCHEDULE_UNIT_SEPARATOR_TOKENS.has(nextLower) || FREQUENCY_CONNECTOR_WORDS.has(nextLower))) {
       const unitToken = context.tokens[cursor + 1];
       const mapped = unitToken
         ? mapIntervalUnit(normalizeTokenLower(unitToken)) ?? mapFrequencyAdverb(normalizeTokenLower(unitToken))
