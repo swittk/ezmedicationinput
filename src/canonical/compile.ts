@@ -23,7 +23,7 @@ import {
   DEFAULT_PRN_REASON_DEFINITIONS, findPrnReasonDefinitionByCoding, normalizePrnReasonKey
 } from "../maps";
 import { SNOMED_SYSTEM } from "../snomed";
-import { FHIR_GTS_TIMING_CODES, FHIR_GTS_TIMING_SYSTEM, preferredTimingCoding, isPreviewTimingCoding } from "../timing-summary";
+import { FHIR_GTS_TIMING_CODES, FHIR_GTS_TIMING_SYSTEM, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding } from "../timing-summary";
 import type { RouteCode } from "../types";
 import { getQuantityDurationUnit } from "../unit-lexicon";
 

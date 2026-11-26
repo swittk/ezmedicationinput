@@ -36,6 +36,7 @@ function runNode(args: string[], code: string): {
   currentText?: string;
   originalComponentText?: string;
   roundTripDoseCount?: number;
+  roundTripAdministrationCount?: number;
   roundTripSiteCode?: string;
   roundTripFrequency?: number;
   roundTripAnchors?: string[];

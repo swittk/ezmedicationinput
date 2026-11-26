@@ -576,6 +576,9 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: C
     if (map[timingCode]) {
       return map[timingCode];
     }
+    const interval = timingPreviewDescriptor(timingCode);
+    if (interval?.period && interval.periodUnit && !interval.when?.length)
+      return `${countPrefix}every ${stripTrailingZero(interval.period)} ${words.timeUnit(interval.periodUnit, interval.period) ?? interval.periodUnit}`;
   }
   if (frequency === undefined && frequencyMax === undefined && period === 1 &&
       periodUnit === FhirPeriodUnit.Day && !rangedPeriod) return "daily";
@@ -1229,10 +1232,9 @@ export function independentTimingText(
   if (!code || TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined) return undefined;
   const lower = code.toLowerCase();
   if (timingPreviewDescriptor(code)) return undefined;
-  if (WORD_FREQUENCIES[lower] && recurrence &&
+  if (WORD_FREQUENCIES[lower] && recurrence?.periodUnit === WORD_FREQUENCIES[lower].periodUnit &&
       (recurrence.frequency !== undefined || recurrence.frequencyMax !== undefined ||
-       recurrence.period !== undefined || recurrence.periodMax !== undefined ||
-       recurrence.periodUnit !== undefined)) return undefined;
+       recurrence.period !== undefined || recurrence.periodMax !== undefined)) return undefined;
   // Compact interval shorthand yields only when a typed cadence replaces it.
   // Otherwise retain the existing code when no preview descriptor expands it.
   return isCompactIntervalTimingCode(code) && recurrence?.periodUnit !== undefined &&

@@ -17,7 +17,7 @@ import type {
 } from "./course";
 import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole, administrationHasAmountFacts, administrationHasDatedClockStart } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
-import { preferredTimingCoding, isPreviewTimingCoding } from "../timing-summary";
+import { preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding } from "../timing-summary";
 import { canonicalClauseHasAdministrationSemantics } from "../ir";
 import { getDoseQuantityUnit } from "../maps";
 import { getQuantityDurationUnit } from "../unit-lexicon";

@@ -83,7 +83,7 @@ import {
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 import { equalStructuredValues } from "./stable-structure";
-import { FHIR_GTS_TIMING_SYSTEM, FHIR_GTS_TIMING_CODES, preferredTimingCoding, isPreviewTimingCoding } from "./timing-summary";
+import { FHIR_GTS_TIMING_SYSTEM, FHIR_GTS_TIMING_CODES, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding } from "./timing-summary";
 
 /** Known modifier: an independent cadence is restricted by unresolved cycle days. */
 export const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-cycle-day-eligibility";

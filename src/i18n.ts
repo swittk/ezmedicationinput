@@ -32,7 +32,8 @@ import {
 import {
   DEFAULT_BODY_SITE_SNOMED_SOURCE,
   findPrnReasonDefinitionByCoding,
-  normalizeBodySiteKey
+  normalizeBodySiteKey,
+  WORD_FREQUENCIES
 } from "./maps";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
@@ -88,6 +89,8 @@ import {
 import {
   getMealTimingGroup,
   hourlyTimingPreviewPeriod,
+  timingPreviewDescriptor,
+  isCompactIntervalTimingCode,
   inferDailyOccurrenceCount,
   type MealTimingGroup,
   type TimingSummaryOptions
@@ -1351,6 +1354,9 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined, word
     if (value) {
       return value;
     }
+    const interval = timingPreviewDescriptor(timingCode);
+    if (interval?.period && interval.periodUnit && !interval.when?.length)
+      return `${countPrefix}ทุก ${stripTrailingZero(interval.period)} ${words.timeUnit(interval.periodUnit, interval.period) ?? interval.periodUnit}`;
   }
   if (frequency === undefined && frequencyMax === undefined && period === 1 &&
       periodUnit === FhirPeriodUnit.Day && !rangedPeriod) return "ทุกวัน";
@@ -1361,7 +1367,10 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined, word
   }
   if (frequency && periodUnit === undefined && period === undefined) {
     if (frequency === 1) {
-      return "ครั้งเดียว";
+      const label = schedule?.timingText ?? timingCode;
+      const recurringLabel = label && (isCompactIntervalTimingCode(label) ||
+        timingPreviewDescriptor(label)?.periodUnit || WORD_FREQUENCIES[label.toLowerCase()]);
+      return recurringLabel ? "1 ครั้ง" : "ครั้งเดียว";
     }
     return `${stripTrailingZero(frequency)} ครั้ง`;
   }

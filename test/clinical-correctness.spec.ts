@@ -3811,8 +3811,51 @@ describe("independent coded timing previews", () => {
       expect(formatSig(input, "long", { locale: "en" })).toBe(complete
         ? "Use 1 tablet once every 4 to 6 hours." : "Use 1 tablet once q4-6h.");
       expect(formatSig(input, "long", { locale: "th" })).toBe(complete
-        ? "ใช้ครั้งละ 1 เม็ด 1 ครั้ง ทุก 4 ถึง 6 ชั่วโมง." : "ใช้ครั้งละ 1 เม็ด ครั้งเดียว q4-6h.");
+        ? "ใช้ครั้งละ 1 เม็ด 1 ครั้ง ทุก 4 ถึง 6 ชั่วโมง." : "ใช้ครั้งละ 1 เม็ด 1 ครั้ง q4-6h.");
     }
     expect(toFhirR5Dosages(r6)[0].timing?.code).toEqual(code);
   });
+});
+
+
+describe("independent cadence display ownership", () => {
+  const doseAndRate = [{ doseQuantity: { value: 1, unit: "tab" } }];
+  it.each([false, true])("renders an existing two-week code without losing its interval (repeat=%s)", complete => {
+    const code = { coding: [{ code: "Q2WK" }] };
+    const row = { doseAndRate, timing: { code, ...(complete
+      ? { repeat: { frequency: 1, period: 2, periodUnit: FhirPeriodUnit.Week } } : {}) } };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+    for (const input of [row, raw]) {
+      expect(formatSig(input, "long", { locale: "en" })).toBe("Use 1 tablet every 2 weeks.");
+      expect(formatSig(input, "long", { locale: "th" })).toBe("ใช้ครั้งละ 1 เม็ด ทุก 2 สัปดาห์.");
+    }
+    expect(toFhirR5Dosages(raw)[0].timing?.code).toEqual(code);
+  });
+
+  it.each([false, true])("prefers a recognized bedtime preview in either coding order (localFirst=%s)", localFirst => {
+    const local = { system: "https://clinic.example/timing", code: "BEDTIME" };
+    const known = { code: "QHS" };
+    const code = { coding: localFirst ? [local, known] : [known, local] };
+    const row = { doseAndRate, timing: { code } };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+    for (const input of [row, raw]) {
+      expect(formatSig(input, "long", { locale: "en" })).toBe("Use 1 tablet at bedtime.");
+      expect(formatSig(input, "long", { locale: "th" })).toBe("ใช้ครั้งละ 1 เม็ด ก่อนนอน.");
+    }
+    expect(toFhirR5Dosages(raw)[0].timing?.code).toEqual(code);
+    expect(toDosageDetails([row]).step[0].component[0].timing?.code).toEqual(code);
+  });
+
+  it.each([{ frequency: 1 }, { frequencyMax: 3 }, { period: 1 }])(
+    "retains the authored daily period when the numeric repeat lacks its unit: %j", repeat => {
+      const code = { text: "once daily" };
+      const row = { doseAndRate, timing: { code, repeat } };
+      const raw: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+      for (const input of [row, raw]) {
+        expect(formatSig(input, "long", { locale: "en" })).toContain("once daily");
+        expect(formatSig(input, "long", { locale: "th" })).toContain("once daily");
+        expect(formatSig(input, "long", { locale: "th" })).not.toContain("ครั้งเดียว");
+      }
+      expect(toFhirR5Dosages(raw)[0].timing?.code).toEqual(code);
+    });
 });

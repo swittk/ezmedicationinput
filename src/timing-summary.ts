@@ -34,15 +34,25 @@ export function isPreviewTimingCoding(coding: { system?: string; code?: string }
 /** Prefer an understood cadence over a local translation without changing
  * either coding or its authored order. Local-only concepts keep their first code. */
 export function preferredTimingCoding<T extends { system?: string; code?: string }>(
-  timing: { code?: { coding?: readonly T[] } }
+  timing: { code?: { coding?: readonly T[] } },
+  includePreview = false
 ): T | undefined {
   let fallback: T | undefined;
+  let preview: T | undefined;
   for (const coding of timing.code?.coding ?? []) {
     if (!coding.code) continue;
     if (isStandardTimingCoding(coding)) return coding;
+    if (includePreview && preview === undefined && isPreviewTimingCoding(coding)) preview = coding;
     if (fallback === undefined) fallback = coding;
   }
-  return fallback;
+  return preview ?? fallback;
+}
+
+/** Preview shorthand does not change execution's standard-code preference. */
+export function preferredPreviewTimingCoding<T extends { system?: string; code?: string }>(
+  timing: { code?: { coding?: readonly T[] } }
+): T | undefined {
+  return preferredTimingCoding(timing, true);
 }
 
 /** Recognized daily cadence, independent of configured clock realization. */
