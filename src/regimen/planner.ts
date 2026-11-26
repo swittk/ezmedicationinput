@@ -1086,21 +1086,29 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       proposals.push(keep('boundary.punctuation-is-not-a-regimen', 0, 'punctuation', site.surface));
     } else if (site.kind === 'hard' || site.kind === 'slash') {
       const right = tokens[site.rightIndex];
-      let maximumOwnsSlash = false;
+      let denominatorOwner: 'maximum' | 'clinical-quantity' | undefined;
       if (site.kind === 'slash' && right?.kind === LexKind.Number &&
           normalizeUnit(lexeme(tokens[site.tokenIndex - 1]), options)) {
-        // A spaced denominator belongs to the selected typed maximum sign.
-        // Probe only the ambiguous unit/slash/number shape and reuse its
-        // cached clause evidence instead of parsing another limit grammar.
+        // A spaced denominator belongs to its selected typed quantity sign.
+        // Reuse the cached evidence for this ambiguous unit/slash/number shape;
+        // an unrelated slash still separates independent regimens.
         const end = probeEnd(site.rightIndex);
         const probe = evidence.probe(start, end);
-        maximumOwnsSlash = probe.clause.evidence.some(item =>
-          ((item.scheduleFields?.indexOf('maxDosePerPeriod') ?? -1) >= 0 ||
-            item.rule === 'hpsg.lex.instruction.maximumPerDaypart') &&
-          item.spans.some(span => probe.start + span.start <= site.start && probe.start + span.end >= site.end));
+        const hasTimeDenominator = probe.clause.clinicalQuantity?.denominators.some(term => term.dimension === 'time');
+        for (const item of probe.clause.evidence) {
+          const maximum = (item.scheduleFields?.indexOf('maxDosePerPeriod') ?? -1) >= 0 ||
+            item.rule === 'hpsg.lex.instruction.maximumPerDaypart';
+          const clinicalQuantity = hasTimeDenominator && item.rule.startsWith('hpsg.lex.clinicalQuantity.');
+          if ((maximum || clinicalQuantity) && item.spans.some(span =>
+              probe.start + span.start <= site.start && probe.start + span.end >= site.end)) {
+            denominatorOwner = maximum ? 'maximum' : 'clinical-quantity';
+            break;
+          }
+        }
       }
-      if (maximumOwnsSlash) proposals.push(keep('structure.maximum-dose-period', 900,
-        'maximum-constituent.owns-slash', true));
+      if (denominatorOwner) proposals.push(keep(
+        denominatorOwner === 'maximum' ? 'structure.maximum-dose-period' : 'structure.clinical-quantity-period', 900,
+        denominatorOwner === 'maximum' ? 'maximum-constituent.owns-slash' : 'clinical-quantity.owns-slash', true));
       else if (site.kind === 'hard' || right && (right.kind === LexKind.Number || CLAUSE_LEAD_WORDS.has(lexeme(right)))) {
         proposals.push({ action: 'split', rule: 'boundary.explicit-delimiter', priority: 200, relation: 'independent',
           evidence: [{ feature: 'delimiter', value: site.surface }] });

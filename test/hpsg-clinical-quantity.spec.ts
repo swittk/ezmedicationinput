@@ -3529,7 +3529,15 @@ describe("round56: explicit division and occurrence bounds", () => {
   it.each([
     ["Give 10 mg/kg/12h PO divided into 2 doses", 12, "h"],
     ["Give 10 mg/kg/12h in 2 divided doses PO", 12, "h"],
-    ["Give 10 mg/kg/24h PO divided into 2 doses", 1, "d"]
+    ["Give 10 mg/kg/24h PO divided into 2 doses", 1, "d"],
+    ["Give 10 mg/kg per day PO divided into 2 doses", 1, "d"],
+    ["Give 10 mg/kg per 24 hours PO divided into 2 doses", 1, "d"],
+    ["Give 10 mg / kg / 24 h PO divided into 2 doses", 1, "d"],
+    ["Give 10mg / kg per 24 hours PO divided into 2 doses", 1, "d"],
+    ["Give 10 mg/kg per 12 hours PO divided into 2 doses", 12, "h"],
+    ["Give 10 mg/kg per 48 hours PO divided into 2 doses", 2, "d"],
+    ["Give 10 mg/kg per 30 minutes PO divided into 2 doses", 30, "min"],
+    ["Give 10 mg/kg per 1 week PO divided into 2 doses", 1, "wk"]
   ] as const)("divides the authored weight-based total over its original period: %s", (source, period, periodUnit) => {
     const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
     expect(parsed.meta.canonical.clauses).toHaveLength(1);
@@ -3543,6 +3551,38 @@ describe("round56: explicit division and occurrence bounds", () => {
       expect(row.doseAndRate![0].doseQuantity).toMatchObject({ value: 5, unit: "mg/kg" });
       expect(row.doseAndRate![0].rateQuantity).toBeUndefined();
       expect(row.timing?.repeat).toMatchObject({ frequency: 2, period, periodUnit });
+      expect(row.timing?.repeat?.boundsDuration).toBeUndefined();
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
+    ["Give 10 mg/kg per 12 hours PO", 10 / 12, "mg/kg/h"],
+    ["Give 10 mg / kg / 24 h PO", 10, "mg/kg/d"]
+  ] as const)("keeps an undivided spaced weight rate dose-free: %s", (source, value, code) => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity?.requiresPatientWeight).toBe(true);
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toBeUndefined();
+      expect(row.doseAndRate?.[0].rateQuantity?.value).toBeCloseTo(value);
+      expect(row.doseAndRate?.[0].rateQuantity?.code).toBe(code);
+      expect(row.timing?.repeat?.frequency).toBeUndefined();
+      expect(row.timing?.repeat?.boundsDuration).toBeUndefined();
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("keeps a divided spaced weight total relative until the patient weight is supplied", () => {
+    const source = "Give 10 mg/kg per 24 hours PO divided into 2 doses";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const options = { from: "2027-01-01T00:00:00Z", orderedAt: "2027-01-01T00:00:00Z",
+      timeZone: "UTC", durationValue: 1, durationUnit: FhirPeriodUnit.Day };
+    for (const dosage of [parsed.fhir, parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(calculateTotalUnits({ dosage, ...options })).toMatchObject({ totalUnits: 10, unit: "mg/kg" });
+      expect(calculateTotalUnits({ dosage, ...options, patientWeightKg: 20 }))
+        .toMatchObject({ totalUnits: 200, unit: "mg" });
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(before);

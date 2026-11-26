@@ -101,22 +101,34 @@ function compactUnitExpression(
   let compact = attachedPrefix.toLowerCase().replace(/[μµ]/gu, "u");
   let result: UnitExpression | undefined = compact && accepts(compact)
     ? { compact, end: start } : undefined;
-  const maxLength = attachedPrefix ? 4 : 5;
-  // Five tokens cover compact/spaced mixtures such as `mcg/kg per min` and
-  // `mg / kg / day` without a clause-wide scan. Longest match prevents /kg
-  // from hiding a real time suffix.
-  for (let length = 1; length <= maxLength && available(context, start + length - 1); length += 1) {
-    const token = context.tokens[start + length - 1];
+  const maxParts = attachedPrefix ? 4 : 5;
+  // Bound the dimensional terms and separators, not their surface tokens:
+  // a numeric time denominator owns both daughters in `per 24 hours`.
+  // Longest match keeps /kg from hiding a real time suffix.
+  let cursor = start;
+  for (let part = 1; part <= maxParts && available(context, cursor); part += 1) {
+    const token = context.tokens[cursor];
     const separator = token.original === "/" || normalizeTokenLower(token) === "per";
     // Spaced expressions have a strict UNIT separator UNIT shape. Do not
     // absorb a following route or cadence into an unknown suffix.
-    const expectsSeparator = attachedPrefix ? length % 2 === 1 : length % 2 === 0;
-    if (length > 1 || attachedPrefix) {
+    const expectsSeparator = attachedPrefix ? part % 2 === 1 : part % 2 === 0;
+    if (part > 1 || attachedPrefix) {
       if (separator !== expectsSeparator) break;
     } else if (separator) break;
-    compact += separator ? "/" : token.original.replace(/\s+/gu, "");
+    let term = token.original.replace(/\s+/gu, "");
+    cursor++;
+    if (!separator && part > 1) {
+      const number = clinicalDurationNumber(token);
+      const timeUnit = number !== undefined && available(context, cursor)
+        ? mapIntervalUnit(normalizeTokenLower(context.tokens[cursor])) : undefined;
+      if (timeUnit) {
+        term = `${number}${timeUnit}`;
+        cursor++;
+      }
+    }
+    compact += separator ? "/" : term;
     const normalized = compact.toLowerCase().replace(/[μµ]/gu, "u");
-    if (accepts(normalized)) result = { compact: normalized, end: start + length };
+    if (accepts(normalized)) result = { compact: normalized, end: cursor };
   }
   return result;
 }
