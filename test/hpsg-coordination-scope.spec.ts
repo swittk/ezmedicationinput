@@ -2071,3 +2071,64 @@ describe("prefix guard constituent ownership", () => {
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });
+
+
+describe("site and clock complement ownership", () => {
+  it.each([
+    ["Wash on the face at 08:00", "face", 12, 16, "89545001", "08:00:00"],
+    ["Wash on the face at 8.30", "face", 12, 16, "89545001", "08:30:00"],
+    ["Wash on the face at 8 AM", "face", 12, 16, "89545001", "08:00:00"],
+    ["Wash the face at 08:00", "face", 9, 13, "89545001", "08:00:00"],
+    ["Wash at 08:00 on the face", "face", 21, 25, "89545001", "08:00:00"],
+    ["Apply 1 mL to the face at 08:00", "face", 18, 22, "89545001", "08:00:00"],
+    ["Wash into the vagina at 08:00", "vagina", 14, 20, "76784001", "08:00:00"],
+    ["ล้างบนใบหน้า เวลา 08:00", "face", 6, 12, "89545001", "08:00:00"]
+  ] as const)("keeps the clock lead outside the coded Site in %s", (source, text, start, end, code, clock) => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.site).toMatchObject({ text, range: { start, end },
+      coding: { system: "http://snomed.info/sct", code } });
+    expect(source.slice(start, end)).toBe(source.startsWith("ล้าง") ? "ใบหน้า" : text);
+    expect(clause.schedule?.timeOfDay).toEqual([clock]);
+    expect(clause.schedule?.frequency).toBeUndefined();
+    if (source.startsWith("Apply")) expect(clause.dose).toEqual({ value: 1, unit: "mL" });
+    if (text === "vagina") expect(clause.route?.code).toBe("16857009");
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages).toHaveLength(1);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      const administration = course.stages[0].administrations[0];
+      expect(administration.target).toMatchObject({ text,
+        coding: [expect.objectContaining({ system: "http://snomed.info/sct", code })] });
+      expect(administration.schedule?.recurrence?.clocks).toEqual([clock]);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).not.toMatch(/\bat at\b/u);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(clause.raw?.text).toBe(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("retains the anatomical relation before an independent clock", () => {
+    const source = "Wash around the eye at 08:00", parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].site).toMatchObject({ text: "around eye",
+      range: { start: 5, end: 19 }, spatialRelation: { relationText: "around", targetText: "eye",
+        targetCoding: { system: "http://snomed.info/sct", code: "81745001" } } });
+    expect(parsed.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual(["08:00:00"]);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("preserves an event complement and the independently negated inward action", () => {
+    const event = parsePublicSig("Wash on the face before breakfast");
+    expect(event.meta.canonical.clauses[0].site).toMatchObject({ text: "face",
+      range: { start: 12, end: 16 }, coding: { code: "89545001" } });
+    expect(event.meta.canonical.clauses[0].schedule?.when).toEqual(["ACM"]);
+    const source = "Do not wash into vagina", negative = parsePublicSig(source);
+    expect(negative.meta.canonical.clauses[0].instructionGraph?.actions[0]).toMatchObject({
+      polarity: "negate", relation: "into", args: [expect.objectContaining({ role: "site", normalized: "vagina" })]
+    });
+    expect(negative.meta.canonical.clauses[0].schedule).toBeUndefined();
+    expect(negative.fhirNext.renderedInstruction).toBe(source);
+  });
+});

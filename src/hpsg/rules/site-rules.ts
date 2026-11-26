@@ -14,6 +14,7 @@ import { resolveBodySiteLexeme, resolveBodySiteRestrictionPredicate, type Resolv
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import {
+  relationHasGrammarFeature,
   resolveActionRelationSurface,
   resolveActionRelationSurfaceCandidates
 } from "../../relation-terminology";
@@ -44,6 +45,7 @@ import {
   INSTRUCTION_START_WORDS,
   NON_OCULAR_DOSE_UNITS,
   NON_SITE_ANCHORED_PHRASES,
+  parseClockToken,
   OCULAR_ROUTE_CODES,
   PRN_LEADS,
   PRN_STANDALONE_REASON_LEADS,
@@ -194,6 +196,11 @@ function relationIntroducesNonSiteComplement(
   if (!token) return false;
   const relations = resolveActionRelationSurfaceCandidates(normalizeTokenLower(token));
   if (!relations.length) return false;
+  // A licensed clock complement owns its relation before site collection.
+  if (relations.some(relation => relationHasGrammarFeature(relation, "timeComplement"))) {
+    const clock = parseClockToken(context.tokens[index + 1], context.tokens[index + 2]);
+    if (clock && tokensAvailable(context, index + 1, clock.tokens.length)) return true;
+  }
   for (let cursor = index + 1; cursor < Math.min(context.limit, index + 4); cursor += 1) {
     const candidate = context.tokens[cursor];
     if (!candidate || context.state.consumed.has(candidate.index) || isPunctuation(normalizeTokenLower(candidate))) {
