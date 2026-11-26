@@ -3166,9 +3166,9 @@ describe("round37 interchange phase, limit and source ownership", () => {
   it.each([
     { amounts: [{ value: 2, unit: "tab" }, { value: 4, unit: "mL" }, { value: 4, unit: "tab" }], owner: 0 },
     { amounts: [{ value: 4, unit: "tab" }, { value: 4, unit: "mL" }, { value: 2, unit: "tab" }], owner: 2 },
-    { amounts: [{ value: 2, unit: "mL" }, { value: 4, unit: "tab" }, { value: 4, unit: "mL" }], owner: 0 },
-    { amounts: [{ value: 4, unit: "mL" }, { value: 2, unit: "tab" }, { value: 4, unit: "tab" }, { value: 2, unit: "mL" }], owner: 3 },
-  ])("keeps the tighter annotated maximum within the last interleaved unit (owner=$owner)", ({ amounts, owner }) => {
+    { amounts: [{ value: 2, unit: "mL" }, { value: 4, unit: "tab" }, { value: 4, unit: "mL" }], owner: 1 },
+    { amounts: [{ value: 4, unit: "mL" }, { value: 2, unit: "tab" }, { value: 4, unit: "tab" }, { value: 2, unit: "mL" }], owner: 1 },
+  ])("keeps the tighter annotated maximum within the dose-compatible interleaved unit (owner=$owner)", ({ amounts, owner }) => {
     const limits = amounts.map((amount, index) => ({ id: "cap-" + index, scope: "administration" as const,
       valueQuantity: { ...amount, id: "quantity-" + index }, text: "Authored cap " + index }));
     let wire = course({ safety: { doseLimit: limits } });
@@ -3227,7 +3227,7 @@ describe("round37 interchange phase, limit and source ownership", () => {
     let wire = course({ safety: { doseLimit: limits } });
     for (let save = 0; save <= 3; save++) {
       const rows = persist(toFhirR5Dosages(wire));
-      expect(quantityFromR5(rows[0].maxDosePerAdministration)).toEqual(difference === "unit" ? last : q(2));
+      expect(quantityFromR5(rows[0].maxDosePerAdministration)).toEqual(q(2));
       wire = toDosageDetails(rows);
       expect(wire.step![0].component[0].safety?.doseLimit).toEqual(limits);
     }
