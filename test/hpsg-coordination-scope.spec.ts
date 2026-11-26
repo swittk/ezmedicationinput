@@ -2203,6 +2203,28 @@ describe("site and clock complement ownership", () => {
 
 describe("condition and successor timing ownership", () => {
   it.each([
+    { partial: "If systolic BP is below 90,", predicate: {
+      kind: "measurement", name: "systolic bp", operation: "lt", value: 90 } },
+    { partial: "Only if SBP > 160 and heart rate < 90,", predicate: { kind: "all", conditions: [
+      { kind: "measurement", name: "sbp", operation: "gt", value: 160 },
+      { kind: "measurement", name: "heart rate", operation: "lt", value: 90 }
+    ] } }
+  ])("keeps an open guard useful before its consequent: $partial", ({ partial, predicate }) => {
+    expect(parseMedicationGuard(partial)?.condition).toMatchObject(predicate);
+    const incomplete = parsePublicSig(partial);
+    expect(incomplete.fhirNext.renderedInstruction).toBe(partial);
+    expect(incomplete.meta.canonical.clauses.every(clause => !clause.dose)).toBe(true);
+    const source = partial + " take 1 tablet", complete = parsePublicSig(source);
+    for (const input of [complete.meta.canonical.course!, complete.fhir, complete.fhirNext]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject(predicate);
+    }
+    expect(complete.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([
     "you have taken at most 2 doses in the past 24 hours",
     "you have vomited no more than twice in 24 hours",
     "you have taken no more than 2 doses in 24 hours"

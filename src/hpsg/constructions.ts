@@ -868,7 +868,7 @@ export function parseMedicationGuard(
     if (comma >= 0) {
       let next = tokens.findIndex(token => token.sourceStart >= end + 1);
       for (const directive of ACTION_DIRECTIVE_PREFIXES) {
-        if (next + directive.parts.length <= tokens.length &&
+        if (next >= 0 && next + directive.parts.length <= tokens.length &&
             directive.parts.every((part, offset) => normalizeTokenLower(tokens[next + offset]) === part)) {
           next += directive.parts.length;
           break;
