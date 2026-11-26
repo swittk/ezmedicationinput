@@ -2010,6 +2010,8 @@ function measuredRateQuantity(
     if (per) {
       value = amount.rate.value * duration * seconds / per;
       unit = match![1];
+      if (amount.rate.code)
+        unit = getDoseQuantityUnit({ system: amount.rate.system, code: unit }, false) || unit;
       comparator = amount.rate.comparator;
     }
   } else if (

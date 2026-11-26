@@ -2089,8 +2089,10 @@ export function getDoseQuantityUnit(
   if (!includeOpaqueCode && code && (!quantity.system || quantity.system === "http://unitsofmeasure.org")) {
     // Terminal UCUM annotations describe a quantity without changing its
     // calculation unit. Keep the authored code and display untouched.
-    const annotation = code.indexOf("{");
-    if (annotation > 0 && /^(?:\{[^{}]*\})+$/u.test(code.slice(annotation))) code = code.slice(0, annotation);
+    if (code.indexOf("{") >= 0) {
+      const annotation = code.match(/(?:\{[^{}]*\})+$/u);
+      if (annotation?.index) code = code.slice(0, annotation.index);
+    }
   }
   const fallbackCode = includeOpaqueCode || !quantity.system || quantity.system === "http://unitsofmeasure.org"
     ? code : undefined;

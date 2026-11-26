@@ -3313,18 +3313,37 @@ describe("PR14 round 29 execution semantics", () => {
     expect(JSON.stringify(course)).toBe(before);
   });
 
-  it.each(["mL/h", "mL/h{infusion}{pump}"])("measures a coded %s rate over one hour", code => {
+  it.each(["mL/h", "mL/h{infusion}{pump}", "mL{solution}/h", "mL{solution}/h{infusion}"])(
+    "measures a coded %s rate and applies its volume ceiling", code => {
     const rate = { value: 10, system: "http://unitsofmeasure.org", code, unit: "L/h" };
     const course: FhirR6DosageInstruction = { step: [{ component: [{
-      timing: { repeat: { count: 1, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
         duration: 1, durationUnit: FhirPeriodUnit.Hour } },
       doseAndRate: [{ rateQuantity: rate }],
+      safety: { doseLimit: [{ scope: "lifetime",
+        valueQuantity: { value: 20, code: "mL", system: "http://unitsofmeasure.org" } }] },
+    }] }] };
+    const before = JSON.stringify(course);
+    for (const dosage of representations(course)) {
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 10, unit: "mL" });
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 20, unit: "mL" });
+    }
+    expect(toFhirR5Dosages(course)[0].doseAndRate![0].rateQuantity).toEqual(rate);
+    expect(JSON.stringify(course)).toBe(before);
+  });
+
+  it("keeps a foreign annotated rate code opaque without an authored unit label", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        duration: 1, durationUnit: FhirPeriodUnit.Hour } },
+      doseAndRate: [{ rateQuantity: { value: 10, code: "mL{solution}/h", system: "urn:clinic:flow" } }],
     }] }] };
     const before = JSON.stringify(course);
     for (const dosage of representations(course))
-      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
-        .toMatchObject({ totalUnits: 10, unit: "mL" });
-    expect(toFhirR5Dosages(course)[0].doseAndRate![0].rateQuantity).toEqual(rate);
+      expect(() => calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toThrow(expect.objectContaining({ code: "rate-units-unresolved" }));
     expect(JSON.stringify(course)).toBe(before);
   });
 
