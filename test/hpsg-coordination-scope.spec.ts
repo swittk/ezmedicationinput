@@ -2211,6 +2211,72 @@ describe("condition and successor timing ownership", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 
+  it("keeps independent conditional counseling beside a prefix medication guard", () => {
+    const source = "If systolic BP is above 140, take 1 tablet at 08:00 daily for 2 days; call the clinic if dizzy.";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const predicate = { kind: "measurement", name: "systolic bp", operation: "gt", value: 140 };
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.actions.map(action => action.predicate.lemma)).toEqual(["call"]);
+    expect(graph.relations).toContainEqual(expect.objectContaining({ kind: "if", toActionIndex: 0, text: "if dizzy" }));
+    const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 3 };
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject(predicate);
+      expect(members[0].schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d", clocks: ["08:00:00"] });
+      expect(nextDueDoses(input, { ...query, evaluateCondition: condition => {
+        expect(condition).toMatchObject(predicate);
+        return false;
+      } })).toEqual([]);
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => true })).toEqual([
+        "2026-12-01T08:00:00+00:00", "2026-12-02T08:00:00+00:00"
+      ]);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toContain("only if systolic bp > 140. Call the clinic if dizzy.");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
+    ["if it is a dialysis day, hold the morning dose", false],
+    ["hold the morning dose if it is a dialysis day", false],
+    ["if it is a dialysis day, hold the morning dose; call the clinic", true]
+  ] as const)("keeps predicate activities inside the withholding antecedent: %s", (advice, independentCall) => {
+    const source = `Take 1 tablet at 08:00 daily for 2 days; ${advice}.`;
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const predicate = { kind: "not", condition: { kind: "text", text: "it is a dialysis day" } };
+    const clause = parsed.meta.canonical.clauses[0], graph = clause.instructionGraph!;
+    expect(graph.actions.map(action => action.predicate.lemma)).toEqual(independentCall ? ["hold", "call"] : ["hold"]);
+    expect(graph.relations).toContainEqual(expect.objectContaining({
+      kind: "if", toActionIndex: 0, text: expect.stringContaining("if it is a dialysis day")
+    }));
+    expect(clause.clinicalAdjuncts?.calendarDayCondition).toEqual(predicate);
+    expect(clause.prn?.enabled).not.toBe(true);
+    expect(graph.sourceText).toBe(source);
+    const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 3 };
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toEqual(predicate);
+      expect(members[0].calendarPredicate).toEqual(predicate);
+      expect(members[0].schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d", clocks: ["08:00:00"] });
+      expect(nextDueDoses(input, { ...query, evaluateCondition: (condition, at) => {
+        expect(condition).toEqual(predicate);
+        return !at.startsWith("2026-12-01");
+      } })).toEqual(["2026-12-02T08:00:00+00:00"]);
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => true })).toEqual([
+        "2026-12-01T08:00:00+00:00", "2026-12-02T08:00:00+00:00"
+      ]);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .not.toContain("dialysis day; then");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
   it("keeps an authored six-hour successor independent of a preceding daily clock", () => {
     const source = "Take 1 tablet daily at 08:00 for 7 days, then take 2 tablets every 6 hours";
     const parsed = parsePublicSig(source), before = JSON.stringify(parsed);

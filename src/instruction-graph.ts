@@ -3668,6 +3668,14 @@ export function buildInstructionGraph(
     }
   }
   for (let index = actions.length - 1; index >= 0; index -= 1) {
+    // The closed HPSG antecedent owns its activities; only its separate
+    // consequent contributes commanded actions to the instruction graph.
+    if (clause.instructionScopes?.some(scope =>
+      scope.span.start <= actions[index].span.start && actions[index].span.end <= scope.span.end
+    )) {
+      actions.splice(index, 1);
+      continue;
+    }
     const definition = frameActionDefinition(actions[index], options);
     const participatesInProcedureSequence = Boolean(
       definition?.procedural &&
