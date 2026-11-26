@@ -6,7 +6,10 @@ import { lexInput } from "../lexer/lex";
 import { LexKind } from "../lexer/token-types";
 import { annotateLexTokens } from "../lexer/meaning";
 import type { Token } from "../parser-state";
-import type { MedicationCondition } from "../types";
+import type { MedicationCondition, ParseOptions } from "../types";
+import { actionMatchAt } from "../instruction-graph";
+import { ACTION_DIRECTIVE_PREFIXES, normalizeTokenLower } from "./lexical-classes";
+import { explicitDoseLexicalEnd } from "./rules/core-rules";
 import { lexicalSign, type HpsgGuardExpression, type HpsgSynsem, type HpsgPhraseRule } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
 import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, type AdviceArgument, type AdviceFrame } from "../types";
@@ -818,9 +821,10 @@ function guardPredicateConstituent(
  * @param source Exact clinician text.
  * @param existingTokens Already-lexed tokens when the caller has a source context.
  * @param withholdingConsequent License supplied only by a typed medication-withholding action daughter.
+ * @param options Registered action vocabulary used by the enclosing clause.
  */
 export function parseMedicationGuard(
-  source: string, existingTokens?: Token[], withholdingConsequent?: true
+  source: string, existingTokens?: Token[], withholdingConsequent?: true, options?: ParseOptions
 ): ParsedMedicationGuard | undefined {
   const lead = medicationGuardLeadLexeme(source, withholdingConsequent);
   if (!lead) return undefined;
@@ -835,16 +839,46 @@ export function parseMedicationGuard(
     end = (otherwise ?? alternative)!.start;
     tail = source.slice(lead.end, end);
   }
+  const tokens = existingTokens ?? annotateLexTokens(lexInput(source));
   const prefix = source.slice(0, lead.start).trim();
   if (!prefix || /[.;!?]$/u.test(prefix)) {
-    const comma = tail.search(/[,;:]/u), action = MEDICATION_GUARD_BOUNDARIES.administrationHead.exec(tail);
-    end = Math.min(end, lead.end + Math.min(comma >= 0 ? comma : tail.length, action?.index ?? tail.length));
+    const comma = tail.search(/[,;:]/u);
+    end = Math.min(end, lead.end + (comma >= 0 ? comma : tail.length));
+    // Registered administration heads and their directive prefixes delimit the
+    // consequent. Locale lexing supplies their canonical tokens and source spans.
+    for (let index = 0; index < tokens.length; index++) {
+      const token = tokens[index];
+      if (token.sourceStart < lead.end) continue;
+      if (token.sourceStart >= end) break;
+      const match = actionMatchAt(tokens, index, options), action = match?.definition;
+      if (!match || !action?.primaryAdministrationHead && !(action?.definesDose && action.administrationMethod)) continue;
+      if (action.procedural && explicitDoseLexicalEnd(tokens, index + match.length, options) === undefined) continue;
+      let consequentStart = token.sourceStart;
+      for (const directive of ACTION_DIRECTIVE_PREFIXES) {
+        const start = index - directive.parts.length;
+        if (start >= 0 && tokens[start].sourceStart >= lead.end &&
+            directive.parts.every((part, offset) => normalizeTokenLower(tokens[start + offset]) === part)) {
+          consequentStart = tokens[start].sourceStart;
+          break;
+        }
+      }
+      if (comma >= 0) {
+        const context: GuardConstituentContext = { source, range: { start: lead.start, end } };
+        const delimited = guardPredicateConstituent(context, tokens, lead.end, end);
+        if (delimited?.synsem.cont.guard?.licensesBareIf) continue;
+        const predicate = guardPredicateConstituent(context, tokens, lead.end, consequentStart);
+        // A predicate activity remains inside its delimited antecedent. A
+        // complete clinical guard can instead precede a later instruction comma.
+        if (!predicate?.synsem.cont.guard?.licensesBareIf) continue;
+      }
+      end = consequentStart;
+      break;
+    }
   } else end = Math.min(end, lead.end + medicationGuardClauseBoundary(tail));
   let predicateStart = lead.end, predicateEnd = end;
   while (predicateStart < predicateEnd && /\s/u.test(source[predicateStart])) predicateStart++;
   while (predicateEnd > predicateStart && /[\s.!?;,]/u.test(source[predicateEnd - 1])) predicateEnd--;
   if (predicateStart >= predicateEnd) return undefined;
-  const tokens = existingTokens ?? annotateLexTokens(lexInput(source));
   const markerTokens = tokens.filter(token => token.sourceStart < lead.end && lead.start < token.sourceEnd);
   if (!markerTokens.length) return undefined;
   const context: GuardConstituentContext = { source, range: { start: lead.start, end },

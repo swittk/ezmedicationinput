@@ -138,7 +138,7 @@ function startsScheduledAdministration(context: HpsgClauseContext, index: number
   );
 }
 
-function isProceduralInstructionFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
+export function isProceduralInstructionFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
   const definition = frameActionDefinition(frame, context.options);
   const scopedDirective = frame.polarity === AdvicePolarity.Negate ||
     isConditionalAdviceFrame(context, frame) || definition?.safetyScopeTarget === true;

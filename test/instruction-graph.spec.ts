@@ -53,6 +53,30 @@ describe("procedural instruction graph", () => {
     expect(parseInstructionGraphExtension([extension])?.actions[0].predicate.lemma).toBe("double");
   });
 
+  it("retains the typed amount in a negated administration instruction", () => {
+    const source = "Do not chew 1 tablet";
+    const action = parseInstructionActions(source)[0];
+    expect(action.args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Amount, quantity: { value: 1, unit: "tab" }
+    }));
+    expect(realizeInstructionAction(action, "en")).toBe("Do not chew 1 tablet");
+    expect(realizeInstructionAction(action, "th")).toBe("ห้ามเคี้ยว 1 เม็ด");
+    const input = "Swallow 1 tablet whole; do not chew 1 tablet";
+    const parsed = parsePublicSig(input);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.fhir[0].doseAndRate).toHaveLength(1);
+    expect(parsed.fhir[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("ห้ามเคี้ยว 1 เม็ด");
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it.each(["Chew gum", "Do not chew tablets"])("does not invent an amount for %s", source => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses.every(clause => clause.dose === undefined)).toBe(true);
+    expect(parsed.fhir.every(row => !row.doseAndRate?.length)).toBe(true);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
   it.each([
     ["Do not rub eyes", "Do not rub the eye"],
     ["Do not dab skin", "Do not dab the skin"],

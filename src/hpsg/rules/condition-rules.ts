@@ -1,5 +1,5 @@
 import { medicationGuardLeadLexeme, CIRCUMSTANTIAL_CONDITION_HEADS } from "../../medication-condition";
-import { registeredActivityDayAt } from "./instruction-rules";
+import { registeredActivityDayAt, isProceduralInstructionFrame } from "./instruction-rules";
 import { frameActionDefinition } from "../../instruction-graph";
 import { AdviceArgumentRole, AdviceFrame, AdvicePolarity, AdviceRelation, EventTiming, FhirDayOfWeek, MedicationCondition, ParseOptions } from "../../types";
 import {
@@ -15,7 +15,7 @@ import {
   resolveActionRelationSurface
 } from "../../relation-terminology";
 import { getProceduralFrames, actionEventRelationAt, conditionalAdviceOwnerAt, isConditionalAdviceFrame, instructionActionsAreSequenced as explicitlySequences, proceduralInstructionProgram as prefixProgram } from "../procedural-context";
-import { hasSymptomOnsetPrnAt, startsMaximumCountLead } from "./prn-rules";
+import { hasSymptomOnsetPrnAt, prnAt, startsMaximumCountLead } from "./prn-rules";
 import { SUPPLEMENTAL_DOSE_MODIFIERS, CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { countAndDurationRule, countFrequencyRule, timeOfDayRule, timingLexicalRule, dayRangeLexicalRule } from "./timing-rules";
@@ -29,7 +29,8 @@ import {
   rangeFromTokens,
   medicationGuardForContext,
   normalizeTokenLower,
-  startsMedicationGuard
+  startsMedicationGuard,
+  isMedicationGuardMarker
 } from "../rule-context";
 import {
   HpsgClinicalAdjunctFeature,
@@ -307,7 +308,17 @@ function withholdsMedicationAdministration(
       argument.role === AdviceArgumentRole.Time || argument.role === AdviceArgumentRole.Duration)) {
     return effect === "withhold";
   }
+  // An explicit supplemental target belongs to a different dose. Its modifier
+  // may be retained on the nominal while the typed Amount has a narrower span.
+  for (const argument of frame.args) {
+    if (argument.role !== AdviceArgumentRole.Object && argument.role !== AdviceArgumentRole.Theme &&
+        argument.role !== AdviceArgumentRole.Amount) continue;
+    if (context.tokens.some(token => tokenInActionArgument(
+      context, token.sourceStart, token.sourceEnd, frame, argument
+    ) && SUPPLEMENTAL_DOSE_MODIFIERS.has(normalizeTokenLower(token)))) return false;
+  }
   return frame.args.some((argument) => {
+    if (prohibitedAdministration && argument.role === AdviceArgumentRole.Amount && argument.quantity) return true;
     // Registered avoidance uses a Theme argument, whereas HOLD uses Object.
     // A medication/product noun is a legitimate explicit medication target;
     // unrelated food, breath, container and activity objects remain distinct.
@@ -315,9 +326,6 @@ function withholdsMedicationAdministration(
     const nominalTokens = context.tokens.filter(token =>
       tokenInActionArgument(context, token.sourceStart, token.sourceEnd, frame, argument));
     const words = nominalTokens.map(normalizeTokenLower);
-    // An explicitly supplemental dose is a distinct referent, not the
-    // standing administration whose clinical guard is being constructed.
-    if (words.some(word => SUPPLEMENTAL_DOSE_MODIFIERS.has(word))) return false;
     if (argument.conceptId === "medication-dose" || argument.conceptId === "product") return true;
     // A registered withholding predicate can select a temporal noun with an
     // elliptical DOSE head (hold 20:00 / omit PM). Physical objects remain
@@ -362,7 +370,7 @@ function localWithholdingGuard(
   // All predicate/Boolean meaning still comes from the same HPSG constructor.
   const guard = applicable && (sourceEnd === undefined || sourceEnd >= applicable.end)
     ? applicable
-    : parseMedicationGuard(context.state.input.slice(sourceStart, sourceEnd), undefined, true);
+    : parseMedicationGuard(context.state.input.slice(sourceStart, sourceEnd), undefined, true, context.options);
   if (!guard) return undefined;
   return guard.condition.kind === "not"
     ? guard.condition.condition
@@ -700,6 +708,19 @@ function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getP
   );
 }
 
+/** A selected positive dose keeps an already licensed clinical condition.
+ * Unknown predicates and procedural/negative targets retain their scope owner. */
+function targetHasClinicalCondition(
+  context: HpsgClauseContext, start: number, frame: AdviceFrame
+): boolean {
+  if (isProceduralInstructionFrame(context, frame)) return false;
+  if (isMedicationGuardMarker(context, start)) return true;
+  return prnAt(context, start).some(sign => {
+    const requests = sign.synsem.valence.prn?.lookupRequests;
+    return Boolean(requests?.length && requests.every(request => request.canonical));
+  });
+}
+
 function hasStrongBoundary(text: string): boolean {
   return /[.!?;]/u.test(text);
 }
@@ -785,6 +806,10 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     );
     if (nextIndex >= 0) {
       const program = prefixProgram(context, nextIndex, frames);
+      // Select the source target before deciding its conditional owner. A
+      // positive administration keeps its admitted clinical condition; a later
+      // procedural action must not take the same antecedent from that dose.
+      if (targetHasClinicalCondition(context, start, program[0])) return [];
       const targetStart = program[0].span.start;
       const targetEnd = program[program.length - 1].span.end;
       const tokens = conditionTokens(context, lead.sourceStart, targetStart);
@@ -832,6 +857,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       hasStrongBoundary(gap) ||
       (gap.trim() && !explicitlySequences(context, previous.span.end, lead.sourceStart))
     ) return [];
+    if (targetHasClinicalCondition(context, start, previous)) return [];
     const conditionEnd = postfixConditionEnd(context, start);
     const tokens = conditionTokens(context, lead.sourceStart, conditionEnd);
     if (!tokens.length) return [];

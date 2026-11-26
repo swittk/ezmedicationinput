@@ -563,7 +563,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   let guard: ReturnType<typeof parseMedicationGuard>;
   const guardForInput = () => {
     if (!guardEvaluated) {
-      guard = parseMedicationGuard(input, tokens);
+      guard = parseMedicationGuard(input, tokens, undefined, options);
       guardEvaluated = true;
     }
     return guard;

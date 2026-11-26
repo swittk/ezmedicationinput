@@ -62,7 +62,7 @@ import {
   isMedicationGuardMarker,
   tokensAvailable
 } from "../rule-context";
-import { HpsgLexicalRule, lexicalSign } from "../signature";
+import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
 import { isScheduleLead, followingCourseDurationHeaderAt } from "./timing-rules";
 import { productRouteHint } from "./product-route";
 
@@ -716,7 +716,7 @@ export function symptomOnsetPrnRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
-export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
+function createPrnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.prn", (context, start) => {
     const lead = tokensAvailable(context, start, 1)?.[0];
     if (!lead) {
@@ -920,4 +920,21 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       })
     ];
   });
+}
+
+const PRN_LEXICAL_RULE = createPrnLexicalRule();
+
+/** Share a PRN daughter requested before chart admission by scope ownership. */
+export function prnAt(context: HpsgClauseContext, start: number): HpsgSign[] {
+  const matches = context.clinicalCache.prnLookahead ??= new Map<number, HpsgSign[]>();
+  const cached = matches.get(start);
+  if (cached) return cached;
+  const signs = PRN_LEXICAL_RULE.match(context, start);
+  matches.set(start, signs);
+  return signs;
+}
+
+export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.prn", (context, start) =>
+    context.clinicalCache.prnLookahead?.get(start) ?? PRN_LEXICAL_RULE.match(context, start));
 }

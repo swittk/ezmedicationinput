@@ -79,7 +79,8 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
     const guard = medicationGuardForContext(context);
     if (guard && guard.start === token.sourceStart && frame.span.start < guard.end) continue;
     const definition = frameActionDefinition(frame, context.options);
-    const procedural = definition?.procedural && !definition.primaryAdministrationHead;
+    const procedural = frame.polarity === AdvicePolarity.Negate ||
+      definition?.procedural && !definition.primaryAdministrationHead;
     const undosedAction = definition && frame.args.length > 0 && !frame.args.some(argument =>
       argument.role === AdviceArgumentRole.Amount || argument.role === AdviceArgumentRole.Site);
     if (undosedAction && !procedural) {
@@ -125,7 +126,8 @@ export function conditionalAdviceOwnerAt(context: HpsgClauseContext, index: numb
 
 /** Whether this existing action daughter is governed as conditional advice. */
 export function isConditionalAdviceFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
-  if (frame.args.some(argument => argument.role === AdviceArgumentRole.Amount)) return false;
+  if (frame.polarity !== AdvicePolarity.Negate &&
+      frame.args.some(argument => argument.role === AdviceArgumentRole.Amount)) return false;
   // A selected procedure's Site is its target, not a newly quantified
   // administration. Keep the conditional owner already selected above.
   if (frame.args.some(argument => argument.role === AdviceArgumentRole.Site) &&

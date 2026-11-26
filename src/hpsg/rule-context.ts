@@ -53,6 +53,8 @@ export interface HpsgClauseContext {
   clinicalCache: {
     /** Existing lexical matches requested early by instruction body lookahead. */
     quantityLookahead?: Map<number, HpsgSign[]>;
+    /** PRN daughters requested early by conditional target ownership. */
+    prnLookahead?: Map<number, HpsgSign[]>;
     medicationGuardScanned?: true;
     medicationGuard?: ParsedMedicationGuard;
     /** Tokens owned by a complete dimensional quantity or cumulative limit.
@@ -69,7 +71,7 @@ export function medicationGuardForContext(
   context: HpsgClauseContext
 ): ParsedMedicationGuard | undefined {
   if (!context.clinicalCache.medicationGuardScanned) {
-    context.clinicalCache.medicationGuard = parseMedicationGuard(context.state.input, context.tokens);
+    context.clinicalCache.medicationGuard = parseMedicationGuard(context.state.input, context.tokens, undefined, context.options);
     context.clinicalCache.medicationGuardScanned = true;
   }
   return context.clinicalCache.medicationGuard;

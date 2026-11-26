@@ -784,6 +784,8 @@
     {
       "code": "chew",
       "semanticClass": "manipulate",
+      "acceptsAmount": true,
+      "definesDose": true,
       "display": "Chew",
       "i18n": {
         "th": "เคี้ยว"

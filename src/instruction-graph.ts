@@ -233,7 +233,7 @@ function actionCandidateIsPerPeriodGrammar(parts: Lexeme[], index: number): bool
   );
 }
 
-function actionMatchAt(
+export function actionMatchAt(
   parts: Lexeme[],
   index: number,
   options?: ParseOptions
@@ -4145,7 +4145,8 @@ function realizeAction(
       : genericRealizer(input)
     : undefined;
   const realized = negated ? adapter.renderNegated(input, genericText ??
-      (realizerKey === "mix-substance" ? adapter.render(realizerKey, input) : undefined))
+      (realizerKey === "mix-substance" || realizerKey === "relation-duration" &&
+        firstArguments[AdviceArgumentRole.Amount]?.quantity ? adapter.render(realizerKey, input) : undefined))
     : genericText ?? adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
   // material/site valence. Never infer a temporal relation from display text.

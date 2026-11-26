@@ -19,7 +19,6 @@ const GUARD_LEAD = /\bonly\s+if\b|\bunless\b|เฉพาะ(?:เมื่อ|�
 // Only the hold/skip constituent belongs to the guard's source ownership;
 // later advice remains available to the shared procedural grammar.
 const OTHERWISE_HOLD = /(?:[,;]\s*|\s+)\b(?:otherwise|else)\s+(?:hold|do\s+not\s+take|skip)\b(?=\s*(?:$|[.,;!?])|\s+(?:and|then)\b)|(?:มิฉะนั้น|ไม่เช่นนั้น)\s*(?:งด|หยุด|ไม่ต้อง)(?:ยา|กิน|รับประทาน)?(?=\s*(?:$|[.,;!?]|และ|แล้ว|จากนั้น))/iu;
-const ACTION_LEAD = /\b(?:take|give|administer|apply|instill|use|inject|infuse)\b|(?:รับประทาน|กิน|หยอด|ใช้|ทา|ฉีด|ให้ยา)/iu;
 const NUMBER = String.raw`[+-]?(?:\d+(?:\.\d+)?|\.\d+)`;
 const OPERATOR = String.raw`(?:>=|<=|>|<|==|=|\b(?:not\s+less\s+than|not\s+below|not\s+under|not\s+more\s+than|not\s+greater\s+than|not\s+above|not\s+over|greater\s+than|exceeds?|at\s+least|no\s+less\s+than|above|over|less\s+than|at\s+most|below|under|no\s+more\s+than|equal\s+to|equals?)\b|ไม่น้อยกว่า|ไม่มากกว่า|ไม่สูงกว่า|มากกว่า|สูงกว่า|ตั้งแต่|อย่างน้อย|ไม่ต่ำกว่า|ต่ำกว่า|น้อยกว่า|ไม่เกิน|เท่ากับ)`;
 // The guard lead and its measurement daughter share one comparison grammar.
@@ -99,8 +98,7 @@ export function medicationGuardLeadLexeme(source: string, licensedConsequent = f
  * from these recognizers is itself a medication condition or administration. */
 export const MEDICATION_GUARD_BOUNDARIES = {
   alternative: ALTERNATE_CUE,
-  noDoseConsequent: OTHERWISE_HOLD,
-  administrationHead: ACTION_LEAD
+  noDoseConsequent: OTHERWISE_HOLD
 };
 
 /** Recognize one predicate atom. Incomplete comparisons remain unsatisfied

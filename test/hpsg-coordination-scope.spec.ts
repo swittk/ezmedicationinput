@@ -16,7 +16,7 @@ import {
 import { applyCoordinatedCadenceScopes } from '../src/regimen/coordination-scope';
 import { createBoundaryPlan, takeBoundaryParsedState } from '../src/regimen/planner';
 import type { BoundaryPlan } from '../src/hpsg/signature';
-import { selectHpsgCoordinationScopeConstruction } from '../src/hpsg/constructions';
+import { parseMedicationGuard, selectHpsgCoordinationScopeConstruction } from '../src/hpsg/constructions';
 import type { CoordinationScopeFacts } from '../src/hpsg/signature';
 import { parseSig, parseSigAsync } from './helpers/r5-parser';
 
@@ -619,6 +619,171 @@ describe('HPSG coordination cadence scope', () => {
     }
     expect(linted.issues).toEqual([]);
   });
+
+  it.each([
+    "Take 1 tablet if SBP > 160",
+    "Swallow 1 tablet if SBP > 160",
+    "Chew 1 tablet if SBP > 160",
+    "If SBP > 160, swallow 1 tablet",
+    "If SBP > 160, chew 1 tablet",
+    "If SBP > 160 swallow 1 tablet",
+    "If SBP > 160 chew 1 tablet",
+    "If SBP > 160, swallow 1 tablet then call clinic",
+    "กลืน 1 เม็ด ถ้า SBP > 160",
+    "เคี้ยว 1 เม็ด ถ้า SBP > 160",
+    "ถ้า SBP > 160, กลืน 1 เม็ด",
+    "ถ้า SBP > 160, เคี้ยว 1 เม็ด",
+    "ถ้า SBP > 160 ให้กลืน 1 เม็ด",
+    "ถ้า SBP > 160 ให้เคี้ยว 1 เม็ด"
+  ])("keeps an admitted guard on its registered administration: %s", input => {
+    const condition = { kind: "measurement", name: "sbp", operation: "gt", value: 160 };
+    expect(parseMedicationGuard(input)?.condition).toMatchObject(condition);
+    const sign = parseClauseSign(input);
+    expect(sign?.synsem.head.dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(sign?.synsem.cont.clinicalAdjunct?.condition).toMatchObject(condition);
+    const parsed = parsePublicSig(input);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.condition).toMatchObject(condition);
+    expect(parsed.fhir).toHaveLength(1);
+    for (const row of [parsed.fhir[0], ...toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(getDosageCondition(row)).toMatchObject(condition);
+      expect(row.asNeeded).not.toBe(true);
+    }
+    expect(parsed.fhirNext.step[0].component[0].condition?.[0]).toMatchObject({
+      operation: "gt", valueQuantity: { value: 160 }
+    });
+    expect(parsed.input).toBe(input);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it.each(["swallow", "chew"])("keeps a fronted guard and no-dose alternative with %s", method => {
+    const input = `Only if SBP > 160, ${method} 1 tab BID, otherwise hold then call clinic`;
+    const parsed = parsePublicSig(input);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.condition).toMatchObject({
+      kind: "measurement", name: "sbp", operation: "gt", value: 160
+    });
+    for (const row of [parsed.fhir[0], ...toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(row.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+      expect(getDosageCondition(row)).toMatchObject({ kind: "measurement", name: "sbp", value: 160 });
+      expect(row.asNeeded).not.toBe(true);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it.each([
+    "If SBP > 160 chew 1 tablet daily for 2 days",
+    "If SBP > 160, chew 1 tablet daily for 2 days",
+    "If SBP > 160 swallow 1 tablet daily for 2 days",
+    "If SBP > 160, swallow 1 tablet daily for 2 days",
+    "If SBP > 160 take 1 tablet daily for 2 days",
+    "If SBP > 160, take 1 tablet daily for 2 days",
+    "ถ้า SBP > 160 ให้เคี้ยว 1 เม็ด ทุกวัน เป็นเวลา 2 วัน",
+    "ถ้า SBP > 160, ให้เคี้ยว 1 เม็ด ทุกวัน เป็นเวลา 2 วัน",
+    "ถ้า SBP > 160 ให้กลืน 1 เม็ด ทุกวัน เป็นเวลา 2 วัน",
+    "ถ้า SBP > 160, ให้กลืน 1 เม็ด ทุกวัน เป็นเวลา 2 วัน",
+    "ถ้า SBP > 160 ให้รับประทาน 1 เม็ด ทุกวัน เป็นเวลา 2 วัน",
+    "ถ้า SBP > 160, ให้รับประทาน 1 เม็ด ทุกวัน เป็นเวลา 2 วัน"
+  ])("executes a fronted threshold only when its evaluator permits it: %s", input => {
+    const condition = { kind: "measurement", name: "sbp", operation: "gt", value: 160 };
+    expect(parseMedicationGuard(input)?.condition).toMatchObject(condition);
+    const parsed = parsePublicSig(input);
+    const options = { from: "2026-11-02T00:00:00+07:00", orderedAt: "2026-11-02T00:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 2 };
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+    for (const dosage of [parsed.meta.canonical.course!, parsed.fhirNext, parsed.fhir, toDosageDetails(parsed.fhir)]) {
+      let rejectingCalls = 0, acceptingCalls = 0;
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition: predicate => {
+        expect(predicate).toMatchObject(condition);
+        rejectingCalls++;
+        return false;
+      } })).toEqual([]);
+      expect(rejectingCalls).toBeGreaterThan(0);
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition: predicate => {
+        expect(predicate).toMatchObject(condition);
+        acceptingCalls++;
+        return true;
+      } })).toHaveLength(2);
+      expect(acceptingCalls).toBeGreaterThan(0);
+    }
+  });
+
+  it.each([
+    ["able to swallow", ","], ["able to swallow", ""],
+    ["you can swallow", ","], ["you can swallow", ""],
+    ["you can swallow 1 tablet", ","]
+  ])("keeps the complete antecedent %s with separator %s", (antecedent, separator) => {
+    const input = `Only if ${antecedent}${separator} take 1 tablet daily`;
+    const condition = { kind: "state", name: antecedent, expected: true };
+    expect(parseMedicationGuard(input)?.condition).toMatchObject(condition);
+    const parsed = parsePublicSig(input);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.condition).toMatchObject(condition);
+    expect(parsed.fhir[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(getDosageCondition(parsed.fhir[0])).toMatchObject(condition);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it.each([
+    ["If dizzy, do not chew 1 tablet", "Swallow 1 tablet daily", "dizzy"],
+    ["ถ้าเวียนศีรษะ ห้ามเคี้ยว 1 เม็ด", "กลืน 1 เม็ด ทุกวัน", "เวียนศีรษะ"]
+  ])("keeps quantified negative advice separate from positive PRN: %s", (advice, standing, symptom) => {
+    const adviceOnly = parsePublicSig(advice);
+    expect(adviceOnly.meta.canonical.clauses.every(clause => !clause.dose && !clause.prn?.enabled)).toBe(true);
+    expect(adviceOnly.fhir.every(row => !row.doseAndRate && !row.asNeeded)).toBe(true);
+    const input = `${standing}; ${advice}`, parsed = parsePublicSig(input);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    for (const row of [parsed.fhir[0], ...toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(row.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(row.asNeeded).not.toBe(true);
+      expect(getDosageCondition(row)).toMatchObject({
+        kind: "not", condition: { kind: "state", name: symptom, expected: true }
+      });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it.each([
+    "the extra dose", "the additional dose", "1 extra tablet",
+    "an extra 1 tablet", "an additional 1 tablet", "an extra half tablet"
+  ])("keeps a supplemental prohibition independent from the standing dose: %s", target => {
+    const input = `Swallow 1 tablet daily for 7 days; If dizzy, do not chew ${target}.`;
+    const parsed = parsePublicSig(input);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.condition).toBeUndefined();
+    for (const row of [parsed.fhir[0], ...toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(getDosageCondition(row)).toBeUndefined();
+      expect(row.asNeeded).not.toBe(true);
+    }
+    let evaluatorCalls = 0;
+    expect(nextDueDoses(parsed.fhirNext, {
+      from: "2026-11-02T00:00:00+07:00", orderedAt: "2026-11-02T00:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 7,
+      evaluateCondition: () => { evaluatorCalls++; return false; }
+    })).toHaveLength(7);
+    expect(evaluatorCalls).toBe(0);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+  });
+
+  it.each([
+    "If dizzy, chew 1 tablet", "If dizzy, do chew 1 tablet",
+    "ถ้าเวียนศีรษะ ให้เคี้ยว 1 เม็ด", "ถ้าเวียนศีรษะ, ให้เคี้ยว 1 เม็ด",
+    "ถ้าเวียนศีรษะ ให้กลืน 1 เม็ด", "ถ้าเวียนศีรษะ, ให้กลืน 1 เม็ด",
+    "ถ้าเวียนศีรษะ ให้รับประทาน 1 เม็ด"
+  ])(
+    "retains an ordinary symptom PRN on a positive quantified administration: %s", input => {
+      const parsed = parsePublicSig(input), clause = parsed.meta.canonical.clauses[0];
+      expect(clause.dose).toEqual({ value: 1, unit: "tab" });
+      expect(clause.prn?.enabled).toBe(true);
+      expect(clause.clinicalAdjuncts?.condition).toBeUndefined();
+      expect(parsed.fhirNext.renderedInstruction).toBe(input);
+    }
+  );
 
   it("types shared guards and exclusions before projecting FHIR", () => {
     for (const [input, kind] of [
