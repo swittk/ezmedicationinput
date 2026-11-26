@@ -3581,7 +3581,7 @@ describe("round27 execution identity and measurement oracles", () => {
     expect(() => supply(incompatible, 1)).toThrow(expect.objectContaining({ code: "incompatible-dose-units" }));
   });
 
-  it("matches actual history before replay admission without losing unmatched nominal doses", () => {
+  it("uses recorded cycle history once while preserving independent overlapping opportunities", () => {
     const member = dose(); member.schedule!.recurrence!.clocks = ["08:00:00"];
     member.limits = [{ scope: "period", amount: { value: 2, unit: "tab" }, period: { value: 48, unit: "h" } }];
     const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
@@ -3591,9 +3591,9 @@ describe("round27 execution identity and measurement oracles", () => {
       const recorded = { ...query, priorDoseTimes: ["2026-01-01T08:00:00Z"] };
       expect(nextDueDoses(input, recorded)).toEqual(["2026-01-02T08:00:00+00:00"]);
       expect(calculateTotalUnits({ ...recorded, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
-      const unmatched = { ...query, priorDoseTimes: ["2026-01-01T07:00:00Z"] };
-      expect(nextDueDoses(input, unmatched)).toEqual(["2026-01-03T08:00:00+00:00"]);
-      expect(calculateTotalUnits({ ...unmatched, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+      const earlierActual = { ...query, priorDoseTimes: ["2026-01-01T07:00:00Z"] };
+      expect(nextDueDoses(input, earlierActual)).toEqual(["2026-01-02T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ ...earlierActual, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
     }
     const extendedCourse = freshExecutionInput(course);
     const extended = extendedCourse.stages[0].administrations[0];

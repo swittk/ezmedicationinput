@@ -1759,3 +1759,46 @@ describe("ranged lifetime supply remains attainable", () => {
     }
   });
 });
+
+
+describe("recorded daily-cycle use replaces nominal history", () => {
+  const options = { from: "2027-01-02T00:00:00Z", orderedAt: "2027-01-01T00:00:00Z",
+    timeZone: "UTC", durationValue: 1, durationUnit: FhirPeriodUnit.Day };
+  const source = (bounded = false): FhirR6DosageInstruction => ({
+    repeatCycle: { value: 1, code: "d" }, step: [{
+      ...(bounded ? { end: {
+        contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+        offsetDuration: { value: 1, code: "d" }
+      } } : {}),
+      component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["08:00:00"] } },
+        safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 2, unit: "tab" },
+          period: { value: 48, code: "h" } }] }
+      }]
+    }]
+  });
+  const check = (course: FhirR6DosageInstruction, priorDoseTimes?: string[]) => {
+    const offGrid = priorDoseTimes?.[0].includes("09:00");
+    for (const dosage of [course, toFhirR5Dosages(course), importCanonicalCourse(course)]) {
+      const before = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, ...options, priorDoseTimes }).totalUnits).toBe(1);
+      expect(nextDueDoses(dosage, { ...options, priorDoseTimes, limit: 2 })).toEqual([
+        "2027-01-02T08:00:00+00:00",
+        offGrid ? "2027-01-04T08:00:00+00:00" : "2027-01-03T08:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...options, priorDoseTimes,
+        from: "2027-01-04T00:00:00Z" }).totalUnits).toBe(1);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  };
+
+  it.each([undefined, "08:00", "09:00"])("keeps one administration for recorded time %s", clock => {
+    check(source(), clock ? [`2027-01-01T${clock}:00Z`] : undefined);
+  });
+
+  it("uses the same history ownership with an explicit one-day stage window", () => {
+    check(source(true), ["2027-01-01T09:00:00Z"]);
+  });
+});

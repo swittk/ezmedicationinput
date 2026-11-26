@@ -3213,7 +3213,7 @@ interface CycleEventQuota {
   historyEnd?: number;
   recordedTimes?: number[];
   recordedIndex?: number;
-  /** Actual history replaces inferred past opportunities for this finite phase. */
+  /** Actual history replaces inferred past opportunities for this resolved phase. */
   hasActualHistory?: true;
   /** Chronological replay must not spend a recorded instant again as a planned clock. */
   lastRecordedAt?: number;
@@ -3435,8 +3435,9 @@ function scheduleTreatmentRelativeCourse(
           (deferred ? undefined : cycleDefaultEnd);
         if (effectiveEnd && from >= effectiveEnd) return;
         const original = member.administration;
-        const prnFrom = original.asNeeded ? (options as PhaseCountOptions).prnOpportunityFrom : undefined;
-        const requestedFrom = prnFrom && prnFrom > from ? prnFrom : from;
+        const replayFrom = phaseReplayFrom(original, options,
+          Math.max(member.eligibleFrom.getTime(), anchor.getTime()), effectiveEnd?.getTime());
+        const requestedFrom = replayFrom && replayFrom > from ? replayFrom : from;
         const effectiveFrom = requestedFrom > member.eligibleFrom ? requestedFrom : member.eligibleFrom;
         if (effectiveEnd && effectiveFrom >= effectiveEnd) return;
         if (collect && unscheduledOccurrenceCapacity(original)) return;
@@ -3448,9 +3449,9 @@ function scheduleTreatmentRelativeCourse(
           remaining: collect && originalRepeat ? repeatOccurrenceCap(originalRepeat) ??
             (deferred ? finiteCompletionCount(originalRepeat) : undefined) : undefined,
         };
-        // Actual use spends a finite quota even when an authored end keeps
-        // phase completion independent of that quota.
-        if (collect && quota.remaining !== undefined) {
+        // Actual use owns this resolved phase's history, including an
+        // uncounted member whose opportunity repeats in each cycle.
+        if (collect && (quota.remaining !== undefined || options.priorDoseTimes?.length)) {
           // Absolute calendar eligibility may predate this repeated cycle.
           // Its earlier records still constrain rolling caps, not this quota.
           quota.historyStart = Math.max(member.eligibleFrom.getTime(), anchor.getTime());
@@ -4084,7 +4085,7 @@ function chronologicalRepeatedEvents(
       // A recorded administration already occupies the rolling ledger. Its
       // matching replay spends its finite phase count, never another amount.
       // Earlier PRN opportunities are not evidence of administration.
-      // A finite phase with actual records follows the same policy as local
+      // A resolved phase with actual records follows the same policy as local
       // finite completion: replay those records, then offer its remaining uses
       // from the query. Nominal history must not spend the allowance again,
       // whether the record coincides with its planned clock or arrives later.
@@ -4522,7 +4523,7 @@ function executionCourseWithPeriodOffsets(course: CanonicalCourse): CanonicalCou
  * eligible administration. This never becomes public options or FHIR state. */
 type PhaseCountOptions = NextDueDoseOptions & {
   countEligibilityStart?: Date;
-  /** Nominal replay may consume scheduled history, never unrecorded PRN use. */
+  /** Original query floor for PRN and actual-history phase replay. */
   prnOpportunityFrom?: Date;
   /** Actual doses already owned by history, excluded before nominal replay admission. */
   countedActualTimes?: ReadonlySet<number>;
@@ -4550,6 +4551,19 @@ function withActualReplayHistory<T extends NextDueDoseOptions>(options: T, befor
     if (at < cutoff) actual.add(at);
   }
   return actual.size ? { ...options, countedActualTimes: actual } : options;
+}
+/** Recorded use replaces nominal history only within its resolved member
+ * window. Other cycles still infer their own unrecorded opportunities. */
+function phaseReplayFrom(
+  member: CanonicalAdministration, options: NextDueDoseOptions,
+  start: number, end?: number
+): Date | undefined {
+  const phase = options as PhaseCountOptions;
+  if (!phase.prnOpportunityFrom) return undefined;
+  if (member.asNeeded) return phase.prnOpportunityFrom;
+  for (const at of phase.countedActualTimes ?? [])
+    if (at >= start && (end === undefined || at < end)) return phase.prnOpportunityFrom;
+  return undefined;
 }
 function unrecordedCountCandidates(candidates: string[], options: NextDueDoseOptions): string[] {
   const recorded = (options as PhaseCountOptions).countedActualTimes;
@@ -8104,11 +8118,12 @@ function calculateCourseTotalUnits(
       const member = window.administrations[memberIndex];
       const dosage = member.administration.schedule?.recurrence
         ? member.administration : prepareBestEffortTiming(member.administration);
-      const prnFrom = dosage.asNeeded ? (options as PhaseCountOptions).prnOpportunityFrom : undefined;
-      const begin = prnFrom && prnFrom > member.eligibleFrom ? prnFrom : member.eligibleFrom;
-      if (capacityOnly && !unscheduledOccurrenceCapacity(dosage)) continue;
       const nativeEnd = cycleOwnedAdministrationEnd(window, member, eventCycleEnd);
       const end = minDate(queryEnd, nativeEnd ?? cycleDefaultEnd ?? null);
+      const replayFrom = phaseReplayFrom(dosage, options,
+        Math.max(member.eligibleFrom.getTime(), treatmentStart.getTime()), end.getTime());
+      const begin = replayFrom && replayFrom > member.eligibleFrom ? replayFrom : member.eligibleFrom;
+      if (capacityOnly && !unscheduledOccurrenceCapacity(dosage)) continue;
       if (end <= begin || end <= queryStart) continue;
       // A pooled ranged plan keeps every resolved cycle/step count as a
       // separate quota; amounts can then be optimized across those windows
