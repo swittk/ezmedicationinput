@@ -5758,7 +5758,9 @@ function generateFrequencyPerPeriodSeries(
     exactDailyClocks || clocklessCalendarPeriod
       ? calendarDayStepper(baseTime, dayCount!, timeZone)
       : createIntervalStepper({ period, periodUnit }, timeZone);
-  const implicitClock = clocklessCalendarPeriod ? toLocalClock(baseTime, timeZone) : undefined;
+  // A gap-adjusted calendar boundary does not replace the source clock for
+  // later inferred slots, including slots inside a month/year period.
+  const implicitClock = calendarInterval && clocks.length === 0 ? toLocalClock(baseTime, timeZone) : undefined;
   const inferredMilliseconds = !configuredClock && !repeat.clocks?.length && !repeat.anchors?.length
     ? baseTime.getUTCMilliseconds() : 0;
   if (!advanceCycle) return [];

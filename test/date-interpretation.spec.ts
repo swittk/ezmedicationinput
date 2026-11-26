@@ -8,7 +8,7 @@ import { normalizeBodySiteKey } from "../src/maps";
 import { parseClauseState, tokenize } from "../src/parser";
 import { ParserState } from "../src/parser-state";
 import type { HpsgSign } from "../src/hpsg/signature";
-import { FhirPeriodUnit, type ParseOptions } from "../src/types";
+import { FhirPeriodUnit, type FhirDosage, type ParseOptions } from "../src/types";
 import { parseSig } from "./helpers/r5-parser";
 
 const REFERENCE_DATE = "2026-09-27";
@@ -1638,4 +1638,33 @@ it.each([
     expect(row.timing?.repeat?.frequency).toBeUndefined();
     expect(row.timing?.repeat?.frequencyMax).toBeUndefined();
   }
+});
+
+
+describe("monthly inferred clocks across a daylight-saving gap", () => {
+  const orderedAt = "2026-02-08T02:30:00-05:00";
+  const timeZone = "America/New_York";
+  const monthly = (clock?: string): FhirDosage => ({
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+    timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Month,
+      ...(clock ? { timeOfDay: [clock] } : {}) } },
+  });
+
+  it("keeps the original clock after the gap-adjusted cycle boundary in due doses and supply", () => {
+    const dosage = monthly();
+    expect({
+      due: nextDueDoses(dosage, { orderedAt, timeZone, from: "2026-03-07T00:00:00-05:00", limit: 2 }),
+      totalUnits: calculateTotalUnits({ dosage, orderedAt, timeZone,
+        from: "2026-03-23T02:00:00-04:00", durationValue: 1, durationUnit: FhirPeriodUnit.Hour }).totalUnits,
+    }).toEqual({ due: ["2026-03-08T03:30:00-04:00", "2026-03-23T02:30:00-04:00"], totalUnits: 1 });
+  });
+
+  it.each(["authored", "configured"] as const)("keeps %s clocks authoritative", owner => {
+    const dosage = monthly(owner === "authored" ? "09:15" : undefined);
+    const config = owner === "configured"
+      ? { frequencyDefaults: { byFrequency: { "freq:2/per:1mo": ["09:15"] } } } : undefined;
+    expect(nextDueDoses(dosage, { orderedAt, timeZone, config,
+      from: "2026-03-07T00:00:00-05:00", limit: 2 }))
+      .toEqual(["2026-03-08T09:15:00-04:00", "2026-03-23T09:15:00-04:00"]);
+  });
 });
