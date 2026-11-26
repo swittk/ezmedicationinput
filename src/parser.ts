@@ -1,5 +1,6 @@
 import type { CanonicalEvidence, CanonicalLexicalCategory } from "./types";
 import { parseHpsgClause } from "./hpsg/clause-parser";
+import { getProceduralFrames } from "./hpsg/procedural-context";
 import { findMedicationDateListSpans } from "./date-interpretation";
 import { applyHpsgDefaultConstraints } from "./hpsg/defaults";
 import { buildTranslationPrimitiveElement, mergeI18nRecords } from "./fhir-translations";
@@ -413,7 +414,8 @@ function finalizeClause(
     state.input,
     clause,
     options,
-    semanticOwnershipRanges
+    semanticOwnershipRanges,
+    getProceduralFrames({ state, options })
   );
   promoteGraphDirectivesToAdditionalInstructions(clause);
 }

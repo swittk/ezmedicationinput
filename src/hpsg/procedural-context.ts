@@ -13,10 +13,12 @@ const PROCEDURAL_FRAME_CACHE = new WeakMap<object, AdviceFrame[]>();
 
 /**
  * Parse procedural semantics once per ParserState and share the result across
- * HPSG lexical constructions. Keeping this cache at the HPSG context layer
- * avoids each rule family independently running the instruction parser.
+ * HPSG lexical constructions and graph finalization. Keeping this cache in
+ * the HPSG context avoids independently parsing the same action program.
  */
-export function getProceduralFrames(context: HpsgClauseContext): AdviceFrame[] {
+export function getProceduralFrames(
+  context: Pick<HpsgClauseContext, "state" | "options">
+): AdviceFrame[] {
   const cached = PROCEDURAL_FRAME_CACHE.get(context.state);
   if (cached) return cached;
   const frames = parseInstructionActions(context.state.input, 0, context.options);

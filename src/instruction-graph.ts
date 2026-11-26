@@ -3498,11 +3498,15 @@ export function buildInstructionGraph(
   input: string,
   clause: CanonicalSigClause,
   options?: ParseOptions,
-  semanticOwnershipRanges?: readonly TextRange[]
+  semanticOwnershipRanges?: readonly TextRange[],
+  proceduralFrames?: readonly AdviceFrame[]
 ): CanonicalInstructionGraph | undefined {
+  // Finalization owns the fields it extends and reorders; HPSG retains its frames.
+  const fullInputFrames = proceduralFrames
+    ? proceduralFrames.map(frame => ({ ...frame, args: frame.args.slice(), span: { ...frame.span } }))
+    : parseInstructionActions(input, 0, options);
   const actions: AdviceFrame[] = [];
   const opaqueSpans: CanonicalSourceSpan[] = [];
-  const fullInputFrames = parseInstructionActions(input, 0, options);
   reconcileComposedAdviceCoding(clause, fullInputFrames);
   let primaryAdministrationSpan = canonicalPrimaryAdministrationSpan(clause, fullInputFrames);
   // A source noun between the typed administration head and its matching
