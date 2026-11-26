@@ -2344,8 +2344,7 @@ function treatmentRelativeInstant(
     getQuantityComparator(duration) ||
     quantity === undefined ||
     !Number.isFinite(quantity) ||
-    quantity < 0 ||
-    ((unit === "mo" || unit === "a") && !Number.isInteger(quantity))
+    quantity < 0
   ) {
     throw new Error("Unsupported R6 step RelativeTime: requires a treatment-start offset");
   }

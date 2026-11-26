@@ -6656,6 +6656,45 @@ describe("shared execution unit and event ownership", () => {
     }
   });
 
+  for (const owner of ["stage", "component"] as const) {
+    it.each([
+      [0.25, "a", "2027-04-30T10:15:00-04:00"],
+      [3, "mo", "2027-04-30T10:15:00-04:00"],
+      [0.5, "a", "2027-07-31T10:15:00-04:00"],
+      [6, "mo", "2027-07-31T10:15:00-04:00"],
+      [0.5, "mo", undefined], [0.1, "a", undefined],
+    ] as const)("resolves a %s %s " + owner + " offset only when it names whole civil months",
+      (value, unit, due) => {
+      const boundary = { anchor: "treatment-start" as const, displacement: {
+        value, system: ucum, code: unit,
+        extension: [{ url: "urn:clinic:calendar-note", valueString: "Retain the authored calendar quantity" }],
+      } };
+      const member: CanonicalAdministration = { kind: "administration",
+        amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { recurrence: { count: 1 } },
+        ...(owner === "component" ? { phaseStart: boundary } : {}),
+      };
+      const course: CanonicalCourse = { kind: "course", stages: [{
+        ...(owner === "stage" ? { start: boundary } : {}), administrations: [member],
+      }] };
+      const options = { orderedAt: "2027-01-31T10:15:00-05:00", from: "2027-01-31T10:15:00-05:00",
+        timeZone: "America/New_York" };
+      for (const dosage of wire(course)) {
+        const before = structuredClone(dosage);
+        expect(JSON.stringify(dosage)).toContain("urn:clinic:calendar-note");
+        const calculate = () => calculateTotalUnits({ dosage, ...options,
+          durationValue: 200, durationUnit: FhirPeriodUnit.Day });
+        if (due) {
+          expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([due]);
+          expect(calculate()).toMatchObject({ totalUnits: 1, unit: "tab" });
+        } else {
+          expect(() => nextDueDoses(dosage, { ...options, limit: 2 })).toThrow(/invalid calendar date/);
+          expect(calculate).toThrow(/invalid calendar date/);
+        }
+        expect(dosage).toStrictEqual(before);
+      }
+    });
+  }
+
   it.each([undefined, "active ingredient"])("sums annotated UCUM quantities using their coded basis (%s)", label => {
     const rows: FhirDosage[] = [
       { doseAndRate: [{ doseQuantity: { value: 200, unit: "mg" } }], timing: { repeat: { count: 1 } } },
