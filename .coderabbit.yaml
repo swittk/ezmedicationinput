@@ -70,6 +70,9 @@ reviews:
         owner across consumers; avoid symptom-only rescue branches, duplicate
         clinical policy and speculative abstractions. Locale providers are plain
         immutable data; receiver rebinding and caller-misuse defenses are out of scope.
+        Custom formatLong overrides own their returned whole-clause text; preserve
+        their full context and defaults. Native rendering retains typed dose/advice
+        ownership; do not infer or repair arbitrary callback output.
     - path: "test/**"
       instructions: |
         Clinical correctness means a precise, independent oracle for realistic
