@@ -6336,19 +6336,41 @@ describe("authored next-day and inherited recurrence ownership", () => {
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 
-  it.each([false, true])("inherits infusion cadence while retaining an authored count: count=%s", counted => {
-    const source = "Infuse 100 mL over 1 hour daily for 2 days, then 50 mL over 30 minutes" +
-      (counted ? " for 1 dose" : "") + " from day 3";
-    const parsed = parseSig(source);
+  it.each([
+    ["over", "from day 3", undefined, 350],
+    ["over", "for 1 dose from day 3", 1, 250],
+    ["over", "from day 3 for 1 dose", 1, 250],
+    ["in", "for 1 dose from day 3", 1, 250],
+    ["in", "from day 3 for 1 dose", 1, 250],
+    ["after", "for 1 dose from day 3", 1, 250],
+    ["after", "from day 3 for 1 dose", 1, 250]
+  ] as const)("keeps the onset and count on one infusion continuation: %s %s", (introducer, tail, count, totalUnits) => {
+    const source = "Infuse 100 mL over 1 hour daily for 2 days, then 50 mL " +
+      introducer + " 30 minutes " + tail;
+    const parsed = parseSig(source), before = JSON.stringify(parsed);
     for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
-      const member = importCanonicalCourse(dosage).stages[1].administrations[0];
-      expect(member.schedule?.recurrence).toMatchObject({
-        frequency: 1, period: 1, periodUnit: "d", occurrenceDuration: 30, occurrenceDurationUnit: "min" });
-      expect(member.schedule?.recurrence?.count).toBe(counted ? 1 : undefined);
-      expect(calculateTotalUnits({ dosage, ...query, durationValue: 5, durationUnit: FhirPeriodUnit.Day }).totalUnits)
-        .toBe(counted ? 250 : 350);
+      const course = importCanonicalCourse(dosage);
+      expect(course.stages).toHaveLength(2);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      expect(course.stages[1].administrations).toHaveLength(1);
+      expect(course.stages[0].administrations[0].amounts?.[0].quantity).toMatchObject({ value: 100, unit: "mL" });
+      expect(course.stages[0].administrations[0].schedule?.recurrence?.courseLength).toMatchObject({ value: 2 });
+      const member = course.stages[1].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 50, unit: "mL" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(member.schedule?.recurrence?.count).toBe(count);
+      expect(member.schedule?.recurrence?.occurrenceDuration).toBe(introducer === "after" ? undefined : 30);
+      expect(member.schedule?.recurrence?.occurrenceDurationUnit).toBe(introducer === "after" ? undefined : "min");
+      expect(member.delayMinutes).toBe(introducer === "after" ? 30 : undefined);
+      if (count !== undefined) expect(nextDueDoses(dosage, { ...query, limit: 6 })).toEqual([
+        "2026-12-01T09:00:00+00:00", "2026-12-02T09:00:00+00:00",
+        "2026-12-03T09:" + (introducer === "after" ? "30" : "00") + ":00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 5, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits, unit: "mL" });
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
   });
 
   it.each(["in", "after"])("lets the inherited administration head own its registered interval: %s", introducer => {

@@ -82,6 +82,31 @@ const hasPhaseBoundary = (clause: CanonicalSigClause) => Boolean(
   )
 );
 
+/** A source-unowned single count is an execution default, not a written
+ * schedule or phase bound. Both boundary planning and cadence inheritance use
+ * this same distinction before a later adjunct completes the administration. */
+export function hasImplicitSingleCount(clause: CanonicalSigClause): boolean {
+  return clause.schedule?.count === 1 && !clause.evidence.some(item =>
+    (item.scheduleFields?.indexOf("count") ?? -1) >= 0 &&
+    item.spans.some(span => span.start >= 0 && span.end <= clause.rawText.length));
+}
+
+/** A postposed onset completes a dose whose only timing is local runtime
+ * or delay. Independent recurrence, anchored positions and authored bounds
+ * remain capable of establishing a separate treatment phase. */
+export function canReceivePostposedOnset(probe: ProbeSummary): boolean {
+  if (!probe.hasDose) return false;
+  if (!probe.hasSchedule) return true;
+  const clause = probe.clause, schedule = clause.schedule;
+  return !hasRecurringSchedule(schedule) && !schedule?.timingCode &&
+    !schedule?.clockWindow && !schedule?.eventWindow && !schedule?.activityTiming?.length &&
+    schedule?.treatmentStartOffsetDays === undefined && schedule?.phaseStartReference === undefined &&
+    schedule?.duration === undefined && schedule?.durationMax === undefined &&
+    schedule?.boundsStart === undefined && schedule?.boundsEnd === undefined &&
+    schedule?.timingReference === undefined && schedule?.countMax === undefined &&
+    (schedule?.count === undefined || hasImplicitSingleCount(clause));
+}
+
 /** A single clock without independent recurrence or phase boundaries can
  * locate the initial administration in an explicitly ordered clock sequence. */
 export function singleClockWithoutRecurrence(schedule: CanonicalSigClause['schedule']): string | undefined {

@@ -1,5 +1,5 @@
 import { DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_DAYPART_CLOCK_RANGES, isNextDayScheduleRule } from "../hpsg/lexical-classes";
-import { singleClockWithoutRecurrence, terminalAdministrationDelay } from "./grammar";
+import { hasImplicitSingleCount, singleClockWithoutRecurrence, terminalAdministrationDelay } from "./grammar";
 import { applyAdministrationDurationSemantics } from "../hpsg/defaults";
 import { hasRecurringSchedule as hasIndependentRecurrence } from "../hpsg/projection";
 import { EventTiming as SequenceEventTiming, FhirPeriodUnit } from '../types';
@@ -733,10 +733,7 @@ export function scopeSequentialPhaseSemantics(
         }
         // A selected recurrence supersedes the unowned single-dose default.
         // A count with its own source daughter remains an independent bound.
-        if (schedule.count === 1 && !clause.evidence.some(item =>
-            (item.scheduleFields?.indexOf("count") ?? -1) >= 0 &&
-            item.spans.some(span => span.start >= 0 && span.end <= clause.rawText.length)))
-          delete schedule.count;
+        if (hasImplicitSingleCount(clause)) delete schedule.count;
         if (schedule.timingReference === "previous" &&
             (schedule.when?.length || schedule.timeOfDay?.length || schedule.clockWindow || schedule.eventWindow)) {
           delete schedule.timingReference;

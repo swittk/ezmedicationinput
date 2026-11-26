@@ -35,7 +35,7 @@ import { parseInstructionActions, frameActionDefinition, instructionGraphPrepara
 import { getMedicationInstructionAction, resolveMedicationInstructionAction } from '../instruction-action-terminology';
 import { resolveActionRelationSurface } from '../relation-terminology';
 import { parseAdditionalInstructions } from '../advice';
-import { grammaticalProposals, arbitrate, hasAdministrationAdjunct } from './grammar';
+import { grammaticalProposals, arbitrate, hasAdministrationAdjunct, canReceivePostposedOnset } from './grammar';
 import type { RejectedConstruction } from './grammar';
 
 /** Use the existing locale normalizer; grammar never maintains Thai connector spellings. */
@@ -1134,7 +1134,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
             TREATMENT_PERIOD_START_LEADS.has(lexeme(tokens[nextBoundary.rightIndex])) &&
             treatmentRelativePeriodStartAt(tokens, nextBoundary.rightIndex)) {
           const prefix = evidence.probe(rightStart, end);
-          if (prefix.hasDose && !prefix.hasSchedule) {
+          if (canReceivePostposedOnset(prefix)) {
             const onsetEnd = probeEnd(nextBoundary.rightIndex);
             const onset = evidence.probe(nextBoundary.start, onsetEnd);
             if ((onset.hasSchedule || onset.clause.schedule?.treatmentStartOffsetDays !== undefined ||
@@ -1195,10 +1195,10 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         if (sourceOnset) {
           const left = leftValue ?? (leftValue = evidence.probe(start, site.start));
           const right = rightValue ?? (rightValue = evidence.probe(rightStart, end));
-          // A postposed onset and clock complete the same unscheduled dose.
-          // A new dosed/method head or an established prior schedule licenses
-          // the ordinary phase construction instead; punctuation stays explicit.
-          if (left.hasDose && !left.hasSchedule && !right.hasDose && !right.method) {
+          // A postposed onset completes the same dose, retaining any local
+          // runtime or delay. An independent head or established recurrence/
+          // bound keeps its phase construction; punctuation stays explicit.
+          if (canReceivePostposedOnset(left) && !right.hasDose && !right.method) {
             proposals.push(keep('regimen.onset-adjunct-of-unscheduled-dose', 950,
               'right.schedule-modifies-left-dose', true));
           }

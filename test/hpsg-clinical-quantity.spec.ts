@@ -3590,6 +3590,24 @@ describe("round56: explicit division and occurrence bounds", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 
+  it("executes an explicit 24-hour weight total in two elapsed half-day doses", () => {
+    const source = "Give 10 mg/kg/24h PO divided into 2 doses";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC" };
+    for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      expect(nextDueDoses(dosage, { ...query, limit: 2 })).toEqual([
+        "2026-12-01T00:00:00+00:00", "2026-12-01T12:00:00+00:00"
+      ]);
+      for (const from of ["2026-12-01T00:00:00Z", "2026-12-01T12:00:00Z"])
+        expect(calculateTotalUnits({ dosage, ...query, from, durationValue: 12,
+          durationUnit: FhirPeriodUnit.Hour, patientWeightKg: 70 })).toMatchObject({ totalUnits: 350, unit: "mg" });
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 24,
+        durationUnit: FhirPeriodUnit.Hour, patientWeightKg: 70 })).toMatchObject({ totalUnits: 700, unit: "mg" });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
   it("leaves a bare weight rate dose-free and keeps an independent infusion amount separate", () => {
     const bare = parsePublicSig("Give 10 mg/kg/12h PO");
     expect(bare.meta.canonical.clauses[0].dose).toBeUndefined();
