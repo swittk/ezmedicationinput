@@ -16218,3 +16218,11 @@ Native previews compose current scalar, ratio and ranged rates with their own
 condition before independent advice. Language modules own weekday vocabulary and
 interval wording. Current quantities, primitive annotations, unknown extensions,
 translations and anatomical specificity survive ordinary FHIR conversion.
+
+
+## 2026-11-26 — Contact participants and computed infusion limits
+
+Negated contact instructions retain the selected nominal and site across language
+realizations. Computed weight-based infusion amounts reuse runtime selection and
+the existing administration ceiling before supply and finite-phase admission.
+Authored absolute rates, runtime uncertainty and current source facts remain intact.
