@@ -38,7 +38,7 @@ import type {
   FormatOptions,
 } from "../types";
 import { administrationHasAmountFacts } from "../canonical/course";
-import { sameCodedQuantityUnit } from "../utils/units";
+import { convertQuantityValue, getQuantityComparisonUnit, getUnitCategory, sameCodedQuantityUnit } from "../utils/units";
 import type {
   CanonicalMeasure,
   CanonicalAmount,
@@ -1334,11 +1334,11 @@ function updateNativeTimingAnnotations(
   );
   return target;
 }
-interface SelectedR5Maximum { quantity: CanonicalMeasure; exact: boolean; index?: number }
+interface SelectedR5Maximum { quantity: CanonicalMeasure; definite: boolean; strict: boolean; index?: number }
 export interface R5MaximumSelection extends SelectedR5Maximum {
   groups?: Map<string, SelectedR5Maximum>;
 }
-function sameMaximumUnit(left: CanonicalMeasure, right: CanonicalMeasure): boolean {
+function sameMaximumIdentity(left: CanonicalMeasure, right: CanonicalMeasure): boolean {
   return sameCodedQuantityUnit(left, right) ||
     left.unit !== undefined && left.unit === right.unit &&
     left.system === right.system && left.code === right.code;
@@ -1346,55 +1346,84 @@ function sameMaximumUnit(left: CanonicalMeasure, right: CanonicalMeasure): boole
 function unitKeyPart(value: string | undefined): string {
   return value === undefined ? "-" : value.length + ":" + value;
 }
-function maximumUnitKey(quantity: CanonicalMeasure, exact: boolean): string | undefined {
-  const unit = quantity.system && quantity.code
+function maximumUnitKey(quantity: CanonicalMeasure): string | undefined {
+  return quantity.system && quantity.code
     ? "c" + unitKeyPart(quantity.system) + unitKeyPart(quantity.code)
     : quantity.unit !== undefined
       ? "u" + unitKeyPart(quantity.system) + unitKeyPart(quantity.code) + unitKeyPart(quantity.unit)
       : undefined;
-  return unit === undefined ? undefined : (exact ? "e" : "q") + unit;
 }
-/** One selection pass for writing R5 maxima and identifying their editable
- * source positions. Equal values retain the last annotated owner. Interleaved
- * exact units allocate a map; same-unit ceilings and qualified-only lists keep
- * scalar state. Operators are observed once, never compared or normalized. */
+function maximumComparisonUnitKey(quantity: CanonicalMeasure): string | undefined {
+  const unit = getQuantityComparisonUnit(quantity);
+  if (!unit) return undefined;
+  const category = getUnitCategory(unit);
+  return category === "other" ? "l" + unitKeyPart(unit) : "d" + category;
+}
+function preferMaximum(
+  value: number, strict: boolean, index: number | undefined,
+  previousValue: number, previousStrict: boolean, previousIndex: number | undefined
+): boolean {
+  if (value !== previousValue) return value < previousValue;
+  if (strict !== previousStrict) return strict;
+  return index === undefined || previousIndex === undefined || index >= previousIndex;
+}
+/** Select a comparable numeric upper bound for R5's singular maximum field.
+ * Equal bounds retain the last annotated source; a strict bound wins an equal
+ * inclusive one. Approximate siblings stay retained without replacing an
+ * available definite upper bound. Only interleaved units allocate group state. */
 export function selectR5Maximum(
   current: R5MaximumSelection | undefined, quantity: CanonicalMeasure, index?: number
 ): R5MaximumSelection {
-  const exact = quantity.value !== undefined && !getQuantityComparator(quantity);
-  // A qualified sibling remains in the complete safety bridge. It cannot
-  // replace an available exact ceiling in R5's singular maximum field.
-  if (!current || exact && !current.exact) return { quantity, exact, index };
-  if (!exact) {
-    if (!current.exact) { current.quantity = quantity; current.index = index; }
-    return current;
-  }
-  if (!current.groups && current.exact === exact && sameMaximumUnit(current.quantity, quantity)) {
-    if (!exact || current.quantity.value! >= quantity.value!) {
-      current.quantity = quantity;
-      current.index = index;
-    }
+  const operator = getQuantityComparator(quantity);
+  const definite = quantity.value !== undefined && (!operator || operator === "<" || operator === "<=");
+  const strict = operator === "<";
+  if (!current || definite && !current.definite) return { quantity, definite, strict, index };
+  if (!definite) {
+    if (!current.definite) { current.quantity = quantity; current.strict = strict; current.index = index; }
     return current;
   }
   if (!current.groups) {
+    // Preserve distinct identities before a physical replacement can hide a
+    // prior code's minimum from a later same-code quantity without a label.
+    if (sameMaximumIdentity(current.quantity, quantity)) {
+      const value = convertQuantityValue(quantity.value!, quantity, current.quantity);
+      if (value !== null) {
+        if (preferMaximum(value, strict, index, current.quantity.value!, current.strict, current.index)) {
+          current.quantity = quantity; current.strict = strict; current.index = index;
+        }
+        return current;
+      }
+    }
     current.groups = new Map();
-    const previousKey = maximumUnitKey(current.quantity, current.exact);
-    if (previousKey !== undefined)
-      current.groups.set(previousKey, { quantity: current.quantity, exact: current.exact, index: current.index });
+    const previous = { quantity: current.quantity, definite: current.definite, strict: current.strict, index: current.index };
+    const previousKey = maximumUnitKey(previous.quantity);
+    if (previousKey !== undefined) current.groups.set(previousKey, previous);
+    const previousUnit = maximumComparisonUnitKey(previous.quantity);
+    if (previousUnit !== undefined) current.groups.set(previousUnit, previous);
   }
-  const key = maximumUnitKey(quantity, exact);
-  const previous = key === undefined ? undefined : current.groups.get(key);
-  if (previous && exact && previous.quantity.value! < quantity.value!) {
-    current.quantity = previous.quantity;
-    current.exact = previous.exact;
-    current.index = previous.index;
-  } else {
-    current.quantity = quantity;
-    current.exact = exact;
-    current.index = index;
-    if (previous) { previous.quantity = quantity; previous.index = index; }
-    else if (key !== undefined) current.groups.set(key, { quantity, exact, index });
+  const candidate: SelectedR5Maximum = { quantity, definite, strict, index };
+  let selected = candidate, selectedValue = quantity.value!;
+  const key = maximumUnitKey(quantity), unit = maximumComparisonUnitKey(quantity);
+  // Identity and compatible-unit groups retain their own minima. A code-only
+  // quantity never borrows a dimension from another limit's display label.
+  for (let group = 0; group < 2; group++) {
+    const groupKey = group === 0 ? key : unit;
+    if (groupKey === undefined) continue;
+    const previous = current.groups.get(groupKey);
+    if (!previous) { current.groups.set(groupKey, candidate); continue; }
+    const previousValue = convertQuantityValue(previous.quantity.value!, previous.quantity, quantity);
+    if (previousValue === null || preferMaximum(quantity.value!, strict, index,
+        previousValue, previous.strict, previous.index)) {
+      current.groups.set(groupKey, candidate);
+      continue;
+    }
+    if (preferMaximum(previousValue, previous.strict, previous.index,
+        selectedValue, selected.strict, selected.index)) {
+      selected = previous; selectedValue = previousValue;
+    }
   }
+  current.quantity = selected.quantity; current.definite = selected.definite;
+  current.strict = selected.strict; current.index = selected.index;
   return current;
 }
 
@@ -2030,7 +2059,9 @@ function administrationToWire(
     delete output.maxDosePerLifetime;
     let periodLimits: FhirRatio[] | undefined;
     let administrationMaximum: R5MaximumSelection | undefined, lifetimeMaximum: R5MaximumSelection | undefined;
-    for (const limit of a.limits ?? []) {
+    const limits = a.limits ?? [];
+    for (let index = 0; index < limits.length; index++) {
+      const limit = limits[index];
       if (!limit.amount) continue;
       const amount = {
         ...limit.amount,
@@ -2047,9 +2078,9 @@ function administrationToWire(
         };
         (periodLimits ??= []).push(periodMaximumToR5(amount, period, limit.provenance));
       } else if (limit.scope === "administration")
-        administrationMaximum = selectR5Maximum(administrationMaximum, amount);
+        administrationMaximum = selectR5Maximum(administrationMaximum, amount, index);
       else if (limit.scope === "lifetime")
-        lifetimeMaximum = selectR5Maximum(lifetimeMaximum, amount);
+        lifetimeMaximum = selectR5Maximum(lifetimeMaximum, amount, index);
     }
     if (administrationMaximum) output.maxDosePerAdministration = simpleQuantityForR5(administrationMaximum.quantity);
     if (lifetimeMaximum) output.maxDosePerLifetime = simpleQuantityForR5(lifetimeMaximum.quantity);

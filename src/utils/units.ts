@@ -105,6 +105,11 @@ export function sameCodedQuantityUnit(left: QuantityUnit | undefined, right: Qua
     return Boolean(left?.system && left.code && left.system === right?.system && left.code === right.code);
 }
 
+/** The calculation unit shared by numeric comparison and compatible-unit indexing. */
+export function getQuantityComparisonUnit(quantity: QuantityUnit | undefined): string {
+    return normalizeQuantityCapUnit(getDoseQuantityUnit(quantity, false));
+}
+
 /** Compare quantity identities before resolving their supported dimensional or
  * plain-label units. Missing labels never make distinct coded quantities equal. */
 export function convertQuantityValue(
@@ -114,8 +119,8 @@ export function convertQuantityValue(
     strength?: Parameters<typeof convertValue>[3]
 ): number | null {
     if (sameCodedQuantityUnit(from, to)) return value;
-    const fromUnit = normalizeQuantityCapUnit(getDoseQuantityUnit(from, false));
-    const toUnit = normalizeQuantityCapUnit(getDoseQuantityUnit(to, false));
+    const fromUnit = getQuantityComparisonUnit(from);
+    const toUnit = getQuantityComparisonUnit(to);
     if (!fromUnit || !toUnit) return null;
     return convertValue(value, fromUnit, toUnit, strength);
 }

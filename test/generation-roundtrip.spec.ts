@@ -3021,6 +3021,64 @@ describe("round37 interchange phase, limit and source ownership", () => {
     }
   });
 
+  it.each(["administration", "lifetime"] as const)("projects the stricter equal %s ceiling", scope => {
+    const inclusive = { value: 2, unit: "tab", id: "inclusive" };
+    const strict: FhirR6Quantity = { value: 2, unit: "tab", comparator: "<", id: "strict" };
+    for (const amounts of [[inclusive, strict], [strict, inclusive]]) {
+      const limits = amounts.map(valueQuantity => ({ scope, valueQuantity }));
+      const input = course({ safety: { doseLimit: limits } });
+      const before = JSON.stringify(input);
+      const rows = toFhirR5Dosages(input);
+      const selected = scope === "administration" ? rows[0].maxDosePerAdministration : rows[0].maxDosePerLifetime;
+      expect(selected).toMatchObject({ value: 2, unit: "tab", id: "strict" });
+      expect(getQuantityComparator(selected)).toBe("<");
+      expect(selected?.comparator).toBeUndefined();
+      expect(toDosageDetails(rows).step![0].component[0].safety?.doseLimit).toEqual(limits);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each(["administration", "lifetime"] as const)("projects the smaller physical %s ceiling in its authored unit", scope => {
+    const tight = { value: 500, unit: "mg", id: "half-gram" };
+    const loose = { value: 1, unit: "g", id: "one-gram" };
+    const independent = { value: 2, unit: "mL", id: "volume" };
+    for (const amounts of [[tight, loose], [loose, tight], [tight, independent, loose]]) {
+      const limits = amounts.map(valueQuantity => ({ scope, valueQuantity }));
+      const input = course({ safety: { doseLimit: limits } });
+      const before = JSON.stringify(input);
+      const rows = toFhirR5Dosages(input);
+      expect(scope === "administration" ? rows[0].maxDosePerAdministration : rows[0].maxDosePerLifetime).toEqual(tight);
+      expect(toDosageDetails(rows).step![0].component[0].safety?.doseLimit).toEqual(limits);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("compares equivalent plain maximum labels while retaining the authored winner", () => {
+    const tight = { value: 2, unit: "tab" }, loose = { value: 3, unit: "tablet" };
+    for (const amounts of [[tight, loose], [loose, tight]]) {
+      const limits = amounts.map(valueQuantity => ({ scope: "administration" as const, valueQuantity }));
+      const input = course({ safety: { doseLimit: limits } });
+      const before = JSON.stringify(input);
+      const rows = toFhirR5Dosages(input);
+      expect(rows[0].maxDosePerAdministration).toEqual(tight);
+      expect(toDosageDetails(rows).step![0].component[0].safety?.doseLimit).toEqual(limits);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("retains a coded minimum across an intervening compatible physical maximum", () => {
+    const coded = { value: 2, system: "urn:clinic:a", code: "x", unit: "mg" };
+    const amounts = [coded, { value: 1, system: "http://unitsofmeasure.org", code: "mg", unit: "mg" },
+      { value: 3, system: "urn:clinic:a", code: "x" }];
+    const limits = amounts.map(valueQuantity => ({ scope: "administration" as const, valueQuantity }));
+    const input = course({ safety: { doseLimit: limits } });
+    const before = JSON.stringify(input);
+    const rows = toFhirR5Dosages(input);
+    expect(rows[0].maxDosePerAdministration).toEqual(coded);
+    expect(toDosageDetails(rows).step![0].component[0].safety?.doseLimit).toEqual(limits);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
   it.each([
     { scope: "administration" as const, values: [2, 4] }, { scope: "administration" as const, values: [4, 2] },
     { scope: "lifetime" as const, values: [2, 4] }, { scope: "lifetime" as const, values: [4, 2] },
@@ -3099,7 +3157,7 @@ describe("round37 interchange phase, limit and source ownership", () => {
     }
   });
 
-  it.each(["~", "<"] as const)("retains the exact minimum around an authored %s maximum", comparator => {
+  it.each(["~", "<"] as const)("retains the applicable minimum around an authored %s maximum", comparator => {
     const limits = [
       { id: "exact-tight", scope: "administration" as const, valueQuantity: { ...q(2), id: "exact-quantity" } },
       { id: "qualified", scope: "administration" as const, valueQuantity: { ...q(1), comparator, id: "qualified-quantity" } },
@@ -3108,7 +3166,11 @@ describe("round37 interchange phase, limit and source ownership", () => {
     let wire = course({ safety: { doseLimit: limits } });
     for (let save = 0; save <= 3; save++) {
       const rows = persist(toFhirR5Dosages(wire));
-      expect(rows[0].maxDosePerAdministration).toEqual({ ...q(2), id: "exact-quantity" });
+      if (comparator === "~") expect(rows[0].maxDosePerAdministration).toEqual({ ...q(2), id: "exact-quantity" });
+      else {
+        expect(rows[0].maxDosePerAdministration).toMatchObject({ ...q(1), id: "qualified-quantity" });
+        expect(getQuantityComparator(rows[0].maxDosePerAdministration)).toBe("<");
+      }
       wire = toDosageDetails(rows);
       expect(wire.step![0].component[0].safety?.doseLimit).toEqual(limits);
     }
@@ -3376,13 +3438,13 @@ describe("round38 external safety, identity, and source ownership", () => {
     }
   });
 
-  it("keeps an authored qualified maximum when there is no exact ceiling", () => {
+  it("keeps a definite strict ceiling ahead of an approximate maximum", () => {
     const limits = [
       { scope: "administration" as const, valueQuantity: { ...q(3), comparator: "<" as const } },
       { scope: "administration" as const, valueQuantity: { ...q(8), comparator: "~" as const } },
     ];
     const rows = persist(toFhirR5Dosages(course({ safety: { doseLimit: limits } })));
-    expect(quantityFromR5(rows[0].maxDosePerAdministration)).toEqual({ ...q(8), comparator: "~" });
+    expect(quantityFromR5(rows[0].maxDosePerAdministration)).toEqual({ ...q(3), comparator: "<" });
     expect(toDosageDetails(rows).step![0].component[0].safety!.doseLimit).toEqual(limits);
   });
 
