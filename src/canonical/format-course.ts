@@ -793,8 +793,6 @@ function formatCanonicalBaseNative(
         ranges.push(amountLabel(amount, "dose", words) + (targetScope ? formatDose.call(env.localization, dose, style, scope) ?? text : text));
       }
     }
-    const text = amount.rateRange && rateRangePreview(amount.rateRange);
-    if (text) ranges.push(amountLabel(amount, "rateRange", words) + text);
   }
   if (ranges.length) rendered = joinGeneratedClauses(rendered ? [rendered, ...ranges] : ranges);
   // Partial method, route, timing or guard facts cannot replace source-only
@@ -1134,6 +1132,8 @@ export function formatCanonicalCourse(
                     : "")
               );
             }
+            const rateRange = amount.rateRange && rateRangePreview(amount.rateRange);
+            if (rateRange) expressions.push(amountLabel(amount, "rateRange", words) + rateRange);
             if (amount.expression)
               expressions.push((hasAmountRole(amount.role) ? amountLabel(amount, "dose", words) : "") +
                 unevaluatedExpressionText(amount.expression, "dose", words));

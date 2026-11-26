@@ -496,11 +496,12 @@ describe("complete native clause defaults", () => {
   const dose = { doseQuantity: { value: 1, unit: "tab" } };
   const note = { url: "https://example.test/preview-note", valueString: "Retain this note" };
 
-  it.each(["quantity", "ratio"] as const)("guards the current partial infusion %s before independent advice", kind => {
+  it.each(["quantity", "ratio", "range"] as const)("guards the current partial infusion %s before independent advice", kind => {
     const sourceText = "Infuse over 2 hours";
     const amount = kind === "quantity"
       ? { rateQuantity: { value: 5, unit: "mL/h", system: "http://unitsofmeasure.org", code: "mL/h" } }
-      : { rateRatio: { numerator: { value: 10, unit: "mL" }, denominator: { value: 2, unit: "h" } } };
+      : kind === "ratio" ? { rateRatio: { numerator: { value: 10, unit: "mL" }, denominator: { value: 2, unit: "h" } } }
+      : { rateRange: { low: { value: 5, unit: "mL/h" }, high: { value: 10, unit: "mL/h" } } };
     const raw: FhirR6DosageInstruction = { step: [{ component: [{ text: sourceText,
       doseAndRate: [amount], condition: [guard], extension: [note],
       additionalInstruction: [{ text: "Recheck BP only if SBP > 160" }, { text: "Otherwise hold" }]
@@ -509,8 +510,10 @@ describe("complete native clause defaults", () => {
     for (const input of [raw, rows, native]) for (const locale of ["en", "th"]) {
       const before = JSON.stringify(input), options = { locale, realizationMode: "normalized" as const };
       const long = formatSig(input, "long", options), short = formatSig(input, "short", options);
-      const primary = (locale === "en" ? "Rate: " : "อัตราการให้ยา: ") +
-        (kind === "quantity" ? "5 mL/h" : "10 mL / 2 h") +
+      const primary = (kind === "range"
+        ? locale === "en" ? "Rate range: " : "ช่วงอัตราการให้ยา: "
+        : locale === "en" ? "Rate: " : "อัตราการให้ยา: ") +
+        (kind === "quantity" ? "5 mL/h" : kind === "ratio" ? "10 mL / 2 h" : "5–10 mL/h") +
         (locale === "en" ? " only if" : " เฉพาะเมื่อ") + " SBP > 160";
       for (const text of [long, short]) {
         const [current, source] = text.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
@@ -536,7 +539,10 @@ describe("complete native clause defaults", () => {
     }
     expect(raw.step[0].component[0].text).toBe(sourceText);
     expect(rows[0].text).toBe(sourceText);
-    expect(toDosageDetails(rows).step[0].component[0].extension).toContainEqual(note);
+    expect(native.stages[0].administrations[0].schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+    const reopened = toDosageDetails(rows).step[0].component[0];
+    expect(reopened.doseAndRate).toEqual([amount]);
+    expect(reopened.extension).toContainEqual(note);
   });
 
   it.each(["en", "th"] as const)("keeps the guard on the complete authored primary in %s", locale => {
