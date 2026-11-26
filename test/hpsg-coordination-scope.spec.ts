@@ -785,6 +785,36 @@ describe('HPSG coordination cadence scope', () => {
     }
   );
 
+  it.each(["", " at 08:00", " at 8 AM"])(
+    "keeps a procedure's condition separate from medication PRN: %s", clock => {
+      for (const standing of ["", "Take 1 tablet daily; "]) {
+        const input = `${standing}Mix with water${clock} if instructed`;
+        const parsed = parsePublicSig(input), clause = parsed.meta.canonical.clauses[0];
+        expect(parsed.meta.canonical.clauses).toHaveLength(1);
+        expect(clause.prn?.enabled).not.toBe(true);
+        expect(clause.clinicalAdjuncts?.condition).toBeUndefined();
+        expect(clause.schedule?.timeOfDay).toBeUndefined();
+        const graph = clause.instructionGraph!;
+        expect(graph.sourceText).toBe(input);
+        expect(graph.relations).toContainEqual(expect.objectContaining({
+          kind: "if", toActionIndex: 0, text: "if instructed"
+        }));
+        for (const row of [parsed.fhir[0], ...toFhirR5Dosages(parsed.fhirNext)]) {
+          expect(row.asNeeded).not.toBe(true);
+          expect(getDosageCondition(row)).toBeUndefined();
+          expect(row.timing?.repeat?.timeOfDay).toBeUndefined();
+          if (standing) {
+            expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+            expect(row.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+          } else {
+            expect(row.doseAndRate).toBeUndefined();
+          }
+        }
+        expect(parsed.fhirNext.renderedInstruction).toBe(input);
+      }
+    }
+  );
+
   it("types shared guards and exclusions before projecting FHIR", () => {
     for (const [input, kind] of [
       ["instill 1 drop in left eye and 2 drops in right eye twice daily only if BP > 160", "condition"],

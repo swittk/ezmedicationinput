@@ -14,7 +14,7 @@ import {
   relationHasGrammarFeature,
   resolveActionRelationSurface
 } from "../../relation-terminology";
-import { getProceduralFrames, actionEventRelationAt, conditionalAdviceOwnerAt, isConditionalAdviceFrame, instructionActionsAreSequenced as explicitlySequences, proceduralInstructionProgram as prefixProgram } from "../procedural-context";
+import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt, conditionalAdviceOwnerAt, isConditionalAdviceFrame, instructionActionsAreSequenced as explicitlySequences, proceduralInstructionProgram as prefixProgram } from "../procedural-context";
 import { hasSymptomOnsetPrnAt, prnAt, startsMaximumCountLead } from "./prn-rules";
 import { SUPPLEMENTAL_DOSE_MODIFIERS, CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../../maps";
@@ -713,7 +713,10 @@ function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getP
 function targetHasClinicalCondition(
   context: HpsgClauseContext, start: number, frame: AdviceFrame
 ): boolean {
-  if (isProceduralInstructionFrame(context, frame)) return false;
+  // A workflow head can be excluded from procedural lexical admission while
+  // its complements still belong to a procedure rather than an administration.
+  if (isProceduralInstructionFrame(context, frame) ||
+      sourceRangeAttachmentClass(context, frame.span.start, frame.span.end) !== "administration") return false;
   if (isMedicationGuardMarker(context, start)) return true;
   return prnAt(context, start).some(sign => {
     const requests = sign.synsem.valence.prn?.lookupRequests;
