@@ -7331,10 +7331,12 @@ function calculateTotalUnitsSingle(
       }
     }
   }
+  let quantityCaps = rangePlan?.caps;
   if (hasPeriodLimits(dosage)) {
+    quantityCaps ??= executableQuantityCaps(dosage, context);
     let suppliedPeriodLimits = 0;
     for (const limit of dosage.limits ?? []) if (limit.scope === "period") suppliedPeriodLimits++;
-    if ((rangePlan?.caps ?? executableQuantityCaps(dosage, context)).length < suppliedPeriodLimits)
+    if (quantityCaps.length < suppliedPeriodLimits)
       unevaluatedMaximumDose = true;
   }
   const hasSafetyPolicy = Boolean(dosage.safety);
@@ -7424,7 +7426,7 @@ function calculateTotalUnitsSingle(
       options,
       timeZone,
       admissionStart,
-      rangePlan?.caps ?? executableQuantityCaps(dosage, context),
+      quantityCaps ?? executableQuantityCaps(dosage, context),
       capacityAllocations, rangePlan, supplyAccounting?.rangePrior, supplyAccounting?.capacityWindows
     );
   } else if (rangePlan && !countOnlyRange) {

@@ -6695,6 +6695,23 @@ describe("shared execution unit and event ownership", () => {
     });
   }
 
+  it("intersects a scalar dose's untimed occurrence allowance and quantity ceiling", () => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{
+      kind: "administration", asNeeded: true, amounts: [{ quantity: { value: 2, unit: "tab" } }],
+      schedule: { recurrence: { occurrenceCap: { max: 3, period: 1, periodUnit: FhirPeriodUnit.Day } } },
+      limits: [{ scope: "period", amount: { value: 5, unit: "tab" }, period: { value: 1, unit: "d" } }],
+    }] }] };
+    for (const dosage of wire(course)) {
+      const before = structuredClone(dosage);
+      expect(nextDueDoses(dosage, { ...query, limit: 4 })).toEqual([]);
+      for (const days of [1, 7])
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: days, durationUnit: FhirPeriodUnit.Day }))
+          .toMatchObject({ totalUnits: 4 * days, unit: "tab", quantityKind: "maximum" });
+      expect(nextDueDoses(dosage, { ...query, limit: 4 })).toEqual([]);
+      expect(dosage).toStrictEqual(before);
+    }
+  });
+
   it.each([undefined, "active ingredient"])("sums annotated UCUM quantities using their coded basis (%s)", label => {
     const rows: FhirDosage[] = [
       { doseAndRate: [{ doseQuantity: { value: 200, unit: "mg" } }], timing: { repeat: { count: 1 } } },
