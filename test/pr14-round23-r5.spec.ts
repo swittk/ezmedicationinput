@@ -5378,10 +5378,16 @@ describe("round78 saved action and cycle locale ownership", () => {
 });
 
 
-it("round78 keeps a fresh public OR condition authoritative over its retained source mirror", () => {
+it("keeps an independently supplied OR condition beside its authored administration", () => {
   const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
-  const parsed = parsePublicSig("Swallow 1 tablet whole if SBP > 160");
-  const row = persist(parsed.fhir[0]);
+  const directions = "Swallow 1 tablet whole";
+  const actions = parseInstructionActions(directions);
+  const row: FhirDosage = { method: { text: "Swallow" },
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+    extension: [buildInstructionGraphExtension({ sourceText: directions, sourceLocale: "en",
+      actions, primaryAdministrationSpan: actions[0].span,
+      primaryOwnership: { administrationActionIndex: 0, dose: { actionIndex: 0,
+        argumentIndex: actions[0].args.findIndex(argument => argument.role === AdviceArgumentRole.Amount) } } })!] };
   setDosageCondition(row, { kind: "any", conditions: [
     { kind: "measurement", name: "SBP", operation: "gt", value: 160, text: "SBP > 160" },
     { kind: "state", name: "dizziness", expected: true, text: "dizziness" }
@@ -5397,8 +5403,7 @@ it("round78 keeps a fresh public OR condition authoritative over its retained so
       { kind: "measurement", value: 160 }, { kind: "state", name: "dizziness", expected: true }
     ] });
   }
-  expect(parseInstructionGraphExtension(row.extension)?.relations)
-    .toContainEqual(expect.objectContaining({ kind: AdviceRelation.If, toActionIndex: 0, text: "if SBP > 160" }));
+  expect(parseInstructionGraphExtension(row.extension)?.sourceText).toBe(directions);
 });
 
 
