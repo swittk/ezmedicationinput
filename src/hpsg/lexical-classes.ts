@@ -2,12 +2,14 @@ import { LexKind, type LexToken } from "../lexer/token-types";
 import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirPeriodUnit, RouteCode, type FhirPrimitiveElement } from "../types";
 import { baseLanguageTag } from "../localization";
 import { buildTranslationPrimitiveElement } from "../fhir-translations";
+import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
 import {
   ACTION_SEQUENCE_MARKERS,
   ACTION_SEQUENCE_RELATION_SURFACES,
   BODY_SITE_EXTERNAL_LOCATIVE_PREFIXES,
   BODY_SITE_LOCATIVE_LEAD_TOKENS,
   listBodySiteRelationDefinitions,
+  localizeAdviceRelation,
   getAdviceRelationCanonicalSetByGrammarFeature
 } from "../relation-terminology";
 export { ACTION_SEQUENCE_MARKERS } from "../relation-terminology";
@@ -439,6 +441,32 @@ export const MEAL_RELATION_BY_TOKEN = new Map<string, MealRelation>(
   stringEntries(source.mealRelationTokens).map(([token, relation]) => [token, relation as MealRelation])
 );
 export const MEAL_TIMING_BY_RELATION = mealTimingByRelation(source.mealTimingByRelation);
+
+/** Realize the existing meal lexicon's instruction wording and translations.
+ * Typed qualification and offset scope remain with the HPSG construction. */
+export function mealInstructionWording(
+  events: readonly EventTiming[], sourceText: string
+): { text: string; i18n?: Record<string, string> } {
+  const i18n: Record<string, string> = {};
+  for (const locale of ["en", "th"]) {
+    const descriptions: string[] = [];
+    for (const event of events) {
+      for (const [relation, values] of MEAL_TIMING_BY_RELATION) {
+        for (const [anchor, value] of values) {
+          if (value !== event) continue;
+          const kind = relation === "before" ? AdviceRelation.Before :
+            relation === "after" ? AdviceRelation.After : AdviceRelation.With;
+          descriptions.push(joinLocalizedTokens(locale, [
+            localizeAdviceRelation(kind, locale), localizedTimeArgument(anchor, locale)
+          ]));
+        }
+      }
+    }
+    if (descriptions.length) i18n[locale] = descriptions.join(", ");
+  }
+  return { text: i18n.en ?? sourceText, ...(Object.keys(i18n).length ? { i18n } : {}) };
+}
+
 export const SLEEP_EVENT_ALIASES = setOf(source.sleepEventAliases);
 export const WAKE_EVENT_ALIASES = setOf(source.wakeEventAliases);
 export const FOOD_EVENT_ALIASES = setOf(source.foodEventAliases);

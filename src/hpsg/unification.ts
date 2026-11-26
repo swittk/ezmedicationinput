@@ -1,9 +1,8 @@
 import { formBodySiteRestriction } from "../body-site-grammar";
 import { EVENT_TIMING_TOKENS } from "../maps";
 import { composeLocalizedRecords } from "../localization";
-import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
-import { localizeAdviceRelation } from "../relation-terminology";
-import { ACTION_COORDINATION_CONNECTOR_I18N, CLOCK_LEAD_TOKENS, DOSE_TARGET_DAYPART_CLOCK_RANGES, FIXED_CLOCK_DAYPART_QUALIFICATION_RULE, MEAL_TIMING_BY_RELATION, isNextDayScheduleRule, coordinationConnectorKind } from "./lexical-classes";
+import { joinLocalizedTokens } from "../locale-realization";
+import { ACTION_COORDINATION_CONNECTOR_I18N, CLOCK_LEAD_TOKENS, DOSE_TARGET_DAYPART_CLOCK_RANGES, FIXED_CLOCK_DAYPART_QUALIFICATION_RULE, MEAL_TIMING_BY_RELATION, mealInstructionWording, isNextDayScheduleRule, coordinationConnectorKind } from "./lexical-classes";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { getUnitCategory } from "../utils/units";
 import {
@@ -25,7 +24,7 @@ import {
 } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
 import { selectHpsgConstruction } from "./constructions";
-import { AdviceRelation, BodySiteSpatialRelation, EventTiming, FhirCoding, FhirPeriodUnit, PrnReasonLookupRequest, RouteCode } from "../types";
+import { BodySiteSpatialRelation, EventTiming, FhirCoding, FhirPeriodUnit, PrnReasonLookupRequest, RouteCode } from "../types";
 
 export interface HpsgUnificationContext {
   normalizeSiteText(text: string): string;
@@ -1175,31 +1174,11 @@ function fixedClockEventAdjunctSynsem(
   // that it adds no separate position when a finite NEXT count is projected.
   if (daypartQualification) return { synsem: mealSynsem,
     qualifiedDaypartTokens: meals.map(token => token.index) };
-  const i18n: Record<string, string> = {};
-  if (meal.offset === undefined && meal.offsetMin === undefined && meal.offsetMax === undefined) {
-    for (const locale of ["en", "th"]) {
-      const descriptions: string[] = [];
-      for (const event of meal.when) {
-        for (const [relation, values] of MEAL_TIMING_BY_RELATION) {
-          for (const [anchor, value] of values) {
-            if (value !== event) continue;
-            const kind = relation === "before" ? AdviceRelation.Before :
-              relation === "after" ? AdviceRelation.After : AdviceRelation.With;
-            descriptions.push(joinLocalizedTokens(locale, [
-              localizeAdviceRelation(kind, locale), localizedTimeArgument(anchor, locale)
-            ]));
-          }
-        }
-      }
-      if (descriptions.length) i18n[locale] = descriptions.join(", ");
-    }
-  }
-  const instruction: HpsgInstructionFeature = {
-    text: i18n.en ?? text,
-    ...(Object.keys(i18n).length ? { i18n } : {}),
-    evidence: [{ rule: "hpsg.cx.schedule.fixed-clock-meal-qualification",
-      spans: [{ start: mealStart, end: mealEnd, text }] }]
-  };
+  const instruction: HpsgInstructionFeature =
+    meal.offset === undefined && meal.offsetMin === undefined && meal.offsetMax === undefined
+      ? mealInstructionWording(meal.when, text) : { text };
+  instruction.evidence = [{ rule: "hpsg.cx.schedule.fixed-clock-meal-qualification",
+    spans: [{ start: mealStart, end: mealEnd, text }] }];
   return { synsem: {
     ...mealSynsem,
     head: { ...mealSynsem.head, schedule: {
