@@ -6834,16 +6834,19 @@ describe("rolling quantity ceilings, amount qualifiers and finite windows", () =
   });
 
   it.each([
-    ["<=", "100000000052", 0.006, "L", ["08:00", "12:00", "16:00"], 6],
-    ["<", "100000000050", 0.006, "L", ["08:00", "12:00"], 4],
-    ["<", "100000000050", 0.007, "L", ["08:00", "12:00", "16:00"], 6],
-    ["<", "100000000050", 6, "mL", ["08:00", "12:00"], 4],
-  ] as const)("admits whole doses under a %s %s rolling limit of %s %s", (comparator, operatorCode, maximum, code, clocks, total) => {
+    [2, "<=", "100000000052", 0.006, "L", ["08:00", "12:00", "16:00"], 6],
+    [2, "<", "100000000050", 0.006, "L", ["08:00", "12:00"], 4],
+    [2, "<", "100000000050", 0.007, "L", ["08:00", "12:00", "16:00"], 6],
+    [2, "<", "100000000050", 6, "mL", ["08:00", "12:00"], 4],
+    [0.18, "<", "100000000050", 0.54, "mL", ["08:00", "12:00"], 0.36],
+    [0.18, "<=", "100000000052", 0.54, "mL", ["08:00", "12:00", "16:00"], 0.54],
+    [0.18, "<", "100000000050", 0.55, "mL", ["08:00", "12:00", "16:00"], 0.54],
+  ] as const)("admits %s mL doses under %s (%s) rolling limit of %s %s", (doseValue, comparator, operatorCode, maximum, code, clocks, total) => {
     const ucum = "http://unitsofmeasure.org";
-    const dose = { value: 2, unit: "mL", system: ucum, code: "mL", id: "dose", extension: [note] };
+    const dose = { value: doseValue, unit: "mL", system: ucum, code: "mL", id: "dose", extension: [note] };
     const amount = { value: maximum, system: ucum, code, id: "maximum", extension: [operator(operatorCode), note] };
     const period = { value: 24, system: ucum, code: "h", id: "period", extension: [note] };
-    const text = `Give 2 mL at 08:00, 12:00, 16:00 and 20:00; maximum ${comparator} ${maximum} ${code} per 24 hours.`;
+    const text = `Give ${doseValue} mL at 08:00, 12:00, 16:00 and 20:00; maximum ${comparator} ${maximum} ${code} per 24 hours.`;
     const common = { text, extension: [note], doseAndRate: [{ doseQuantity: dose }],
       timing: { repeat: { frequency: 4, period: 1, periodUnit: FhirPeriodUnit.Day,
         timeOfDay: ["08:00:00", "12:00:00", "16:00:00", "20:00:00"] } } };

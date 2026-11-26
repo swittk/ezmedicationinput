@@ -2122,7 +2122,7 @@ function executableQuantityCaps(
     const equivalentDose = perTargetDose * getAdministrationTargetMultiplier(dosage, context);
     const doseCapacity = maximum / equivalentDose;
     const max = asQuantity ? doseCapacity * dose.value
-      : maximumOperator === "<" ? Math.ceil(doseCapacity) - 1
+      : maximumOperator === "<" ? Math.ceil(doseCapacity - 1e-9) - 1
       : Math.floor(doseCapacity + 1e-9);
     // A stated ceiling below the authored dose is contradictory. Preserve
     // the clinician's editable schedule rather than turning a suggestion
