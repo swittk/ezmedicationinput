@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { parserStateFromFhir } from "../src/fhir";
-import { calculateTotalUnits, formatSig, getDosageCondition, parseSig as parseBatch, nextDueDoses, toDosageDetails, toFhirR5Dosages, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src/index";
+import { calculateTotalUnits, formatSig, getDosageCondition, parseSig as parseBatch, importCanonicalCourse, nextDueDoses, toDosageDetails, toFhirR5Dosages, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
-import { EventTiming, FhirDosage, FhirPeriodUnit, FhirDayOfWeek } from "../src/types";
+import { EventTiming, FhirDosage, FhirPeriodUnit, FhirDayOfWeek, FhirR6DosageInstruction } from "../src/types";
 
 describe("calculateTotalUnits", () => {
     const BASE_OPTIONS = {
@@ -1694,4 +1694,68 @@ describe("quantity windows and infusion minute aliases", () => {
       })).toMatchObject({ totalUnits: 60, unit: "mL" });
     }
   );
+});
+
+describe("ranged lifetime supply remains attainable", () => {
+  const options = {
+    from: "2027-01-01T00:00:00Z", orderedAt: "2027-01-01T00:00:00Z", timeZone: "UTC",
+    durationValue: 1, durationUnit: FhirPeriodUnit.Day
+  };
+  const ranged = (maximum: number): FhirDosage => ({
+    doseAndRate: [{ doseRange: {
+      low: { value: 2, unit: "mL" }, high: { value: 3, unit: "mL" }
+    } }],
+    timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+      timeOfDay: ["08:00:00", "20:00:00"] } },
+    maxDosePerLifetime: { value: maximum, unit: "mL" }
+  });
+
+  it.each([[3.5, 3], [4, 4], [5, 5]])("admits complete ranged doses under a %s mL lifetime limit", (maximum, expected) => {
+    const row = ranged(maximum);
+    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+      const before = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, ...options })).toMatchObject({ totalUnits: expected, unit: "mL" });
+      expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([
+        "2027-01-01T08:00:00+00:00", "2027-01-01T20:00:00+00:00"
+      ]);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("intersects the lifetime allowance with each rolling-period maximum", () => {
+    const row = ranged(3.5);
+    row.timing!.repeat = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] };
+    row.maxDosePerPeriod = [{ numerator: { value: 2.5, unit: "mL" },
+      denominator: { value: 24, unit: "h", code: "h" } }];
+    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 2 }).totalUnits).toBe(2.5);
+    }
+  });
+
+  it("preserves the strict lower endpoint when counting feasible administrations", () => {
+    const row = ranged(4);
+    row.doseAndRate![0].doseRange!.low!.comparator = ">";
+    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+      expect(calculateTotalUnits({ dosage, ...options }).totalUnits).toBe(3);
+    }
+  });
+
+  it("allocates a lifetime allowance jointly across ordinary daily course cycles", () => {
+    const row = ranged(4);
+    row.timing!.repeat = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] };
+    const relative = (value: number) => ({
+      contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+      offsetDuration: { value, unit: "d", system: "http://unitsofmeasure.org", code: "d" }
+    });
+    const course: FhirR6DosageInstruction = {
+      repeatCycle: { value: 1, unit: "d", code: "d" },
+      step: [{ start: relative(0), end: relative(1), component: [{
+        doseAndRate: row.doseAndRate, timing: row.timing,
+        safety: { doseLimit: [{ scope: "lifetime", valueQuantity: { value: 4, unit: "mL" } }] }
+      }] }]
+    };
+    for (const dosage of [course, toFhirR5Dosages(course), importCanonicalCourse(course)]) {
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 2 }).totalUnits).toBe(4);
+    }
+  });
 });
