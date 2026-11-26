@@ -26,6 +26,7 @@ import {
   administrationFromR6,
   boundaryFromR6,
   safetyFromWire,
+  doseLimitFromWire,
   measureFromWire,
   administrationToR5,
   removeLiftedPartialMaximumMirrors,
@@ -304,15 +305,7 @@ function restoreComponentDelta(
     // Reconciliation can deliberately remove the final limit. Apply that
     // empty result too, otherwise the lifted mirror remains active.
     fresh.safety = safetyFromWire(safety);
-    fresh.limits = safety?.doseLimit?.map((limit) => ({
-      scope: limit.scope,
-      amount: measureFromWire(limit.valueQuantity),
-      count: limit.valueInteger,
-      expression: limit.valueExpression,
-      period: measureFromWire(limit.period),
-      text: limit.text,
-      provenance: limit,
-    }));
+    fresh.limits = safety?.doseLimit?.map(doseLimitFromWire);
     if (safety) retained.safety = safety;
     removeLiftedPartialMaximumMirrors(fresh, row, safety);
     if (!equalStructuredValues(safety, delta.safety)) {

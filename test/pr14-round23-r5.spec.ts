@@ -1844,7 +1844,7 @@ describe("round58 interop occurrence and metadata ownership", () => {
 describe("round58 retained range source retirement", () => {
   const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
   const sourceRanges = (wire: FhirR6DosageInstruction) => {
-    const ranges: NonNullable<NonNullable<FhirR6Dosage["doseAndRate"]>[number]["doseRange"]>[] = [];
+    const ranges: NonNullable<FhirR6Extension["valueRange"]>[] = [];
     for (const history of wire.extension ?? []) {
       if (history.url !== DOSAGE_RECONCILIATION_SOURCE_URL) continue;
       for (const marker of history.extension ?? [])
@@ -2575,6 +2575,13 @@ describe("round61 supported interchange ownership", () => {
 
   it("accepts native R6 Quantity qualifiers on component extension slots", () => {
     const extension: FhirR6Extension = { url: "urn:clinic:quantity", valueQuantity: { value: 5, unit: "mg", comparator: "~" } };
+    const nativeNestedValues: FhirR6Extension[] = [
+      { url: "urn:clinic:concept", valueCodeableConcept: { extension: [extension] } },
+      { url: "urn:clinic:coding", valueCoding: { code: "dose", _code: { extension: [extension] } } },
+      { url: "urn:clinic:range", valueRange: { low: { value: 1, extension: [extension] } } },
+      { url: "urn:clinic:expression", valueExpression: { expression: "%weight", extension: [extension] } }
+    ];
+    void nativeNestedValues;
     const component: FhirR6Dosage = {
       extension: [extension], modifierExtension: [{ ...extension, url: "urn:clinic:modifier-quantity" }],
       doseAndRate: [{ doseQuantity: q(1) }],

@@ -29,6 +29,7 @@ import type {
   FhirQuantity,
   FhirR6Quantity,
   FhirRange,
+  FhirR6Range,
   FhirRatio,
   ParseBatchResult,
   FhirCodeableConcept,
@@ -197,13 +198,13 @@ const record = (value: object): Record<string, unknown> => value as Record<strin
 /** Decode a source R5 quantity into its clinical operator, removing only
  * the exact generated EMA carrier. Author-enriched/unknown extensions remain
  * source data. Do not keep two active encodings of the same qualifier. */
-function measureFromR5(q: FhirQuantity | undefined): CanonicalMeasure | undefined {
+function measureFromR5(q: FhirQuantity | FhirR6Quantity | undefined): CanonicalMeasure | undefined {
   return quantityFromR5(q);
 }
 export function measureFromWire(q: FhirQuantity | FhirR6Quantity | undefined): CanonicalMeasure | undefined {
   return quantityFromWire(q);
 }
-function rangeFromWire(r: FhirRange | undefined, r5 = false): CanonicalRange | undefined {
+function rangeFromWire(r: FhirRange | FhirR6Range | undefined, r5 = false): CanonicalRange | undefined {
   if (!r) return undefined;
   const low = r5 ? measureFromR5(r.low) : measureFromWire(r.low);
   const high = r5 ? measureFromR5(r.high) : measureFromWire(r.high);
@@ -211,7 +212,7 @@ function rangeFromWire(r: FhirRange | undefined, r5 = false): CanonicalRange | u
     ? r
     : { ...r, ...(r.low ? { low } : {}), ...(r.high ? { high } : {}) };
 }
-export function rangeFromFhir(r: FhirRange | undefined): CanonicalRange | undefined {
+export function rangeFromFhir(r: FhirRange | FhirR6Range | undefined): CanonicalRange | undefined {
   return rangeFromWire(r);
 }
 function ratio(
@@ -466,6 +467,18 @@ function onlyOwnedMemberQuantityLimits(safety: FhirR6DosageSafety): boolean {
 
 /** Every understood safety rule is typed. Unknown element metadata stays
  * only on the retained external source object, never in an executable bag. */
+export function doseLimitFromWire(limit: FhirR6DoseLimit): CanonicalDoseLimit {
+  return {
+    scope: limit.scope,
+    amount: measureFromWire(limit.valueQuantity),
+    count: limit.valueInteger,
+    expression: limit.valueExpression,
+    period: measureFromWire(limit.period),
+    text: limit.text,
+    provenance: limit,
+  };
+}
+
 export function safetyFromWire(
   safety: FhirR6DosageSafety | undefined,
   includeLimits = false
@@ -476,15 +489,7 @@ export function safetyFromWire(
     ...(safety.ifExceeded !== undefined ? { ifExceeded: safety.ifExceeded } : {}),
     ...(includeLimits && safety.doseLimit
       ? {
-          limits: safety.doseLimit.map((limit) => ({
-            scope: limit.scope,
-            amount: measureFromWire(limit.valueQuantity),
-            count: limit.valueInteger,
-            expression: limit.valueExpression,
-            period: measureFromWire(limit.period),
-            text: limit.text,
-            provenance: limit,
-          })),
+          limits: safety.doseLimit.map(doseLimitFromWire),
         }
       : {}),
     ...(safety.ifExceeded ||
@@ -863,16 +868,7 @@ function baseAdministration(
 export function administrationFromR6(raw: FhirR6Dosage, sourceContext = false): CanonicalAdministration {
   const result = baseAdministration(raw, "r6", sourceContext);
   if (raw.safety) {
-    result.safety = safetyFromWire(raw.safety);
-    result.limits = raw.safety.doseLimit?.map((limit) => ({
-      scope: limit.scope,
-      amount: measureFromWire(limit.valueQuantity),
-      count: limit.valueInteger,
-      expression: limit.valueExpression,
-      period: measureFromWire(limit.period),
-      text: limit.text,
-      provenance: limit,
-    }));
+    result.limits = raw.safety.doseLimit?.map(doseLimitFromWire);
   }
   return result;
 }
@@ -918,15 +914,7 @@ export function administrationFromR5(
   if ((raw as EzDosage).safety) {
     const safety = reconcileLiftedR5Safety(raw as EzDosage);
     result.safety = safetyFromWire(safety);
-    result.limits = safety?.doseLimit?.map((limit) => ({
-      scope: limit.scope,
-      amount: measureFromWire(limit.valueQuantity),
-      count: limit.valueInteger,
-      expression: limit.valueExpression,
-      period: measureFromWire(limit.period),
-      text: limit.text,
-      provenance: limit,
-    }));
+    result.limits = safety?.doseLimit?.map(doseLimitFromWire);
     removeLiftedPartialMaximumMirrors(result, raw, safety);
   }
   return result;

@@ -17,12 +17,27 @@ export interface FhirCoding {
   i18n?: Record<string, string>;
 }
 
+export interface FhirR6Coding extends Omit<FhirCoding,
+  "extension" | "_system" | "_version" | "_code" | "_display" | "_userSelected">, FhirR6Element {
+  _system?: FhirR6PrimitiveElement;
+  _version?: FhirR6PrimitiveElement;
+  _code?: FhirR6PrimitiveElement;
+  _display?: FhirR6PrimitiveElement;
+  _userSelected?: FhirR6PrimitiveElement;
+}
+
 export interface FhirCodeableConcept {
   id?: string;
   coding?: FhirCoding[];
   text?: string;
   extension?: FhirExtension[];
   _text?: FhirPrimitiveElement;
+}
+
+export interface FhirR6CodeableConcept extends Omit<FhirCodeableConcept,
+  "extension" | "coding" | "_text">, FhirR6Element {
+  coding?: FhirR6Coding[];
+  _text?: FhirR6PrimitiveElement;
 }
 
 export interface FhirExtension {
@@ -58,6 +73,7 @@ export interface FhirExtension {
 
 /** R6 Extension values retain their native datatype contracts. */
 export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity" | "valueRatio" | "valueTiming" | "valueReference" | "valueCodeableReference" |
+  "valueCoding" | "valueCodeableConcept" | "valueRange" | "valueExpression" |
   "_valueCode" | "_valueString" | "_valueDecimal" | "_valueTime"> {
   _valueCode?: FhirR6PrimitiveElement;
   _valueString?: FhirR6PrimitiveElement;
@@ -65,6 +81,10 @@ export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valu
   _valueTime?: FhirR6PrimitiveElement;
   extension?: FhirR6Extension[];
   valueQuantity?: FhirR6Quantity;
+  valueCoding?: FhirR6Coding;
+  valueCodeableConcept?: FhirR6CodeableConcept;
+  valueRange?: FhirR6Range;
+  valueExpression?: FhirR6Expression;
   valueRatio?: FhirR6Ratio;
   valueTiming?: FhirR6Timing;
   valueReference?: FhirR6Reference;
@@ -181,6 +201,11 @@ export type FhirR6SimpleQuantity = Omit<FhirR6Quantity, "comparator" | "_compara
 export interface FhirRange extends FhirElement {
   low?: FhirSimpleQuantity;
   high?: FhirSimpleQuantity;
+}
+
+export interface FhirR6Range extends FhirR6Element {
+  low?: FhirR6SimpleQuantity;
+  high?: FhirR6SimpleQuantity;
 }
 
 export interface FhirRatio extends FhirElement {
@@ -497,6 +522,8 @@ export interface FhirExpression extends FhirElement {
   expression?: string;
   reference?: string;
 }
+
+export interface FhirR6Expression extends Omit<FhirExpression, "extension">, FhirR6Element {}
 
 export interface FhirDoseAndRate extends FhirBackboneElement {
   type?: FhirCodeableConcept;

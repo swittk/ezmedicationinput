@@ -7716,3 +7716,31 @@ describe("dated phase start previews", () => {
     }
   });
 });
+
+
+describe("R6 stage safety in individual previews", () => {
+  it("shows the current stage limit and exceeded policy without leaking them to the loading item", () => {
+    const component = (value: number) => ({
+      doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    });
+    const safety = {
+      doseLimit: [{ scope: "administration" as const, valueQuantity: { value: 2, unit: "tab" } }],
+      ifExceeded: "Call the clinic"
+    };
+    const wire: FhirR6DosageInstruction = {
+      step: [{ component: [component(3)] }, { component: [component(1)], safety }]
+    };
+    const imported = fromFhir(wire, { locale: "en" });
+    expect(imported.items).toHaveLength(2);
+    for (const text of [imported.items[1].shortText, imported.items[1].longText]) {
+      expect(text).toContain("max per administration: 2 tab");
+      expect(text).toContain("Call the clinic");
+    }
+    for (const text of [imported.items[0].shortText, imported.items[0].longText]) {
+      expect(text).not.toContain("max per administration");
+      expect(text).not.toContain("Call the clinic");
+    }
+    expect(imported.fhirNext.step![1].safety).toEqual(safety);
+  });
+});

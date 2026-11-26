@@ -72,6 +72,7 @@ import {
   FhirPrimitiveElement,
   FhirQuantity,
   FhirSimpleQuantity,
+  FhirR6SimpleQuantity,
   FhirR6Quantity,
   FhirRange,
   FhirTiming,
@@ -315,7 +316,7 @@ export function getAnchoredCourseDuration(
  * original elapsed/calendar quantity while applying current annotations and
  * qualifier; changing > alone must not turn 48 elapsed hours into two days. */
 function reconcileDurationEndpoint(
-  source: FhirR6Quantity, projected: FhirSimpleQuantity | undefined, current: FhirSimpleQuantity | undefined
+  source: FhirR6Quantity, projected: FhirSimpleQuantity | FhirR6SimpleQuantity | undefined, current: FhirSimpleQuantity | undefined
 ): FhirSimpleQuantity | undefined {
   if (equalStructuredValues(projected, current)) return source as FhirSimpleQuantity;
   if (!projected || !current || projected.value !== current.value || projected.unit !== current.unit ||
@@ -1016,7 +1017,7 @@ export function parseActivityTimingExtensions(repeat: FhirR6TimingRepeat | undef
       activity: {
         text,
         i18n: Object.keys(i18n).length ? i18n : undefined,
-        coding: coding ? { ...coding } : undefined
+        coding: coding ? { ...coding } as FhirCoding : undefined
       },
       offset: activityTimingQuantityMinutes(child("offset")),
       offsetMin: activityTimingQuantityMinutes(child("offsetMin")),

@@ -1369,8 +1369,8 @@ export function fromFhir(
     const projection = r5Rows[row++];
     items.push({
       fhir: projection,
-      shortText: formatCanonicalAdministration(administration, "short", options, compiled),
-      longText: formatCanonicalAdministration(administration, "long", options, compiled),
+      shortText: formatCanonicalAdministration(administration, "short", options, compiled, undefined, stage.safety),
+      longText: formatCanonicalAdministration(administration, "long", options, compiled, undefined, stage.safety),
       warnings: clause.warnings ?? [],
       meta: { consumedTokens: [],
         normalized: buildNormalizedMetaFromClause(clause, projection, options),

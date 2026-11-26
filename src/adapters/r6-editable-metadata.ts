@@ -7,7 +7,7 @@
 import type {
   FhirExtension, FhirR6Extension, FhirR6DosageInstruction, FhirR6DosageInstructionInput,
   FhirR6DosageSafety, FhirR6DosageStep, FhirR6DoseLimit, FhirR6Ratio, FhirR6Timing,
-  FhirR6Dosage, FhirR6Quantity, FhirR6RelativeTime, FhirRange,
+  FhirR6Dosage, FhirR6Quantity, FhirR6RelativeTime, FhirRange, FhirR6Range,
 } from "../types";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { boundaryFromR6 } from "./canonical-course";
@@ -101,7 +101,7 @@ function draftCompletionQuantity(quantity: FhirR6Quantity | undefined): object |
   return quantity ? { value: quantity.value, unit: quantity.unit, code: quantity.code,
     system: quantity.system, comparator: getQuantityComparator(quantity) } : undefined;
 }
-function draftCompletionRange(range: FhirRange | undefined): object | undefined {
+function draftCompletionRange(range: FhirRange | FhirR6Range | undefined): object | undefined {
   return range ? { low: draftCompletionQuantity(range.low), high: draftCompletionQuantity(range.high) } : undefined;
 }
 function draftCompletionBoundary(boundary: FhirR6RelativeTime | undefined): object | undefined {
