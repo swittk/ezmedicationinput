@@ -29,7 +29,7 @@ import {
   DurationUnit,
   TimingEvent,
   numericAdministrationLimits,
-  administrationHasDatedClockStart,
+  administrationHasDatedStart,
   normalizeQuantityCapUnit,
   hasPeriodLimits,
   measureOperator as getQuantityComparator,
@@ -1122,11 +1122,24 @@ function standardTimingCodeFrequency(coding: TimingCoding | undefined, includeIn
   const hours = TIMING_CODE_HOURLY_PERIODS[code];
   return hours === undefined ? undefined : 24 / hours;
 }
-/** Resolves fallback clock arrays for frequency-only schedules. */
-function resolveFrequencyClocks(
-  timing: CanonicalTiming, config: NextDueDoseConfig, coding = executionTimingCoding(timing),
-  clockOwner?: { configured: boolean }
-): string[] {
+/** Missing event clocks can defer to a complete cadence; an explicit clock
+ * list remains authoritative even when none of its entries can be realized. */
+function canFallbackToCadence(
+  repeat: CanonicalRecurrence, expanded: readonly ClockEntry[], enforceDayFilter: boolean
+): boolean {
+  return expanded.length === 0 && !repeat.clocks?.length &&
+    ((!!repeat.frequency && !!repeat.period && !!repeat.periodUnit) ||
+      (repeat.anchors?.length === 1 && repeat.anchors[0] === TimingEvent.Immediate &&
+        usesIntervalCadence(repeat) && isDayFilteredIntervalSupported(repeat, enforceDayFilter)));
+}
+
+/** One owner for fallback clocks and daily-versus-period frequency routing.
+ * Enumeration, historical counts and supply retain their own window loops. */
+function resolveFrequencyCadence(
+  timing: CanonicalTiming, effectiveRepeat: CanonicalRecurrence, config: NextDueDoseConfig,
+  coding = executionTimingCoding(timing)
+): { clocks: string[]; daily: boolean; configured: boolean } {
+  let configuredClocks = false;
   const configured = config.frequencyDefaults;
   const collected = new Set<string>();
   const normalizedCode = coding?.code?.toUpperCase();
@@ -1157,8 +1170,8 @@ function resolveFrequencyClocks(
       (isStandardTimingCoding(coding) ? DEFAULT_FREQUENCY_DEFAULTS.byCode[normalizedCode] : undefined)
     : undefined;
   if (codeClocks) {
-    if (clockOwner && codeClocks.length && codeClocks === configuredCodeClocks)
-      clockOwner.configured = true;
+    if (codeClocks.length && codeClocks === configuredCodeClocks)
+      configuredClocks = true;
     for (const clock of codeClocks) collected.add(normalizeClock(clock));
   }
   // A code and a frequency describe the same opportunities. A local code can
@@ -1169,15 +1182,20 @@ function resolveFrequencyClocks(
     const clocks = configured?.byFrequency?.[perPeriodKey] ?? DEFAULT_FREQUENCY_DEFAULTS.byFrequency[perPeriodKey] ??
       configured?.byFrequency?.[key] ?? DEFAULT_FREQUENCY_DEFAULTS.byFrequency[key];
     if (clocks) {
-      if (clockOwner && clocks.length && (clocks === configured?.byFrequency?.[perPeriodKey] ||
-          clocks === configured?.byFrequency?.[key])) clockOwner.configured = true;
+      if (clocks.length && (clocks === configured?.byFrequency?.[perPeriodKey] ||
+          clocks === configured?.byFrequency?.[key])) configuredClocks = true;
       for (const clock of clocks) collected.add(normalizeClock(clock));
     }
     if (collected.size === 0 && repeat.period === 1 && repeat.periodUnit === "d") {
       for (const clock of inferDailyFrequencyClocks(repeat.frequency)) collected.add(clock);
     }
   }
-  return Array.from(collected).sort();
+  return {
+    clocks: Array.from(collected).sort(),
+    daily: (codeFrequency !== undefined && codeFrequency >= 1) ||
+      (effectiveRepeat.period === 1 && effectiveRepeat.periodUnit === DurationUnit.Day),
+    configured: configuredClocks,
+  };
 }
 /** Realize known code cadence without changing the authored recurrence:
  * QOD uses alternate-day institution clocks; hourly codes retain elapsed spacing. */
@@ -1190,7 +1208,7 @@ function codedExecutionRecurrence(timing: CanonicalTiming | undefined, config: N
   if (repeat.frequency && repeat.period && repeat.periodUnit === DurationUnit.Day &&
       standardTimingCodeFrequency(coding) === 0.5 && matchesDailyCodeCadence(0.5, repeat)) {
     // Equivalent aggregate QOD repeats share the same alternate-day clinic grid.
-    return { ...repeat, frequency: 1, period: 2, clocks: resolveFrequencyClocks(timing, config, coding) };
+    return { ...repeat, frequency: 1, period: 2, clocks: resolveFrequencyCadence(timing, repeat, config, coding).clocks };
   }
   if (repeat.frequency === 1) return repeat;
   // A matching aggregate count (Q4H + 6/day) does not erase the code's
@@ -1200,10 +1218,6 @@ function codedExecutionRecurrence(timing: CanonicalTiming | undefined, config: N
   return hours && repeat.frequency && repeat.period && repeat.periodUnit &&
       matchesDailyCodeCadence(24 / hours, repeat)
     ? { ...repeat, frequency: 1, period: hours, periodUnit: DurationUnit.Hour } : repeat;
-}
-function recognizedDailyTimingCode(timing: CanonicalTiming): number | undefined {
-  const daily = standardTimingCodeFrequency(executionTimingCoding(timing));
-  return daily !== undefined && daily >= 1 ? daily : undefined;
 }
 function matchesDailyCodeCadence(daily: number, repeat: CanonicalRecurrence): boolean {
   const seconds = repeat.periodUnit ? INFUSION_TIME_SECONDS[repeat.periodUnit] : undefined;
@@ -2059,13 +2073,18 @@ function executableQuantityCaps(
     ) {
       continue;
     }
-    const actualUnit = capQuantityUnit(dose);
-    const maximumUnit = capQuantityUnit(numerator);
-    if ((!actualUnit && dose.code) || (!maximumUnit && numerator?.code)) continue;
-    const normalizedActual = normalizeQuantityCapUnit(actualUnit);
-    const normalizedMaximum = normalizeQuantityCapUnit(maximumUnit);
-    const perTargetDose =
-      normalizedActual === normalizedMaximum ? dose.value : convertValue(dose.value, normalizedActual, normalizedMaximum, measuredStrengthRatio(context));
+    // Exact coded identity compares counts without interpreting a local code as a dimension.
+    const sameCodedUnit = dose.system && dose.code && dose.system === numerator?.system && dose.code === numerator.code;
+    let perTargetDose: number | null = dose.value;
+    if (!sameCodedUnit) {
+      const actualUnit = capQuantityUnit(dose);
+      const maximumUnit = capQuantityUnit(numerator);
+      if ((!actualUnit && dose.code) || (!maximumUnit && numerator?.code)) continue;
+      const normalizedActual = normalizeQuantityCapUnit(actualUnit);
+      const normalizedMaximum = normalizeQuantityCapUnit(maximumUnit);
+      perTargetDose = normalizedActual === normalizedMaximum ? dose.value
+        : convertValue(dose.value, normalizedActual, normalizedMaximum, measuredStrengthRatio(context));
+    }
     if (perTargetDose === null || !Number.isFinite(perTargetDose) || perTargetDose <= 0) {
       continue;
     }
@@ -2643,7 +2662,7 @@ function resolveAdministrationWindow(
       {
         recurrenceOrigin: cadence.origin,
         eligibleFrom: countOrigin,
-        endExclusive: earlierDate(endExclusive, administration.schedule?.explicitEvents?.length ? cycleEnd ?? null : null),
+        endExclusive: earlierDate(endExclusive, absoluteEventCycleEnd(administration, cycleEnd) ?? null),
         countEligibilityStart,
       },
       countOptions ?? { from: cadence.origin, orderedAt: cadence.origin, timeZone },
@@ -2701,18 +2720,19 @@ function completePhaseDependency(
   }
   return ready;
 }
-/** A dated replacement starts at its authored clock, not midnight.
- * Resolve that occurrence with the ordinary admission owner in the requested
- * zone. An inferred event clock or conditional opportunity proves no boundary. */
-function datedClockSuccessorBoundary(
+/** A dated replacement owns its calendar opening or explicit clock.
+ * Resolve clocks with the ordinary admission owner in the requested zone;
+ * inferred event clocks and conditional opportunities prove no boundary. */
+function datedSuccessorBoundary(
   successor: CanonicalAdministration, precedingStart: Date,
   zone: string, options?: NextDueDoseOptions
 ): Date | undefined {
-  if (!administrationHasDatedClockStart(successor)) return undefined;
+  if (!administrationHasDatedStart(successor)) return undefined;
   const bounds = resolveRepeatBoundsPeriod(successor.schedule?.recurrence, zone,
     (getAdministrationOffsetMinutes(successor) ?? 0) * 60000);
   if (!bounds.start || !bounds.nominalStart ||
       getLocalDayNumber(bounds.start, zone) < getLocalDayNumber(precedingStart, zone)) return undefined;
+  if (!successor.schedule?.recurrence?.clocks?.length) return bounds.start;
   const execution = { ...successor, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined,
     phaseOriginIssue: undefined, phasePredecessors: undefined };
   const first = nextDueDosesSingle(execution, {
@@ -2740,7 +2760,7 @@ function datedMemberReplacementEnds(
     const start = resolveRepeatBoundsPeriod(successor.schedule?.recurrence, zone,
       (getAdministrationOffsetMinutes(successor) ?? 0) * 60000).start;
     if (!start) continue;
-    const end = datedClockSuccessorBoundary(successor, start, zone, options);
+    const end = datedSuccessorBoundary(successor, start, zone, options);
     if (!end) continue;
     if (!members) {
       members = new Map();
@@ -2904,9 +2924,9 @@ function treatmentStepWindow(
     let replacement: Date | undefined;
     for (const successor of nextStage.administrations) {
       // Undated concurrent members inherit the phase opening, not an invented
-      // calendar start. Every authored date must retain its explicit clock.
+      // calendar start. An authored clock refines its date's opening.
       if (!successor.schedule?.recurrence?.calendarWindow?.start && !successor.schedule?.explicitEvents?.length) continue;
-      const boundary = datedClockSuccessorBoundary(successor, opening, timeZone, options);
+      const boundary = datedSuccessorBoundary(successor, opening, timeZone, options);
       if (!boundary) { replacement = undefined; break; }
       if (!replacement || boundary < replacement) replacement = boundary;
     }
@@ -3288,14 +3308,23 @@ function trimRollingCycleHistory<T extends string | SupplyAllocation>(
   }
 }
 
+/** The cycle owns the nominal absolute event. Its execution fence follows
+ * the same displacement as that event. */
+function absoluteEventCycleEnd(
+  administration: CanonicalAdministration, cycleEnd?: Date
+): Date | undefined {
+  if (!cycleEnd || !administration.schedule?.explicitEvents?.length) return undefined;
+  const delay = getAdministrationOffsetMinutes(administration) ?? 0;
+  return delay ? new Date(cycleEnd.getTime() + delay * 60000) : cycleEnd;
+}
+
 /** Absolute events use one cycle interval even when a separate authored
  * relative duration extends the phase. Relative recurrence keeps its overlap. */
 function cycleOwnedAdministrationEnd(
   window: TreatmentStepWindow, member: ResolvedAdministrationWindow, cycleEnd?: Date
 ): Date | null {
-  const end = earlierDate(window.end ?? null, member.endExclusive);
-  return cycleEnd && member.administration.schedule?.explicitEvents?.length
-    ? earlierDate(end, cycleEnd) : end;
+  return earlierDate(earlierDate(window.end ?? null, member.endExclusive),
+    absoluteEventCycleEnd(member.administration, cycleEnd) ?? null);
 }
 
 /** A resolved phase keeps its nominal grid after calendar eligibility has
@@ -5162,13 +5191,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     if (results.length >= effectiveLimit) {
       return results.slice(0, effectiveLimit);
     }
-    const canFallbackToCadence =
-      expanded.length === 0 &&
-      timeOfDayEntries.length === 0 &&
-      ((!!repeat.frequency && !!repeat.period && !!repeat.periodUnit) ||
-        (whenCodes.length === 1 && whenCodes[0] === TimingEvent.Immediate &&
-          usesIntervalCadence(repeat) && isDayFilteredIntervalSupported(repeat, enforceDayFilter)));
-    if (!canFallbackToCadence) {
+    if (!canFallbackToCadence(repeat, expanded, enforceDayFilter)) {
       if (expanded.length === 0) {
         return results.slice(0, effectiveLimit);
       }
@@ -5289,11 +5312,8 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     // Pure frequency schedules (e.g., BID/TID) rely on institution clocks that
     // clinicians expect. These can be overridden via configuration when
     // facilities use bespoke medication rounds.
-    const clockOwner = config.frequencyDefaults ? { configured: false } : undefined;
-    const clocks = resolveFrequencyClocks(timing, config, undefined, clockOwner);
-    const codedDaily = recognizedDailyTimingCode(timing) !== undefined;
-    const ordinaryDaily = repeat.period === 1 && repeat.periodUnit === DurationUnit.Day;
-    if (!codedDaily && !ordinaryDaily) {
+    const { clocks, daily, configured } = resolveFrequencyCadence(timing, repeat, config);
+    if (!daily) {
       return generateFrequencyPerPeriodSeries(
         baseTime,
         from,
@@ -5304,7 +5324,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
         courseEnd,
         clocks,
         calendarDays,
-        clockOwner?.configured,
+        configured,
         enforceDayFilter ? dayFilter : undefined
       );
     }
@@ -5424,13 +5444,7 @@ function derivePriorCountFromHistory(
         return count;
       }
     }
-    const canFallbackToCadence =
-      expanded.length === 0 &&
-      timeOfDayEntries.length === 0 &&
-      ((!!repeat.frequency && !!repeat.period && !!repeat.periodUnit) ||
-        (whenCodes.length === 1 && whenCodes[0] === TimingEvent.Immediate &&
-          usesIntervalCadence(repeat) && isDayFilteredIntervalSupported(repeat, enforceDayFilter)));
-    if (!canFallbackToCadence) {
+    if (!canFallbackToCadence(repeat, expanded, enforceDayFilter)) {
       if (expanded.length === 0) {
         return count;
       }
@@ -5525,11 +5539,8 @@ function derivePriorCountFromHistory(
     return count + generated.length;
   }
   if (repeat.frequency && repeat.period && repeat.periodUnit) {
-    const clockOwner = config.frequencyDefaults ? { configured: false } : undefined;
-    const clocks = resolveFrequencyClocks(timing, config, undefined, clockOwner);
-    const codedDaily = recognizedDailyTimingCode(timing) !== undefined;
-    const ordinaryDaily = repeat.period === 1 && repeat.periodUnit === DurationUnit.Day;
-    if (!codedDaily && !ordinaryDaily) {
+    const { clocks, daily, configured } = resolveFrequencyCadence(timing, repeat, config);
+    if (!daily) {
       return (
         count +
         generateFrequencyPerPeriodSeries(
@@ -5542,7 +5553,7 @@ function derivePriorCountFromHistory(
           from,
           clocks,
           calendarDays,
-          clockOwner?.configured,
+          configured,
           enforceDayFilter ? dayFilter : undefined
         ).length
       );
@@ -5786,10 +5797,24 @@ function generateFrequencyPerPeriodSeries(
   const pending = interlacingClocks ? new ChronologicalQueue<ChronologicalEvent>() : undefined;
   let serial = 0;
   let cycleStart = baseTime;
+  let elapsedClockOffsets: number[] | undefined;
   if (!calendarInterval) {
     const firstEnd = advanceCycle(baseTime);
     if (!firstEnd || firstEnd <= baseTime) return results;
     const width = firstEnd.getTime() - baseTime.getTime();
+    if (configuredClock && clocks.length === frequency) {
+      const offsets: number[] = [];
+      for (const entry of clocks) {
+        const clock = typeof entry === "string" ? entry : entry.time;
+        const day = typeof entry === "object" && entry.dayShift ? addLocalDays(baseTime, entry.dayShift, timeZone) : baseTime;
+        let at = makeZonedDateFromDay(day, timeZone, clock);
+        if (at && at < baseTime) at = makeZonedDateFromDay(addLocalDays(day, 1, timeZone), timeZone, clock);
+        if (!at || at < baseTime || at >= firstEnd) break;
+        offsets.push(at.getTime() - baseTime.getTime());
+      }
+      // Select positions once, then retain the authored elapsed cycle across clock changes.
+      if (offsets.length === frequency) elapsedClockOffsets = offsets.sort((a, b) => a - b);
+    }
     const seek = latestDayShift ? addLocalDays(from, -latestDayShift, timeZone) : from;
     const periods = Math.max(0, Math.floor((seek.getTime() - baseTime.getTime()) / width));
     cycleStart = new Date(baseTime.getTime() + periods * width);
@@ -5880,7 +5905,8 @@ function generateFrequencyPerPeriodSeries(
         if (candidate && inferredMilliseconds) candidate.setUTCMilliseconds(inferredMilliseconds);
       } else {
         candidate = new Date(
-          cycleStart.getTime() + Math.floor(((cycleEnd.getTime() - cycleStart.getTime()) * index) / frequency)
+          cycleStart.getTime() + (elapsedClockOffsets?.[index] ??
+            Math.floor(((cycleEnd.getTime() - cycleStart.getTime()) * index) / frequency))
         );
       }
       // Meal offsets may place the administration outside its anchor cycle.
@@ -6189,13 +6215,7 @@ function countScheduleEvents(
         recordCandidate(immediateSource);
       }
     }
-    const canFallbackToCadence =
-      expanded.length === 0 &&
-      timeOfDayEntries.length === 0 &&
-      ((!!repeat.frequency && !!repeat.period && !!repeat.periodUnit) ||
-        (whenCodes.length === 1 && whenCodes[0] === TimingEvent.Immediate &&
-          usesIntervalCadence(repeat) && isDayFilteredIntervalSupported(repeat, enforceDayFilter)));
-    if (!canFallbackToCadence) {
+    if (!canFallbackToCadence(repeat, expanded, enforceDayFilter)) {
       if (expanded.length === 0) return count;
       if (hasDistributedClockFrequency(repeat, expanded, enforceDayFilter)) {
         return (
@@ -6288,11 +6308,8 @@ function countScheduleEvents(
     return count;
   }
   if (repeat.frequency && repeat.period && repeat.periodUnit) {
-    const clockOwner = config.frequencyDefaults ? { configured: false } : undefined;
-    const clocks = resolveFrequencyClocks(timing, config, undefined, clockOwner);
-    const codedDaily = recognizedDailyTimingCode(timing) !== undefined;
-    const ordinaryDaily = repeat.period === 1 && repeat.periodUnit === DurationUnit.Day;
-    if (!codedDaily && !ordinaryDaily) {
+    const { clocks, daily, configured } = resolveFrequencyCadence(timing, repeat, config);
+    if (!daily) {
       const generated = generateFrequencyPerPeriodSeries(
         baseTime,
         from,
@@ -6303,7 +6320,7 @@ function countScheduleEvents(
         to,
         clocks,
         calendarDays,
-        clockOwner?.configured,
+        configured,
         enforceDayFilter ? dayFilter : undefined
       );
       if (count === 0) return generated.length;
@@ -6896,7 +6913,7 @@ function sumCourseUnits(
         throw new MedicationQuantityCalculationError("incompatible-dose-units",
           "Cannot sum medication supply with both a nonzero unitless amount and a measured quantity.");
       hasQuantity = true;
-      if (commonUnit !== undefined && unit !== undefined && commonUnit.toLowerCase() !== unit.toLowerCase()) {
+      if (commonUnit !== undefined && unit !== undefined && normalizeQuantityCapUnit(commonUnit) !== normalizeQuantityCapUnit(unit)) {
         const translated = convertValue(
           quantity,
           unit,
@@ -8399,7 +8416,8 @@ function explicitAdministrationCompletion(
     schedule: { ...dosage.schedule, recurrence: repeat
       ? { ...repeat, count: undefined, countMax: undefined } : undefined },
   });
-  const eventStatus: ExplicitEventStatus = { possible: false, end: cycleEnd };
+  const ownedEnd = absoluteEventCycleEnd(dosage, cycleEnd);
+  const eventStatus: ExplicitEventStatus = { possible: false, end: ownedEnd };
   const due = nextDueDoses(raw, { ...options, from: eligibleFrom, orderedAt: start,
     candidateOnly: true, explicitEventStatus: eventStatus,
     priorCount: undefined, priorDoseTimes: undefined, limit: 10000 } as PhaseCountOptions);
@@ -8407,7 +8425,7 @@ function explicitAdministrationCompletion(
   // The sorted probe can include later absolute events. Only this cycle's
   // opportunities determine its completion; a final finite tail has no fence.
   let ownedCount = due.length;
-  if (cycleEnd) while (ownedCount && new Date(due[ownedCount - 1]) >= cycleEnd) ownedCount--;
+  if (ownedEnd) while (ownedCount && new Date(due[ownedCount - 1]) >= ownedEnd) ownedCount--;
   if (eventStatus.possible && (count === undefined || ownedCount < count)) return undefined;
   const last = ownedCount ? new Date(due[ownedCount - 1]) : undefined;
   return last ? completionAfterAcceptedAdministration(dosage, last, zone) : undefined;

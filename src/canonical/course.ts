@@ -295,13 +295,19 @@ export const recurrenceCap = (r: CanonicalRecurrence | undefined) => r?.occurren
 export const administrationCycleDays = (a: CanonicalAdministration) => a.cycleDays;
 export const recurrenceClockWindow = (r: CanonicalRecurrence | undefined) => r?.clockWindow;
 export const recurrenceEventWindow = (r: CanonicalRecurrence | undefined) => r?.eventWindow;
-/** A dated phase can own its local clock boundary only with an explicit,
- * unconditional clock. Execution resolves the instant in the requested zone. */
-export function administrationHasDatedClockStart(a: CanonicalAdministration): boolean {
+/** An unconditional dated phase owns its calendar opening. An explicit
+ * clock refines that date; an event or condition cannot prove an opening. */
+export function administrationHasDatedStart(a: CanonicalAdministration): boolean {
   const repeat = a.schedule?.recurrence;
-  return Boolean(repeat?.calendarWindow?.start?.length === 10 && repeat.clocks?.length &&
+  return Boolean(repeat?.calendarWindow?.start?.length === 10 &&
+    (repeat.clocks?.length || !a.schedule?.explicitEvents?.length) &&
     !repeat.anchors?.length && !a.asNeeded && !a.predicate && !a.calendarPredicate &&
     !a.choice && !a.choiceIssue);
+}
+
+/** A clocked replacement defers its projected calendar cut to execution. */
+export function administrationHasDatedClockStart(a: CanonicalAdministration): boolean {
+  return Boolean(a.schedule?.recurrence?.clocks?.length && administrationHasDatedStart(a));
 }
 
 /** Normalize equivalent count-unit labels before dimensional conversion. */

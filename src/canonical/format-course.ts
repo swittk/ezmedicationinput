@@ -15,7 +15,7 @@ import type {
   CanonicalSafety,
   RegimenPosition,
 } from "./course";
-import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole, administrationHasAmountFacts, administrationHasDatedClockStart } from "./course";
+import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole, administrationHasAmountFacts, administrationHasDatedStart } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
 import { preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding } from "../timing-summary";
 import { canonicalClauseHasAdministrationSemantics } from "../ir";
@@ -443,7 +443,7 @@ function previewCourseWindows(
   selected?: { groupId: string; branchId: string }
 ) {
   let priorEndDays: number | undefined, priorEndAnchor: CanonicalBoundary["anchor"] | undefined;
-  let priorOptional = false, included = 0, hasTimedStages = false;
+  let priorOptional = false, priorActive = false, included = 0, hasTimedStages = false;
   let gapAnchor: CanonicalBoundary["anchor"] | undefined, mixedGapOrigins = false;
   const windows: Array<{
     start: number | undefined; end: number | undefined;
@@ -451,6 +451,7 @@ function previewCourseWindows(
     endAnchor: CanonicalBoundary["anchor"] | undefined;
     choiceDependentStart: boolean;
     datedStart: boolean;
+    datedEnd: boolean;
   }> = [];
   const activeWindows: Array<{ start: number | undefined; end: number | undefined }> = [];
   for (const step of course.stages) {
@@ -460,7 +461,16 @@ function previewCourseWindows(
     // A choice can remove its own stage, but never an authored empty pause.
     if (selected && !members.length && step.administrations.length > 0) continue;
     if (step.start || step.end) hasTimedStages = true;
-    const datedStart = !step.start && included > 0 && members.some(administrationHasDatedClockStart);
+    const datedStart = !step.start && included > 0 && members.some(administrationHasDatedStart);
+    if (datedStart) {
+      // A calendar replacement can precede the nominal relative end. Without
+      // an order date, preview cannot state that nominal end as the actual cut.
+      const previous = windows[windows.length - 1];
+      previous.end = undefined;
+      previous.endAnchor = undefined;
+      previous.datedEnd = true;
+      if (priorActive) activeWindows[activeWindows.length - 1].end = undefined;
+    }
     // The authored calendar date can open a successor before its predecessor's
     // nominal end; it cannot be described by an inherited treatment-day offset.
     const start = step.start ? treatmentStepOffsetDays(step.start)
@@ -468,7 +478,7 @@ function previewCourseWindows(
     const startAnchor = step.start?.anchor ?? (included === 0 ? "treatment-start" : priorEndAnchor);
     const endAnchor = step.end?.anchor, end = treatmentStepOffsetDays(step.end);
     const choiceDependentStart = !step.start && priorOptional;
-    windows.push({ start, end, startAnchor, endAnchor, choiceDependentStart, datedStart });
+    windows.push({ start, end, startAnchor, endAnchor, choiceDependentStart, datedStart, datedEnd: false });
     let activeEnd = end, repetitionResolved = true;
     if (step.count !== undefined && step.count !== 1) {
       // A later implicit start repeats its resolved elapsed span in execution.
@@ -487,7 +497,8 @@ function previewCourseWindows(
     priorEndDays = priorOptional ? undefined : activeEnd;
     priorEndAnchor = priorOptional ? undefined : endAnchor;
     included++;
-    if (members.length) {
+    priorActive = members.length > 0;
+    if (priorActive) {
       if (gapAnchor === undefined) gapAnchor = startAnchor;
       if (startAnchor !== gapAnchor || (endAnchor !== undefined && endAnchor !== gapAnchor))
         mixedGapOrigins = true;
@@ -903,7 +914,8 @@ export function formatCanonicalCourse(
   const { windows, activeWindows, hasTimedStages, gapAnchor, mixedGapOrigins } = previewCourseWindows(oneOrCourse, groups);
   for (let index = 0; index < oneOrCourse.stages.length; index++) {
     const step = oneOrCourse.stages[index];
-    const { start: startDays, end: endDays, startAnchor, endAnchor, choiceDependentStart, datedStart } = windows[index];
+    const { start: startDays, end: endDays, startAnchor, endAnchor, choiceDependentStart, datedStart, datedEnd } = windows[index];
+    const displayEnd = datedEnd ? undefined : step.end;
     let rendered = formatCourseChoices(
       step.administrations,
       (component) => {
@@ -1162,7 +1174,7 @@ export function formatCanonicalCourse(
       rendered = appendDoseLimits(rendered, step.safety.limits, words, "stage", step.safety.ifExceeded);
     if (!rendered.trim() && !step.start && !step.end && step.count === undefined) continue;
     let timing = "";
-    if (step.start || step.end || index > 0) {
+    if (step.start || displayEnd || index > 0) {
       const previous = !step.start && !choiceDependentStart && !datedStart && index > 0
         ? oneOrCourse.stages[index - 1] : undefined;
       const inheritedStart = previous && (previous.count === undefined || previous.count === 1)
@@ -1172,7 +1184,7 @@ export function formatCanonicalCourse(
       if (
         (step.start && startDays === undefined) ||
         (inheritedStart && startDays === undefined) ||
-        (step.end && endDays === undefined) ||
+        (displayEnd && endDays === undefined) ||
         reversedWindow
       ) {
         // Unsupported event anchors must stay visible instead of becoming
@@ -1184,10 +1196,10 @@ export function formatCanonicalCourse(
           : startDays !== undefined
           ? { value: startDays, unit: "d" }
           : inheritedStart;
-        const endQuantity = treatmentStepOffsetQuantity(step.end);
+        const endQuantity = treatmentStepOffsetQuantity(displayEnd);
         if (
           (!step.start || startQuantity) &&
-          (!step.end || endQuantity) &&
+          (!displayEnd || endQuantity) &&
           !reversedWindow
         ) {
           timing = formatCalendarStepWindow(startQuantity, endQuantity, words, startAnchor, endAnchor, cycleStart);
@@ -1195,9 +1207,9 @@ export function formatCanonicalCourse(
             timing = words.afterPreviousPhase + "; " + timing;
         } else {
           const startRange = treatmentBoundaryRangeText(step.start, words, cycleStart);
-          const endRange = treatmentBoundaryRangeText(step.end, words, cycleStart);
+          const endRange = treatmentBoundaryRangeText(displayEnd, words, cycleStart);
           if ((startRange || !step.start || startQuantity) &&
-              (endRange || !step.end || endQuantity) && (startRange || endRange)) {
+              (endRange || !displayEnd || endQuantity) && (startRange || endRange)) {
             timing = words.calendarWindow(startRange ?? courseBoundaryPoint(startQuantity, startAnchor, words, cycleStart), endRange ?? courseBoundaryPoint(endQuantity, endAnchor, words, cycleStart));
             if (index > 0 && !step.start && !startQuantity)
               timing = words.afterPreviousPhase + "; " + timing;
@@ -1206,16 +1218,16 @@ export function formatCanonicalCourse(
             // a fallback, and each side is a point rather than an open window.
             const start = startRange ?? boundaryEventText(step.start, words, cycleStart) ??
               courseBoundaryPoint(startQuantity, startAnchor, words, cycleStart) ?? step.start?.description;
-            const end = endRange ?? boundaryEventText(step.end, words, cycleStart) ??
-              courseBoundaryPoint(endQuantity, endAnchor, words, cycleStart) ?? step.end?.description;
+            const end = endRange ?? boundaryEventText(displayEnd, words, cycleStart) ??
+              courseBoundaryPoint(endQuantity, endAnchor, words, cycleStart) ?? displayEnd?.description;
             const contextualStart = index > 0 && step.start?.anchor === "previous-phase-next-day";
-            const contextualEnd = index > 0 && step.end?.anchor === "previous-phase-next-day";
-            const unresolvedEnd = Boolean(step.end && !end);
+            const contextualEnd = index > 0 && displayEnd?.anchor === "previous-phase-next-day";
+            const unresolvedEnd = Boolean(displayEnd && !end);
             const window = unresolvedEnd ? [start, words.reviewTiming(undefined, "end")].filter(Boolean).join("; ")
               : words.calendarWindow(start, end);
             timing = unresolvedEnd ? window : (contextualStart || contextualEnd) &&
               (!step.start || startQuantity || startRange || contextualStart) &&
-              (!step.end || endQuantity || endRange || contextualEnd)
+              (!displayEnd || endQuantity || endRange || contextualEnd)
               ? window : words.reviewTiming(window || undefined);
             if (index > 0 && !step.start && !startQuantity)
               timing = words.afterPreviousPhase + "; " + timing;
@@ -1248,7 +1260,7 @@ export function formatCanonicalCourse(
     // A successor can finish this stage before any open-ended continuation.
     // Show the known origin as a point; do not invent an end that could
     // contradict the member's earlier duration/count completion.
-    if (!step.end && index + 1 < oneOrCourse.stages.length &&
+    if (!displayEnd && index + 1 < oneOrCourse.stages.length &&
         (index > 0 || step.start?.anchor !== "previous-phase-next-day")) {
       const quantity = step.start ? treatmentStepOffsetQuantity(step.start)
         : startDays === undefined ? undefined : { value: startDays, unit: "d" };

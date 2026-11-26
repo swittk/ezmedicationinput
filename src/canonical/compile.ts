@@ -14,7 +14,7 @@ import type {
   CanonicalStage,
   CanonicalBoundary,
 } from "./course";
-import { hasAmountRole, administrationHasAmountFacts, administrationHasDatedClockStart } from "./course";
+import { hasAmountRole, administrationHasAmountFacts, administrationHasDatedStart, administrationHasDatedClockStart } from "./course";
 import type { CanonicalParallelRegimen, RegimenPosition } from "../regimen/parallel-course";
 import { bodySiteTextConflictsWithCoding, getBodySiteAdministrationTargetCount } from "../body-site-target";
 import { getBodySiteText } from "../body-site-lookup";
@@ -286,6 +286,18 @@ function boundaryForOnset(a: CanonicalAdministration): CanonicalBoundary {
     boundary.displacement = clinicalBoundary({ value: a.onsetDays, unit: "d" }).displacement;
   return boundary;
 }
+/** Transfer a track-owned calendar cut without replacing authored duration. */
+function applyParallelCalendarEnd(a: CanonicalAdministration, end: string | undefined): void {
+  if (!end) return;
+  const recurrence = (a.schedule ??= {}).recurrence ??= {};
+  (recurrence.calendarWindow ??= {}).end = end;
+  if (recurrence.courseLength || recurrence.courseLengthRange) {
+    a.anchoredLength = { quantity: recurrence.courseLength, range: recurrence.courseLengthRange };
+    recurrence.courseLength = undefined;
+    recurrence.courseLengthRange = undefined;
+  }
+}
+
 export function courseFromParallel(
   regimen: Extract<CanonicalParallelRegimen, { kind: "resolved" }>,
   clauseTexts: readonly (string | undefined)[],
@@ -298,15 +310,7 @@ export function courseFromParallel(
       const a = administrationFromClause(item.clause, clauseTexts[item.member], stage.sequence);
       // Preserve the authored clause in syntax; the track owns only this
       // earlier execution cut, just as in an unresolved parallel course.
-      if (item.effectiveBoundsEnd) {
-        const recurrence = (a.schedule ??= {}).recurrence ??= {};
-        (recurrence.calendarWindow ??= {}).end = item.effectiveBoundsEnd;
-        if (recurrence.courseLength || recurrence.courseLengthRange) {
-          a.anchoredLength = { quantity: recurrence.courseLength, range: recurrence.courseLengthRange };
-          recurrence.courseLength = undefined;
-          recurrence.courseLengthRange = undefined;
-        }
-      }
+      applyParallelCalendarEnd(a, item.effectiveBoundsEnd);
       a.sourceMember = item.member;
       if (item.phaseOrigin) a.phaseOrigin = clinicalBoundary(item.phaseOrigin).displacement;
       administrations.push(a);
@@ -345,15 +349,7 @@ export function courseFromPartialParallel(
         if (!a.phaseEnd && phase.phaseEnd) a.phaseEnd = phase.phaseEnd;
         // Keep the authored clause in syntax; only this owned execution window
         // receives the calendar end inferred within its independent track.
-        if (item.effectiveBoundsEnd) {
-          const recurrence = (a.schedule ??= {}).recurrence ??= {};
-          (recurrence.calendarWindow ??= {}).end = item.effectiveBoundsEnd;
-          if (recurrence.courseLength || recurrence.courseLengthRange) {
-            a.anchoredLength = { quantity: recurrence.courseLength, range: recurrence.courseLengthRange };
-            recurrence.courseLength = undefined;
-            recurrence.courseLengthRange = undefined;
-          }
-        }
+        applyParallelCalendarEnd(a, item.effectiveBoundsEnd);
         if (a.onsetReference === "treatment-day-start") a.phaseStart = boundaryForOnset(a);
         else if (a.onsetReference === "previous-phase-next-day" && index > 0) {
           a.phaseStart = boundaryForOnset(a);
@@ -392,8 +388,8 @@ export function courseFromPartialParallel(
         }
         // A dated replacement still belongs to this track even when its
         // predecessor began earlier. Execution owns the successor's local
-        // clock boundary; the compiler retains only the selected relation.
-        if (index > 0 && priorEnd > priorStart && administrationHasDatedClockStart(a)) {
+        // calendar or clock boundary; the compiler retains only the selected relation.
+        if (index > 0 && priorEnd > priorStart && administrationHasDatedStart(a)) {
           dependsOnPrevious = true;
           datedReplacement = true;
         }

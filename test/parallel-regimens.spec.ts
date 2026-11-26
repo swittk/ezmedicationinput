@@ -5259,3 +5259,34 @@ describe("ordinary authored phase continuation ownership", () => {
     }
   });
 });
+
+
+describe("displaced administration boundaries", () => {
+  const options = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC" };
+
+  it.each([false, true])("cuts a predecessor at its track's dated successor, independent of delay (%s)", delayed => {
+    const parsed = parseSig("Instill 1 drop OD " + (delayed ? "in 6 hours " : "") +
+      "every 6 hours, then starting 2027-01-02 instill 2 drops OD every 6 hours; instill 1 drop OS daily at 09:00");
+    for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(nextDueDoses(dosage, { ...options, from: "2027-01-01T18:00:00Z", limit: 6 })).toEqual([
+        "2027-01-01T18:00:00+00:00", "2027-01-02T00:00:00+00:00", "2027-01-02T06:00:00+00:00",
+        "2027-01-02T09:00:00+00:00", "2027-01-02T12:00:00+00:00", "2027-01-02T18:00:00+00:00"
+      ]);
+      for (const [clock, totalUnits] of [["00:00:00", 2], ["09:00:00", 1]] as const)
+        expect(calculateTotalUnits({ dosage, ...options, from: "2027-01-02T" + clock + "Z",
+          durationValue: 1, durationUnit: Unit.Hour })).toMatchObject({ totalUnits, unit: "drop" });
+    }
+  });
+
+  it.each([0, 120])("keeps a delayed absolute event in its nominal weekly cycle (%s minutes)", delayMinutes => {
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "wk" }, cycleCount: 2,
+      stages: [{ administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+        delayMinutes, schedule: { explicitEvents: ["2027-01-07T23:00:00Z"] } }] }] };
+    for (const dosage of [course, courseToR5(course), courseToR6(course)]) {
+      expect(nextDueDoses(dosage, { ...options, limit: 3 })).toEqual([
+        delayMinutes ? "2027-01-08T01:00:00+00:00" : "2027-01-07T23:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 14, durationUnit: Unit.Day }).totalUnits).toBe(1);
+    }
+  });
+});

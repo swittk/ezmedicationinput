@@ -2890,3 +2890,44 @@ describe("independent clinical conditions and coded quantity meaning", () => {
     expect(fromFhirDosage(input).longText).toContain("Rate range: " + expected);
   });
 });
+
+
+describe("coded presentation quantity identity", () => {
+  const options = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC" };
+
+  it.each(["nebule", "respule"])("sums a labeled %s and the same standard code without a label", unit => {
+    const rows: FhirDosage[] = [unit, undefined].map(label => ({ sequence: 1,
+      doseAndRate: [{ doseQuantity: { value: 1, system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+        code: "C71204", ...(label ? { unit: label } : {}) } }],
+      timing: { repeat: { count: 1, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["09:00:00"] } } }));
+    for (const dosage of [rows, toDosageDetails(rows), importCanonicalCourse(rows)]) {
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 2, unit });
+      expect(projectCanonicalCourse(importCanonicalCourse(dosage)).fhir.map(row => row.doseAndRate?.[0].doseQuantity))
+        .toEqual(rows.map(row => row.doseAndRate?.[0].doseQuantity));
+    }
+  });
+
+  it("compares an identical local dose and cap code without assigning it a standard dimension", () => {
+    for (const sameSystem of [true, false]) {
+      const row: FhirDosage = {
+        doseAndRate: [{ doseQuantity: { value: 1, system: "urn:clinic:dose-unit", code: "tab" } }],
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["08:00:00", "20:00:00"] } },
+        maxDosePerPeriod: [{ numerator: { value: 1,
+          system: sameSystem ? "urn:clinic:dose-unit" : "urn:other:dose-unit", code: "tab" },
+          denominator: { value: 24, unit: "h", code: "h", system: "http://unitsofmeasure.org" } }],
+      };
+      for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+        expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([
+          "2027-01-01T08:00:00+00:00", sameSystem ? "2027-01-02T08:00:00+00:00" : "2027-01-01T20:00:00+00:00"
+        ]);
+        expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: "d" }).totalUnits)
+          .toBe(sameSystem ? 1 : 2);
+        expect(importCanonicalCourse(dosage).stages[0].administrations[0].amounts?.[0].quantity)
+          .toEqual(row.doseAndRate![0].doseQuantity);
+      }
+    }
+  });
+});

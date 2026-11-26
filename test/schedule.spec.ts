@@ -5491,3 +5491,37 @@ describe("ordinary recurrence and partial-event supply boundaries", () => {
     }
   });
 });
+
+
+describe("configured clocks within elapsed frequency periods", () => {
+  const options = { orderedAt: "2027-03-13T00:00:00-05:00", from: "2027-03-13T00:00:00-05:00",
+    timeZone: "America/New_York", frequencyDefaults: { byFrequency: { "freq:2/per:24h": ["07:00", "19:00"] } } };
+
+  it("uses configured first-cycle positions while retaining a 24-hour elapsed cycle", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 2, period: 24, periodUnit: Unit.Hour } } };
+    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+      expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual([
+        "2027-03-13T07:00:00-05:00", "2027-03-13T19:00:00-05:00",
+        "2027-03-14T08:00:00-04:00", "2027-03-14T20:00:00-04:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...options, from: "2027-03-14T07:30:00-04:00",
+        durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(1);
+      expect(nextDueDoses(dosage, { ...options, frequencyDefaults: undefined, limit: 2 })).toEqual([
+        "2027-03-13T00:00:00-05:00", "2027-03-13T12:00:00-05:00"
+      ]);
+    }
+  });
+
+  it("uses the same configured grid for prior count, remaining due doses and supply", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { count: 3, frequency: 2, period: 24, periodUnit: Unit.Hour } } };
+    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+      const query = { ...options, from: "2027-03-13T13:00:00-05:00" };
+      expect(nextDueDoses(dosage, { ...query, limit: 4 })).toEqual([
+        "2027-03-13T19:00:00-05:00", "2027-03-14T08:00:00-04:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(2);
+    }
+  });
+});

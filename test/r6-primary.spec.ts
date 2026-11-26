@@ -7709,6 +7709,7 @@ describe("dated phase start previews", () => {
         if (dated) {
           expect(text).toContain("starting 3 Jan 2027");
           expect(text).not.toContain("From 4 days after treatment start");
+          expect(text).not.toContain("until 4 days after treatment start");
           expect(calculateTotalUnits({ dosage: input, ...options, from: "2027-01-03T00:00:00Z",
             durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(1);
         } else expect(text).toContain("From 4 days after treatment start");
