@@ -2224,6 +2224,62 @@ describe("condition and successor timing ownership", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 
+  it.each([
+    { suffix: "call the clinic if you have vomited no more than once in 24 hours.",
+      condition: "if you have vomited no more than once in 24 hours", kind: "if" },
+    { suffix: "when you have vomited no more than once in 24 hours, call the clinic.",
+      condition: "when you have vomited no more than once in 24 hours", kind: "when" },
+    { suffix: "call the clinic if you have taken no more than 1 tablet in 24 hours.",
+      condition: "if you have taken no more than 1 tablet in 24 hours", kind: "if" }
+  ])("keeps counseling history out of the medication ceiling: $suffix", ({ suffix, condition, kind }) => {
+    const source = "When SBP > 160, take 1 tablet every 6 hours for 2 days, maximum 2 tablets/day; " + suffix;
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const predicate = { kind: "measurement", name: "sbp", operation: "gt", value: 160 };
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(graph.actions.map(action => action.predicate.lemma)).toEqual(["call"]);
+    expect(graph.relations).toContainEqual(expect.objectContaining({ kind, toActionIndex: 0,
+      text: expect.stringContaining(condition) }));
+    const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 6 };
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0], recurrence = member.schedule?.recurrence;
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.predicate).toMatchObject(predicate);
+      expect(recurrence).toMatchObject({ period: 6, periodUnit: "h", courseLength: { value: 2 } });
+      expect(recurrence?.courseLength?.code ?? recurrence?.courseLength?.unit).toBe("d");
+      expect(recurrence?.occurrenceCap).toBeUndefined();
+      expect(recurrence?.countMax).toBeUndefined();
+      expect(member.asNeeded).not.toBe(true);
+      expect(member.limits).toHaveLength(1);
+      expect(member.limits?.[0]).toMatchObject({ scope: "period", amount: { value: 2, unit: "tab" },
+        period: { value: 1, unit: "d" } });
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => true })).toEqual([
+        "2026-12-01T00:00:00+00:00", "2026-12-01T06:00:00+00:00",
+        "2026-12-02T00:00:00+00:00", "2026-12-02T06:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d",
+        evaluateCondition: () => true }).totalUnits).toBe(4);
+      let rejectedCalls = 0;
+      const reject = (condition: unknown) => {
+        expect(condition).toMatchObject(predicate); rejectedCalls++; return false;
+      };
+      expect(nextDueDoses(input, { ...query, evaluateCondition: reject })).toEqual([]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d",
+        evaluateCondition: reject }).totalUnits).toBe(0);
+      expect(rejectedCalls).toBeGreaterThan(0);
+      for (const locale of ["en", "th"] as const) {
+        const preview = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(preview).toContain("SBP > 160");
+        expect(preview.toLowerCase()).toContain(condition);
+        expect(preview).toContain("2 tab / 1 d");
+      }
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
   it("retains a separated occurrence cap beside the complete predicate", () => {
     const source = "Take 1 tablet only if you have taken at most 2 doses, maximum 4 doses per day";
     const parsed = parsePublicSig(source);

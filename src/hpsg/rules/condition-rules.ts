@@ -18,7 +18,7 @@ import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt,
 import { hasSymptomOnsetPrnAt, prnAt, startsMaximumCountLead } from "./prn-rules";
 import { SUPPLEMENTAL_DOSE_MODIFIERS, CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../../maps";
-import { countAndDurationRule, countFrequencyRule, timeOfDayRule, timingLexicalRule, dayRangeLexicalRule } from "./timing-rules";
+import { countAndDurationRule, countFrequencyRule, timeOfDayRule, timingLexicalRule, dayRangeLexicalRule, maximumOccurrenceAt, isIndependentMaximum } from "./timing-rules";
 import { LexKind } from "../../lexer/token-types";
 import { normalizeUnit } from "../../unit-lexicon";
 import { mapIntervalUnit } from "../timing-lexicon";
@@ -28,6 +28,7 @@ import {
   tokensAvailable,
   rangeFromTokens,
   medicationGuardForContext,
+  maximumDosePerPeriodAt,
   normalizeTokenLower,
   startsMedicationGuard,
   isMedicationGuardMarker
@@ -791,11 +792,17 @@ function postfixConditionEnd(context: HpsgClauseContext, start: number): number 
   for (let index = start + 1; index < context.limit; index += 1) {
     const current = context.tokens[index];
     if (!current) break;
-    if (/^[.;!?]$/u.test(current.original.trim()) ||
-        current.sourceStart >= comparisonEnd && startsMaximumCountLead(context, index)) {
+    if (/^[.;!?]$/u.test(current.original.trim())) {
       end = current.sourceStart;
       break;
     }
+    if (current.sourceStart < comparisonEnd) continue;
+    const maximum = maximumDosePerPeriodAt(context, index) ?? maximumOccurrenceAt(context, index);
+    if (maximum) {
+      if (!isIndependentMaximum(context, index, maximum)) continue;
+    } else if (!startsMaximumCountLead(context, index)) continue;
+    end = current.sourceStart;
+    break;
   }
   return end;
 }

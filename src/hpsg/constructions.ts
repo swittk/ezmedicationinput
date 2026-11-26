@@ -8,10 +8,10 @@ import { annotateLexTokens } from "../lexer/meaning";
 import type { Token } from "../parser-state";
 import type { MedicationCondition, ParseOptions } from "../types";
 import { actionMatchAt } from "../instruction-graph";
-import { ACTION_DIRECTIVE_PREFIXES, MAXIMUM_COUNT_LEAD_TOKENS, normalizeTokenLower } from "./lexical-classes";
+import { ACTION_DIRECTIVE_PREFIXES, normalizeTokenLower } from "./lexical-classes";
 import { explicitDoseLexicalEnd } from "./rules/core-rules";
 import { maximumDosePerPeriodAt } from "./rule-context";
-import { maximumOccurrenceAt } from "./rules/timing-rules";
+import { maximumOccurrenceAt, isIndependentMaximum } from "./rules/timing-rules";
 import { lexicalSign, type HpsgGuardExpression, type HpsgSynsem, type HpsgPhraseRule } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
 import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, type AdviceArgument, type AdviceFrame } from "../types";
@@ -926,9 +926,7 @@ export function parseMedicationGuard(
       // A denominator/registered cadence, separator, explicit maximum head,
       // or structured predicate supplies independent ownership. An observation
       // window alone does not separate a count from the patient's history.
-      if (occurrenceCap && occurrenceCap.headStart === index &&
-          (!occurrenceCap.period || occurrenceCap.period.unitDenominator === false) &&
-          !MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(token)) &&
+      if (occurrenceCap && !isIndependentMaximum(lexicalContext, index, occurrenceCap) &&
           !predicate?.synsem.cont.guard?.licensesBareIf && !guardHasMeasurement(condition)) continue;
       end = capStart;
       scopedGuard = guard;

@@ -77,6 +77,7 @@ import {
   MEAL_TIMING_BY_RELATION,
   OCCURRENCE_COUNT_WORDS,
   MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
+  MAXIMUM_COUNT_LEAD_TOKENS,
   OCCURRENCE_COUNT_MODIFIERS,
   RANGE_CONNECTORS,
   RELATIVE_INTERVAL_TRAILING_RELATIONS,
@@ -825,6 +826,18 @@ export function maximumOccurrenceAt(
   const period = compact?.period ?? maximumDosePeriodAt(context, valueIndex + countTokens.length);
   return { tokens: [...lead.tokens, ...countTokens, ...(period?.tokens ?? [])],
     headStart: lead.headStart, count, ...(period ? { period } : {}) };
+}
+
+/** A comparative maximum can remain inside an opaque predicate.
+ * Separators, an explicit maximum head or a treatment period establish an
+ * independent limit; an observational window alone does not. */
+export function isIndependentMaximum(
+  context: Parameters<typeof maximumCountLeadAt>[0], start: number,
+  maximum: NonNullable<ReturnType<typeof maximumOccurrenceAt> | ReturnType<typeof maximumDosePerPeriodAt>>
+): boolean {
+  return maximum.headStart !== start ||
+    Boolean(maximum.period && maximum.period.unitDenominator !== false) ||
+    MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[maximum.headStart]));
 }
 
 function frequencyRangeConnector(token: Token | undefined): boolean {
