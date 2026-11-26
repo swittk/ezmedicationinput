@@ -7020,16 +7020,34 @@ function weightResolvedAdministration(
   }
   const resolved = amounts || limits ? { ...dosage,
     ...(amounts ? { amounts } : {}), ...(limits ? { limits } : {}) } : dosage;
-  const first = amounts?.length === 1 ? amounts[0] : undefined;
+  let first = amounts?.length === 1 ? amounts[0] : undefined;
   const authored = dosage.amounts?.[0];
+  if (first && !first.quantity && !first.range &&
+      (first.rate !== authored?.rate || first.rateRatio !== authored?.rateRatio) &&
+      resolved.limits?.some(limit => limit.scope === "administration")) {
+    // Resolve the existing runtime allowance before bounding a weighted rate.
+    // Keep its original schedule for independent phase-completion decisions.
+    const maximal = prepareMaximumSupplyTiming(resolved, true);
+    const repeat = maximal.dosage.schedule?.recurrence;
+    if (repeat?.occurrenceDurationRange) {
+      const range = measuredRateDurationRange(first, repeat);
+      if (range) first = { ...first, range };
+    } else {
+      const quantity = measuredRateQuantity(first, repeat);
+      // An upper-only runtime still provides a maximum, never an exact dose.
+      if (quantity) first = maximal.infusionDurationMaximum
+        ? { ...first, range: { high: quantity } } : { ...first, quantity };
+    }
+  }
   // Apply an absolute upper bound to computed patient-specific quantities,
   // including range endpoints, before chronological cap admission.
   // Authored scalar doses and absolute range endpoints stay authored.
   if (first && (first.quantity !== authored?.quantity || first.range !== authored?.range)) {
-    const maximum = numericAdministrationLimits(resolved, strength).administration;
+    const measured = first === amounts?.[0] ? resolved : { ...resolved, amounts: [first] };
+    const maximum = numericAdministrationLimits(measured, strength).administration;
     const maximumValue = maximum?.value;
     if (maximum && maximumValue !== undefined) {
-      const multiplier = getAdministrationTargetMultiplier(resolved, context);
+      const multiplier = getAdministrationTargetMultiplier(measured, context);
       const boundedComputedQuantity = (
         quantity: CanonicalMeasure | undefined, source: CanonicalMeasure | undefined
       ): CanonicalMeasure | undefined => {

@@ -6288,6 +6288,103 @@ describe("current course bounds and measured execution", () => {
     }
   });
 
+  it.each([
+    ["quantity", "exact", 40, 4], ["quantity", "exact", 70, 5],
+    ["ratio", "exact", 70, 5], ["quantity", "range", 40, 5],
+    ["quantity", "range", 70, 5], ["quantity", "upper", 70, 5], ["approximate", "upper", 70, 5],
+  ] as const)("bounds a computed weighted %s with %s runtime at %s kg", (kind, runtime, weight, expected) => {
+    const ucum = "http://unitsofmeasure.org";
+    const context = { strengthRatio: {
+      numerator: { value: 100, code: "mg", system: ucum },
+      denominator: { value: 5, code: "mL", system: ucum },
+    } };
+    const row: FhirDosage = {
+      text: "Infuse by body weight twice daily, with an absolute administration and daily maximum.",
+      doseAndRate: [kind === "ratio" ? { rateRatio: {
+        numerator: { value: 0.2, unit: "mL/kg", code: "mL/kg", system: ucum },
+        denominator: { value: 2, unit: "h", code: "h", system: ucum },
+      } } : { rateQuantity: { value: 0.1, unit: "mL/kg/h", code: "mL/kg/h", system: ucum,
+        ...(kind === "approximate" ? { comparator: "~" } : {}) } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"], durationUnit: FhirPeriodUnit.Hour,
+        ...(runtime === "upper" ? {} : { duration: 1 }),
+        ...(runtime === "exact" ? {} : { durationMax: 2 }),
+      } },
+      maxDosePerAdministration: { value: 100, unit: "mg", code: "mg", system: ucum },
+      maxDosePerPeriod: [{ numerator: { value: 200, unit: "mg" }, denominator: { value: 24, unit: "h" } }],
+    };
+    const original = structuredClone({ row, context });
+    for (const dosage of forms(row)) {
+      const before = structuredClone(dosage);
+      const half = calculateTotalUnits({ dosage, ...query, context, patientWeightKg: weight,
+        durationValue: 12, durationUnit: FhirPeriodUnit.Hour });
+      expect(half).toMatchObject({ totalUnits: expected, unit: "mL" });
+      if (runtime !== "exact") expect(half.quantityKind).toBe("maximum");
+      expect(calculateTotalUnits({ dosage, ...query, context, patientWeightKg: weight,
+        durationValue: 24, durationUnit: FhirPeriodUnit.Hour }))
+        .toMatchObject({ totalUnits: expected * 2, unit: "mL" });
+      expect(dosage).toStrictEqual(before);
+    }
+    expect({ row, context }).toStrictEqual(original);
+    const saved = toFhirR5Dosages(fresh(toDosageDetails([fresh(row)])))[0];
+    for (const field of ["text", "maxDosePerAdministration", "maxDosePerPeriod"] as const)
+      expect(saved[field]).toEqual(row[field]);
+    if (kind === "approximate") {
+      const { comparator: _comparator, ...quantity } = row.doseAndRate![0].rateQuantity!;
+      expect(saved.doseAndRate).toEqual([{ rateQuantity: { ...quantity, extension: [{
+        url: "http://ema.europa.eu/fhir/extension/comparator", valueCoding: {
+          system: "http://spor.ema.europa.eu/v1/lists/100000000008", code: "100000000055",
+        },
+      }] } }]);
+    } else expect(saved.doseAndRate).toEqual(row.doseAndRate);
+    // R5 represents the retained missing lower runtime explicitly after R6 projection.
+    expect(saved.timing).toEqual(runtime === "upper" ? { repeat: { ...row.timing!.repeat,
+      _duration: { extension: [{ url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown" }] },
+    } } : row.timing);
+  });
+
+  it("keeps a counted weighted infusion open until its capped doses finish", () => {
+    const ucum = "http://unitsofmeasure.org";
+    const first: FhirDosage = {
+      doseAndRate: [{ rateQuantity: { value: 0.1, unit: "mL/kg/h", code: "mL/kg/h", system: ucum } }],
+      timing: { repeat: { count: 3, frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"], duration: 1, durationUnit: FhirPeriodUnit.Hour } },
+      maxDosePerAdministration: { value: 100, unit: "mg" },
+      maxDosePerPeriod: [{ numerator: { value: 100, unit: "mg" }, denominator: { value: 24, unit: "h" } }],
+    };
+    const successor: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }],
+      timing: { repeat: { count: 1, timeOfDay: ["09:00:00"] } } };
+    const course: CanonicalCourse = { kind: "course", stages: [
+      importCanonicalCourse(first).stages[0], importCanonicalCourse(successor).stages[0],
+    ] };
+    const context = { strengthRatio: { numerator: { value: 100, unit: "mg" }, denominator: { value: 5, unit: "mL" } } };
+    for (const dosage of [course, courseToR5(course), courseToR6(course)]) {
+      const before = structuredClone(dosage);
+      expect(calculateTotalUnits({ dosage, ...query, context, patientWeightKg: 70,
+        durationValue: 2, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 10, unit: "mL" });
+      expect(calculateTotalUnits({ dosage, ...query, context, patientWeightKg: 70,
+        durationValue: 3, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 16, unit: "mL" });
+      expect(dosage).toStrictEqual(before);
+    }
+  });
+
+  it("does not rewrite an authored absolute rate beside a conflicting administration maximum", () => {
+    const row: FhirDosage = { doseAndRate: [{ rateQuantity: { value: 7, unit: "mL/h" } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"], duration: 1, durationUnit: FhirPeriodUnit.Hour } },
+      maxDosePerAdministration: { value: 5, unit: "mL" },
+      maxDosePerPeriod: [{ numerator: { value: 10, unit: "mL" }, denominator: { value: 24, unit: "h" } }],
+    };
+    for (const dosage of forms(row)) {
+      const before = structuredClone(dosage);
+      const result = calculateTotalUnits({ dosage, ...query, patientWeightKg: 70,
+        durationValue: 12, durationUnit: FhirPeriodUnit.Hour });
+      expect(result).toMatchObject({ totalUnits: 7, unit: "mL", quantityKind: "maximum" });
+      expect(result.explanation).toMatch(/unevaluable maximum-dose constraint/);
+      expect(dosage).toStrictEqual(before);
+    }
+  });
+
   it("retains an authored absolute range beside a conflicting administration maximum", () => {
     const row: FhirDosage = {
       doseAndRate: [{ doseRange: { low: { value: 70, unit: "mg" }, high: { value: 140, unit: "mg" } } }],
