@@ -266,15 +266,19 @@ function registeredLocalization(key: string | undefined): SigLocalization | unde
 
 /** Native defaults belong to the registered language implementation, while
  * public format callbacks remain complete-clause overrides. */
-export function resolveNativeClauseRendering(localization?: SigLocalization): NativeClauseRendering {
+function registeredNativeClauseRendering(localization?: SigLocalization): NativeClauseRendering | undefined {
   const native = (localization as NativeLocalization | undefined)?.[NATIVE_CLAUSE_RENDERING];
   if (native) return native;
   const key = localization?.locale.toLowerCase();
-  if (!key) return ENGLISH_NATIVE_RENDERING;
+  if (!key) return undefined;
   const exact = REGISTERED_LOCALIZATIONS.get(key)?.native;
   if (exact) return exact;
   const separator = key.indexOf("-");
-  return (separator < 0 ? undefined : REGISTERED_LOCALIZATIONS.get(key.slice(0, separator))?.native) ?? ENGLISH_NATIVE_RENDERING;
+  return separator < 0 ? undefined : REGISTERED_LOCALIZATIONS.get(key.slice(0, separator))?.native;
+}
+
+export function resolveNativeClauseRendering(localization?: SigLocalization): NativeClauseRendering {
+  return registeredNativeClauseRendering(localization) ?? ENGLISH_NATIVE_RENDERING;
 }
 
 export function resolveSigLocalization(
@@ -303,8 +307,7 @@ export function resolveSigLocalization(
   const result: NativeLocalization = {
     locale: resolvedLocale,
     [NATIVE_CLAUSE_RENDERING]: (config as NativeLocalization)[NATIVE_CLAUSE_RENDERING] ??
-      (inherited ? resolveNativeClauseRendering(inherited) : undefined) ??
-      (base ? resolveNativeClauseRendering(base) : ENGLISH_NATIVE_RENDERING),
+      registeredNativeClauseRendering(inherited) ?? registeredNativeClauseRendering(base) ?? ENGLISH_NATIVE_RENDERING,
     ...(config?.course ?? inherited?.course ?? base?.course
       ? {course:config?.course ?? inherited?.course ?? base?.course} : {})
   };

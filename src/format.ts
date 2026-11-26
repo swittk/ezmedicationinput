@@ -1253,12 +1253,23 @@ function shouldSuppressRoutePhrase(
   }
 }
 
+/** A count bound cannot use an authored exact cadence as its active period. */
+function authoredCountTimingText(
+  code: string | undefined,
+  recurrence: Pick<CanonicalScheduleExpr, "frequency" | "frequencyMax" | "periodUnit"> | undefined
+): string | undefined {
+  if (!code || recurrence?.frequencyMax === undefined ||
+      recurrence.frequencyMax === recurrence.frequency || recurrence.periodUnit !== undefined) return undefined;
+  return WORD_FREQUENCIES[code.toLowerCase()] === undefined ? undefined : code;
+}
+
 /** Preserve free labels; recognized cadence prose yields to a typed recurrence. */
 export function independentTimingText(
   code: string | undefined,
   recurrence?: Pick<CanonicalScheduleExpr, "frequency" | "frequencyMax" | "period" | "periodMax" | "periodUnit">
 ): string | undefined {
-  if (!code || TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined) return undefined;
+  if (!code || TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined ||
+      authoredCountTimingText(code, recurrence)) return undefined;
   const lower = code.toLowerCase();
   if (timingPreviewDescriptor(code)) return undefined;
   if (WORD_FREQUENCIES[lower] && recurrence?.periodUnit !== undefined &&
@@ -2281,10 +2292,15 @@ export function formatNativeCanonicalClause(
     return rendered.replace(/[.。]$/u, "") + " (" + offsetNote + ").";
   }
   const words = localization?.course ?? ENGLISH_COURSE;
-  return style === "short"
+  const rendered = style === "short"
     ? native.short ? native.short(clause, words, resolvedMethod) : formatShort(clause, words)
     : native.long ? native.long(clause, options, words, resolvedMethod, authoredPrimary, deferredDirections)
       : formatLong(clause, options, words, resolvedMethod, clause.clinicalAdjuncts?.condition, authoredPrimary, deferredDirections);
+  const schedule = clause.schedule;
+  const authoredTiming = !schedule?.timingTextIsLiteral &&
+    authoredCountTimingText(schedule?.timingText ?? schedule?.timingCode, schedule);
+  return authoredTiming
+    ? words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), authoredTiming) + "." : rendered;
 }
 
 export function formatCanonicalClause(

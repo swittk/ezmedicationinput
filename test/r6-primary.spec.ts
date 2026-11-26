@@ -1663,10 +1663,11 @@ describe("source-less repeating and overlapping treatment windows", () => {
         const en = formatSig(input, "long", { locale: "en" });
         const stated: number[] = [];
         let interpretedPauses = 0;
-        for (const match of en.matchAll(/No doses from (?:(\d+) days? after )?(treatment start|each cycle start) until (\d+) days? after \2/gu)) {
+        for (const match of en.matchAll(/No doses from (?:(\d+) days? after )?(treatment start) until (\d+) days? after \2/gu)) {
           interpretedPauses++;
           for (let day = Number(match[1] ?? 0); day < Number(match[3]); day++) stated.push(day + 1);
         }
+        expect(en).not.toContain("each cycle start");
         expect(interpretedPauses).toBe(en.match(/No doses\b/gu)?.length ?? 0);
         expect(stated).toEqual(uncovered);
         expect(calculateTotalUnits({
@@ -5723,6 +5724,23 @@ describe("review 17: course history, imported rate ranges and civil-clock caps",
     const r5 = toFhirR5Dosages(source)[0];
     expect(formatSig(r5, "long", { locale })).toContain(expected);
     expect(fromFhirDosage(r5, { locale }).longText).toContain(expected);
+    const beforeR5 = JSON.stringify(r5);
+    for (const realizationMode of ["normalized", "roundtrip"] as const)
+      for (const api of ["formatSig", "fromFhirDosage"] as const) {
+        let calls = 0;
+        const options: FormatOptions = { locale, realizationMode, i18n: { formatLong: context => {
+          calls++;
+          expect(context.clause.dose).toMatchObject({ value: 500, unit: "mL" });
+          expect(context.defaultText).toContain(expected);
+          expect(context.formatDefault("long")).toBe(context.defaultText);
+          expect(context.formatDefault("short")).toContain("50–100 mL/h");
+          return "Clinical wording, unchanged!";
+        } } };
+        const text = api === "formatSig" ? formatSig(r5, "long", options) : fromFhirDosage(r5, options).longText;
+        expect(text).toBe("Clinical wording, unchanged!");
+        expect(calls).toBe(1);
+      }
+    expect(JSON.stringify(r5)).toBe(beforeR5);
     expect(toDosageDetails([r5])).toEqual(source);
     const editedSource: FhirR6DosageInstruction = JSON.parse(JSON.stringify(source));
     editedSource.step[0].component[0].text = "Infuse using the written rate plan";
@@ -8016,6 +8034,21 @@ describe("current structured preview qualifiers", () => {
             if (variant.startsWith("dose and ")) expect(text).toContain(locale === "en" ? "1 tab" : "1 เม็ด");
             if (input.renderedInstruction) expect(text).toContain(input.renderedInstruction);
           }
+      for (const locale of ["en", "th"]) {
+        const imported = fromFhir(input, { locale, realizationMode: "normalized" });
+        for (const style of ["short", "long"] as const) {
+          const qualifier = locale === "en" ? "Unresolved cycle timing" : "ยังระบุเวลาในรอบไม่ได้";
+          expect(formatParseBatch(imported, style)).toContain(qualifier);
+          if (variant === "authored count only") {
+            const item = imported.items[0];
+            expect(style === "short" ? item.shortText : item.longText).toContain(qualifier);
+            expect(formatParseBatch(imported, style)).toContain(input.renderedInstruction!);
+          }
+        }
+        expect(imported.meta.canonical.course?.cycleCount).toBeUndefined();
+        expect(imported.meta.canonical.course?.cycleCountUnresolved).toBe(true);
+        expect(imported.fhirNext).toEqual(input);
+      }
       expect(JSON.stringify(input)).toBe(before);
     }
   );
@@ -8067,6 +8100,12 @@ describe("current structured preview qualifiers", () => {
         expect(text).toContain(locale === "en" ? "Use 1 tablet once daily" : "ใช้ครั้งละ 1 เม็ด วันละครั้ง");
         expect(text).toContain(locale === "en" ? "Use 5 mL once daily" : "ใช้ครั้งละ 5 มิลลิลิตร วันละครั้ง");
         expect(text.match(/Wear gloves when handling/gu)).toHaveLength(1);
+        const branches = text.split(locale === "en" ? " or " : " หรือ ");
+        expect(branches).toHaveLength(2);
+        expect(branches[0]).toContain(locale === "en" ? "Use 1 tablet once daily" : "ใช้ครั้งละ 1 เม็ด วันละครั้ง");
+        expect(branches[0]).toContain("Wear gloves when handling");
+        expect(branches[1]).toContain(locale === "en" ? "Use 5 mL once daily" : "ใช้ครั้งละ 5 มิลลิลิตร วันละครั้ง");
+        expect(branches[1]).not.toContain("Wear gloves when handling");
       }
     expect(formatSig(rows[0], "long", { realizationMode: "normalized" })).toContain("Wear gloves when handling");
     const parsed = parseSig("Take 1 tablet daily");

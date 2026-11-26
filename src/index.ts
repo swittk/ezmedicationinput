@@ -1128,7 +1128,7 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
   if (!primary && !dosage.method && dosage.text?.trim() && options?.realizationMode !== "roundtrip") return true;
   if (primary?.extension?.some(extension => extension.url === R5_EXPRESSION_SLOT_SOURCE_URL)) return true;
   if ((dosage.doseAndRate?.length ?? 0) > 1 || hasAmountRole(primary?.type)) return true;
-  if ((primary?.rateQuantity || primary?.rateRatio || primary?.doseExpression || primary?.rateExpression) &&
+  if ((primary?.rateQuantity || primary?.rateRatio || primary?.rateRange || primary?.doseExpression || primary?.rateExpression) &&
       !dosage.text?.trim()) return true;
   // Normalization is the default, including when no mode is supplied.
   // Explicit source replay keeps its separate authored-text behavior.
@@ -1309,7 +1309,7 @@ function formatParseBatchContents(
   if(importedBatchesWithHeaderDirections.has(batch)||
       course?.provenance?.format==="r6"&&course.instruction&&whole===course.instruction)return whole;
   if(steps&&steps.length>1)return whole;
-  if(batch.fhirNext.repeatCycle||batch.fhirNext.safety||batch.meta.canonical.course?.cycleCount!==undefined)
+  if(batch.fhirNext.repeatCycle||batch.fhirNext.safety||course?.cycleCount!==undefined||course?.cycleCountUnresolved)
     return style==="short"?batch.shortText:batch.longText;
   for(const step of steps??[])if(step.start||step.end||step.count!==undefined||step.safety)
     return style==="short"?batch.shortText:batch.longText;
@@ -1390,7 +1390,8 @@ export function fromFhir(
   if (!items.length && r5Rows.length) {
     const text = native.instruction ?? "";
     const clause = createEmptyCanonicalClause(text);
-    const structured = native.safety || native.cycleInterval || native.cycleCount !== undefined || native.stages.length;
+    const structured = native.safety || native.cycleInterval || native.cycleCount !== undefined ||
+      native.cycleCountUnresolved || native.stages.length;
     items.push({ fhir: r5Rows[0],
       shortText: structured ? shortText : text,
       longText: structured ? longText : text, warnings: [],

@@ -5854,6 +5854,12 @@ describe("independent primary graph rendering owners", () => {
         quantity: { value: 1, unit: "min" } }));
     }
     const parsed = parsePublicSig(source);
+    if (!material) {
+      expect(parsed.meta.canonical.course?.stages.flatMap(stage =>
+        stage.administrations.flatMap(administration => administration.amounts ?? []))).toEqual([]);
+      expect(parsed.fhir.flatMap(row => row.doseAndRate ?? [])).toEqual([]);
+      expect(parsed.fhirNext.step.flatMap(step => step.component.flatMap(component => component.doseAndRate ?? []))).toEqual([]);
+    }
     for (const locale of ["en", "th"]) {
       const expected = locale === "en" ? en : th;
       const direct = realizeInstructionAction(action, locale);
@@ -5986,6 +5992,9 @@ describe("independent primary graph rendering owners", () => {
     expect(action.args[1].role).toBe(entry.targetRole);
     const native = importCanonicalCourse(parsed.fhirNext);
     expect(native.stages[0].administrations[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "drop" });
+    expect(native.stages[0].administrations[0].target).toMatchObject({
+      coding: [{ system: "http://snomed.info/sct", code: "1290032005" }]
+    });
     for (const locale of ["en", "th"]) {
       const target = locale === "en" ? entry.enTarget : entry.thTarget;
       const primary = locale === "en" ? "tube tip" : "ปลายหลอด";
@@ -6104,6 +6113,18 @@ describe("independent primary graph rendering owners", () => {
 
 describe("complete typed action participants", () => {
   it.each([
+    { head: "Rinse the mouth", relation: AdviceRelation.For, polarity: AdvicePolarity.Affirm,
+      args: [
+        { role: AdviceArgumentRole.Site, text: "mouth", normalized: "mouth", i18n: { th: "ปาก" } },
+        { role: AdviceArgumentRole.Duration, text: "30 seconds", quantity: { value: 30, unit: "s" }, relation: AdviceRelation.For },
+        { role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00" }
+      ], en: "Rinse mouth for 30 seconds at 08:00", th: "ล้างปากเป็นเวลา 30 วินาที เวลา 08:00" },
+    { head: "Squeeze 1 mL", relation: AdviceRelation.Into, polarity: AdvicePolarity.Affirm,
+      args: [
+        { role: AdviceArgumentRole.Amount, text: "1 mL", quantity: { value: 1, unit: "mL" } },
+        { role: AdviceArgumentRole.Destination, text: "cup", normalized: "cup", i18n: { th: "ถ้วย" }, relation: AdviceRelation.Into },
+        { role: AdviceArgumentRole.Duration, text: "5 seconds", quantity: { value: 5, unit: "s" }, relation: AdviceRelation.For }
+      ], en: "Squeeze 1 mL into cup for 5 seconds", th: "บีบ 1 มิลลิลิตรเข้าไปในถ้วย 5 วินาที" },
     { head: "Rinse the mouth", relation: AdviceRelation.In, polarity: AdvicePolarity.Negate,
       args: [
         { role: AdviceArgumentRole.Theme, text: "the applicator", normalized: "applicator", i18n: { th: "อุปกรณ์ทายา" } },

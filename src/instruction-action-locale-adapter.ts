@@ -144,7 +144,7 @@ function siteRelationObject(input: InstructionActionRealizationInput): string | 
 }
 
 function relationForSite(input: InstructionActionRealizationInput): AdviceRelation {
-  return (input.time ? input.timeRelation : undefined) ?? input.frame.relation ??
+  return input.frame.relation ??
     getUniqueAdviceRelationByGrammarFeature("defaultSiteRelation") ??
     (() => { throw new Error("Missing declarative default site relation"); })();
 }
@@ -421,10 +421,9 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       const substance = renderEnglishAccompaniment(c);
       const elapsed = c.duration ? ` for ${c.duration}` : "";
       if (relationTarget) {
-        if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
         const target = object && (!c.site || !suppressSite(c)) ? ` ${object}` : "";
-        if (c.time && relationHasGrammarFeature(c.timeRelation, "directTimeRealization")) {
-          const timePhrase = englishDirectTime(c.time);
+        if (c.time) {
+          const timePhrase = realizeTimeArgument(c);
           return `${c.label}${target}${manner}${elapsed}${substance} ${timePhrase}`;
         }
         const semanticRelation = relationForSite(c);
@@ -583,10 +582,9 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const substance = renderThaiAccompaniment(c);
       const elapsed = c.duration ? `เป็นเวลา ${c.duration}` : "";
       if (relationTarget) {
-        if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
         const target = object && (!c.site || !suppressSite(c)) ? object : "";
-        if (c.time && relationHasGrammarFeature(c.timeRelation, "directTimeRealization")) {
-          const timePhrase = thaiDirectTime(c.time);
+        if (c.time) {
+          const timePhrase = realizeTimeArgument(c);
           return `${c.label}${target}${manner}${elapsed}${substance}${timePhrase}`;
         }
         const semanticRelation = relationForSite(c);

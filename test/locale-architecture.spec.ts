@@ -756,6 +756,65 @@ describe("complete native clause defaults", () => {
 });
 
 
+describe("native renderer inheritance", () => {
+  it.each(["en", "th"])("keeps partial-count timing roles in the complete %s callback default", locale => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { text: "once daily" }, repeat: { frequencyMax: 3 } } };
+    const sourceLabel = locale === "en" ? "; original directions: " : "; ข้อความเดิม: ";
+    const expected = locale === "en"
+      ? "Current: Use 1 tablet up to 3 times; original directions: once daily."
+      : "ปัจจุบัน: ใช้ครั้งละ 1 เม็ด ไม่เกิน 3 ครั้ง; ข้อความเดิม: once daily.";
+    for (const input of [row, toDosageDetails([row])]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale })).toBe(expected);
+      const compact = formatSig(input, "short", { locale }).split(sourceLabel);
+      expect(compact).toHaveLength(2);
+      expect(compact[0]).not.toContain("once daily");
+      expect(compact[1]).toBe("once daily.");
+      let calls = 0;
+      expect(formatSig(input, "long", { locale, i18n: { formatLong: context => {
+        calls++;
+        expect(context.clause.schedule?.frequencyMax).toBe(3);
+        expect(context.clause.schedule?.timingText ?? context.clause.schedule?.timingCode).toBe("once daily");
+        expect(context.defaultText).toBe(expected);
+        expect(context.formatDefault("long")).toBe(expected);
+        expect(context.formatDefault("short").split(sourceLabel)[1]).toBe("once daily.");
+        return "Clinical wording, unchanged!";
+      } } })).toBe("Clinical wording, unchanged!");
+      expect(calls).toBe(1);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("keeps the target native default when the inherited provider supplies only a short callback", () => {
+    const input: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    }] }] };
+    const before = JSON.stringify(input);
+    const provider = { locale: "clinic-short-no-native", formatShort: () => "Clinic short" };
+    const keys = Reflect.ownKeys(provider);
+    registerSigLocalization(provider);
+    const i18n = { inherit: provider.locale };
+    const expected = "ใช้ครั้งละ 1 เม็ด วันละครั้ง.";
+    expect(formatSig(input, "long", { locale: "th", i18n })).toBe(expected);
+    expect(formatSig(input, "short", { locale: "th", i18n })).toBe("Clinic short");
+    expect(formatSig(input, "long", { locale: "unregistered-native", i18n })).toBe("Use 1 tablet once daily.");
+    const shortDefault = formatSig(input, "short", { locale: "th" });
+    let calls = 0;
+    expect(formatSig(input, "long", { locale: "th", i18n: { ...i18n, formatLong: context => {
+      calls++;
+      expect(context.defaultText).toBe(expected);
+      expect(context.formatDefault("long")).toBe(expected);
+      expect(context.formatDefault("short")).toBe(shortDefault);
+      return "Clinical wording, unchanged!";
+    } } })).toBe("Clinical wording, unchanged!");
+    expect(calls).toBe(1);
+    expect(Reflect.ownKeys(provider)).toEqual(keys);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+});
+
 describe("typed meal-state locale realization", () => {
   it("localizes an admitted negative food adjunct while retaining its dose and water", () => {
     const source = "Swallow 1 tablet with water without food";
@@ -851,7 +910,8 @@ describe("native timing realization uses selected language and event owners", ()
           if (owner === "event") expect(text).toContain(locale === "en" ? style === "short" ? "EVE" : "evening" : "เย็น");
           else expect(text).toContain(locale === "en" && style === "long" ? "8:00 pm" : "20:00");
         }
-        expect(text).toContain(locale === "en" ? "final 1 hour" : "1 ชั่วโมงสุดท้าย");
+        expect(text).toContain(locale === "en"
+          ? "No doses during the final 1 hour of each period" : "งดยาในช่วง 1 ชั่วโมงสุดท้ายของแต่ละรอบ");
       }
     expect(raw.step[0].component[0].timing?.code).toEqual(timing.code);
     expect(JSON.stringify(raw)).toBe(before);

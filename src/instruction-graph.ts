@@ -4035,11 +4035,10 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   let unmarkedMaterial: AdviceArgument | undefined, unmarkedSubstance: AdviceArgument | undefined;
   let unmarkedDestination: AdviceArgument | undefined;
   for (const arg of c.frame.args) {
-    if (arg.role === AdviceArgumentRole.Time) continue;
+    if (arg.role === AdviceArgumentRole.Time || arg.role === AdviceArgumentRole.Duration) continue;
     if (arg.relation && arg.relation === c.frame.relation) {
       targetArgument ??= arg;
     } else if (!arg.relation && arg.role !== AdviceArgumentRole.Amount &&
-        arg.role !== AdviceArgumentRole.Duration &&
         arg.role !== AdviceArgumentRole.Activity && arg.role !== AdviceArgumentRole.Manner) {
       if (!materialArgument) materialArgument = arg;
       else nextMaterialArgument ??= arg;
@@ -4069,7 +4068,8 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   if (relation && relationTarget) destinations.push(
     joinLocalizedTokens(c.locale, [relation, relationTarget]));
   for (const arg of c.frame.args) {
-    if (arg === targetArgument || arg.role === AdviceArgumentRole.Time || !arg.relation ||
+    if (arg === targetArgument || arg.role === AdviceArgumentRole.Time ||
+        arg.role === AdviceArgumentRole.Duration || !arg.relation ||
         relationHasSemanticClass(arg.relation, "temporal") ||
         relationHasGrammarFeature(arg.relation, "conditionalTail")) continue;
     const text = translatedArgument(arg, c.locale);
