@@ -7,7 +7,7 @@ import { normalizeUnit } from "../../unit-lexicon";
 import {
   HpsgClauseContext, lexicalRule, maximumDosePerPeriodAt, normalizeTokenLower,
   quantityTokenAvailable as available, doseNumberValue, plainClinicalNumberAt, doseUnitIndexAfter,
-  directDoseUnitAfter, medicationAmountAt, clinicalDurationNumber, clinicalDurationAt, precedingMethodOwnsAdministrationDuration
+  directDoseUnitAfter, medicationAmountAt, hasPrecedingMedicationAmount, clinicalDurationNumber, clinicalDurationAt, precedingMethodOwnsAdministrationDuration
 } from "../rule-context";
 import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, mapFrequencyAdverb, mapIntervalUnit } from "../timing-lexicon";
 import {
@@ -548,7 +548,7 @@ function weightQuantity(
 
 /** Shared lexical rate-head ownership, including a local route or AT marker. */
 export function clinicalRateHeadAt(
-  context: HpsgClauseContext, phraseStart: number, end: number, allowPrecedingDose = false
+  context: HpsgClauseContext, phraseStart: number, end: number, allowPrecedingDose = false, period = 1
 ): { licensed: boolean; marker: number | undefined } {
   const cue = context.tokens[phraseStart - 1]?.original === ","
     ? context.tokens[phraseStart - 2] : context.tokens[phraseStart - 1];
@@ -559,7 +559,8 @@ export function clinicalRateHeadAt(
   const maximum = MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[phraseStart])) ||
     cue && MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(cue));
   return { marker, licensed: marker !== undefined || context.tokens[phraseStart].lower.startsWith("@") ||
-    !maximum && (getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] ||
+    !maximum && (getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] &&
+      (period <= 1 || allowPrecedingDose || !hasPrecedingMedicationAmount(context, phraseStart)) ||
       getRouteMeaning(after)?.code === RouteCode["Intravenous route"]) ||
     hasAdministrationCue(context, phraseStart, allowPrecedingDose && !maximum) };
 }
@@ -584,7 +585,7 @@ function fixedRate(
   // A clause-initial rate with its own elapsed duration is a complete typed
   // complement. The selected sequential construction owns its omitted method.
   const completeRateComplement = completesVolume && phraseStart === 0 && duration !== undefined;
-  const head = clinicalRateHeadAt(context, phraseStart, expression.end, completesVolume);
+  const head = clinicalRateHeadAt(context, phraseStart, expression.end, completesVolume, denominator?.value);
   if (!numerator || !denominator || (!completeRateComplement && !head.licensed)) return undefined;
   const indices = [
     ...(head.marker !== undefined ? [head.marker] : []),

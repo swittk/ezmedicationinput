@@ -5119,10 +5119,12 @@ describe("round69 current structured preview ownership", () => {
       }] }] };
       const before = JSON.stringify(wire), rows = JSON.parse(JSON.stringify(toFhirR5Dosages(wire)));
       for (const input of [wire, rows]) {
-        expect(formatSig(input, "long", { locale: "en" }))
-          .toContain(order === "systemless only" ? "evening" : "afternoon");
-        expect(formatSig(input, "long", { locale: "th" }))
-          .toContain(order === "systemless only" ? "ตอนเย็น" : "ตอนบ่าย");
+        const english = formatSig(input, "long", { locale: "en" });
+        const thai = formatSig(input, "long", { locale: "th" });
+        expect(english).toContain(order === "systemless only" ? "evening" : "afternoon");
+        expect(english).not.toContain(order === "systemless only" ? "afternoon" : "evening");
+        expect(thai).toContain(order === "systemless only" ? "ตอนเย็น" : "ตอนบ่าย");
+        expect(thai).not.toContain(order === "systemless only" ? "ตอนบ่าย" : "ตอนเย็น");
       }
       expect(toDosageDetails(rows).step[0].component[0].timing?.code?.coding).toEqual(codings);
       expect(JSON.stringify(wire)).toBe(before);

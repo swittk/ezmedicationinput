@@ -2641,7 +2641,8 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     // Comparative infusion constraints retain their existing licensed owner.
     const rateHead = period.unitDenominator && !("daypart" in period) && (period.period === 1 || comparative) &&
       clinicalRatePeriodUnit(period.periodUnit) && volumeOrMassTerm(amount, unit)
-      ? clinicalRateHeadAt(context, headStart, headStart + matched.length, comparative) : undefined;
+      ? clinicalRateHeadAt(context, headStart, headStart + matched.length,
+          comparative && period.period <= 1, period.period) : undefined;
     // The earlier clinical quantity rule already owns a licensed rate, including
     // its external AT marker. That same constituent cannot also be a dose cap.
     for (const sign of context.clinicalCache.quantityLookahead?.get(rateHead?.marker ?? headStart) ?? [])

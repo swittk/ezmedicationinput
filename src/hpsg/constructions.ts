@@ -8,7 +8,7 @@ import { annotateLexTokens } from "../lexer/meaning";
 import type { Token } from "../parser-state";
 import type { MedicationCondition, ParseOptions } from "../types";
 import { actionMatchAt } from "../instruction-graph";
-import { ACTION_DIRECTIVE_PREFIXES, normalizeTokenLower } from "./lexical-classes";
+import { ACTION_DIRECTIVE_PREFIXES, MAXIMUM_COUNT_LEAD_TOKENS, normalizeTokenLower } from "./lexical-classes";
 import { explicitDoseLexicalEnd } from "./rules/core-rules";
 import { maximumDosePerPeriodAt } from "./rule-context";
 import { maximumOccurrenceAt } from "./rules/timing-rules";
@@ -905,7 +905,9 @@ export function parseMedicationGuard(
       const token = tokens[index];
       if (token.sourceStart < lead.end) continue;
       if (token.sourceStart >= end) break;
-      if (!maximumDosePerPeriodAt(lexicalContext, index) && !maximumOccurrenceAt(lexicalContext, index)) continue;
+      const quantityCap = maximumDosePerPeriodAt(lexicalContext, index);
+      const occurrenceCap = quantityCap ? undefined : maximumOccurrenceAt(lexicalContext, index);
+      if (!quantityCap && !occurrenceCap) continue;
       const capStart = token.sourceStart;
       const context: GuardConstituentContext = { source, range: { start: lead.start, end: capStart },
         ...(withholdingConsequent ? { withholdingConsequent } : {}) };
@@ -913,7 +915,15 @@ export function parseMedicationGuard(
       // Marker-sensitive guard composition licenses the preceding predicate;
       // the cap's quantity/count daughters remain independently owned.
       const guard = predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate);
-      if (!guard?.synsem.cont.clinicalAdjunct?.condition) continue;
+      const condition = guard?.synsem.cont.clinicalAdjunct?.condition;
+      if (!condition) continue;
+      // A bare comparative count can be the predicate's own complement.
+      // An opaque state prefix does not prove an independent treatment limit.
+      // A separator, explicit maximum head, period, or structured predicate
+      // supplies that ownership without interpreting the patient's history.
+      if (occurrenceCap && !occurrenceCap.period && occurrenceCap.headStart === index &&
+          !MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(token)) &&
+          !predicate?.synsem.cont.guard?.licensesBareIf && !guardHasMeasurement(condition)) continue;
       end = capStart;
       scopedGuard = guard;
       break;

@@ -216,6 +216,13 @@ function pushSplitParts(
 }
 
 function splitCompactToken(token: string): string[] {
+  const compactDiscrete = token.match(
+    /^((?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))([A-Za-z-]+)$/
+  );
+  if (compactDiscrete && COMPACT_DISCRETE_UNIT_SUFFIX_PATTERN.test(compactDiscrete[2]) &&
+      COMPACT_DISCRETE_UNITS_PATTERN.test(compactDiscrete[2])) {
+    return [compactDiscrete[1], compactDiscrete[2]];
+  }
   if (/^[0-9]+(?:\.[0-9]+)?$/.test(token)) {
     return [token];
   }
@@ -512,18 +519,6 @@ function pushTextToken(output: LexToken[], surface: SurfaceToken, input: string)
       output.push(...tokens);
       return;
     }
-  }
-
-  const compactDiscrete = surface.original.match(
-    /^((?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))([A-Za-z-]+)$/
-  );
-  if (
-    compactDiscrete &&
-    COMPACT_DISCRETE_UNIT_SUFFIX_PATTERN.test(compactDiscrete[2]) &&
-    COMPACT_DISCRETE_UNITS_PATTERN.test(compactDiscrete[2])
-  ) {
-    pushSplitParts(output, surface, [compactDiscrete[1], compactDiscrete[2]], input);
-    return;
   }
 
   pushSplitParts(output, surface, splitCompactToken(surface.original), input);

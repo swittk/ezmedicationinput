@@ -42,6 +42,8 @@ import {
   OCCURRENCE_COUNT_WORDS,
   parseClockToken,
   RELATIVE_TIME_END_LEADS,
+  MEAL_RELATION_BY_TOKEN,
+  MEAL_TIMING_BY_RELATION,
   NEXT_DAY_MODIFIERS,
   NEXT_DAY_HEADS,
   NEXT_DAY_PREPOSITIONS,
@@ -347,7 +349,7 @@ export function medicationAmountAt(context: QuantityLexicalContext, index: numbe
   return Boolean(rawUnit && normalizeUnit(rawUnit, context.options));
 }
 
-function hasPrecedingMedicationAmount(context: QuantityLexicalContext, before: number): boolean {
+export function hasPrecedingMedicationAmount(context: QuantityLexicalContext, before: number): boolean {
   for (let index = before - 1; index >= 0; index--) {
     const lower = normalizeTokenLower(context.tokens[index]);
     if (ACTION_SEQUENCE_MARKERS.has(lower) || HARD_SEGMENT_BOUNDARY_TOKENS.has(lower) ||
@@ -563,6 +565,12 @@ export function courseEndClockAt(tokens: readonly Token[], start: number, limit 
   for (let index = start; index < limit && parts.length < MAX_EVENT_TIMING_EXPRESSION_PARTS; index++)
     parts.push(normalizeTokenLower(tokens[index]));
   const named = resolveEventTimingExpression(parts);
+  const governor = tokens[start - 1];
+  const mealRelation = governor && MEAL_RELATION_BY_TOKEN.get(normalizeTokenLower(governor));
+  // A licensed meal relation owns its event as administration timing. It is
+  // not an end-clock complement merely because the same preposition can end
+  // a course; the NEXT nominal remains available to the onset construction.
+  if (named && mealRelation && MEAL_TIMING_BY_RELATION.get(mealRelation)?.has(named.timing)) return undefined;
   return named ? { tokens: tokens.slice(start, start + named.length), event: named.timing } : undefined;
 }
 

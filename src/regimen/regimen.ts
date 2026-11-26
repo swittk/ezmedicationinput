@@ -695,11 +695,13 @@ export function scopeSequentialPhaseSemantics(
         Number.isInteger(calendarPeriod) && calendarPeriod > 0 &&
         (schedule?.periodUnit === "d" || schedule?.periodUnit === "wk" ||
          schedule?.periodUnit === "mo" || schedule?.periodUnit === "a");
-      const matchesSuccessorCadence = schedule?.frequency === undefined || (
-        schedule.frequency === donorClockCount &&
-        (singleCalendarClock || (schedule.period === undefined || schedule.period === 1) &&
-          (schedule.periodUnit === undefined || schedule.periodUnit === 'd')) &&
-        (schedule.frequencyMax === undefined || schedule.frequencyMax === donorClockCount)
+      const successorFrequency = schedule?.frequency ??
+        (schedule?.period !== undefined || schedule?.periodUnit !== undefined ? 1 : undefined);
+      const matchesSuccessorCadence = successorFrequency === undefined || (
+        successorFrequency === donorClockCount &&
+        (singleCalendarClock || (schedule?.period === undefined || schedule.period === 1) &&
+          (schedule?.periodUnit === undefined || schedule.periodUnit === 'd')) &&
+        (schedule?.frequencyMax === undefined || schedule.frequencyMax === donorClockCount)
       );
       const onsetOnlyContinuation = edge.relation.semanticLicense === "dose-continuation" &&
         (schedule?.treatmentStartOffsetDays !== undefined || Boolean(schedule?.phaseStartReference)) &&

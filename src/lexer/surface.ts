@@ -85,7 +85,7 @@ function isSentenceBoundaryChar(input: string, index: number): boolean {
   const after = index + 1 < input.length ? input[index + 1] : "";
   let rangeLeft = index - 2;
   if (/[-–—]/u.test(before)) {
-    while (rangeLeft >= 0 && (input[rangeLeft] === " " || input[rangeLeft] === "\t")) rangeLeft--;
+    while (rangeLeft >= 0 && isWhitespaceChar(input[rangeLeft])) rangeLeft--;
   }
   // Keep decimal points inside numeric tokens (e.g. 1.5 mL, .5 tab,
   // or a directly prefixed '~.1mcg/kg/min' / '@.5 mL/h'). Breaking the prefix changes

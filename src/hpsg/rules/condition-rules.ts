@@ -800,20 +800,23 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       a.span.start - b.span.start || a.span.end - b.span.end
     );
 
-    const nextIndex = frames.findIndex((frame) =>
-      frame.span.start >= lead.sourceEnd && isScopeTarget(context, frame) &&
-      // The conditional cannot select a later action across a completed
-      // directive. A subsequent counseling sentence must not steal the IF
-      // daughter from its immediately preceding medication-withholding head.
-      !context.tokens.some(token => token.sourceStart >= lead.sourceEnd &&
-        token.sourceEnd <= frame.span.start && /^[;.!?]$/u.test(token.original))
-    );
+    let nextIndex = -1;
+    for (let index = 0; index < frames.length; index++) {
+      const frame = frames[index];
+      if (frame.span.start < lead.sourceEnd) continue;
+      // A completed directive ends this conditional's target search.
+      if (context.tokens.some(token => token.sourceStart >= lead.sourceEnd &&
+          token.sourceEnd <= frame.span.start && /^[;.!?]$/u.test(token.original))) break;
+      // Select the positive dose before procedural eligibility can skip it.
+      // Its clinical condition cannot transfer to later counseling.
+      if (targetHasClinicalCondition(context, start, frame)) return [];
+      if (isScopeTarget(context, frame)) {
+        nextIndex = index;
+        break;
+      }
+    }
     if (nextIndex >= 0) {
       const program = prefixProgram(context, nextIndex, frames);
-      // Select the source target before deciding its conditional owner. A
-      // positive administration keeps its admitted clinical condition; a later
-      // procedural action must not take the same antecedent from that dose.
-      if (targetHasClinicalCondition(context, start, program[0])) return [];
       const targetStart = program[0].span.start;
       const targetEnd = program[program.length - 1].span.end;
       const tokens = conditionTokens(context, lead.sourceStart, targetStart);

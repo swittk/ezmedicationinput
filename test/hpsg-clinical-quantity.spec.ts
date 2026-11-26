@@ -4505,10 +4505,15 @@ describe("round80 dated single-administration duration ownership", () => {
     for (const input of views(parsed)) {
       const member = importCanonicalCourse(input).stages[0].administrations[0];
       expect(member.schedule?.recurrence?.count).toBeUndefined();
-      expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([
-        "2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00", "2026-11-24T08:00:00+00:00"]);
-      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: "d" }))
-        .toMatchObject({ totalUnits: 300, unit: "mL" });
+      const morning = cadence === "and in the morning";
+      const config = { ...query, eventClock: { MORN: "11:00" }, limit: morning ? 6 : 3 };
+      expect(nextDueDoses(input, config)).toEqual(morning ? [
+        "2026-11-22T08:00:00+00:00", "2026-11-22T11:00:00+00:00",
+        "2026-11-23T08:00:00+00:00", "2026-11-23T11:00:00+00:00",
+        "2026-11-24T08:00:00+00:00", "2026-11-24T11:00:00+00:00"
+      ] : ["2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00", "2026-11-24T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...config, durationValue: 3, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: morning ? 600 : 300, unit: "mL" });
     }
   });
 
@@ -5111,5 +5116,65 @@ describe("complete numeric quantities and maximum periods", () => {
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(before);
+  });
+});
+
+
+describe("elapsed ceiling and decimal range ownership", () => {
+  it.each(["per", "within"])("keeps an independently trailing ceiling %s two hours", periodLead => {
+    const source = `Infuse 100 mL IV, no more than 200 mL ${periodLead} 2 hours`;
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts).toMatchObject([{ quantity: { value: 100, unit: "mL" } }]);
+      expect(members[0].amounts?.[0].rate).toBeUndefined();
+      expect(members[0].amounts?.[0].rateRatio).toBeUndefined();
+      expect(members[0].limits).toMatchObject([{ scope: "period",
+        amount: { value: 200, unit: "mL" }, period: { value: 2, unit: "h" } }]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
+    ["Infuse 100 mL IV at no more than 200 mL per 2 hours", true, 100],
+    ["Infuse no more than 200 mL per 2 hours IV", true, undefined],
+    ["Infuse 100 mL IV, no more than 50 mL/hr", false, 100]
+  ] as const)("retains independently licensed flow constraints in %s", (source, ratio, volume) => {
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      if (volume === undefined) expect(member.amounts?.[0].quantity).toBeUndefined();
+      else expect(member.amounts?.[0].quantity).toMatchObject({ value: volume, unit: "mL" });
+      if (ratio) expect(member.amounts?.[0].rateRatio).toMatchObject({
+        numerator: { value: 200, unit: "mL", comparator: "<=" }, denominator: { value: 2, unit: "h" }
+      });
+      else expect(member.amounts?.[0].rate).toMatchObject({ value: 50, unit: "mL/h", comparator: "<=" });
+      expect(member.limits?.some(limit => limit.scope === "period") ?? false).toBe(false);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each(["0.25 –.5mL", "0.25 –.5 mL", "0.25\u00a0–.5 mL"])(
+    "keeps both fractional endpoints and the unit span in %s", quantity => {
+    const source = `Take ${quantity} daily`, parsed = parsePublicSig(source);
+    const tokens = lexInput(source), range = tokens.find(token => token.kind === "NUMBER_RANGE")!;
+    const unit = tokens.find(token => token.original === "mL")!;
+    expect(range).toMatchObject({ low: 0.25, high: 0.5, sourceStart: 5,
+      sourceEnd: source.indexOf(".5") + 2 });
+    expect(source.slice(range.sourceStart, range.sourceEnd)).toBe(quantity.slice(0, quantity.indexOf("mL")).trimEnd());
+    expect(source.slice(unit.sourceStart, unit.sourceEnd)).toBe("mL");
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].range).toMatchObject({
+        low: { value: 0.25, unit: "mL" }, high: { value: 0.5, unit: "mL" }
+      });
+      expect(members[0].amounts?.[0].quantity).toBeUndefined();
+      expect(members[0].schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(members[0].schedule?.recurrence?.clocks).toBeUndefined();
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });

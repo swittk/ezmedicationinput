@@ -2063,10 +2063,25 @@ describe("prefix guard constituent ownership", () => {
     const parsed = parsePublicSig(source);
     for (const course of [parsed.meta.canonical.course!, importCanonicalCourse(parsed.fhir),
         importCanonicalCourse(parsed.fhirNext)]) {
-      const administration = course.stages[0].administrations[0];
+      const administrations = course.stages.flatMap(stage => stage.administrations);
+      expect(administrations).toHaveLength(1);
+      const administration = administrations[0];
+      const predicate = { kind: "not", condition: { kind: "state", name: "dizzy", expected: true } };
       expect(administration.amounts?.[0].quantity).toMatchObject({ value, unit });
-      expect(administration.predicate).toMatchObject({ kind: "not", condition: {
-        kind: "state", name: "dizzy", expected: true } });
+      expect(administration.predicate).toMatchObject(predicate);
+      const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z",
+        timeZone: "UTC", limit: 1 };
+      let rejected = 0;
+      // The patient is dizzy on the first day only. An unguarded duplicate
+      // would incorrectly preserve that day's fixed 09:00 administration.
+      expect(nextDueDoses(course, { ...query, evaluateCondition: (condition, at) => {
+        expect(condition).toMatchObject(predicate);
+        if (at.startsWith("2026-12-01")) { rejected++; return false; }
+        return true;
+      } })).toEqual(["2026-12-02T09:00:00+00:00"]);
+      expect(rejected).toBeGreaterThan(0);
+      expect(nextDueDoses(course, { ...query, evaluateCondition: () => true }))
+        .toEqual(["2026-12-01T09:00:00+00:00"]);
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
@@ -2130,5 +2145,131 @@ describe("site and clock complement ownership", () => {
     });
     expect(negative.meta.canonical.clauses[0].schedule).toBeUndefined();
     expect(negative.fhirNext.renderedInstruction).toBe(source);
+  });
+});
+
+
+describe("condition and successor timing ownership", () => {
+  it("retains a complete occurrence-history predicate without inventing treatment bounds", () => {
+    const condition = "you have taken at most 2 doses in the past 24 hours";
+    const source = "Take 1 tablet only if " + condition;
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.predicate).toMatchObject({ kind: "state", name: condition, text: condition });
+      expect(member.schedule?.recurrence?.countMax).toBeUndefined();
+      expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
+      expect(member.schedule?.recurrence?.occurrenceCap).toBeUndefined();
+      expect(member.limits).toBeUndefined();
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("retains a separated occurrence cap beside the complete predicate", () => {
+    const source = "Take 1 tablet only if you have taken at most 2 doses, maximum 4 doses per day";
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].predicate).toMatchObject({ kind: "state", name: "you have taken at most 2 doses" });
+      expect(members[0].schedule?.recurrence).toMatchObject({ occurrenceCap: { max: 4, period: 1, periodUnit: "d" } });
+      expect(members[0].schedule?.recurrence?.countMax).toBeUndefined();
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each(["take 1 tablet and call the clinic.", "take 1 tablet daily for 2 days and call the clinic."])(
+    "keeps the prefix blood-pressure guard on the dose before counseling: %s", directive => {
+    const source = "If systolic BP is above 140, " + directive, parsed = parsePublicSig(source);
+    const predicate = { kind: "measurement", name: "systolic bp", operation: "gt", value: 140 };
+    const before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const course = importCanonicalCourse(input), members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject(predicate);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase())
+        .toContain("call the clinic");
+      if (directive.includes("daily")) {
+        const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 3 };
+        let calls = 0;
+        expect(nextDueDoses(input, { ...query, evaluateCondition: condition => {
+          expect(condition).toMatchObject(predicate); calls++; return false;
+        } })).toEqual([]);
+        expect(calls).toBeGreaterThan(0);
+        expect(nextDueDoses(input, { ...query, evaluateCondition: () => true })).toEqual([
+          "2026-12-01T09:00:00+00:00", "2026-12-02T09:00:00+00:00"
+        ]);
+      }
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("keeps an authored six-hour successor independent of a preceding daily clock", () => {
+    const source = "Take 1 tablet daily at 08:00 for 7 days, then take 2 tablets every 6 hours";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const query = { from: "2026-12-08T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 4 };
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const course = importCanonicalCourse(input);
+      expect(course.stages).toHaveLength(2);
+      expect(course.stages[0].administrations[0].schedule?.recurrence?.clocks).toEqual(["08:00:00"]);
+      const successor = course.stages[1].administrations[0];
+      expect(successor.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(successor.schedule?.recurrence).toMatchObject({ period: 6, periodUnit: "h" });
+      expect(successor.schedule?.recurrence?.clocks).toBeUndefined();
+      expect(nextDueDoses(input, query)).toEqual(["2026-12-08T00:00:00+00:00", "2026-12-08T06:00:00+00:00",
+        "2026-12-08T12:00:00+00:00", "2026-12-08T18:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, from: query.orderedAt, durationValue: 8, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 15, unit: "tab" });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([["daily", "08:00:00"], ["every 6 hours at 10:00", "10:00:00"]] as const)(
+    "preserves compatible inheritance and the successor's own clock: %s", (cadence, clock) => {
+    const source = "Take 1 tablet daily at 08:00 for 7 days, then take 2 tablets " + cadence;
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      expect(importCanonicalCourse(input).stages[1].administrations[0].schedule?.recurrence?.clocks).toEqual([clock]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("retains the next-morning onset of one before-breakfast administration", () => {
+    const source = "Take 1 tablet once before breakfast the next morning", parsed = parsePublicSig(source);
+    const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z",
+      timeZone: "UTC", limit: 3, eventClock: { ACM: "07:30", MORN: "11:00" } };
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const course = importCanonicalCourse(input), member = course.stages[0].administrations[0];
+      expect(course.stages[0].start).toMatchObject({ anchor: "treatment-day-start", displacement: { value: 1 } });
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence?.count).toBe(1);
+      expect(member.schedule?.recurrence?.anchors).toContain("ACM");
+      expect(member.phaseEnd).toBeUndefined();
+      expect(nextDueDoses(input, query)).toEqual(["2026-12-02T07:30:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("keeps an explicit next-morning course end unresolved without inventing an onset", () => {
+    const source = "Take 1 tablet every 6 hours until breakfast the next morning", parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const course = importCanonicalCourse(input), member = course.stages[0].administrations[0];
+      expect(course.stages[0].start).toBeUndefined();
+      expect(member.onsetDays).toBeUndefined();
+      expect(member.phaseEnd).toMatchObject({ anchor: "unresolved", description: "until breakfast the next morning" });
+      expect(member.schedule?.recurrence).toMatchObject({ period: 6, periodUnit: "h" });
+      expect(member.schedule?.recurrence?.anchors).toBeUndefined();
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });
