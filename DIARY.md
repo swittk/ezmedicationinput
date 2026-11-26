@@ -16204,3 +16204,17 @@ and equivalent cadences reuse their established semantic owners. FHIR projection
 retains phase-total limits, current quantities, primitive annotations and unknown
 extensions. Substantive clinical, terminology and distribution assertions remain
 part of review coverage.
+
+
+## 2026-11-26 — Administration scope and current FHIR facts
+
+Clinical guards, cumulative limits and numeric rate denominators retain their
+authored scope through shared parsing and projection owners. Counted infusion
+continuations retain onset, runtime and dose bounds together. Scheduling preserves
+explicit clocks, delayed phase completion and finite course uncertainty; computed
+weight doses use the existing per-administration ceiling before total supply.
+
+Native previews compose current scalar, ratio and ranged rates with their own
+condition before independent advice. Language modules own weekday vocabulary and
+interval wording. Current quantities, primitive annotations, unknown extensions,
+translations and anatomical specificity survive ordinary FHIR conversion.
