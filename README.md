@@ -1068,16 +1068,19 @@ parseStrength("1%", { dosageForm: "cream" });
 parseStrength("250mg/5mL");
 // → { strengthRatio: { numerator: { value: 250, unit: "mg" }, denominator: { value: 5, unit: "mL" } } }
 
-// Composite (sums components into a single ratio)
+// Composite (preserves each ingredient separately)
 parseStrength("875mg + 125mg");
-// → { strengthQuantity: { value: 1000, unit: "mg" } }
+// → { strengthComponents: [
+//     { strengthQuantity: { value: 875, unit: "mg" } },
+//     { strengthQuantity: { value: 125, unit: "mg" } }
+//   ] }
 
 // Simple Quantity
 parseStrength("500mg");
 // → { strengthQuantity: { value: 500, unit: "mg" } }
 ```
 
-`parseStrengthIntoRatio` is also available if you specifically need a FHIR Ratio object regardless of the denominator.
+`parseStrengthIntoRatio` is also available when you need a FHIR Ratio for one ingredient; it returns `null` for composite strengths.
 
 ### Ocular & intravitreal shortcuts
 
