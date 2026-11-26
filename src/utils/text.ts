@@ -67,3 +67,13 @@ export function normalizeLoosePhraseKey(value: string): string {
   }
   return result;
 }
+
+/** Single-pass list join with historical comma/conjunction placement.
+ * No slice() plus join() array allocation. */
+export function joinLocalizedList(parts: readonly string[], conjunction: string): string {
+  if (!parts.length) return "";
+  if (parts.length === 1) return parts[0];
+  let text = parts[0];
+  for (let index = 1; index < parts.length - 1; index++) text += ", " + parts[index];
+  return text + " " + conjunction + " " + parts[parts.length - 1];
+}

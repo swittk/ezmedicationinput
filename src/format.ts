@@ -1,8 +1,8 @@
 import { TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
 import { getDoseUnitKind, getQuantityDurationUnit } from "./unit-lexicon";
-import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./locales/course/types";
-import { ENGLISH_COURSE } from "./locales/course/en";
-import type { CourseLanguage } from "./locales/course/types";
+import { joinLocalizedList } from "./utils/text";
+import { ENGLISH_COURSE, ENGLISH_DAY_NAMES } from "./locales/course/en";
+import type { CourseLanguage } from "./localization";
 import { buildCanonicalSigClauses, canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
   collectLocalizedWhenPhrases,

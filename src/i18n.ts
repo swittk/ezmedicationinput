@@ -1,8 +1,8 @@
-import { THAI_DAY_NAMES, joinLocalizedList } from "./locales/course/types";
-import type { CourseLanguage } from "./locales/course/types";
+import { joinLocalizedList } from "./utils/text";
+import type { CourseLanguage } from "./localization";
 import { ENGLISH_COURSE, ENGLISH_CLAUSE_TIMING } from "./locales/course/en";
-import { THAI_COURSE, THAI_CLAUSE_TIMING } from "./locales/course/th";
-export type { CourseLanguage } from "./locales/course/types";
+import { THAI_COURSE, THAI_CLAUSE_TIMING, THAI_DAY_NAMES } from "./locales/course/th";
+export type { CourseLanguage } from "./localization";
 import { localizedValue, quantityComparatorText } from "./localization";
 import {
   formatDoseEnglish, timingCodeMatchesRecurrence,
@@ -2451,9 +2451,10 @@ function realizeAdviceFramesThai(frames: AdviceFrame[]): string | undefined {
       const argument = frame.args[index];
       if (!argument.conceptId || argument.i18n?.th) continue;
       const shared = resolveMedicationInstructionConcept(argument.text);
-      // An exact shared nominal can supply a missing locale facet. A contained
-      // noun must not erase an opaque qualification such as "cool water".
-      if (shared?.code !== argument.conceptId || shared.role !== argument.role || !shared.i18n?.th) continue;
+      // Exact concept identity supplies wording without changing the
+      // contextual argument role. A contained noun must not erase an opaque
+      // qualification such as "cool water".
+      if (shared?.code !== argument.conceptId || !shared.i18n?.th) continue;
       localizedFrames ??= frames.slice();
       localizedFrame ??= { ...frame, args: frame.args.slice() };
       localizedFrame.args[index] = { ...argument, i18n: { ...shared.i18n, ...(argument.i18n ?? {}) } };

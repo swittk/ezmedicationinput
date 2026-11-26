@@ -1005,6 +1005,8 @@ export function resolveAdviceMannerModifier(surface: string):
 }
 
 function findContainedConcept(normalized: string): AdviceConceptEntry | undefined {
+  const exact = findExactConcept(normalized);
+  if (exact) return exact;
   let best: AdviceConceptEntry | undefined;
   let bestLength = 0;
   for (const entry of CONCEPT_LIST) {
@@ -2040,7 +2042,10 @@ function realizeSingleAdviceFrame(frame: AdviceFrame, locale = "en"): string | u
   const adapter = getAdviceLocaleAdapter(locale);
   const argText = joinAdviceArgumentTexts(frame.args, locale);
   const modalityText = adapter.realizeModality(frame.modality);
-  const relationText = localizeAdviceRelation(frame.relation, locale);
+  // A typed meal state supplies nominal context; terminology owns the
+  // locale wording before the adapter receives the resolved relation.
+  const relationText = localizeAdviceRelation(frame.relation, locale,
+    frame.args.some(arg => arg.role === AdviceArgumentRole.MealState) ? "complement" : undefined);
   const lexeme = findVerbLexeme(frame.predicate.lemma);
   const sharedAction = resolveMedicationInstructionAction(frame.predicate.lemma);
   const localizedPredicate = localizedValue(lexeme?.i18n, locale) ??

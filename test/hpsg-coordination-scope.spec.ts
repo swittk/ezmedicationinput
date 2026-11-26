@@ -1974,7 +1974,7 @@ describe("round76 timing-reference clock compatibility", () => {
 
 describe("negative meal accompaniment ownership", () => {
   it.each([
-    ["Swallow 1 tablet without food", "Swallow 1 tablet. Without food."],
+    ["Swallow 1 tablet without food", "Swallow 1 tablet without food."],
     ["Swallow 1 tablet with water without food", "Swallow 1 tablet with water. Take without food."]
   ])("keeps the negative meal instruction in %s", (source, expected) => {
     const parsed = parsePublicSig(source);
@@ -1990,8 +1990,10 @@ describe("negative meal accompaniment ownership", () => {
     for (const input of [parsed.fhir, parsed.fhirNext]) {
       expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(expected);
       const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
-      expect(thai).toContain(source.includes("with water") ? "โดยไม่ food" : "Without food");
+      expect(thai).toMatch(/โดยไม่มี\s*อาหาร/u);
+      expect(thai).not.toMatch(/Without food|\bfood\b/u);
       expect(thai).not.toContain("พร้อมอาหาร");
+      if (source.includes("with water")) expect(thai).toContain("น้ำ");
     }
   });
 

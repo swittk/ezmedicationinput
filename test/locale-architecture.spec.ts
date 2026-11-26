@@ -2,6 +2,7 @@ import { cycleDayConstraintExtension, TIMING_CLOCK_WINDOW_EXTENSION_URL, ADMINIS
 import { fromFhir, toFhirR5Dosages, toDosageDetails } from "../src/index";
 import { describe, expect, it } from "vitest";
 import { resolveSigLocalization, registerSigLocalization } from "../src/i18n";
+import { formatCanonicalClause } from "../src/format";
 import {
   localizedConfig,
   localizedValue
@@ -11,7 +12,7 @@ import {
   resolveMedicationInstructionAction
 } from "../src/instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../src/instruction-concept-terminology";
-import { AdviceArgumentRole, AdviceRelation, EventTiming, RouteCode, FhirPeriodUnit, type FhirDosage, type FhirR6DosageInstruction, type FormatOptions } from "../src/types";
+import { AdviceArgumentRole, AdviceForce, AdviceRelation, EventTiming, RouteCode, FhirPeriodUnit, type CanonicalSigClause, type FhirDosage, type FhirR6DosageInstruction, type FormatOptions } from "../src/types";
 import { suggestSig } from "../src/suggest";
 import { localizeAdviceRelation } from "../src/relation-terminology";
 import { shouldJoinAdjacentSourceTokens } from "../src/locale-detection";
@@ -698,5 +699,60 @@ describe("complete native clause defaults", () => {
       return "Clinic: " + context.defaultText;
     } } })).toBe("Clinic: " + expected);
     expect(calls).toBe(1);
+  });
+});
+
+
+describe("typed meal-state locale realization", () => {
+  it("localizes an admitted negative food adjunct while retaining its dose and water", () => {
+    const source = "Swallow 1 tablet with water without food";
+    const parsed = parseSig(source), clause = parsed.meta.canonical.clauses[0];
+    const frames = clause.additionalInstructions?.flatMap(instruction => instruction.frames ?? []);
+    expect(frames).toContainEqual(expect.objectContaining({
+      relation: AdviceRelation.Without,
+      args: [expect.objectContaining({ role: AdviceArgumentRole.MealState,
+        text: "food", normalized: "food", conceptId: "food" })]
+    }));
+    expect(clause.dose).toMatchObject({ value: 1, unit: "tab" });
+    const before = JSON.stringify([parsed.meta.canonical, parsed.fhir, parsed.fhirNext]);
+    for (const input of [parsed.meta.canonical.course!,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" })
+        .split("; original directions: ")[0];
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" })
+        .split("; ข้อความเดิม: ")[0];
+      expect(en).toContain("without food");
+      expect(en).not.toContain("with food");
+      expect(en).toContain("water");
+      expect(en.match(/\b1 tablet\b/gu)).toHaveLength(1);
+      expect(th).toMatch(/โดยไม่มี\s*อาหาร/u);
+      expect(th).toContain("น้ำ");
+      expect(th.match(/(?:^|[^\d.])1 เม็ด/gu)).toHaveLength(1);
+      expect(th).not.toMatch(/food|water/iu);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify([parsed.meta.canonical, parsed.fhir, parsed.fhirNext])).toBe(before);
+  });
+
+  it.each([undefined, "อาหารที่จัดไว้"])("preserves typed identity and a supplied Thai nominal: %s", thai => {
+    const source = "Take 1 tablet without food";
+    const clause: CanonicalSigClause = {
+      kind: "administration", rawText: source, raw: { start: 0, end: source.length, text: source },
+      dose: { value: 1, unit: "tab" }, leftovers: [], evidence: [], confidence: 1,
+      additionalInstructions: [{ text: "Take without food", frames: [{
+        force: AdviceForce.Instruction, predicate: { lemma: "take", semanticClass: "administration" },
+        relation: AdviceRelation.Without, sequenceIndex: 0,
+        sourceText: "without food", span: { start: 14, end: source.length },
+        args: [{ role: AdviceArgumentRole.MealState, text: "food", normalized: "food", conceptId: "food",
+          ...(thai ? { i18n: { th: thai } } : {}) }]
+      }] }]
+    };
+    const before = JSON.stringify(clause);
+    const en = formatCanonicalClause(clause, "long", resolveSigLocalization("en"));
+    const th = formatCanonicalClause(clause, "long", resolveSigLocalization("th"));
+    expect(en).toContain("without food");
+    expect(th).toContain("โดยไม่มี " + (thai ?? "อาหาร"));
+    expect(th).not.toContain("food");
+    expect(JSON.stringify(clause)).toBe(before);
   });
 });

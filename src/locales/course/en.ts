@@ -1,7 +1,18 @@
 /** English course wording. Clinical scope and date arithmetic are supplied
  * by the canonical formatter; this module owns words and English inflection. */
-import type { CourseLanguage } from "./types";
-import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./types";
+import type { CourseLanguage } from "../../localization";
+import { joinLocalizedList } from "../../utils/text";
+
+export const ENGLISH_DAY_NAMES: Record<string, string> = {
+  mon: "Monday",
+  tue: "Tuesday",
+  wed: "Wednesday",
+  thu: "Thursday",
+  fri: "Friday",
+  sat: "Saturday",
+  sun: "Sunday",
+};
+
 const UNITS: Readonly<Record<string, readonly [string, string]>> = {
   s: ["second", "seconds"],
   min: ["minute", "minutes"],

@@ -2183,7 +2183,7 @@ function actionTailStartsPhrase(parts: Lexeme[], index: number, phrases: Readonl
 
 function actionHasLocalRelationBefore(parts: Lexeme[], actionStart: number, index: number): boolean {
   for (let cursor = actionStart + 1; cursor < index; cursor += 1) {
-    if (Boolean(resolveActionRelationSurface(key(parts[cursor])))) return true;
+    if (Boolean(actionArgumentRelation(key(parts[cursor])))) return true;
   }
   return false;
 }
