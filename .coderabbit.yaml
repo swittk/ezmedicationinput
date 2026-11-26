@@ -16,12 +16,16 @@ reviews:
     - "!DIRECTIONALITY.md"
     - "!HPSG_IMPLEMENTATION_GUIDE.md"
     - "!DIARY.md"
+    - "!README.md"
     - "!bench/**"
     - "!experiments/boundary-planner/**"
     # This replay runner changes only the imported R6 type name; clinical
     # oracle suites, terminology coverage, and mixed distribution tests remain
     # selected. Benchmark and measurement artifacts are outside review scope.
     - "!test/real-world-fuzz-2026.spec.ts"
+    # This legacy first-clause adapter has no assertions; its clinical test
+    # suites remain selected, including source and conversion correctness.
+    - "!test/helpers/r5-parser.ts"
     - "!package-lock.json"
   path_instructions:
     - path: "**/*"
