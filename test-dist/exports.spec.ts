@@ -173,8 +173,8 @@ describe("published package entrypoints", () => {
           locale: "th",
           realizationMode: "roundtrip"
         });
-        // Independently submitted R6 wording has no saved agreement proof.
-        // Reparse the current clinical SIG, not its labeled original strings.
+        // Reparse the independently rendered clinical facts while the original
+        // authored fields remain available on the parser output above.
         const current = JSON.parse(JSON.stringify(parsed.fhirNext));
         delete current.renderedInstruction;
         for (const step of current.step ?? [])
@@ -200,13 +200,10 @@ describe("published package entrypoints", () => {
         }));
       `
     );
-    expect(result.currentText).toBe("หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา.");
-    expect(result.roundTripText?.split("; ข้อความเดิม: ")[0])
-      .toBe("ปัจจุบัน: หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา");
+    expect(result.currentText).toBe("หยอดตาขวา วันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน.");
+    expect(result.roundTripText).toBe(result.currentText);
     expect(result.originalInstruction).toBe("หยอดตาขวาวันละ 4 ครั้ง เช้า กลางวัน เย็น ก่อนนอน");
     expect(result.originalComponentText).toBe("หยอดตาขวา วันละ 4 ครั้ง ตอนเช้า, ตอนเที่ยง, ตอนเย็น และ ก่อนนอน.");
-    expect(result.roundTripText).toContain("; ข้อความเดิม: " + result.originalComponentText);
-    expect(result.roundTripText).toContain("; ข้อความเดิม: " + result.originalInstruction);
     expect(result.roundTripAdministrationCount).toBe(1);
     expect(result.roundTripDoseCount).toBe(0);
     expect(result.roundTripSiteCode).toBe("1290032005");
