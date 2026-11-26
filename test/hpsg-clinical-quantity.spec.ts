@@ -5,7 +5,7 @@ import { unifySynsem } from "../src/hpsg/unification";
 import { describe, expect, it } from "vitest";
 import { parseClauseSign, parseClauseState } from "../src/parser";
 import { projectHpsgSignToState } from "../src/hpsg/projection";
-import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL } from "../src/fhir";
+import { canonicalFromFhir, canonicalToFhir, getAnchoredCourseDuration, parserStateFromFhir, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL } from "../src/fhir";
 import {
   calculateTotalUnits, importCanonicalCourse,
   getEmaQuantityComparator, getMedicationInstructionAction,
@@ -2579,10 +2579,16 @@ describe("round36 authored duration endpoints", () => {
       for (let save = 0; save < 3; save++) {
         const before = JSON.stringify(row);
         const next = canonicalToFhir(canonicalFromFhir(row));
-        expect(next.timing?.repeat?.boundsRange).toEqual({
+        const authored = {
           low: { value: 1, unit: lowUnit, system: "http://unitsofmeasure.org", code: "d" },
           high: { value: 3, unit: highUnit, system: "http://unitsofmeasure.org", code: "d" },
+        };
+        expect(next.timing?.repeat?.boundsRange).toEqual({
+          low: authored.low, high: { ...authored.high, unit: lowUnit }
         });
+        expect(getAnchoredCourseDuration(next)?.valueRange).toEqual(authored);
+        expect(importCanonicalCourse(next).stages[0].administrations[0].schedule?.recurrence?.courseLengthRange)
+          .toMatchObject(authored);
         expect(JSON.stringify(row)).toBe(before);
         row = next;
       }

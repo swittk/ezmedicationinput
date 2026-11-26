@@ -14,7 +14,7 @@ import { formatCanonicalCourse } from "../src/canonical/format-course";
 import { administrationFromClause, clauseForAdministration, courseFromAdministrations, courseFromPartialParallel, courseFromParallel } from "../src/canonical/compile";
 import { courseFromR6, courseToR6 } from "../src/adapters/canonical-course";
 import type { CanonicalCourse, CanonicalBoundary } from "../src/canonical/course";
-import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_EVENT_WINDOW_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL } from "../src/fhir";
+import { canonicalFromFhir, canonicalToFhir, getAnchoredCourseDuration, parserStateFromFhir, TIMING_EVENT_WINDOW_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL } from "../src/fhir";
 import { buildBodySiteSpatialRelationExtension } from "../src/body-site-spatial";
 import { getQuantityComparator, simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 import { resolveSigLocalization, type SigFormatContext, registerSigLocalization } from "../src/i18n";
@@ -1011,15 +1011,23 @@ describe("round 23: duration endpoints retain their own units", () => {
     for (const locale of ["en", "th"])
       expect(formatCanonicalCourse(course, "short", { locale })).toContain(`x${low}min-${high}h`);
     const wire = JSON.parse(JSON.stringify(courseToR6(course))) as FhirR6DosageInstruction;
-    const emitted = wire.step![0].component[0].timing?.repeat?.boundsRange;
+    const component = wire.step![0].component[0];
+    const emitted = component.timing?.repeat?.boundsRange;
     expect(emitted?.low).toMatchObject({ value: low, code: "min", unit: "minutes" });
-    expect(emitted?.high).toMatchObject({ value: high, code: "h", unit: "hours" });
-    const reopened = courseFromR6(wire).stages[0].administrations[0];
+    expect(emitted?.high).toBeUndefined();
+    expect(getAnchoredCourseDuration(component)?.valueRange)
+      .toEqual(raw.step![0].component[0].timing!.repeat!.boundsRange!);
+    const reopenedCourse = courseFromR6(wire);
+    const reopened = reopenedCourse.stages[0].administrations[0];
     expect(reopened.schedule?.recurrence?.courseLengthRange)
       .toMatchObject(raw.step![0].component[0].timing!.repeat!.boundsRange!);
     expect(clauseForAdministration(reopened).schedule).toMatchObject({
       duration: low, durationUnit: "min", durationMax: high, durationMaxUnit: "h"
     });
+    for (const locale of ["en", "th"])
+      for (const style of ["short", "long"] as const)
+        expect(formatCanonicalCourse(reopenedCourse, style, { locale }))
+          .toBe(formatCanonicalCourse(course, style, { locale }));
     expect(JSON.stringify(course)).toBe(original);
   });
 
@@ -1039,10 +1047,16 @@ describe("round 23: duration endpoints retain their own units", () => {
     expect(formatCanonicalClause(clause, "long", resolveSigLocalization("th")))
       .toContain(">=30 นาที ถึง <=2 ชั่วโมง");
     const wire = JSON.parse(JSON.stringify(canonicalToFhir(clause))) as FhirDosage;
-    const roundtrip = wire.timing?.repeat?.boundsRange;
-    // The prescriber owns both active endpoint units. An interoperability
-    // constraint does not authorize a 30-minute to 0.5-hour conversion.
-    // Wire labels also retain authored min/h; the preview may spell them out.
+    const core = wire.timing?.repeat?.boundsRange;
+    expect(core?.low).toMatchObject({ value: 30, code: "min", unit: "min" });
+    expect(core?.high).toBeUndefined();
+    // The active endpoint quantities retain authored min/h and qualifiers;
+    // conforming partial core output does not convert 30 minutes to 0.5 hours.
+    const roundtrip = getAnchoredCourseDuration(wire)?.valueRange;
+    expect(roundtrip).toEqual({
+      low: { ...input.timing!.repeat!.boundsRange!.low, system: "http://unitsofmeasure.org" },
+      high: { ...input.timing!.repeat!.boundsRange!.high, system: "http://unitsofmeasure.org" }
+    });
     expect(roundtrip?.low).toMatchObject({ value: 30, code: "min", unit: "min" });
     expect(roundtrip?.high).toMatchObject({ value: 2, code: "h", unit: "h" });
     expect(getQuantityComparator(roundtrip?.low)).toBe(">=");
@@ -1052,6 +1066,9 @@ describe("round 23: duration endpoints retain their own units", () => {
         duration: 30, durationUnit: "min", durationMax: 2, durationMaxUnit: "h",
         durationComparator: ">=", durationMaxComparator: "<="
       });
+      expect(formatCanonicalClause(reopened, "long")).toContain(">=30 minutes to <=2 hours");
+      expect(formatCanonicalClause(reopened, "long", resolveSigLocalization("th")))
+        .toContain(">=30 นาที ถึง <=2 ชั่วโมง");
     }
   });
 });
