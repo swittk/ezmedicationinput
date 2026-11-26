@@ -6003,8 +6003,10 @@ describe("round76 bound source wording agreement", () => {
       expect(english).toContain("Rotate sites after each injection");
       expect(english.match(/Rotate sites/gu)).toHaveLength(1);
       expect(english).not.toContain("original directions");
-      expect(formatSig(current, "long", { locale: "th", realizationMode: "normalized" }))
-        .not.toMatch(/Rotate|injection|original directions/u);
+      const thai = formatSig(current, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain("สลับตำแหน่งหลังการฉีดยาแต่ละครั้ง");
+      expect(thai.match(/สลับตำแหน่ง/gu)).toHaveLength(1);
+      expect(thai).not.toMatch(/Rotate|injection|original directions/u);
       expect(current.step![0].component[1].text).toBe("Rotate sites after each injection.");
       const rows = fresh(toFhirR5Dosages(current));
       expect(rows[1].text).toBe("Rotate sites after each injection.");

@@ -1900,6 +1900,7 @@ describe("round41 live quantity, cadence and indication previews", () => {
       expect(en).toContain(unit === "mL" ? "both nostrils" : "each nostril");
       expect(en.includes("each nostril")).toBe(unit === "spray");
       expect(th.includes("ข้างละ")).toBe(unit === "spray");
+      expect(th).toContain(unit === "mL" ? "รูจมูกทั้งสองข้าง" : "รูจมูกข้างละ");
       expect(en).toMatch(unit === "mL" ? /^1 mL /u : /^1 spray /u);
       expect(th).toMatch(unit === "mL" ? /^1 มล\. /u : /^1 พ่น /u);
       expect(r6.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(1);
@@ -2077,6 +2078,10 @@ it.each([
     expect(th).toMatch(/น้ำ(?: 100 มิลลิลิตร)? เวลา 08:00:00\.$/u);
     expect(en.match(/08:00/gu)).toHaveLength(1);
     expect(th.match(/08:00/gu)).toHaveLength(1);
+    if (source.startsWith("Mix")) {
+      expect(en).toContain("Mix 5 mL with 100 mL water");
+      expect(th).toContain("ผสม5 มิลลิลิตรกับน้ำ 100 มิลลิลิตร");
+    }
     if (source.startsWith("Dissolve")) {
       expect(en).toContain("2 tablets");
       expect(th).toContain("2 เม็ด");

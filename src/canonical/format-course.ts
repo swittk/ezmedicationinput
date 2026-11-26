@@ -21,7 +21,7 @@ import { preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingC
 import { canonicalClauseHasAdministrationSemantics } from "../ir";
 import { getDoseQuantityUnit } from "../maps";
 import { getQuantityDurationUnit } from "../unit-lexicon";
-import { doseUnitUsesTargetScope, formatCanonicalClause, formatNativeCanonicalClause, composeNativePrimaryDirections, formatDoseEnglish, timingCodeMatchesRecurrence, independentTimingText } from "../format";
+import { doseUnitUsesTargetScope, formatCanonicalClause, formatNativeCanonicalClause, composeNativePrimaryDirections, formatDoseEnglish, timingCodeMatchesRecurrence, timingEventPreviewSchedule, independentTimingText } from "../format";
 import { resolveBodySitePhrase } from "../body-site-grammar";
 import {
   resolveSigLocalization,
@@ -652,7 +652,7 @@ function formatCanonicalBase(
   environment?: CourseFormatEnvironment,
   source: CanonicalAdministration = a,
   authored?: AuthoredDirectionsState,
-  deferredDirections?: { text?: string }
+  deferredDirections?: { text?: string; current?: string }
 ): string {
   const env = environment ?? courseEnvironment(options);
   const clause = compiled ?? clauseForAdministration(a, options);
@@ -668,7 +668,7 @@ function formatCanonicalBaseNative(
   environment?: CourseFormatEnvironment,
   source: CanonicalAdministration = a,
   authored?: AuthoredDirectionsState,
-  deferredDirections?: { text?: string }
+  deferredDirections?: { text?: string; current?: string }
 ): string {
   // Member bounds and safety limits qualify the directions; they cannot
   // replace the only authored dose, manner and cadence.
@@ -710,7 +710,8 @@ function formatCanonicalBaseNative(
   // With no structured administration, the live guard qualifies the supplied
   // directions. Independent advice (for example, "Otherwise hold") is not
   // the administration and must not acquire that guard. Do not parse the text.
-  const authoredQualifiers = (a.predicate || a.excludedDates?.length || a.excludedWeekdays?.length) && a.text?.trim() &&
+  const authoredQualifiers = !deferredDirections?.current &&
+    (a.predicate || a.excludedDates?.length || a.excludedWeekdays?.length) && a.text?.trim() &&
     !canonicalClauseHasAdministrationSemantics(clause) && !clause.instructionGraph?.actions.length;
   const sourceOwnsPrimary = !administrationOwnsSourceDirections(source, clause.instructionGraph, a.text);
   const graphOwnsDirections = clause.instructionGraph?.coverage?.complete &&
@@ -724,7 +725,8 @@ function formatCanonicalBaseNative(
     : clause;
   const authoredPrimary = partialAuthoredDirections && sourceOwnsPrimary && (!deferredDirections || a.predicate)
     ? a.text : undefined;
-  const primaryDirections = authoredPrimary && a.predicate ? deferredDirections ?? {} : undefined;
+  const primaryDirections = deferredDirections?.current ? deferredDirections
+    : authoredPrimary && a.predicate ? deferredDirections ?? {} : undefined;
   let rendered = formatNativeCanonicalClause(displayClause, style, env.localization, options,
     style === "long" ? authoredPrimary : undefined, primaryDirections);
   if (authoredQualifiers) {
@@ -1001,6 +1003,11 @@ export function formatCanonicalCourse(
               timingCodeMatchesRecurrence(display.schedule.recurrence,
                 coding?.code ?? timingCode?.text);
             const independentText = independentTimingText(timingCode?.text, display.schedule.recurrence);
+            // Select a compatible event from the complete timing before the
+            // display view removes cadence. Explicit events/clocks still own it.
+            const eventSchedule = timingEventPreviewSchedule(clause.schedule);
+            if (eventSchedule !== clause.schedule && eventSchedule?.when)
+              rest.anchors = eventSchedule.when;
             display = { ...display, schedule: {
               ...(!literalCode && (structuredCount || !codeAgrees)
                 ? { ...withoutCode, ...(independentText ? { code: { text: independentText } } : {}) }
@@ -1031,17 +1038,7 @@ export function formatCanonicalCourse(
           }
           // Rich rates and expressions belong to the current member. Append
           // its separate original directions after those current facts.
-          const deferredDirections: { text?: string } | undefined = component.text ? {} : undefined;
-          const recognized = formatCanonicalBaseNative(
-            display,
-            style,
-            hasOffsets ? { ...options, includeTimesPerDaySummary: false } : options,
-            display === component ? clause : undefined,
-            environment,
-            component,
-            authored,
-            deferredDirections
-          );
+          let deferredDirections: { text?: string; current?: string } | undefined = component.text ? {} : undefined;
           const expressions: string[] = [];
           if (hasOffsets && repeat) {
             const periodUnit = repeat.periodUnit;
@@ -1144,6 +1141,21 @@ export function formatCanonicalCourse(
               expressions.push((hasAmountRole(amount.role) ? amountLabel(amount, "rate", words) : "") +
                 unevaluatedExpressionText(amount.rateExpression, "rate", words));
           }
+          if (component.predicate && expressions.length && administrationHasAmountFacts(component) &&
+              !administrationOwnsSourceDirections(component, clause.instructionGraph, component.text)) {
+            (deferredDirections ??= {}).current = joinGeneratedClauses(expressions);
+            expressions.length = 0;
+          }
+          const recognized = formatCanonicalBaseNative(
+            display,
+            style,
+            hasOffsets ? { ...options, includeTimesPerDaySummary: false } : options,
+            display === component ? clause : undefined,
+            environment,
+            component,
+            authored,
+            deferredDirections
+          );
           let body = joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
           if (deferredDirections?.text)
             body = words.withAuthoredDirections(body.replace(/\.\s*$/u, ""), deferredDirections.text);

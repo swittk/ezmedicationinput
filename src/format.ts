@@ -554,16 +554,9 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: C
     case "period": {
       const interval = rangeEnd !== undefined
         ? `${stripTrailingZero(period!)} to ${stripTrailingZero(rangeEnd)}` : stripTrailingZero(period!);
-      let unit: string | undefined;
-      switch (periodUnit) {
-        case FhirPeriodUnit.Second: unit = words.timeUnit(periodUnit, periodMax ?? period) ?? periodUnit; break;
-        case FhirPeriodUnit.Minute: unit = rangeEnd !== undefined || period !== 1 ? "minutes" : "minute"; break;
-        case FhirPeriodUnit.Hour: unit = rangeEnd !== undefined || period !== 1 ? "hours" : "hour"; break;
-        case FhirPeriodUnit.Day: unit = "days"; break;
-        case FhirPeriodUnit.Week: unit = "weeks"; break;
-        case FhirPeriodUnit.Month: unit = "months"; break;
-        case FhirPeriodUnit.Year: unit = "years"; break;
-      }
+      const unitValue = rangeEnd === undefined ? period : undefined;
+      const unit = words.timeUnit(periodUnit!, unitValue) ??
+        ENGLISH_COURSE.timeUnit(periodUnit!, unitValue) ?? periodUnit;
       return `${countPrefix}every ${interval} ${unit}`;
     }
     case "calendar-count":
@@ -1081,8 +1074,10 @@ function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string 
 }
 
 export function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefined {
-  const durationUnit = schedule.durationUnit ?? schedule.durationUnitLabel;
-  const durationMaxUnit = schedule.durationMaxUnit ?? schedule.durationMaxUnitLabel;
+  const durationUnit = schedule.durationUnit ??
+    (schedule.durationUnitLabel ? " " + schedule.durationUnitLabel : undefined);
+  const durationMaxUnit = schedule.durationMaxUnit ??
+    (schedule.durationMaxUnitLabel ? " " + schedule.durationMaxUnitLabel : undefined);
   if (schedule.durationIsRange && schedule.duration !== undefined && schedule.durationMax !== undefined &&
       (!schedule.durationUnit || !schedule.durationMaxUnit)) {
     const low = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration) + (durationUnit ?? "");
@@ -1689,8 +1684,16 @@ function applyEnglishAdministrationModality(verb: string, clause: CanonicalSigCl
 export function composeNativePrimaryDirections(
   rendered: string, authored: string | undefined,
   condition: MedicationCondition | undefined, words: CourseLanguage,
-  deferredDirections?: { text?: string }
+  deferredDirections?: { text?: string; current?: string }
 ): string {
+  if (deferredDirections?.current) {
+    // Rich native amounts belong to the same primary administration. Compose
+    // them before its guard and before the locale adds independent advice.
+    const primary = rendered.trim().replace(/[.!?]+$/u, "");
+    const current = (primary ? primary + "; " : "") + deferredDirections.current;
+    if (authored) deferredDirections.text = authored;
+    return condition ? appendClinicalConditionText(current, condition, words) : current;
+  }
   if (!authored) return condition ? appendClinicalConditionText(rendered, condition, words) : rendered;
   const current = rendered.trim().replace(/[.!?]+$/u, "");
   const source = authored.trim().replace(/[.!?]+$/u, "");
@@ -1715,7 +1718,7 @@ export function composeNativePrimaryDirections(
 
 function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | undefined, words: CourseLanguage,
   resolvedMethod?: SigLongContext["resolvedMethod"], condition?: MedicationCondition, authoredPrimary?: string,
-  deferredDirections?: { text?: string }): string {
+  deferredDirections?: { text?: string; current?: string }): string {
   const hasCanonicalAdministration = canonicalClauseHasAdministrationSemantics(clause);
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
@@ -2173,7 +2176,7 @@ export function formatNativeCanonicalClause(
   localization?: SigLocalization,
   options?: TimingSummaryOptions,
   authoredPrimary?: string,
-  deferredDirections?: { text?: string }
+  deferredDirections?: { text?: string; current?: string }
 ): string {
   // Per-call vocabulary can declare method identities beyond the built-in
   // compiler dictionary. Resolve that head for every locale's display view

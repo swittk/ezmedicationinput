@@ -3782,6 +3782,12 @@ describe("round72 reviewed completion and batch directions", () => {
       { doseAndRate: [{ doseQuantity: q(2) }], timing: { repeat: daily } },
     ] }] };
     const batch = fromFhir(source, { locale: "en", realizationMode: "normalized" });
+    expect(batch.items).toHaveLength(2);
+    for (let index = 0; index < batch.items.length; index++) {
+      expect(batch.items[index].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(index + 1);
+      expect(batch.items[index].shortText).toContain(`${index + 1} tab`);
+      expect(batch.items[index].longText).toContain(index ? "2 tablets" : "1 tablet");
+    }
     for (const style of ["short", "long"] as const) {
       const values = batch.items.map(item => style === "short" ? item.shortText : item.longText);
       expect(formatParseBatch(batch, style, " / ")).toBe(values.join(" / "));
@@ -4309,7 +4315,21 @@ describe("round76 shared current preview owners", () => {
     for (const input of [raw, rows, rows[0]]) for (const locale of ["en", "th"] as const) {
       expect(formatSig(input, "long", { locale })).toContain("2 h");
       expect(formatSig(input, "long", { locale })).not.toMatch(/hours|ชั่วโมง/u);
+      const short = formatSig(input, "short", { locale });
+      expect(short).toContain("2 h");
+      expect(short).not.toMatch(/x2h|hours|ชั่วโมง/u);
+      const native = importCanonicalCourse(input);
+      expect(native.stages[0].administrations[0].schedule?.recurrence?.courseLength).toEqual(bound);
+      expect(projectCanonicalCourse(native).fhirNext.step[0].component[0].timing?.repeat?.boundsDuration).toEqual(bound);
+    }
+  });
+
+  it("keeps recognized UCUM hours distinct from an opaque local duration label", () => {
+    const bound = { value: 2, system: "http://unitsofmeasure.org", code: "h", unit: "h" };
+    const raw = course({ timing: { repeat: { boundsDuration: bound } } });
+    for (const input of [raw, toFhirR5Dosages(raw)]) for (const locale of ["en", "th"]) {
       expect(formatSig(input, "short", { locale })).toContain("x2h");
+      expect(formatSig(input, "long", { locale })).toContain(locale === "en" ? "2 hours" : "2 ชั่วโมง");
     }
   });
 
@@ -4335,7 +4355,7 @@ describe("round76 shared current preview owners", () => {
     } } } });
     const rows = persist(toFhirR5Dosages(persist(raw)));
     for (const input of [raw, rows, rows[0]]) for (const locale of ["en", "th"] as const) {
-      expect(formatSig(input, "short", { locale })).toContain("x2h – 3h");
+      expect(formatSig(input, "short", { locale })).toContain("x2 h – 3h");
       expect(formatSig(input, "short", { locale })).not.toContain("x2-3h");
     }
     expect(projectCanonicalCourse(importCanonicalCourse(raw)).fhirNext.step![0].component[0].timing!.repeat!.boundsRange)

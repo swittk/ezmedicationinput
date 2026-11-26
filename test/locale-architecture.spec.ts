@@ -1,5 +1,5 @@
 import { cycleDayConstraintExtension, TIMING_CLOCK_WINDOW_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src/fhir";
-import { fromFhir, toFhirR5Dosages, toDosageDetails } from "../src/index";
+import { fromFhir, importCanonicalCourse, toFhirR5Dosages, toDosageDetails } from "../src/index";
 import { describe, expect, it } from "vitest";
 import { resolveSigLocalization, registerSigLocalization } from "../src/i18n";
 import { formatCanonicalClause } from "../src/format";
@@ -496,6 +496,49 @@ describe("complete native clause defaults", () => {
   const dose = { doseQuantity: { value: 1, unit: "tab" } };
   const note = { url: "https://example.test/preview-note", valueString: "Retain this note" };
 
+  it.each(["quantity", "ratio"] as const)("guards the current partial infusion %s before independent advice", kind => {
+    const sourceText = "Infuse over 2 hours";
+    const amount = kind === "quantity"
+      ? { rateQuantity: { value: 5, unit: "mL/h", system: "http://unitsofmeasure.org", code: "mL/h" } }
+      : { rateRatio: { numerator: { value: 10, unit: "mL" }, denominator: { value: 2, unit: "h" } } };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{ text: sourceText,
+      doseAndRate: [amount], condition: [guard], extension: [note],
+      additionalInstruction: [{ text: "Recheck BP only if SBP > 160" }, { text: "Otherwise hold" }]
+    }] }] };
+    const rows = toFhirR5Dosages(raw), native = importCanonicalCourse(raw);
+    for (const input of [raw, rows, native]) for (const locale of ["en", "th"]) {
+      const before = JSON.stringify(input), options = { locale, realizationMode: "normalized" as const };
+      const long = formatSig(input, "long", options), short = formatSig(input, "short", options);
+      const primary = (locale === "en" ? "Rate: " : "อัตราการให้ยา: ") +
+        (kind === "quantity" ? "5 mL/h" : "10 mL / 2 h") +
+        (locale === "en" ? " only if" : " เฉพาะเมื่อ") + " SBP > 160";
+      for (const text of [long, short]) {
+        const [current, source] = text.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
+        expect(current).toContain(primary);
+        expect(source).toBe(sourceText);
+        expect(current.indexOf(primary)).toBeLessThan(current.indexOf("Recheck") < 0 ? current.length : current.indexOf("Recheck"));
+      }
+      expect(long).toContain("Recheck BP only if SBP > 160");
+      expect(long).toContain("Otherwise hold");
+      expect(long.match(/SBP > 160/gu)).toHaveLength(2);
+      let calls = 0;
+      expect(formatSig(input, "long", { ...options, i18n: { formatLong: context => {
+        calls++;
+        expect(context.defaultText).toBe(long);
+        expect(context.formatDefault("long")).toBe(long);
+        expect(context.formatDefault("short")).toBe(short);
+        expect(context.clause.clinicalAdjuncts?.condition).toMatchObject({ kind: "measurement", operation: "gt", value: 160 });
+        expect(context.clause.additionalInstructions).toContainEqual(expect.objectContaining({ text: "Otherwise hold" }));
+        return "Clinic wording, unchanged!";
+      } } })).toBe("Clinic wording, unchanged!");
+      expect(calls).toBe(1);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(raw.step[0].component[0].text).toBe(sourceText);
+    expect(rows[0].text).toBe(sourceText);
+    expect(toDosageDetails(rows).step[0].component[0].extension).toContainEqual(note);
+  });
+
   it.each(["en", "th"] as const)("keeps the guard on the complete authored primary in %s", locale => {
     for (const text of [locale === "en" ? "Use the medication once daily." : "ใช้ยา วันละครั้ง.",
       "Swallow 1 tablet whole"]) {
@@ -659,7 +702,7 @@ describe("complete native clause defaults", () => {
       expect(native).toContain(locale === "en" ? "1 tablet" : "1 เม็ด");
       if (kind === "cycle") { expect(native).toContain("1-5"); expect(native).toContain("28"); }
       if (kind === "clock window") { expect(native).toContain("08:00"); expect(native).toContain("18:00"); }
-      if (kind === "offset") expect(native).toMatch(/0?9[:.]30/u);
+      if (kind === "offset") expect(native).toContain(locale === "en" ? "9:30 am" : "09:30");
       for (const wrapper of [false, true]) {
         let calls = 0;
         const actual = formatSig(input, "long", { locale, realizationMode: "normalized", i18n: { formatLong: context => {
@@ -754,5 +797,53 @@ describe("typed meal-state locale realization", () => {
     expect(th).toContain("โดยไม่มี " + (thai ?? "อาหาร"));
     expect(th).not.toContain("food");
     expect(JSON.stringify(clause)).toBe(before);
+  });
+});
+
+describe("native timing realization uses selected language and event owners", () => {
+  it.each(["en", "th"])("uses the selected %s interval unit for coded and structured timing", locale => {
+    const i18n = { locale: "clinic-interval-" + locale, inherit: locale,
+      course: { timeUnit: (unit: string) => unit === "h" ? "clinic-hour" : undefined } };
+    for (const timing of [
+      { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "Q6H" }] } },
+      { repeat: { period: 6, periodUnit: FhirPeriodUnit.Hour } }
+    ]) {
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing };
+      for (const input of [row, toDosageDetails([row])])
+        expect(formatSig(input, "long", { locale, i18n, realizationMode: "normalized" }))
+          .toContain(locale === "en" ? "every 6 clinic-hour" : "ทุก 6 clinic-hour");
+    }
+    for (const period of [1, 6]) {
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { period, periodUnit: FhirPeriodUnit.Hour } } };
+      expect(formatSig(row, "long", { locale })).toContain(locale === "en"
+        ? `every ${period} ${period === 1 ? "hour" : "hours"}` : `ทุก ${period} ชั่วโมง`);
+    }
+  });
+
+  it.each(["code", "event", "clock"] as const)("retains the %s event owner in a partial-period preview", owner => {
+    const timing: NonNullable<FhirR6DosageInstruction["step"][number]["component"][number]["timing"]> = {
+      code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "AM" }] },
+      repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        endOffset: { value: 1, unit: "h", system: "http://unitsofmeasure.org", code: "h" },
+        ...(owner === "event" ? { when: [EventTiming.Evening] } : owner === "clock" ? { timeOfDay: ["20:00:00"] } : {}) }
+    };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing
+    }] }] };
+    const before = JSON.stringify(raw);
+    for (const input of [raw, toFhirR5Dosages(raw)]) for (const locale of ["en", "th"])
+      for (const style of ["short", "long"] as const) {
+        const text = formatSig(input, style, { locale, realizationMode: "normalized" });
+        if (owner === "code") expect(text).toContain(locale === "en" ? style === "short" ? "MORN" : "morning" : "เช้า");
+        else {
+          expect(text).not.toContain(locale === "en" ? style === "short" ? "MORN" : "morning" : "เช้า");
+          if (owner === "event") expect(text).toContain(locale === "en" ? style === "short" ? "EVE" : "evening" : "เย็น");
+          else expect(text).toContain(locale === "en" && style === "long" ? "8:00 pm" : "20:00");
+        }
+        expect(text).toContain(locale === "en" ? "final 1 hour" : "1 ชั่วโมงสุดท้าย");
+      }
+    expect(raw.step[0].component[0].timing?.code).toEqual(timing.code);
+    expect(JSON.stringify(raw)).toBe(before);
   });
 });

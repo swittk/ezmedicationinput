@@ -1197,16 +1197,9 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined, word
     case "period": {
       const interval = rangeEnd !== undefined
         ? `${stripTrailingZero(period!)} ถึง ${stripTrailingZero(rangeEnd)}` : stripTrailingZero(period!);
-      let unit: string | undefined;
-      switch (periodUnit) {
-        case FhirPeriodUnit.Second: unit = words.timeUnit(periodUnit, periodMax ?? period) ?? periodUnit; break;
-        case FhirPeriodUnit.Minute: unit = "นาที"; break;
-        case FhirPeriodUnit.Hour: unit = "ชั่วโมง"; break;
-        case FhirPeriodUnit.Day: unit = "วัน"; break;
-        case FhirPeriodUnit.Week: unit = "สัปดาห์"; break;
-        case FhirPeriodUnit.Month: unit = "เดือน"; break;
-        case FhirPeriodUnit.Year: unit = "ปี"; break;
-      }
+      const unitValue = rangeEnd === undefined ? period : undefined;
+      const unit = words.timeUnit(periodUnit!, unitValue) ??
+        THAI_COURSE.timeUnit(periodUnit!, unitValue) ?? periodUnit;
       return `${countPrefix}ทุก ${interval} ${unit}`;
     }
     case "calendar-count":
@@ -2073,7 +2066,7 @@ function formatLongThai(
   words: CourseLanguage = THAI_COURSE,
   resolvedMethod?: MedicationInstructionActionDefinition,
   authoredPrimary?: string,
-  deferredDirections?: { text?: string }
+  deferredDirections?: { text?: string; current?: string }
 ): string {
   if (
     !authoredPrimary && options?.realizationMode === "roundtrip" &&

@@ -5636,6 +5636,28 @@ describe("required graph conditions beside independent Boolean guards", () => {
 
 
 describe("independent primary graph rendering owners", () => {
+  it.each([false, true])("retains explicit accompaniment under a negated medication action (milk=%s)", accompanied => {
+    const source = "Do not swallow the tablet" + (accompanied ? " with milk" : "");
+    const frame = parseInstructionActions(source)[0];
+    const before = JSON.stringify(frame);
+    if (accompanied) expect(frame.args).toContainEqual(expect.objectContaining({ text: "milk", relation: AdviceRelation.With }));
+    for (const locale of ["en", "th"]) {
+      const text = realizeInstructionAction(frame, locale);
+      expect(text).toContain(locale === "en" ? "Do not swallow" : "ห้ามกลืน");
+      expect(text).toContain(locale === "en" ? "tablet" : "ยาเม็ด");
+      if (accompanied) expect(text).toContain("milk");
+      else expect(text).not.toContain("milk");
+    }
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: [frame] })!] };
+    for (const input of [row, toDosageDetails([row])]) for (const locale of ["en", "th"]) {
+      const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain(locale === "en" ? "Do not swallow" : "ห้ามกลืน");
+      if (accompanied) expect(text).toContain("milk");
+      else expect(text).not.toContain("milk");
+    }
+    expect(JSON.stringify(frame)).toBe(before);
+  });
+
   it.each(["clock", "event", "duration only", "clock only"] as const)("retains Rinse duration and %s independently", kind => {
     const source = "Rinse the mouth for 1 minute at 08:00";
     const frame: AdviceFrame = { ...parseInstructionActions("Rinse mouth")[0], sourceText: "", args: [
@@ -5696,6 +5718,8 @@ describe("independent primary graph rendering owners", () => {
       } else {
         expect(en).toContain("both nostrils"); expect(en).not.toContain("each nostril");
         expect(th).not.toContain("ข้างละ");
+        expect(th).toContain("รูจมูกทั้งสองข้าง");
+        expect(th).toContain("1 มิลลิลิตร");
       }
       expect(en).toContain("1 " + (unit === "spray" ? "spray" : "mL"));
       expect(en.toLowerCase()).toContain("gently");

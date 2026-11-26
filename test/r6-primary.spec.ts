@@ -1662,15 +1662,30 @@ describe("source-less repeating and overlapping treatment windows", () => {
       for (const input of variants(course)) {
         const en = formatSig(input, "long", { locale: "en" });
         const stated: number[] = [];
-        for (const match of en.matchAll(/No doses from (\d+) days? after treatment start until (\d+) days? after treatment start/gu)) {
-          for (let day = Number(match[1]); day < Number(match[2]); day++) stated.push(day + 1);
+        let interpretedPauses = 0;
+        for (const match of en.matchAll(/No doses from (?:(\d+) days? after )?(treatment start|each cycle start) until (\d+) days? after \2/gu)) {
+          interpretedPauses++;
+          for (let day = Number(match[1] ?? 0); day < Number(match[3]); day++) stated.push(day + 1);
         }
+        expect(interpretedPauses).toBe(en.match(/No doses\b/gu)?.length ?? 0);
         expect(stated).toEqual(uncovered);
         expect(calculateTotalUnits({
           dosage: input, timeZone: "Asia/Bangkok", orderedAt: "2026-11-02T00:00:00+07:00",
           from: "2026-11-02T00:00:00+07:00", durationValue: 28, durationUnit: FhirPeriodUnit.Day
         }).totalUnits).toBe(7 + (left[1] - left[0]) * 0.5 + (right[1] - right[0]) * 0.25);
       }
+    }
+  });
+
+  it("keeps the leading untreated interval explicit without hiding an active first day", () => {
+    const course: FhirR6DosageInstruction = { step: [step(2, 5, 1)] };
+    for (const input of variants(course)) {
+      const en = formatSig(input, "long", { locale: "en" });
+      expect(en).toContain("No doses from treatment start until 2 days after treatment start");
+      expect(en.match(/No doses/gu)).toHaveLength(1);
+      expect(calculateTotalUnits({ dosage: input, timeZone: "Asia/Bangkok",
+        orderedAt: "2026-11-02T00:00:00+07:00", from: "2026-11-02T00:00:00+07:00",
+        durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(3);
     }
   });
 
@@ -1957,13 +1972,17 @@ it("normalizes editable R5 and R6 course previews while retaining original wordi
     expect(phases[1]).toMatch(/Instill 1 drop four times daily[\s\S]*in the right eye/iu);
     for (const phase of phases) {
       expect(phase.match(/\bInstill\b/giu)).toHaveLength(1);
+      expect(phase).toContain("for 1 week");
       expect(phase).not.toMatch(/\b(?:left|both) eyes?\b|\bbilateral\b/iu);
     }
     const thaiPhases = formatSig(input, "long", { locale: "th", realizationMode: "normalized" }).split("จากนั้น");
     expect(thaiPhases).toHaveLength(2);
     expect(thaiPhases[0]).toMatch(/หยอดตาขวา ครั้งละ 1 หยด ทุก 2 ชั่วโมง/u);
     expect(thaiPhases[1]).toMatch(/หยอดตาขวา ครั้งละ 1 หยด วันละ 4 ครั้ง/u);
-    for (const phase of thaiPhases) expect(phase).not.toMatch(/ตาซ้าย|ทั้งสอง|สองข้าง/u);
+    for (const phase of thaiPhases) {
+      expect(phase).toContain("เป็นเวลา 1 สัปดาห์");
+      expect(phase).not.toMatch(/ตาซ้าย|ทั้งสอง|สองข้าง/u);
+    }
     expect(input.renderedInstruction).toBe(source);
   }
   expect(parsed.fhirNext.renderedInstruction).toBe(source);
