@@ -734,10 +734,13 @@ function targetHasClinicalCondition(
  * source scope without becoming a procedure or losing its medication head. */
 function selectedClinicalGuardSign(
   context: HpsgClauseContext, start: number, relation: AdviceRelation,
-  frame: AdviceFrame, guard: ParsedMedicationGuard | undefined
+  frame: AdviceFrame, guard: ParsedMedicationGuard | undefined, frames: readonly AdviceFrame[]
 ): HpsgSign | undefined {
   const lead = context.tokens[start];
   if (!guard || lead.sourceStart < guard.start || lead.sourceStart >= guard.markerEnd) return undefined;
+  // Only an activity wholly owned by this antecedent needs graph exclusion.
+  // Ordinary guards keep their existing clinical path without extra scope data.
+  if (!frames.some(candidate => candidate.span.start >= guard.start && candidate.span.end <= guard.end)) return undefined;
   const condition: HpsgConditionFeature = {
     relation, text: guard.text,
     fullText: context.state.input.slice(Math.min(guard.start, frame.span.start), Math.max(guard.end, frame.span.end)).trim(),
@@ -853,7 +856,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       // Select the positive dose before procedural eligibility can skip it.
       // Its clinical condition cannot transfer to later counseling.
       if (targetHasClinicalCondition(context, start, frame)) {
-        const sign = selectedClinicalGuardSign(context, start, relation, frame, guard);
+        const sign = selectedClinicalGuardSign(context, start, relation, frame, guard, frames);
         return sign ? [sign] : [];
       }
       if (isScopeTarget(context, frame)) {
@@ -902,7 +905,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const gap = context.state.input.slice(previous.span.end, lead.sourceStart);
     if (hasStrongBoundary(gap)) return [];
     if (targetHasClinicalCondition(context, start, previous)) {
-      const sign = selectedClinicalGuardSign(context, start, relation, previous, guard);
+      const sign = selectedClinicalGuardSign(context, start, relation, previous, guard, frames);
       return sign ? [sign] : [];
     }
     if (gap.trim() && !explicitlySequences(context, previous.span.end, lead.sourceStart)) return [];
