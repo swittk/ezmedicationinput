@@ -19,7 +19,8 @@ import {
   instructionGraphActionHasSequenceSuccessor,
   instructionGraphCanStandAlone,
   isEmptyStomachInstruction,
-  stripTrailingZero
+  stripTrailingZero,
+  routeCodeFromDisplayText
 } from "./format";
 import { findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { TH_POSITIVE_MODALITY_PREFIX } from "./instruction-action-locale-adapter";
@@ -974,7 +975,8 @@ function resolveRouteGrammarThai(clause: CanonicalSigClause): ThaiRouteGrammar {
   if (routeCode && THAI_ROUTE_GRAMMAR[routeCode]) {
     return THAI_ROUTE_GRAMMAR[routeCode] ?? DEFAULT_THAI_ROUTE_GRAMMAR;
   }
-  const grammar = grammarFromRouteTextThai(clause.route?.text);
+  const textRoute = routeCodeFromDisplayText(clause.route?.text, false);
+  const grammar = textRoute ? THAI_ROUTE_GRAMMAR[textRoute] : undefined;
   if (grammar) {
     return grammar;
   }
@@ -985,53 +987,6 @@ function resolveRouteGrammarThai(clause: CanonicalSigClause): ThaiRouteGrammar {
     );
   }
   return DEFAULT_THAI_ROUTE_GRAMMAR;
-}
-
-function grammarFromRouteTextThai(text: string | undefined): ThaiRouteGrammar | undefined {
-  if (!text) {
-    return undefined;
-  }
-  const normalized = text.trim().toLowerCase();
-  if (!normalized) {
-    return undefined;
-  }
-  if (normalized.includes("mouth") || normalized.includes("oral")) {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Oral route"]];
-  }
-  if (normalized.includes("ophthalm")) {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Ophthalmic route"]];
-  }
-  if (normalized.includes("intravitreal")) {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Intravitreal route (qualifier value)"]];
-  }
-  if (normalized.includes("topical")) {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Topical route"]];
-  }
-  if (normalized.includes("transdermal")) {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Transdermal route"]];
-  }
-  if (normalized.includes("subcutaneous") || normalized === "sc" || normalized === "sq") {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Subcutaneous route"]];
-  }
-  if (normalized.includes("intramuscular") || normalized === "im") {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Intramuscular route"]];
-  }
-  if (normalized.includes("intravenous") || normalized === "iv") {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Intravenous route"]];
-  }
-  if (normalized.includes("rectal") || normalized.includes("rectum")) {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Per rectum"]];
-  }
-  if (normalized.includes("vagin")) {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Per vagina"]];
-  }
-  if (normalized.includes("nasal")) {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Nasal route"]];
-  }
-  if (normalized.includes("inhal")) {
-    return THAI_ROUTE_GRAMMAR[RouteCode["Respiratory tract route (qualifier value)"]];
-  }
-  return undefined;
 }
 
 function formatDoseThaiShort(dose: CanonicalDoseExpr | undefined): string | undefined {

@@ -231,7 +231,7 @@ function scheduleOf(clause: CanonicalSigClause): CanonicalScheduleExpr {
   return clause.schedule ?? {};
 }
 
-function grammarFromRouteText(text: string | undefined): RouteGrammar | undefined {
+export function routeCodeFromDisplayText(text: string | undefined, includeOtic: boolean): RouteCode | undefined {
   if (!text) {
     return undefined;
   }
@@ -240,43 +240,44 @@ function grammarFromRouteText(text: string | undefined): RouteGrammar | undefine
     return undefined;
   }
   if (normalized.includes("mouth") || normalized.includes("oral")) {
-    return ROUTE_GRAMMAR[RouteCode["Oral route"]];
+    return RouteCode["Oral route"];
   }
   if (normalized.includes("ophthalm")) {
-    return ROUTE_GRAMMAR[RouteCode["Ophthalmic route"]];
+    return RouteCode["Ophthalmic route"];
   }
   if (normalized.includes("intravitreal")) {
-    return ROUTE_GRAMMAR[RouteCode["Intravitreal route (qualifier value)"]];
+    return RouteCode["Intravitreal route (qualifier value)"];
   }
   if (normalized.includes("topical")) {
-    return ROUTE_GRAMMAR[RouteCode["Topical route"]];
+    return RouteCode["Topical route"];
   }
   if (normalized.includes("transdermal")) {
-    return ROUTE_GRAMMAR[RouteCode["Transdermal route"]];
+    return RouteCode["Transdermal route"];
   }
   if (normalized.includes("subcutaneous") || normalized === "sc" || normalized === "sq") {
-    return ROUTE_GRAMMAR[RouteCode["Subcutaneous route"]];
+    return RouteCode["Subcutaneous route"];
   }
   if (normalized.includes("intramuscular") || normalized === "im") {
-    return ROUTE_GRAMMAR[RouteCode["Intramuscular route"]];
+    return RouteCode["Intramuscular route"];
   }
   if (normalized.includes("intravenous") || normalized === "iv") {
-    return ROUTE_GRAMMAR[RouteCode["Intravenous route"]];
+    return RouteCode["Intravenous route"];
   }
   if (normalized.includes("rectal") || normalized.includes("rectum")) {
-    return ROUTE_GRAMMAR[RouteCode["Per rectum"]];
+    return RouteCode["Per rectum"];
   }
   if (normalized.includes("vagin")) {
-    return ROUTE_GRAMMAR[RouteCode["Per vagina"]];
+    return RouteCode["Per vagina"];
   }
-  if (normalized.includes("otic") || normalized.includes("ear")) {
-    return ROUTE_GRAMMAR[RouteCode["Otic route"]];
+  // Otic text remains an English fallback; Thai requires its existing coded route.
+  if (includeOtic && (normalized.includes("otic") || normalized.includes("ear"))) {
+    return RouteCode["Otic route"];
   }
   if (normalized.includes("nasal")) {
-    return ROUTE_GRAMMAR[RouteCode["Nasal route"]];
+    return RouteCode["Nasal route"];
   }
   if (normalized.includes("inhal")) {
-    return ROUTE_GRAMMAR[RouteCode["Respiratory tract route (qualifier value)"]];
+    return RouteCode["Respiratory tract route (qualifier value)"];
   }
   return undefined;
 }
@@ -286,7 +287,8 @@ function resolveRouteGrammar(clause: CanonicalSigClause): RouteGrammar {
   if (routeCode && ROUTE_GRAMMAR[routeCode]) {
     return ROUTE_GRAMMAR[routeCode] ?? DEFAULT_ROUTE_GRAMMAR;
   }
-  return grammarFromRouteText(clause.route?.text) ?? DEFAULT_ROUTE_GRAMMAR;
+  const textRoute = routeCodeFromDisplayText(clause.route?.text, true);
+  return (textRoute ? ROUTE_GRAMMAR[textRoute] : undefined) ?? DEFAULT_ROUTE_GRAMMAR;
 }
 
 function resolveMethodVerb(clause: CanonicalSigClause, grammar: RouteGrammar): string {
