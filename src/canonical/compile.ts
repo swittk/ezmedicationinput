@@ -34,13 +34,20 @@ const quantity = (
 ): CanonicalMeasure | undefined =>
   value === undefined ? undefined : { value, unit, ...(comparator ? { comparator } : {}) };
 
+/** A single authored time denominator is shared by native and FHIR rate projection. */
+export function clinicalQuantityTimeDenominator(
+  quantity: NonNullable<CanonicalSigClause["clinicalQuantity"]>
+) {
+  return quantity.denominators.length === 1 && quantity.denominators[0].dimension === "time"
+    ? quantity.denominators[0] : undefined;
+}
+
 /** Choose the native rate shape once, preserving an authored numeric time
  * denominator. Protocol adapters only encode this clinical amount. */
 export function rateFromClinicalQuantity(
   quantity: NonNullable<CanonicalSigClause["clinicalQuantity"]>
 ) {
-  const period = quantity.denominators.length === 1 && quantity.denominators[0].dimension === "time"
-    ? quantity.denominators[0] : undefined;
+  const period = clinicalQuantityTimeDenominator(quantity);
   if (period && period.value !== 1) return {
     rateRatio: {
       numerator: { value: quantity.numerator.value, unit: quantity.numerator.unit,
@@ -98,7 +105,7 @@ function amounts(clause: CanonicalSigClause): CanonicalAmount[] | undefined {
         ...rateFromClinicalQuantity(q),
       },
     ];
-  const duration = q.administrationDuration;
+  const duration = q.administrationDuration ?? clinicalQuantityTimeDenominator(q);
   const numerator = q.rateNumerator ?? projected;
   if (!duration || !numerator || (!projected && !result?.range)) return result ? [result] : undefined;
   return [

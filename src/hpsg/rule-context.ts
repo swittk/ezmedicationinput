@@ -1,8 +1,9 @@
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
 import { Token, ParserState } from "../parser-state";
 import { shouldJoinAdjacentSourceTokens } from "../locale-detection";
-import { FhirPeriodUnit, ParseOptions } from "../types";
+import { EventTiming, FhirPeriodUnit, ParseOptions } from "../types";
 import { LexKind } from "../lexer/token-types";
+import { MAX_EVENT_TIMING_EXPRESSION_PARTS, resolveEventTimingExpression } from "../event-timing-expression";
 import { normalizeUnit } from "../unit-lexicon";
 import { isMedicationAdministrationMethod } from "./method-lexicon";
 import { FREQUENCY_NUMBER_WORDS, mapFrequencyAdverb, mapIntervalUnit } from "./timing-lexicon";
@@ -38,7 +39,13 @@ import {
   MAXIMUM_PERIOD_PREPOSITIONS,
   MAXIMUM_PERIOD_MODIFIERS,
   OCCURRENCE_CAP_PERIOD_PHRASES,
-  OCCURRENCE_COUNT_WORDS
+  OCCURRENCE_COUNT_WORDS,
+  parseClockToken,
+  RELATIVE_TIME_END_LEADS,
+  NEXT_DAY_MODIFIERS,
+  NEXT_DAY_HEADS,
+  NEXT_DAY_PREPOSITIONS,
+  NEXT_DAY_START_LEADS
 } from "./lexical-classes";
 export { normalizeTokenLower, parseClockToken } from "./lexical-classes";
 import { HpsgLexicalRule, HpsgSign } from "./signature";
@@ -280,7 +287,7 @@ export function clinicalDurationAt(context: QuantityLexicalContext, start: numbe
   // The fraction selects its unit complement, including "of an hour".
   // Whole duration numbers retain their direct unit boundary.
   if (!rawUnit && value !== undefined && value > 0 &&
-      (value < 1 || denominator !== undefined || qualified &&
+      (value < 1 || mixed !== undefined || denominator !== undefined || qualified &&
         DOSE_FRACTION_DENOMINATOR_WORDS.has(normalizeTokenLower(context.tokens[qualified.numericIndex])))) {
     while (quantityTokenAvailable(context, unitIndex) &&
         DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[unitIndex]))) unitIndex++;
@@ -524,10 +531,9 @@ export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: n
   if (!quantityTokens) return undefined;
   const unitSurface = normalizeTokenLower(unitToken);
   const compact = compactMaximumPeriodAt(context, unitIndex, unitSurface);
-  // Quantitative count denominators belong to the occurrence-cap constituent.
-  // Daypart maxima retain their existing authored-only instruction owner.
-  if (OCCURRENCE_COUNT_WORDS.has(unitSurface) || compact && !("daypart" in compact.period) &&
-      OCCURRENCE_COUNT_WORDS.has(compact.unitSurface)) return undefined;
+  // Occurrence nouns keep their own count and period constituent, including
+  // daypart maxima that remain complete authored instructions.
+  if (OCCURRENCE_COUNT_WORDS.has(compact?.unitSurface ?? unitSurface)) return undefined;
   const unit = normalizeUnit(compact?.unitSurface ?? unitSurface, context.options);
   if (!unit) return undefined;
   matched.push(...quantityTokens);
@@ -543,4 +549,67 @@ export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: n
       !hasPrecedingMedicationAmount(context, headStart)) return undefined;
   if (!periodFirst) matched.push(...period.tokens);
   return { tokens: matched, amount, unit, period, headStart, comparative };
+}
+
+/** Numeric and locale-licensed named clocks share one end complement owner. */
+export function courseEndClockAt(tokens: readonly Token[], start: number, limit = tokens.length):
+  { tokens: Token[]; value?: string; event?: EventTiming } | undefined {
+  const first = start < limit ? tokens[start] : undefined;
+  if (!first) return undefined;
+  const next = start + 1 < limit ? tokens[start + 1] : undefined;
+  const numeric = parseClockToken(first, next);
+  if (numeric) return numeric;
+  const parts: string[] = [];
+  for (let index = start; index < limit && parts.length < MAX_EVENT_TIMING_EXPRESSION_PARTS; index++)
+    parts.push(normalizeTokenLower(tokens[index]));
+  const named = resolveEventTimingExpression(parts);
+  return named ? { tokens: tokens.slice(start, start + named.length), event: named.timing } : undefined;
+}
+
+function hasRelativeTimeEndGovernor(tokens: readonly Token[], start: number): boolean {
+  let before = start - 1;
+  let previous = tokens[before];
+  if (previous && EVENT_ARTICLE_TOKENS.has(previous.canonical ?? previous.lower))
+    previous = tokens[--before];
+  if (previous && NEXT_DAY_PREPOSITIONS.has(previous.canonical ?? previous.lower))
+    previous = tokens[--before];
+  // The same complete clock complement belongs to the end construction,
+  // whether it was authored numerically or as a licensed event name.
+  const clockEnd = before + 1;
+  for (let clockStart = Math.max(0, clockEnd - Math.max(2, MAX_EVENT_TIMING_EXPRESSION_PARTS)); clockStart < clockEnd; clockStart++) {
+    const clock = courseEndClockAt(tokens, clockStart, clockEnd);
+    if (clock && clockStart + clock.tokens.length === clockEnd) {
+      before = clockStart - 1;
+      break;
+    }
+  }
+  const governor = tokens[before];
+  return Boolean(governor && RELATIVE_TIME_END_LEADS.has(governor.canonical ?? governor.lower));
+}
+/** A daypart inside UNTIL + NEXT is an end complement, not a recurring event. */
+export function isEndBoundDaypartAt(tokens: readonly Token[], head: number): boolean {
+  const modifier = tokens[head - 1];
+  return Boolean(modifier && NEXT_DAY_MODIFIERS.has(modifier.canonical ?? modifier.lower) &&
+    hasRelativeTimeEndGovernor(tokens, head - 1));
+}
+/** Bounded NEXT + day/daypart nominal, with an optional locale article. */
+export function nextDayOnsetAt(tokens: readonly Token[], start: number, limit: number):
+  { headIndex: number; tokenEnd: number; explicitStart: boolean } | undefined {
+  const first = tokens[start];
+  if (!first || start >= limit) return undefined;
+  const explicitStart = NEXT_DAY_START_LEADS.has(first.canonical ?? first.lower);
+  let cursor = start + (explicitStart ? 1 : 0);
+  const preposition = tokens[cursor];
+  if (explicitStart && preposition && NEXT_DAY_PREPOSITIONS.has(preposition.canonical ?? preposition.lower)) cursor++;
+  const article = tokens[cursor];
+  if (article && EVENT_ARTICLE_TOKENS.has(article.canonical ?? article.lower)) cursor++;
+  const modifier = tokens[cursor];
+  if (!modifier || !NEXT_DAY_MODIFIERS.has(modifier.canonical ?? modifier.lower)) return undefined;
+  const headIndex = cursor + 1;
+  const head = headIndex < limit ? tokens[headIndex] : undefined;
+  if (!head || !NEXT_DAY_HEADS.has(head.canonical ?? head.lower)) return undefined;
+  // An end governor owns this nominal, including a cover starting at NEXT
+  // rather than its article. Ordinary non-NEXT tokens never inspect it.
+  if (hasRelativeTimeEndGovernor(tokens, start)) return undefined;
+  return { headIndex, tokenEnd: headIndex + 1, explicitStart };
 }

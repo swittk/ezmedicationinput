@@ -3036,13 +3036,15 @@ describe("round60 typed meaning and interchange ownership", () => {
   });
 
   it.each(["8.30", "08:30", "8 AM"])("keeps an UNTIL next-day clock as an end complement: %s", clock => {
-    const tokens = tokenize("until " + clock + " the next morning");
-    return import("../src/hpsg/lexical-classes").then(({ nextDayOnsetAt, isEndBoundDaypartAt }) => {
-      const next = tokens.findIndex(token => token.lower === "next");
-      const article = tokens.findIndex(token => token.lower === "the");
-      expect(nextDayOnsetAt(tokens, next, tokens.length)).toBeUndefined();
-      expect(nextDayOnsetAt(tokens, article, tokens.length)).toBeUndefined();
-      expect(isEndBoundDaypartAt(tokens, next + 1)).toBe(true);
+    return import("../src/hpsg/rule-context").then(({ nextDayOnsetAt, isEndBoundDaypartAt }) => {
+      for (const lead of ["until", "by"]) {
+        const tokens = tokenize(lead + " " + clock + " the next morning");
+        const next = tokens.findIndex(token => token.lower === "next");
+        const article = tokens.findIndex(token => token.lower === "the");
+        expect(nextDayOnsetAt(tokens, next, tokens.length)).toBeUndefined();
+        expect(nextDayOnsetAt(tokens, article, tokens.length)).toBeUndefined();
+        expect(isEndBoundDaypartAt(tokens, next + 1)).toBe(true);
+      }
       const start = tokenize("the next morning");
       expect(nextDayOnsetAt(start, 0, start.length)).toMatchObject({ headIndex: 2, tokenEnd: 3 });
     });

@@ -4959,9 +4959,9 @@ describe("round62 review: typed grammar and partial display facts", () => {
     }
   });
 
-  it.each(["increase by 1 the next day", "Take 1 tablet daily; increase by 1 the next day"])(
+  it.each(["increase by 1 the next day", "Take 1 tablet daily; increase by 1 the next day", "increase by 0.50 tablet the next day"])(
     "keeps the next-day lexical onset after a non-clock adjustment numeral: %s", async source => {
-      const { nextDayOnsetAt } = await import("../src/hpsg/lexical-classes");
+      const { nextDayOnsetAt } = await import("../src/hpsg/rule-context");
       const tokens = tokenize(source), start = tokens.findIndex(token => token.lower === "the");
       expect(nextDayOnsetAt(tokens, start, tokens.length)).toMatchObject({ headIndex: start + 2, tokenEnd: start + 3 });
       expect(parseSig(source).input).toBe(source);
@@ -4969,7 +4969,7 @@ describe("round62 review: typed grammar and partial display facts", () => {
 
   it.each(["by 08:00 the next day", "until 8 AM next day"])(
     "keeps an actual end-governor clock out of next-day onset: %s", async source => {
-      const { nextDayOnsetAt } = await import("../src/hpsg/lexical-classes");
+      const { nextDayOnsetAt } = await import("../src/hpsg/rule-context");
       const tokens = tokenize(source), start = tokens.findIndex(token => token.lower === "the" || token.lower === "next");
       expect(nextDayOnsetAt(tokens, start, tokens.length)).toBeUndefined();
     });
@@ -4983,6 +4983,7 @@ describe("round62 review: typed grammar and partial display facts", () => {
     for (const value of [parsed.meta.canonical.course, ...views(parsed.fhirNext)]) {
       const member = importCanonicalCourse(value).stages[0].administrations[0];
       expect(member.amounts![0].quantity).toMatchObject({ value: 50, unit: "mL" });
+      expect(member.amounts![0].rate).toMatchObject({ value: 30, unit: "mL/h" });
       expect(member.schedule?.recurrence?.count).toBe(daily ? undefined : 2);
       expect(nextDueDoses(value, query)).toEqual(expected);
       expect(calculateTotalUnits({ dosage: value, ...query, durationValue: 3, durationUnit: "d" }))
@@ -5267,3 +5268,52 @@ describe("round74 source and timing authority", () => {
 });
 
 }
+
+
+describe("fronted inherited infusion intervals", () => {
+  it.each(["in", "over", "after"])("keeps the typed %s interval with its quantified successor", relation => {
+    for (const separator of [" ", ", "]) {
+      const source = "Infuse 100 mL over 1 hour, then " + relation + " 2 hours" + separator + "200 mL";
+      const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+      for (const value of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const course = importCanonicalCourse(value);
+        expect(course.stages).toHaveLength(2);
+        expect(course.stages.map(stage => stage.administrations.length)).toEqual([1, 1]);
+        const next = course.stages[1].administrations[0];
+        expect(next.amounts?.[0].quantity).toMatchObject({ value: 200, unit: "mL" });
+        expect(next.method?.coding?.[0].code).toBe("764794000");
+        expect(next.schedule?.recurrence?.count).toBe(1);
+        if (relation === "after") {
+          expect(next.delayMinutes).toBe(120);
+          expect(next.schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+        } else {
+          expect(next.delayMinutes).toBeUndefined();
+          expect(next.schedule?.recurrence).toMatchObject({ occurrenceDuration: relation === "in" ? 120 : 2,
+            occurrenceDurationUnit: relation === "in" ? "min" : "h" });
+        }
+        const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 3 };
+        expect(nextDueDoses(value, query)).toEqual(["2026-12-01T00:00:00+00:00",
+          relation === "after" ? "2026-12-01T03:00:00+00:00" : "2026-12-01T01:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage: value, ...query, durationValue: 6, durationUnit: "h" }))
+          .toMatchObject({ totalUnits: 300, unit: "mL" });
+      }
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(parsed)).toBe(before);
+    }
+  });
+
+  it.each([
+    ["Take 1 tablet at 8.30", ["08:30:00"]],
+    ["Take 1 tablet PO 08.30", ["08:30:00"]],
+    ["Take 1 tablet 08.30 and 20.30", ["08:30:00", "20:30:00"]],
+    ["กิน 1 เม็ด 08.30", ["08:30:00"]]
+  ])("preserves ordinary dotted clock ownership: %s", (source, clocks) => {
+    const parsed = parsePublicSig(source as string);
+    for (const value of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const member = importCanonicalCourse(value).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence?.clocks).toEqual(clocks);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+});

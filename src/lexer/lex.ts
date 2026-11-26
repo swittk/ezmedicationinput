@@ -319,7 +319,7 @@ function tryNumericRangeToken(
   surfaces: SurfaceToken[],
   index: number,
   input: string
-): { token: LexToken; nextIndex: number } | undefined {
+): { tokens: LexToken[]; nextIndex: number } | undefined {
   const start = surfaces[index];
   const hyphen = surfaces[index + 1];
   const end = surfaces[index + 2];
@@ -327,9 +327,15 @@ function tryNumericRangeToken(
   // A spaced left endpoint may be followed by a dash attached to its right
   // endpoint. It is the same bounded range as three separate surface tokens.
   if (isSurfaceText(start) && isNumericText(start.lower) && isSurfaceText(hyphen) &&
-      /^[-–—]/u.test(hyphen.lower) && isNumericText(hyphen.lower.slice(1))) {
-    return { token: buildToken(start.original + hyphen.original, [start, hyphen], input,
-      undefined, undefined, true), nextIndex: index + 2 };
+      /^[-–—]/u.test(hyphen.lower)) {
+    const parts = splitCompactToken(hyphen.original.slice(1));
+    if (isNumericText(parts[0])) {
+      const rangeEnd = hyphen.start + 1 + parts[0].length;
+      const tokens = [buildToken(start.original + hyphen.original[0] + parts[0],
+        [start, hyphen], input, start.start, rangeEnd, true)];
+      pushSplitParts(tokens, hyphen, parts.slice(1), input);
+      return { tokens, nextIndex: index + 2 };
+    }
   }
   if (
     !isSurfaceText(start) ||
@@ -343,7 +349,7 @@ function tryNumericRangeToken(
   }
 
   return {
-    token: buildToken(`${start.original}-${end.original}`, [start, hyphen, end], input, undefined, undefined, true),
+    tokens: [buildToken(`${start.original}-${end.original}`, [start, hyphen, end], input, undefined, undefined, true)],
     nextIndex: index + 3
   };
 }
@@ -431,6 +437,14 @@ function tryTimeLikeToken(
 }
 
 function pushTextToken(output: LexToken[], surface: SurfaceToken, input: string): void {
+  // A slash attached to its right daughter is the same separator as a spaced
+  // slash. Reuse ordinary compact-token expansion for the remaining term.
+  if (surface.original.startsWith("/") && surface.original.length > 1) {
+    output.push(buildToken("/", [surface], input, surface.start, surface.start + 1, true));
+    pushTextToken(output, { ...surface, original: surface.original.slice(1),
+      lower: surface.lower.slice(1), start: surface.start + 1 }, input);
+    return;
+  }
   const slashUnitMatch = surface.original.match(
     /^([0-9]+(?:\.[0-9]+)?)\/(d|day|days|wk|w|week|weeks|mo|month|months|hr|hrs|hour|hours|h|min|mins|minute|minutes)$/i
   );
@@ -539,7 +553,7 @@ export function lexInput(input: string): LexToken[] {
 
     const numericRange = tryNumericRangeToken(surfaces, index, input);
     if (numericRange) {
-      output.push(numericRange.token);
+      output.push(...numericRange.tokens);
       index = numericRange.nextIndex;
       continue;
     }

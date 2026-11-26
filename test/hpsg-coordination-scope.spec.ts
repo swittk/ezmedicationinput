@@ -692,7 +692,7 @@ describe('HPSG coordination cadence scope', () => {
     expect(parseMedicationGuard(input)?.condition).toMatchObject(condition);
     const parsed = parsePublicSig(input);
     const options = { from: "2026-11-02T00:00:00+07:00", orderedAt: "2026-11-02T00:00:00+07:00",
-      timeZone: "Asia/Bangkok", limit: 2 };
+      timeZone: "Asia/Bangkok", limit: 3 };
     expect(parsed.fhirNext.renderedInstruction).toBe(input);
     for (const dosage of [parsed.meta.canonical.course!, parsed.fhirNext, parsed.fhir, toDosageDetails(parsed.fhir)]) {
       let rejectingCalls = 0, acceptingCalls = 0;
@@ -706,7 +706,7 @@ describe('HPSG coordination cadence scope', () => {
         expect(predicate).toMatchObject(condition);
         acceptingCalls++;
         return true;
-      } })).toHaveLength(2);
+      } })).toEqual(["2026-11-02T09:00:00+07:00", "2026-11-03T09:00:00+07:00"]);
       expect(acceptingCalls).toBeGreaterThan(0);
     }
   });
@@ -2047,7 +2047,7 @@ describe("prefix guard constituent ownership", () => {
       expect(course.stages[0].administrations).toHaveLength(1);
       expect(course.stages[0].administrations[0].predicate).toMatchObject(condition);
       expect(course.stages[0].administrations[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
-      expect(course.stages[0].administrations[0].asNeeded?.enabled).not.toBe(true);
+      expect(course.stages[0].administrations[0].asNeeded).not.toBe(true);
     }
     expect(parsed.input).toBe(source);
     expect(parsed.fhirNext.renderedInstruction).toBe(source);

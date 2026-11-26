@@ -1,4 +1,4 @@
-import { rateFromClinicalQuantity } from "./canonical/compile";
+import { clinicalQuantityTimeDenominator, rateFromClinicalQuantity } from "./canonical/compile";
 import { resolveBodySiteRestrictionPredicate } from "./body-site-grammar";
 import { resolveMedicationInstructionActionForMethod, selectMedicationInstructionMethodCoding } from "./instruction-action-terminology";
 import {
@@ -2782,8 +2782,7 @@ function projectHpsgClinicalQuantityToFhir(
   }
   // An explicit ratio period survives even when independent coded quantities
   // do not establish a carrier administration duration.
-  const period = quantity.administrationDuration ?? (quantity.denominators.length === 1 &&
-    quantity.denominators[0].dimension === "time" ? quantity.denominators[0] : undefined);
+  const period = quantity.administrationDuration ?? clinicalQuantityTimeDenominator(quantity);
   const dose = quantity.projectedDose;
   const rate = quantity.rateNumerator ?? dose;
   if (!period || !rate || (!dose && !originalAmount?.doseRange)) return;

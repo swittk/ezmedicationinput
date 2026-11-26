@@ -914,6 +914,8 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!instructionStartIsLicensed(context, cursor, consumed.length > 0)) {
       return [];
     }
+    // A separator alone does not turn a typed medication amount into advice.
+    if (consumed.length > 0 && isExplicitDoseLead(context, cursor)) return [];
     // A separator before "up to 3 doses" is not a license to swallow a
     // clinically meaningful maximum count as unstructured advice.
     // Leave the marker for the typed timing-limit construction; the

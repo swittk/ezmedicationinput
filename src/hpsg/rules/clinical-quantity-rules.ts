@@ -9,7 +9,7 @@ import {
   quantityTokenAvailable as available, doseNumberValue, plainClinicalNumberAt, doseUnitIndexAfter,
   directDoseUnitAfter, medicationAmountAt, clinicalDurationNumber, clinicalDurationAt, precedingMethodOwnsAdministrationDuration
 } from "../rule-context";
-import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, mapIntervalUnit } from "../timing-lexicon";
+import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, mapFrequencyAdverb, mapIntervalUnit } from "../timing-lexicon";
 import {
   doseComparatorNumberAt,
   doseRangeNumberAt,
@@ -19,6 +19,7 @@ import {
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
   DOSE_FRACTION_DENOMINATOR_WORDS,
   DOSE_UNIT_CONNECTORS,
+  DAYPART_INTERVAL_TOKENS,
   MEDICATION_OBJECT_FILLERS,
   MAXIMUM_COUNT_LEAD_TOKENS,
   MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
@@ -174,10 +175,10 @@ export function clinicalRatePeriodUnit(raw: string): FhirPeriodUnit.Hour | FhirP
 function weightQuantityPeriodUnit(
   raw: string
 ): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | FhirPeriodUnit.Week | FhirPeriodUnit.Day | undefined {
-  if (/^(?:day|daily|d)$/u.test(raw)) return FhirPeriodUnit.Day;
-  const unit = mapIntervalUnit(raw);
-  return unit === FhirPeriodUnit.Hour || unit === FhirPeriodUnit.Minute || unit === FhirPeriodUnit.Week
-    ? unit : undefined;
+  if (DAYPART_INTERVAL_TOKENS.has(raw)) return undefined;
+  const unit = mapIntervalUnit(raw) ?? mapFrequencyAdverb(raw);
+  return unit === FhirPeriodUnit.Hour || unit === FhirPeriodUnit.Minute ||
+    unit === FhirPeriodUnit.Week || unit === FhirPeriodUnit.Day ? unit : undefined;
 }
 
 function hasAdministrationCue(context: HpsgClauseContext, before: number, allowPrecedingDose = false): boolean {

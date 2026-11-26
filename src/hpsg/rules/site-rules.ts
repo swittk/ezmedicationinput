@@ -44,7 +44,6 @@ import {
   INSTRUCTION_START_WORDS,
   NON_OCULAR_DOSE_UNITS,
   NON_SITE_ANCHORED_PHRASES,
-  nextDayOnsetAt,
   OCULAR_ROUTE_CODES,
   PRN_LEADS,
   PRN_STANDALONE_REASON_LEADS,
@@ -59,6 +58,7 @@ import {
 } from "../lexical-classes";
 import {
   HpsgClauseContext,
+  nextDayOnsetAt,
   sourceRangeOverlapsContextDate,
   isAmPmLower,
   isClockLikeLower,

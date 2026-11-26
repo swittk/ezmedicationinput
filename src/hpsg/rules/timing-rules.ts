@@ -54,13 +54,11 @@ import {
   DURATION_LEAD_TOKENS,
   INSTRUCTION_DURATION_UNITS,
   COURSE_DURATION_UNITS,
-  nextDayOnsetAt,
   NEXT_DAY_MODIFIERS,
   NEXT_DAY_HEADS,
   NEXT_DAY_PREPOSITIONS,
   RELATIVE_TIME_END_LEADS,
   attachedNumberUnitAt,
-  isEndBoundDaypartAt,
   NEXT_DAY_SCHEDULE_RULE,
   NEXT_DAY_ONSET_RULE,
   compactDurationParts,
@@ -93,6 +91,9 @@ import {
 } from "../lexical-classes";
 import {
   HpsgClauseContext,
+  nextDayOnsetAt,
+  isEndBoundDaypartAt,
+  courseEndClockAt,
   maximumCountLeadAt,
   maximumDosePerPeriodAt,
   maximumDosePeriodAt,
@@ -806,7 +807,7 @@ function exactCountCardinalValue(token: Token | undefined): number | undefined {
 export function maximumOccurrenceAt(
   context: Parameters<typeof maximumCountLeadAt>[0], start: number, firstLower?: string
 ): { tokens: Token[]; headStart: number; count: number;
-  period?: NonNullable<ReturnType<typeof occurrenceCapPeriodAt>> } | undefined {
+  period?: NonNullable<ReturnType<typeof maximumDosePeriodAt>> } | undefined {
   const lead = maximumCountLeadAt(context, start, firstLower);
   if (!lead) return undefined;
   const valueIndex = lead.headStart + lead.tokens.length;
@@ -821,9 +822,7 @@ export function maximumOccurrenceAt(
   if (!valueToken || context.state?.consumed.has(valueToken.index) ||
       count === undefined || !explicitOccurrence && fusedCount === undefined) return undefined;
   const countTokens = explicitOccurrence ? [valueToken, occurrenceToken] : [valueToken];
-  if (compact && "daypart" in compact.period) return undefined;
-  const maximumPeriod = compact?.period ?? maximumDosePeriodAt(context, valueIndex + countTokens.length);
-  const period = maximumPeriod && "period" in maximumPeriod ? maximumPeriod : undefined;
+  const period = compact?.period ?? maximumDosePeriodAt(context, valueIndex + countTokens.length);
   return { tokens: [...lead.tokens, ...countTokens, ...(period?.tokens ?? [])],
     headStart: lead.headStart, count, ...(period ? { period } : {}) };
 }
@@ -2618,6 +2617,16 @@ function timingRangeIsProcedureLocalDuration(
   return false;
 }
 
+function authoredMaximumConstraint(context: HpsgClauseContext, tokens: Token[], rateConstraint = false): HpsgSign {
+  const text = context.state.input.slice(tokens[0].sourceStart, tokens[tokens.length - 1].sourceEnd);
+  return lexicalSign({
+    type: "instruction-sign", rule: rateConstraint ? "hpsg.lex.instruction.rateConstraint" : "hpsg.lex.instruction.maximumPerDaypart",
+    tokens, synsem: {
+      head: {}, valence: { instructions: [{ text }] }, cont: { clauseKind: "administration" }
+    }, score: 35 + tokens.length
+  });
+}
+
 /**
  * A maximum medication quantity is a typed schedule adjunct, not another
  * administration dose. The full lexical sign owns its source span so a
@@ -2645,13 +2654,7 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     if ("daypart" in period || rateConstraint) {
       // Unsupported dimensional constraints and dayparts retain their complete
       // authored instruction without inventing a rate or cumulative limit.
-      const text = context.state.input.slice(matched[0].sourceStart, matched[matched.length - 1].sourceEnd);
-      return [lexicalSign({
-        type: "instruction-sign", rule: rateConstraint ? "hpsg.lex.instruction.rateConstraint" : "hpsg.lex.instruction.maximumPerDaypart",
-        tokens: matched, synsem: {
-          head: {}, valence: { instructions: [{ text }] }, cont: { clauseKind: "administration" }
-        }, score: 35 + matched.length
-      })];
+      return [authoredMaximumConstraint(context, matched, Boolean(rateConstraint))];
     }
 
     return [lexicalSign({
@@ -3034,6 +3037,11 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
       ? maximumOccurrenceAt(context, start, lower) : undefined;
     if (maximum?.headStart === start) {
       const { tokens: matched, count: countValue, period } = maximum;
+      if (period && "daypart" in period) {
+        const owned = context.clinicalCache.quantityTokenIndices ??= new Set<number>();
+        for (const token of matched) owned.add(token.index);
+        return [authoredMaximumConstraint(context, matched)];
+      }
       if (period) {
         signs.push(lexicalSign({
           type: "schedule-sign",
@@ -3397,7 +3405,7 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
     return undefined;
   }
   let next = start + 1;
-  const clock = parseClockToken(context.tokens[next], context.tokens[next + 1]);
+  const clock = courseEndClockAt(context.tokens, next, context.limit);
   if (clock) next += clock.tokens.length;
   const preposition = context.tokens[next];
   if (preposition && NEXT_DAY_PREPOSITIONS.has(normalizeTokenLower(preposition))) next += 1;
@@ -3425,10 +3433,8 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
   const trailingLead = context.tokens[endIndex];
   const clockLeadLength = trailingLead && CLOCK_LEAD_TOKENS.has(normalizeTokenLower(trailingLead)) ? 1 : 0;
   const clockStart = endIndex + clockLeadLength;
-  const numericClock = parseClockToken(context.tokens[clockStart], context.tokens[clockStart + 1]);
-  const clockExpression = !numericClock && clockLeadLength ? eventExpressionPartsAt(context, clockStart) : undefined;
-  const namedClock = clockExpression && resolveEventTimingExpression(clockExpression.parts);
-  const trailingClock = numericClock ?? (namedClock ? { tokens: clockExpression!.members.slice(0, namedClock.length) } : undefined);
+  const candidateClock = courseEndClockAt(context.tokens, clockStart, context.limit);
+  const trailingClock = candidateClock && (!candidateClock.event || clockLeadLength) ? candidateClock : undefined;
   if (trailingClock) endIndex += clockLeadLength + trailingClock.tokens.length;
   const tokens = tokensAvailable(context, start, endIndex - start);
   if (!tokens) return undefined;

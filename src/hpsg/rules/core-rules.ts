@@ -31,7 +31,6 @@ import {
   BODY_SITE_PARTITIVE_HEADS,
   CLOCK_LEAD_TOKENS,
   EVENT_PREPOSITIONS,
-  nextDayOnsetAt,
   COMPOUND_DOSE_UNITS,
   CONNECTORS,
   COORDINATED_NOUN_METHOD_VERBS,
@@ -81,6 +80,7 @@ import {
 } from "../method-lexicon";
 import {
   HpsgClauseContext,
+  nextDayOnsetAt,
   sourceRangeOverlapsContextDate,
   isClockLikeLower,
   isAmPmLower,

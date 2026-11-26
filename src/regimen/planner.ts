@@ -921,10 +921,15 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       inheritTrailingDurationFromNext: inheritTrailingDurationFromNext || undefined });
     return true;
   };
+  const possibleQuantityDenominator = (site: BoundarySite) => site.kind === 'slash' &&
+    tokens[site.rightIndex]?.kind === LexKind.Number &&
+    Boolean(normalizeUnit(lexeme(tokens[site.tokenIndex - 1]), options));
   const probeBoundary = (rightIndex: number, broad = false): BoundarySite | undefined => {
     const rightStart = tokens[rightIndex]?.sourceStart ?? input.length;
     for (const site of sites) {
-      if (site.start <= rightStart || site.kind === 'adjacent-dose') continue;
+      // Keep a possible unit denominator inside the bounded chart probe.
+      // The selected quantity constituent still decides whether its slash is owned.
+      if (site.start <= rightStart || site.kind === 'adjacent-dose' || possibleQuantityDenominator(site)) continue;
       if (broad && (site.kind === 'coordination' || site.kind === 'sequence' || site.kind === 'punctuation')) continue;
       if (!owners.owner(site.start)) return site;
     }
@@ -1088,8 +1093,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     } else if (site.kind === 'hard' || site.kind === 'slash') {
       const right = tokens[site.rightIndex];
       let denominatorOwner: 'maximum' | 'clinical-quantity' | undefined;
-      if (site.kind === 'slash' && right?.kind === LexKind.Number &&
-          normalizeUnit(lexeme(tokens[site.tokenIndex - 1]), options)) {
+      if (possibleQuantityDenominator(site)) {
         // A spaced denominator belongs to its selected typed quantity sign.
         // Reuse the cached evidence for this ambiguous unit/slash/number shape;
         // an unrelated slash still separates independent regimens.
@@ -1145,11 +1149,11 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         // Preserve that typed attachment before evaluating the phase boundary.
         if (site.kind === 'sequence' && nextBoundary?.kind === 'comma') {
           const prefix = evidence.probe(rightStart, end);
-          if (!prefix.hasHead && (prefix.clause.schedule?.treatmentStartOffsetDays !== undefined ||
-              prefix.clause.schedule?.phaseStartReference)) {
+          if (!prefix.hasHead && !prefix.hasDose && (prefix.hasSchedule ||
+              prefix.clause.schedule?.treatmentStartOffsetDays !== undefined || prefix.clause.schedule?.phaseStartReference)) {
             const administrationEnd = probeEnd(nextBoundary.rightIndex);
             const full = evidence.probe(rightStart, administrationEnd);
-            if (full.complete && full.hasHead && full.hasDose) end = administrationEnd;
+            if (full.complete && full.hasDose) end = administrationEnd;
           }
         }
         // A prepared dose and its following administration form one right
@@ -1238,7 +1242,11 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
           // independent administration before this comma. The prefix probe is
           // shared with the grammatical proposals above.
           const prefix = evidence.probe(start, site.start);
-          if (prefix.complete && prefix.clause.route && !prefix.hasHead && !prefix.hasSchedule && !prefix.prn) {
+          const fronted = inheritedAdministration && !prefix.hasHead && !prefix.hasDose && prefix.hasSchedule
+            ? evidence.probe(start, end) : undefined;
+          if (fronted?.complete && fronted.hasDose) {
+            proposals.push(keep('regimen.fronted-adjunct', 850, 'whole.completeWithFrontedAdjunct', true));
+          } else if (prefix.complete && prefix.clause.route && !prefix.hasHead && !prefix.hasSchedule && !prefix.prn) {
             proposals.push(keep('structure.route-complement', 500, 'left.typed-route-only', true));
           } else {
             // An infusion's volume and rate can be comma-separated arguments

@@ -556,7 +556,7 @@ export function applyAdministrationDurationSemantics(
   // an independent course duration and other temporal relations stay intact.
   let inheritedInterval = false;
   if (inheritedMethod && schedule.administrationOffsetMinutes !== undefined &&
-      intervalSpanCount === 1 && intervalSpan && intervalSpan.start > methodEnd) {
+      intervalSpanCount === 1 && intervalSpan && intervalSpan.start >= methodEnd) {
     for (const token of state.tokens) {
       if (token.sourceStart !== intervalSpan.start) continue;
       inheritedInterval = introducers.has(token.canonical ?? token.lower);
