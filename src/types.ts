@@ -50,6 +50,7 @@ export interface FhirExtension {
   _valueString?: FhirPrimitiveElement;
   valueDate?: string;
   valueBoolean?: boolean;
+  _valueBoolean?: FhirPrimitiveElement;
   valueInteger?: number;
   _valueInteger?: FhirPrimitiveElement;
   valueDecimal?: number;
@@ -75,7 +76,8 @@ export interface FhirExtension {
 /** R6 Extension values retain their native datatype contracts. */
 export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity" | "valueRatio" | "valueTiming" | "valueReference" | "valueCodeableReference" |
   "valueCoding" | "valueCodeableConcept" | "valueRange" | "valueExpression" |
-  "_valueCode" | "_valueString" | "_valueDecimal" | "_valueTime" | "_valueInteger"> {
+  "_valueCode" | "_valueString" | "_valueDecimal" | "_valueTime" | "_valueInteger" | "_valueBoolean"> {
+  _valueBoolean?: FhirR6PrimitiveElement;
   _valueCode?: FhirR6PrimitiveElement;
   _valueString?: FhirR6PrimitiveElement;
   _valueDecimal?: FhirR6PrimitiveElement;

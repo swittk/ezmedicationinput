@@ -3860,6 +3860,48 @@ describe("round39 external interchange ownership and positional primitives", () 
     }
   });
 
+  it("preserves fresh boolean and integer extension annotations through R6 and R5", () => {
+    const extensions: FhirR6Extension[] = [
+      { url: "urn:clinic:reviewed", valueBoolean: false,
+        _valueBoolean: { id: "review-status", extension: [
+          { url: "urn:clinic:note", valueString: "Retain review annotation" }
+        ] } },
+      { url: "urn:clinic:sequence", valueInteger: 7,
+        _valueInteger: { id: "sequence-id", extension: [
+          { url: "urn:clinic:note", valueString: "Retain integer annotation" }
+        ] } }
+    ];
+    const input: FhirR6DosageInstruction = {
+      renderedInstruction: "Take 2 tablets daily.",
+      step: [{ component: [{ text: "Take 2 tablets daily.", extension: extensions,
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+        doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }]
+      }] }]
+    };
+    const before = persist(input), r5 = toFhirR5Dosages(input), r5Before = persist(r5);
+    const returned = toDosageDetails(persist(r5));
+    const imported = fromFhir(input).fhirNext;
+    for (const extension of extensions)
+      for (const current of [r5[0], returned.step![0].component[0], imported.step![0].component[0]])
+        expect(current.extension).toContainEqual(extension);
+    expect(r5[0].extension?.find(item => item.url === extensions[0].url)?._valueBoolean)
+      .toEqual(extensions[0]._valueBoolean);
+    expect(r5[0].extension?.find(item => item.url === extensions[1].url)?._valueInteger)
+      .toEqual(extensions[1]._valueInteger);
+    expect(r5[0].text).toBe(input.renderedInstruction);
+    expect(returned.renderedInstruction).toBe(input.renderedInstruction);
+    expect(returned.step![0].component[0]).toMatchObject({
+      text: "Take 2 tablets daily.",
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }]
+    });
+    const expected = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+    for (const current of [r5, returned])
+      expect(formatSig(current, "long", { locale: "en", realizationMode: "normalized" })).toBe(expected);
+    expect(input).toEqual(before);
+    expect(r5).toEqual(r5Before);
+  });
+
   it("keeps optional condition choices exclusive without requiring a value or inventing runtime validation", () => {
     const noValue: FhirR6DosageCondition = { code: { text: "if needed" } };
     const primitive: FhirR6DosageCondition = { code: { text: "temperature" }, valueDecimal: 38,
