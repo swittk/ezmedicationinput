@@ -20,6 +20,7 @@ import {
   ACTION_SEQUENCE_MARKERS,
   HARD_SEGMENT_BOUNDARY_TOKENS,
   INSTRUCTION_LEADING_SEPARATORS,
+  coordinationConnectorKind,
   additiveDoseNumberAt,
   fractionalDoseNumberAt,
   millionDoseNumberAt,
@@ -274,6 +275,7 @@ function hasPrecedingMedicationAmount(context: QuantityLexicalContext, before: n
   for (let index = before - 1; index >= 0; index--) {
     const lower = normalizeTokenLower(context.tokens[index]);
     if (ACTION_SEQUENCE_MARKERS.has(lower) || HARD_SEGMENT_BOUNDARY_TOKENS.has(lower) ||
+        coordinationConnectorKind(lower) === "disjunction" ||
         isMedicationAdministrationMethod(lower, context.options)) return false;
     if (medicationAmountAt(context, index)) return true;
   }
@@ -389,9 +391,14 @@ export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: n
   headStart: number;
   comparative: boolean;
 } | undefined {
-  const separator = context.tokens[start] && INSTRUCTION_LEADING_SEPARATORS.has(context.tokens[start].original.toLowerCase())
-    ? context.tokens[start] : undefined;
-  const headStart = start + (separator ? 1 : 0);
+  let headStart = start;
+  while (context.tokens[headStart]) {
+    const token = context.tokens[headStart], following = context.tokens[headStart + 1];
+    if (!INSTRUCTION_LEADING_SEPARATORS.has(token.original) && !(following &&
+        MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(normalizeTokenLower(following)) &&
+        coordinationConnectorKind(token.original) === "conjunction")) break;
+    headStart++;
+  }
   const lead = maximumCountLeadAt(context, headStart);
   if (!lead) return undefined;
   const comparative = !MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(lead[0]));

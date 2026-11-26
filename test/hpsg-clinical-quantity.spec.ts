@@ -4464,7 +4464,8 @@ describe("qualified maximum and omitted-unit ownership", () => {
   it.each([
     [", ", "no more than 4 tablets daily"], [", ", "not more than 4 tablets daily"],
     [", ", "no more than 4 tablets per day"], [", ", "maximum 4 tablets daily"],
-    ["; ", "no more than 4 tablets daily"], [" ", "no more than 4 tablets daily"]
+    ["; ", "no more than 4 tablets daily"], [" ", "no more than 4 tablets daily"],
+    [" and ", "no more than 4 tablets daily"], [", and ", "no more than 4 tablets daily"]
   ])("keeps %s%s with the existing PRN administration", (separator, limit) => {
       const parsed = parsePublicSig("Take 1 tablet every 4 hours as needed" + separator + limit);
       expect(parsed.meta.canonical.clauses).toHaveLength(1);
@@ -4482,8 +4483,8 @@ describe("qualified maximum and omitted-unit ownership", () => {
     }
   );
 
-  it("keeps a new sequential administration's comparative daily dose", () => {
-    const parsed = parsePublicSig("Take 1 tablet daily, then take at most 2 tablets daily");
+  it.each(["then take", "then", "and take", "or"])("keeps %s as a new comparative daily administration", connector => {
+    const parsed = parsePublicSig("Take 1 tablet daily, " + connector + " at most 2 tablets daily");
     expect(parsed.meta.canonical.clauses.map(clause => clause.dose)).toEqual([
       { value: 1, unit: "tab" }, { value: 2, unit: "tab", comparator: "<=" }
     ]);
