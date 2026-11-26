@@ -16248,3 +16248,10 @@ explicit when unresolved. Procedure companions keep their own quantities,
 relations and clocks, including complete negative instructions in both languages.
 Meaningful dose, timing, quantity and localized-preview assertions are retained
 and strengthened.
+
+
+## 2026-11-27 — Boolean extension metadata
+
+The public R5 and R6 Extension types accept boolean-value annotations through
+their existing primitive element types. Fresh typed conversion coverage retains
+false values, annotations, authored source, current dose and timing.
