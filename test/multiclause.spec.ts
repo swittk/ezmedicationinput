@@ -584,7 +584,9 @@ describe("multi-clause parsing", () => {
 
 describe("round48 clinical quantity and delayed PRN ownership", () => {
   it.each([
-    ["1h", 1], ["1hr", 1], ["0.5h", 0.5], [".5h", 0.5]
+    ["1h", 1], ["1hr", 1], ["0.5h", 0.5], [".5h", 0.5],
+    ["half an hour", 0.5], ["a half hour", 0.5], ["a quarter of an hour", 0.25],
+    ["one and a half hours", 1.5], ["three quarters of an hour", 0.75]
   ] as const)("keeps a maximum over %s separate from the administered volume", (period, value) => {
     const parsed = parsePublicSig(`Infuse 100 mL, no more than 50 mL over ${period}`);
     const clause = parsed.meta.canonical.clauses[0];

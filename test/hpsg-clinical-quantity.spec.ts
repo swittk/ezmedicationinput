@@ -3212,7 +3212,8 @@ describe("round46 supported quantity and boundary ownership", () => {
     "until 8am next morning", "until 8:30am the next day", "until 8:30 am the next day",
     "until 8:30pm the next day", "until 8:30 pm the next day", "until the next morning at 8 AM",
     "until the next morning at 08:00", "until 8 AM on the next morning",
-    "until 8:30am on the next day", "until 08:00 on next day"])("retains the relative ending %s without turning it into an onset", ending => {
+    "until 8:30am on the next day", "until 08:00 on next day",
+    "until the next day at noon", "until the next day at midday", "until the next day at 12:00"])("retains the relative ending %s without turning it into an onset", ending => {
     const source = "Take 1 tablet every 6 hours " + ending;
     const parsed = parsePublicSig(source);
     const query = { orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
@@ -4709,4 +4710,48 @@ describe("qualified minute infusion durations", () => {
       expect(parsed.fhirNext.renderedInstruction).toBe(source);
     }
   );
+});
+
+
+describe("declared biological units and explicit dose prohibitions", () => {
+  it.each(["[iU] per hour", "[iU]/h", "IU per hour", "units/hour"])(
+    "preserves the typed biological activity rate in %s", units => {
+      const source = "Infuse 2 " + units, parsed = parsePublicSig(source);
+      expect(parsed.input).toBe(source);
+      const clause = parsed.meta.canonical.clauses[0];
+      expect(clause.dose).toBeUndefined();
+      expect(clause.clinicalQuantity).toMatchObject({
+        representation: "rate-quantity", status: "resolved",
+        numerator: { value: 2, unit: "[iU]", dimension: "biologic-activity" },
+        denominators: [{ value: 1, unit: "h", dimension: "time" }]
+      });
+      for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0],
+        toFhirR5Dosages(parsed.fhirNext)[0]]) {
+        expect(row.doseAndRate).toHaveLength(1);
+        expect(row.doseAndRate![0].doseQuantity).toBeUndefined();
+        expect(row.doseAndRate![0].rateQuantity).toMatchObject({ value: 2, unit: "[iU]/h" });
+      }
+    });
+
+  it.each(["do not exceed", "maximum", "max."])(
+    "retains %s as a cumulative cap when the administered amount is omitted", lead => {
+      const source = "Take as needed for pain; " + lead + " 2 tablets daily";
+      const parsed = parsePublicSig(source), clause = parsed.meta.canonical.clauses[0];
+      expect(parsed.input).toBe(source);
+      expect(clause.dose).toBeUndefined();
+      expect(clause.prn?.enabled).toBe(true);
+      expect(clause.schedule?.frequency).toBeUndefined();
+      expect(clause.schedule?.maxDosePerPeriod).toEqual([
+        { amount: 2, unit: "tab", period: 1, periodUnit: "d" }
+      ]);
+      for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+        expect(row.doseAndRate).toBeUndefined();
+        expect(row.maxDosePerPeriod).toMatchObject([{
+          numerator: { value: 2, unit: "tab" }, denominator: { value: 1, unit: "d" }
+        }]);
+      }
+      expect(parsed.fhirNext.step[0].component[0].safety?.doseLimit).toMatchObject([{
+        scope: "period", valueQuantity: { value: 2, unit: "tab" }, period: { value: 1, unit: "d" }
+      }]);
+    });
 });

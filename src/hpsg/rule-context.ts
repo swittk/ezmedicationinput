@@ -26,12 +26,13 @@ import {
   millionDoseNumberAt,
   DOSE_NUMBER_WORDS,
   DOSE_FRACTION_WORDS,
+  DOSE_FRACTION_DENOMINATOR_WORDS,
   DOSE_UNIT_CONNECTORS,
   DAYPART_INTERVAL_TOKENS,
   DOSE_FRACTION_ARTICLES,
   EVENT_ARTICLE_TOKENS,
   MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
-  MAXIMUM_COUNT_LEAD_TOKENS,
+  DOSE_COMPARATOR_PREFIXES,
   MAXIMUM_COUNT_LEAD_SEQUENCES,
   MAXIMUM_PERIOD_PREPOSITIONS,
   MAXIMUM_PERIOD_MODIFIERS,
@@ -226,6 +227,53 @@ export function doseNumberValue(token: Token | undefined): number | undefined {
     : DOSE_NUMBER_WORDS.get(normalizeTokenLower(token));
 }
 
+/** Shared numeric-word inventory: clinical quantities and ordinary timing
+ * interpret the same lexical number daughters, without string special cases. */
+export function clinicalDurationNumber(token: Token | undefined): number | undefined {
+  if (!token) return undefined;
+  if (token.kind === LexKind.Number) return token.value !== undefined && token.value > 0 ? token.value : undefined;
+  const word = normalizeTokenLower(token);
+  const value = DOSE_NUMBER_WORDS.get(word) ?? FREQUENCY_NUMBER_WORDS[word] ?? DOSE_FRACTION_WORDS.get(word);
+  return value !== undefined && value > 0 ? value : undefined;
+}
+
+/** One elapsed-duration daughter shared by infusion amounts and dose-limit periods. */
+export function clinicalDurationAt(context: QuantityLexicalContext, start: number) {
+  const token = context.tokens[start];
+  if (!token || !quantityTokenAvailable(context, start)) return undefined;
+  const qualified = token.kind === LexKind.Number ? undefined :
+    doseComparatorNumberAt(context.tokens, start, context.limit ?? context.tokens.length, normalizeTokenLower(token), false);
+  const articleFraction = !qualified && DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(token)) &&
+    quantityTokenAvailable(context, start + 1)
+    ? DOSE_FRACTION_WORDS.get(normalizeTokenLower(context.tokens[start + 1])) : undefined;
+  const attached = !qualified && token.kind !== LexKind.Number
+    ? attachedNumberUnitAt(token.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
+  const cardinal = articleFraction ?? attached?.value ?? (qualified ? undefined : clinicalDurationNumber(token));
+  const denominator = articleFraction === undefined && cardinal !== undefined && quantityTokenAvailable(context, start + 1)
+    ? DOSE_FRACTION_DENOMINATOR_WORDS.get(normalizeTokenLower(context.tokens[start + 1])) : undefined;
+  const exact = cardinal === undefined ? undefined : denominator === undefined ? cardinal : cardinal * denominator;
+  const mixed = exact === undefined || denominator !== undefined ? undefined :
+    additiveDoseNumberAt(context.tokens, start, context.limit ?? context.tokens.length, exact, false);
+  let unitIndex = (qualified?.numericIndex ?? mixed?.numericIndex ??
+    (articleFraction === undefined && denominator === undefined ? start : start + 1)) + 1;
+  const value = qualified?.value ?? mixed?.value ?? exact;
+  const rawUnit = qualified?.rawUnit ?? attached?.rawUnit;
+  // The fraction selects its unit complement, including "of an hour".
+  // Whole duration numbers retain their direct unit boundary.
+  if (!rawUnit && value !== undefined && value > 0 &&
+      (value < 1 || denominator !== undefined || qualified &&
+        DOSE_FRACTION_DENOMINATOR_WORDS.has(normalizeTokenLower(context.tokens[qualified.numericIndex])))) {
+    while (quantityTokenAvailable(context, unitIndex) &&
+        DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[unitIndex]))) unitIndex++;
+  }
+  const unitToken = context.tokens[unitIndex];
+  const unitSurface = rawUnit ?? (unitToken && quantityTokenAvailable(context, unitIndex) ? normalizeTokenLower(unitToken) : undefined);
+  const unit = unitSurface && mapIntervalUnit(unitSurface);
+  if (value === undefined || !unit) return undefined;
+  return { value, unit, unitSurface, comparator: qualified?.comparator,
+    end: unitIndex + (rawUnit ? 0 : 1) };
+}
+
 /** One plain numeric daughter shared by active amounts, carrier volumes and limits. */
 export function plainClinicalNumberAt(context: QuantityLexicalContext, start: number, initial?: number) {
   const token = context.tokens[start];
@@ -370,17 +418,12 @@ function maximumDosePeriodAt(
     return DAYPART_INTERVAL_TOKENS.has(lower)
       ? { tokens, daypart: true, unitDenominator } : { tokens, period: 1, periodUnit: bareUnit, unitDenominator };
   }
-  const attached = value.kind !== LexKind.Number
-    ? attachedNumberUnitAt(value.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
-  const amount = attached?.value ?? (value.kind === LexKind.Number ? value.value : FREQUENCY_NUMBER_WORDS[lower]);
-  const unit = attached ? undefined : context.tokens[cursor + 1];
-  if (unit && context.state?.consumed.has(unit.index)) return undefined;
-  const unitLower = attached?.rawUnit ?? (unit && normalizeTokenLower(unit));
-  const periodUnit = unitLower && mapIntervalUnit(unitLower);
-  if (amount === undefined || amount <= 0 || !periodUnit) return undefined;
-  const tokens = context.tokens.slice(start, cursor + (attached ? 1 : 2));
-  return DAYPART_INTERVAL_TOKENS.has(unitLower!)
-    ? { tokens, daypart: true, unitDenominator } : { tokens, period: amount, periodUnit, unitDenominator };
+  const duration = clinicalDurationAt(context, cursor);
+  if (!duration || duration.value <= 0 || duration.comparator) return undefined;
+  const tokens = context.tokens.slice(start, duration.end);
+  return DAYPART_INTERVAL_TOKENS.has(duration.unitSurface!)
+    ? { tokens, daypart: true, unitDenominator }
+    : { tokens, period: duration.value, periodUnit: duration.unit, unitDenominator };
 
 }
 
@@ -403,7 +446,9 @@ export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: n
   }
   const lead = maximumCountLeadAt(context, headStart);
   if (!lead) return undefined;
-  const comparative = !MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(lead[0]));
+  const comparative = (DOSE_COMPARATOR_PREFIXES.get(normalizeTokenLower(lead[0])) ?? []).some(candidate =>
+    candidate.comparator === "<=" && candidate.words.length === lead.length &&
+    candidate.words.every((word, index) => normalizeTokenLower(lead[index]) === word));
 
   let cursor = headStart + lead.length;
   const matched = [...lead];

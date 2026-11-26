@@ -1310,6 +1310,31 @@ describe("round42 relative points and inherited cadence origins", () => {
 });
 
 
+describe("bounded treatment-relative dose continuation", () => {
+  it.each([
+    ["2 tablets from day 8 for 7 days", 7, { duration: 7, durationUnit: "d" }],
+    ["from day 8 take 2 tablets for 7 days", 7, { duration: 7, durationUnit: "d" }],
+    ["2 tablets from day 8 for 3 doses", 3, { count: 3 }]
+  ] as const)("inherits cadence while retaining the successor bound: %s", (tail, days, bound) => {
+    const source = "Take 1 tablet daily at 08:00 for 7 days, then " + tail;
+    const parsed = parseSig(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.dose?.value)).toEqual([1, 2]);
+    expect(parsed.meta.canonical.clauses[1].schedule).toMatchObject({
+      treatmentStartOffsetDays: 7, frequency: 1, period: 1, periodUnit: "d",
+      timeOfDay: ["08:00:00"], ...bound
+    });
+    const times = Array.from({ length: days }, (_, offset) =>
+      "2026-12-" + String(8 + offset).padStart(2, "0") + "T08:00:00+00:00");
+    for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(parsed.fhir))]) {
+      expect(nextDueDoses(dosage, { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-08T00:00:00Z",
+        timeZone: "UTC", limit: 10 })).toEqual(times);
+    }
+  });
+});
+
+
 describe("round43 inherited activity timing", () => {
   it.each([
     ["2 tablets from day 8", 30],

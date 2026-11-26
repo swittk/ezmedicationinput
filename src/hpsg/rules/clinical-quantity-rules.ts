@@ -6,19 +6,16 @@ import { normalizeUnit } from "../../unit-lexicon";
 import {
   HpsgClauseContext, lexicalRule, maximumDosePerPeriodAt, normalizeTokenLower,
   quantityTokenAvailable as available, doseNumberValue, plainClinicalNumberAt, doseUnitIndexAfter,
-  directDoseUnitAfter, medicationAmountAt
+  directDoseUnitAfter, medicationAmountAt, clinicalDurationNumber, clinicalDurationAt
 } from "../rule-context";
 import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, mapIntervalUnit } from "../timing-lexicon";
 import {
   doseComparatorNumberAt,
   doseRangeNumberAt,
   compactMillionDoseNumber,
-  DOSE_FRACTION_ARTICLES,
   additiveDoseNumberAt,
   attachedNumberUnitAt,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
-  DOSE_NUMBER_WORDS,
-  DOSE_FRACTION_WORDS,
   DOSE_FRACTION_DENOMINATOR_WORDS,
   DOSE_UNIT_CONNECTORS,
   MEDICATION_OBJECT_FILLERS,
@@ -154,16 +151,6 @@ export function volumeOrMassTerm(value: number, raw: string): HpsgDimensionalQua
   if (normalized === "ml") return { value, unit: "mL", dimension: "volume" };
   if (normalized === "l") return { value, unit: "L", dimension: "volume" };
   return undefined;
-}
-
-/** Shared numeric-word inventory: clinical quantities and ordinary timing
- * interpret the same lexical number daughters, without string special cases. */
-function clinicalDurationNumber(token: HpsgClauseContext["tokens"][number] | undefined): number | undefined {
-  if (!token) return undefined;
-  if (token.kind === LexKind.Number) return token.value !== undefined && token.value > 0 ? token.value : undefined;
-  const word = normalizeTokenLower(token);
-  const value = DOSE_NUMBER_WORDS.get(word) ?? FREQUENCY_NUMBER_WORDS[word] ?? DOSE_FRACTION_WORDS.get(word);
-  return value !== undefined && value > 0 ? value : undefined;
 }
 
 export function clinicalRatePeriodUnit(raw: string): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | undefined {
@@ -392,41 +379,11 @@ function activeDoseInCarrierOverTime(
   );
 }
 
-/** Shared elapsed-duration daughter of both infusion constructions. */
+/** Infusion constructions license only elapsed hours and minutes. */
 function infusionDurationAt(context: HpsgClauseContext, start: number) {
-  const token = context.tokens[start];
-  if (!token || !available(context, start)) return undefined;
-  const qualified = token.kind === LexKind.Number ? undefined :
-    doseComparatorNumberAt(context.tokens, start, context.limit, normalizeTokenLower(token), false);
-  const articleFraction = !qualified && DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(token)) &&
-    available(context, start + 1)
-    ? DOSE_FRACTION_WORDS.get(normalizeTokenLower(context.tokens[start + 1])) : undefined;
-  const attached = !qualified && token.kind !== LexKind.Number
-    ? attachedNumberUnitAt(token.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
-  const cardinal = articleFraction ?? attached?.value ?? (qualified ? undefined : clinicalDurationNumber(token));
-  const denominator = articleFraction === undefined && cardinal !== undefined && available(context, start + 1)
-    ? DOSE_FRACTION_DENOMINATOR_WORDS.get(normalizeTokenLower(context.tokens[start + 1])) : undefined;
-  const exact = cardinal === undefined ? undefined : denominator === undefined ? cardinal : cardinal * denominator;
-  const mixed = exact === undefined || denominator !== undefined ? undefined :
-    additiveDoseNumberAt(context.tokens, start, context.limit, exact, false);
-  let unitIndex = (qualified?.numericIndex ?? mixed?.numericIndex ??
-    (articleFraction === undefined && denominator === undefined ? start : start + 1)) + 1;
-  const value = qualified?.value ?? mixed?.value ?? exact;
-  const rawUnit = qualified?.rawUnit ?? attached?.rawUnit;
-  // The fraction selects its unit complement, including "of an hour".
-  // Whole duration numbers retain their direct unit boundary.
-  if (!rawUnit && value !== undefined && value > 0 &&
-      (value < 1 || denominator !== undefined || qualified &&
-        DOSE_FRACTION_DENOMINATOR_WORDS.has(normalizeTokenLower(context.tokens[qualified.numericIndex])))) {
-    while (available(context, unitIndex) &&
-        DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[unitIndex]))) unitIndex++;
-  }
-  const unitToken = context.tokens[unitIndex];
-  const unit = rawUnit ? clinicalRatePeriodUnit(rawUnit) :
-    unitToken && available(context, unitIndex) ? clinicalRatePeriodUnit(normalizeTokenLower(unitToken)) : undefined;
-  if (value === undefined || !unit) return undefined;
-  return { value, unit, comparator: qualified?.comparator,
-    end: unitIndex + (rawUnit ? 0 : 1) };
+  const duration = clinicalDurationAt(context, start);
+  if (!duration || duration.unit !== FhirPeriodUnit.Hour && duration.unit !== FhirPeriodUnit.Minute) return undefined;
+  return { ...duration, unit: duration.unit };
 }
 
 function fixedVolumeOverTime(
@@ -801,10 +758,15 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
     return signs;
   }
-  const accepts = (candidate: string) =>
-    /^(?:mcg|ug|mg|g|u|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
-    /^(?:ml|l|mcg|ug|mg|g|u|unit|units|iu)\/[^/]+$/u.test(candidate) &&
-      Boolean(mapIntervalUnit(candidate.slice(candidate.indexOf("/") + 1)));
+  const accepts = (candidate: string) => {
+    const terms = candidate.split("/");
+    if (terms[1] === "kg") {
+      return Boolean(massTerm(value, terms[0])) &&
+        (terms.length === 2 || terms.length === 3 && Boolean(terms[2]));
+    }
+    return terms.length === 2 && Boolean(volumeOrMassTerm(value, terms[0])) &&
+      Boolean(mapIntervalUnit(terms[1]));
+  };
   const expression = compactUnitExpression(
     context, quantityEnd + 1, accepts, unit ?? ""
   );

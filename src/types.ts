@@ -1666,8 +1666,9 @@ export interface ParseOptions extends FormatOptions {
    */
   instructionConceptMap?: Record<string, MedicationInstructionConceptInput>;
   /**
-   * Optional learned/remote semantic proposal providers. They are used only by
-   * parseSigAsync(), and only against spans the deterministic parser left opaque.
+   * Optional learned/remote semantic proposal providers. parseSig() accepts
+   * synchronous providers; parseSigAsync() also accepts asynchronous providers.
+   * Both apply proposals only to spans the deterministic parser left opaque.
    * Proposals are validated against registered action/concept/site/unit vocabularies
    * before they can enter the canonical graph.
    */
