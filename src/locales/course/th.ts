@@ -104,7 +104,7 @@ export const THAI_COURSE: CourseLanguage = {
   phaseCount: (count) => `ทำซ้ำระยะนี้รวม ${count} ครั้ง`,
   repeatCount: (count) => `จำนวน ${count} รอบ`,
   repeatCycle: (interval, exact, count) => {
-    if (count === 1) return exact ? "ใช้แผนการใช้ยานี้รวม 1 รอบ."
+    if (count === 1) return exact ? `ใช้แผนการใช้ยานี้รวม 1 รอบ (ระยะรอบการใช้ยา: ${interval}).`
       : `รวม 1 รอบ; ระยะรอบการใช้ยา: ${interval}.`;
     const iterations = count === undefined ? "" : ` จำนวน ${count} รอบ`;
     return exact

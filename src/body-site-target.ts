@@ -45,6 +45,7 @@ const BODY_SITE_REFINEMENTS: Readonly<Record<string, { broader: string; laterali
   "723608007": { broader: "1797002", lateralized: true }, // Left anterior naris -> naris.
   "723609004": { broader: "1797002", lateralized: true }, // Right anterior naris -> naris.
   "244506005": { broader: "1797002" }, // Anterior nares -> naris.
+  "68426009": { broader: "181195007" }, // Nasal septum -> entire nose.
 };
 
 /** Compare exact stock site labels only. A lateralized label can refine its

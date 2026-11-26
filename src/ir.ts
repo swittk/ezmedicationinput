@@ -218,7 +218,7 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.countMax !== undefined ||
     schedule.timingCode || schedule.timingText?.trim() ||
     schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
-    schedule.eventWindow || schedule.when?.length ||
+    schedule.eventWindow || schedule.clockWindow || schedule.when?.length ||
     schedule.timeOfDay?.length ||
     schedule.calendarEvents?.length
   ));

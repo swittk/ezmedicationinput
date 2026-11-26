@@ -4423,11 +4423,11 @@ export function instructionGraphCoversTypedWarnings(
   if (!frames?.length) return false;
   return frames.every((expected) => {
     if (expected.polarity !== AdvicePolarity.Negate) return false;
-    const expectedCode = getMedicationInstructionAction(expected.predicate.lemma)?.code ??
+    const expectedCode = resolveMedicationInstructionAction(expected.predicate.lemma)?.code ??
       expected.predicate.lemma;
     return graph.actions.some((actual) => {
       if (actual.polarity !== AdvicePolarity.Negate) return false;
-      const actualCode = getMedicationInstructionAction(actual.predicate.lemma)?.code ??
+      const actualCode = resolveMedicationInstructionAction(actual.predicate.lemma)?.code ??
         actual.predicate.lemma;
       if (actualCode !== expectedCode ||
           actual.span.end <= expected.span.start ||
@@ -5338,6 +5338,7 @@ export function realizeInstructionGraph(
     : primary ? graph.actions.findIndex(frame =>
       frame.span.start <= primary.start && primary.end <= frame.span.end) : -1;
   const temporalEdges = new Map<number, number[]>();
+  let temporalOrderDiffersFromSource = false;
   for (const relation of graph.relations ?? []) {
     if (relation.fromActionIndex === undefined) continue;
     const from = relation.kind === AdviceRelation.After ? relation.toActionIndex : relation.fromActionIndex;
@@ -5346,6 +5347,8 @@ export function realizeInstructionGraph(
         relation.kind !== AdviceRelation.Then) continue;
     const targets = temporalEdges.get(from) ?? [];
     targets.push(to); temporalEdges.set(from, targets);
+    if (graph.actions[from]?.span.start > graph.actions[to]?.span.start)
+      temporalOrderDiffersFromSource = true;
   }
   const precedes = (from: number, to: number): boolean => {
     const pending = [...(temporalEdges.get(from) ?? [])];
@@ -5544,6 +5547,51 @@ export function realizeInstructionGraph(
   }
   if (!nodes.length) return undefined;
   nodes.sort((left, right) => left.start - right.start);
+  if (temporalOrderDiffersFromSource && nodes.length > 1) {
+    // Include omitted actions in the edge walk so their predecessors still
+    // precede their successors. Emit each condition with its owning action.
+    type Group = { start: number; nodes: typeof nodes; before: Group[] };
+    const actions = new Map<number, Group>();
+    const groups: Group[] = [];
+    for (let index = 0; index < graph.actions.length; index++) {
+      const group: Group = { start: graph.actions[index].span.start, nodes: [], before: [] };
+      actions.set(index, group);
+      groups.push(group);
+    }
+    for (const node of nodes) {
+      const owner = node.actionIndex ?? node.conditionTargetActionIndex;
+      const group = owner === undefined ? undefined : actions.get(owner);
+      if (group) {
+        group.start = Math.min(group.start, node.start);
+        group.nodes.push(node);
+      } else groups.push({ start: node.start, nodes: [node], before: [] });
+    }
+    for (const [from, targets] of temporalEdges) {
+      for (const to of targets) actions.get(to)!.before.push(actions.get(from)!);
+    }
+    groups.sort((left, right) => left.start - right.start);
+    for (const group of groups) group.before.sort((left, right) => left.start - right.start);
+    const visited = new Set<Group>();
+    nodes.length = 0;
+    for (const group of groups) {
+      if (visited.has(group)) continue;
+      visited.add(group);
+      const pending = [{ group, next: 0 }];
+      while (pending.length) {
+        const current = pending[pending.length - 1];
+        const before = current.group.before[current.next++];
+        if (before) {
+          if (!visited.has(before)) {
+            visited.add(before);
+            pending.push({ group: before, next: 0 });
+          }
+          continue;
+        }
+        nodes.push(...current.group.nodes);
+        pending.pop();
+      }
+    }
+  }
   let output = "";
   for (let index = 0; index < nodes.length; index += 1) {
     const node = nodes[index];

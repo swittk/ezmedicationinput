@@ -901,7 +901,8 @@ describe("native timing realization uses selected language and event owners", ()
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing
     }] }] };
     const before = JSON.stringify(raw);
-    for (const input of [raw, toFhirR5Dosages(raw)]) for (const locale of ["en", "th"])
+    const converted = toFhirR5Dosages(raw);
+    for (const input of [raw, converted]) for (const locale of ["en", "th"])
       for (const style of ["short", "long"] as const) {
         const text = formatSig(input, style, { locale, realizationMode: "normalized" });
         if (owner === "code") expect(text).toContain(locale === "en" ? style === "short" ? "MORN" : "morning" : "เช้า");
@@ -913,6 +914,7 @@ describe("native timing realization uses selected language and event owners", ()
         expect(text).toContain(locale === "en"
           ? "No doses during the final 1 hour of each period" : "งดยาในช่วง 1 ชั่วโมงสุดท้ายของแต่ละรอบ");
       }
+    expect(converted[0].timing?.code).toEqual(timing.code);
     expect(raw.step[0].component[0].timing?.code).toEqual(timing.code);
     expect(JSON.stringify(raw)).toBe(before);
   });

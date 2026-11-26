@@ -1688,7 +1688,7 @@ export function instructionGraphCanStandAlone(
   const hasAdministrationTiming = Boolean(
     timingText || schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
-    schedule.when?.length || schedule.eventWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
+    schedule.when?.length || schedule.eventWindow || schedule.clockWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
     schedule.timeOfDay?.length || schedule.calendarEvents?.length ||
     schedule.boundsStart !== undefined || schedule.boundsEnd !== undefined ||
     schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||

@@ -102,9 +102,11 @@ function suppressActivity(input: InstructionActionRealizationInput): boolean {
 
 export function instructionActionDefinitionForRealization(frame: AdviceFrame): MedicationInstructionActionDefinition | undefined {
   const fallback = getMedicationInstructionAction(frame.predicate.lemma);
-  // A selected custom head may share a default code without sharing its
-  // wording or attachment. Its persisted realizer and configuration own both.
-  return !frame.predicate.display || frame.predicate.display === fallback?.display ? fallback : undefined;
+  // A persisted custom realizer owns its attachment and configuration.
+  // Without that override, recognized identity owns valence independently
+  // of the author's display wording.
+  return !frame.predicate.realizer || !frame.predicate.display ||
+    frame.predicate.display === fallback?.display ? fallback : undefined;
 }
 
 /** The selected valence determines which daughter owns the frame relation. */
@@ -227,7 +229,7 @@ function relationDurationContent(c: InstructionActionRealizationInput) {
 
 function renderEnglishRelationDuration(c: InstructionActionRealizationInput): string {
   const { object, target, relation, objectRelation, time } = relationDurationContent(c);
-  return `${c.label}${object ? ` ${objectRelation ? objectRelation + " " : ""}${object}` : ""}` +
+  return `${c.label}${object ? ` ${objectRelation ? objectRelation + " " : ""}${object}` : ""}${renderEnglishAccompaniment(c)}` +
     `${target ? ` ${relation ? relation + " " : ""}${target}` : ""}${time ? ` ${time}` : ""}`;
 }
 
@@ -522,7 +524,7 @@ function thaiAsciiSeparated(value: string | undefined): string {
 
 function renderThaiRelationDuration(c: InstructionActionRealizationInput): string {
   const { object, target, relation, objectRelation, time } = relationDurationContent(c);
-  return `${c.label}${objectRelation ?? ""}${thaiAsciiSeparated(object)}` +
+  return `${c.label}${objectRelation ?? ""}${thaiAsciiSeparated(object)}${renderThaiAccompaniment(c)}` +
     `${target ? `${relation ?? ""}${thaiAsciiSeparated(target)}` : ""}${time ?? ""}`;
 }
 

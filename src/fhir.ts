@@ -10,6 +10,7 @@ import type { ParseOptions, FhirDayOfWeek } from "./types";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
 import {
   buildAdditionalInstructionFramesFromCoding,
+  additionalInstructionFallbackText,
   findAdditionalInstructionDefinitionByCoding
 } from "./advice";
 import { realizeInstructionAction } from "./instruction-graph";
@@ -2289,8 +2290,9 @@ export function deserializeCanonicalContext(
     clause.additionalInstructions = [];
     for (const instruction of dosage.additionalInstruction) {
       const coding = instruction.coding?.find((code) => Boolean(code.code));
+      const text = additionalInstructionFallbackText(instruction, coding);
       clause.additionalInstructions.push({
-        text: instruction.text,
+        text,
         i18n: codeableConceptTranslationI18n(instruction, coding).text,
         coding: coding?.code
           ? {
@@ -2304,7 +2306,7 @@ export function deserializeCanonicalContext(
           ? buildAdditionalInstructionFramesFromCoding(
             coding.system ?? SNOMED_SYSTEM,
             coding.code,
-            instruction.text ?? coding.display ?? "",
+            text ?? coding.display ?? "",
             clause.raw
           )
           : undefined
@@ -2665,6 +2667,8 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
   if (dosage.additionalInstruction?.length) {
     state.additionalInstructions = dosage.additionalInstruction.map((concept) => {
       const coding = selectFirstCodingWithCode(concept);
+      const text = additionalInstructionFallbackText(concept, coding);
+      const sourceText = text ?? coding?.display ?? "";
       const defaultDef = coding?.code
         ? findAdditionalInstructionDefinitionByCoding(
           coding.system ?? SNOMED_SYSTEM,
@@ -2673,7 +2677,7 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
         : undefined;
 
       return {
-        text: concept.text,
+        text,
         coding: coding?.code
           ? {
             code: coding.code,
@@ -2686,8 +2690,8 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
           ? buildAdditionalInstructionFramesFromCoding(
             coding.system ?? SNOMED_SYSTEM,
             coding.code,
-            concept.text ?? coding.display ?? "",
-            { start: 0, end: (concept.text ?? coding.display ?? "").length }
+            sourceText,
+            { start: 0, end: sourceText.length }
           )
           : undefined
       };

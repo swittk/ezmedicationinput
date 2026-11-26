@@ -2146,6 +2146,15 @@ export const __test__: {
   createDefinitionFromSource
 };
 
+/** Keep authored wording when the selected advice identity has no display. */
+export function additionalInstructionFallbackText(
+  concept: { text?: string; coding?: readonly { display?: string }[] },
+  selectedCoding: { display?: string } | undefined
+): string | undefined {
+  return concept.text ?? (!selectedCoding?.display
+    ? concept.coding?.find(coding => coding.display)?.display : undefined);
+}
+
 export function buildAdditionalInstructionFramesFromCoding(
   system: string,
   code: string,

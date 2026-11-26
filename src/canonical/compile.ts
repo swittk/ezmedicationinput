@@ -26,6 +26,7 @@ import { SNOMED_SYSTEM } from "../snomed";
 import { standardTimingCodingFromSig, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding, timingCodeMeaning } from "../timing-summary";
 import type { RouteCode } from "../types";
 import { getQuantityDurationUnit } from "../unit-lexicon";
+import { additionalInstructionFallbackText } from "../advice";
 
 const quantity = (
   value: number | undefined,
@@ -518,21 +519,24 @@ function calendarEventsForAdministration(a: CanonicalAdministration): CanonicalC
 function additionalInstructionsForAdministration(a: CanonicalAdministration): CanonicalSigClause["additionalInstructions"] {
   if (!a.additionalInstructions) return undefined;
   const source = a.syntax?.additionalInstructions;
-  const matches = (instruction: NonNullable<typeof a.additionalInstructions>[number],
+  const matches = (instruction: NonNullable<CanonicalSigClause["additionalInstructions"]>[number],
     original: NonNullable<typeof source>[number] | undefined) => {
-    const code = instruction.coding?.find((entry) => entry.code);
+    const code = instruction.coding;
     return original && original.text === instruction.text && code?.code === original.coding?.code &&
       (code?.system ?? "http://snomed.info/sct") === (original.coding?.system ?? "http://snomed.info/sct") &&
       code?.display === original.coding?.display && code?.version === original.coding?.version;
   };
-  return a.additionalInstructions?.map((instruction, index) => {
+  return a.additionalInstructions.map((instruction, index) => {
+    const coding = instruction.coding?.find((entry) => entry.code);
+    const text = additionalInstructionFallbackText(instruction, coding);
+    const view = { text, coding };
     const original = source?.[index];
-    if (matches(instruction, original)) return original!;
+    if (matches(view, original)) return original!;
     // Reordering/removing an earlier instruction must not attach its source
     // language evidence to another instruction. Compare typed identities only
     // after the ordinary same-order path has failed.
-    for (const item of source ?? []) if (matches(instruction, item)) return item;
-    return { text: instruction.text, coding: instruction.coding?.find((entry) => entry.code) };
+    for (const item of source ?? []) if (matches(view, item)) return item;
+    return view;
   });
 }
 

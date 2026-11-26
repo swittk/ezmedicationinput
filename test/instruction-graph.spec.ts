@@ -1,13 +1,13 @@
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
 import { deserializeCanonicalContext, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
 import { courseFromR6 } from "../src/adapters/canonical-course";
-import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, EventTiming, type AdviceFrame, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
+import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, EventTiming, type AdviceFrame, type CanonicalInstructionGraph, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
 import { setDosageCondition, withDosageEditProvenance, getDosageSourceOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
 import { realizeInstructionAction, instructionGraphRichPrimaryAction,
-  instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose
+  instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose, instructionGraphCoversTypedWarnings
 } from "../src/instruction-graph";
 import { formatCanonicalClause } from "../src/format";
 import { formatCanonicalCourse } from "../src/canonical/format-course";
@@ -4404,7 +4404,7 @@ describe("round65 structured cadence and action ownership", () => {
     expect(marker).toEqual(before);
   });
 
-  it.each([false, true])("keeps a selected site's relation beside an independent application instrument (site first=%s)", siteFirst => {
+  it.each([false, true])("keeps a selected site's relation beside an independent application instrument (material first=%s)", materialFirst => {
     const frame = fresh(parseInstructionActions("Apply cream")[0]);
     frame.sourceText = ""; frame.relation = AdviceRelation.With; frame.predicate.realizer = "default";
     frame.args = [
@@ -4412,7 +4412,7 @@ describe("round65 structured cadence and action ownership", () => {
       { role: AdviceArgumentRole.Site, text: "rash", normalized: "rash", i18n: { en: "the rash", th: "ผื่น" }, relation: AdviceRelation.To },
       { role: AdviceArgumentRole.Material, text: "cotton swab", normalized: "cotton swab", i18n: { en: "a cotton swab", th: "สำลี" }, relation: AdviceRelation.With }
     ];
-    if (siteFirst) [frame.args[0], frame.args[1]] = [frame.args[1], frame.args[0]];
+    if (materialFirst) [frame.args[1], frame.args[2]] = [frame.args[2], frame.args[1]];
     const marker = buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!;
     const before = fresh(marker), reopened = parseInstructionGraphExtension([fresh(marker)])!.actions[0];
     const en = realizeInstructionAction(reopened, "en"), th = realizeInstructionAction(reopened, "th");
@@ -6208,5 +6208,160 @@ describe("complete typed action participants", () => {
     }
     expect(parseInstructionGraphExtension(parsed.fhir[0].extension)?.sourceText).toBe(source);
     expect(JSON.stringify(parsed.fhirNext)).toBe(before);
+  });
+});
+
+
+describe("current graph realization families", () => {
+  const frame = (lemma: string, display: string, object: string, start: number, thai: string): AdviceFrame => ({
+    force: AdviceForce.Instruction, polarity: AdvicePolarity.Affirm,
+    predicate: { lemma, display }, sourceText: "", span: { start, end: start + 10 },
+    args: [{ role: AdviceArgumentRole.Theme, text: object, normalized: object,
+      i18n: { en: object, th: thai } }]
+  });
+  const publicViews = (graph: CanonicalInstructionGraph) => {
+    const marker = buildInstructionGraphExtension(graph)!;
+    const row: FhirDosage = { extension: [marker,
+      { url: "urn:clinic:instruction-note", valueString: "Keep supplied graph" }] };
+    const course = toDosageDetails([row]);
+    return { marker, row, course, native: importCanonicalCourse(course) };
+  };
+
+  it("orders removal before application and keeps its condition attached to application", () => {
+    const apply = frame("apply", "Apply", "the new patch", 24, "แผ่นยาใหม่");
+    const remove = frame("remove", "Remove", "the old patch", 60, "แผ่นยาเก่า");
+    const graph: CanonicalInstructionGraph = { sourceText: "If skin is clean, apply the new patch after removing the old patch",
+      sourceLocale: "en", actions: [apply, remove], relations: [
+        { kind: AdviceRelation.After, fromActionIndex: 0, toActionIndex: 1 },
+        { kind: AdviceRelation.If, toActionIndex: 0, text: "If skin is clean", span: { start: 0, end: 16 } }
+      ] };
+    const before = JSON.stringify(graph), views = publicViews(graph);
+    const reopened = parseInstructionGraphExtension(toFhirR5Dosages(views.course)[0].extension)!;
+    expect(reopened.relations).toMatchObject(graph.relations!);
+    for (const value of [graph, reopened]) {
+      const text = realizeInstructionGraph(value, "en")!;
+      expect(text.indexOf("Remove the old patch")).toBeLessThan(text.indexOf("skin is clean"));
+      expect(text.indexOf("skin is clean")).toBeLessThan(text.toLowerCase().indexOf("apply the new patch"));
+      expect(text.match(/skin is clean/gu)).toHaveLength(1);
+    }
+    for (const value of [views.row, views.course, views.native]) {
+      const en = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(value, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en.toLowerCase().indexOf("remove the old patch")).toBeLessThan(en.toLowerCase().indexOf("apply the new patch"));
+      expect(th.indexOf("แผ่นยาเก่า")).toBeLessThan(th.indexOf("แผ่นยาใหม่"));
+    }
+    expect(toFhirR5Dosages(views.course)[0].extension).toContainEqual({
+      url: "urn:clinic:instruction-note", valueString: "Keep supplied graph"
+    });
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it("orders related preparations before the primary while keeping unrelated actions in source order", () => {
+    const clean = frame("clean", "Clean", "the skin", 0, "ผิวหนัง");
+    const remove = frame("remove", "Remove", "the old patch", 25, "แผ่นยาเก่า");
+    const apply = frame("apply", "Apply", "the new patch", 50, "แผ่นยาใหม่");
+    const graph: CanonicalInstructionGraph = { sourceText: "Clean the skin after removing the old patch, then apply the new patch",
+      sourceLocale: "en", actions: [clean, remove, apply], primaryAdministrationSpan: apply.span,
+      relations: [
+        { kind: AdviceRelation.After, fromActionIndex: 0, toActionIndex: 1 },
+        { kind: AdviceRelation.Before, fromActionIndex: 0, toActionIndex: 2 },
+        { kind: AdviceRelation.Before, fromActionIndex: 1, toActionIndex: 2 }
+      ] };
+    const before = JSON.stringify(graph);
+    for (const locale of ["en", "th"]) {
+      const pre = realizeInstructionGraph(graph, locale, { position: "pre" })!;
+      expect(pre.indexOf(locale === "en" ? "Remove" : "แผ่นยาเก่า"))
+        .toBeLessThan(pre.indexOf(locale === "en" ? "clean" : "ผิวหนัง"));
+      expect(pre).not.toContain(locale === "en" ? "new patch" : "แผ่นยาใหม่");
+    }
+    const views = publicViews(graph);
+    for (const value of [views.row, views.course]) {
+      const text = formatSig(value, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase();
+      expect(text.indexOf("remove the old patch")).toBeLessThan(text.indexOf("clean the skin"));
+      expect(text.indexOf("clean the skin")).toBeLessThan(text.indexOf("apply the new patch"));
+    }
+    const laterClean = frame("clean", "Clean", "the hands", 0, "มือ");
+    const middleApply = frame("apply", "Apply", "the new patch", 25, "แผ่นยาใหม่");
+    const earlierRemove = frame("remove", "Remove", "the old patch", 50, "แผ่นยาเก่า");
+    const throughPrimary: CanonicalInstructionGraph = {
+      sourceText: "Clean the hands after applying the new patch after removing the old patch",
+      sourceLocale: "en", actions: [laterClean, middleApply, earlierRemove],
+      primaryAdministrationSpan: middleApply.span,
+      relations: [
+        { kind: AdviceRelation.After, fromActionIndex: 0, toActionIndex: 1 },
+        { kind: AdviceRelation.After, fromActionIndex: 1, toActionIndex: 2 }
+      ]
+    };
+    expect(realizeInstructionGraph(throughPrimary, "en", { omitRenderedAction: middleApply }))
+      .toBe("Remove the old patch; clean the hands");
+    const unrelated = { sourceText: "Clean the skin; remove the old patch", sourceLocale: "en", actions: [clean, remove] };
+    expect(realizeInstructionGraph(unrelated, "en")).toBe("Clean the skin; remove the old patch");
+    const alreadyOrdered: CanonicalInstructionGraph = { sourceText: "Remove the old patch, then clean the skin",
+      sourceLocale: "en", actions: [frame("remove", "Remove", "the old patch", 0, "แผ่นยาเก่า"),
+        frame("clean", "Clean", "the skin", 30, "ผิวหนัง")],
+      relations: [{ kind: AdviceRelation.Before, fromActionIndex: 0, toActionIndex: 1 }] };
+    expect(realizeInstructionGraph(alreadyOrdered, "en")).toBe("Remove the old patch; clean the skin");
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it("uses recognized dissolve valence independently of display casing", () => {
+    const action: AdviceFrame = { force: AdviceForce.Instruction, polarity: AdvicePolarity.Affirm,
+      predicate: { lemma: "dissolve", display: "dissolve" }, sourceText: "", span: { start: 0, end: 40 }, args: [
+        { role: AdviceArgumentRole.Amount, text: "2 tablets", quantity: { value: 2, unit: "tab" } },
+        { role: AdviceArgumentRole.Material, text: "100 mL water", normalized: "water",
+          i18n: { en: "water", th: "น้ำ" }, relation: AdviceRelation.In, quantity: { value: 100, unit: "mL" } }
+      ] };
+    const graph = { sourceText: "", sourceLocale: "en", actions: [action] };
+    const before = JSON.stringify(graph), views = publicViews(graph);
+    expect(action.predicate.realizer).toBeUndefined();
+    expect(action.args[0].quantity).toEqual({ value: 2, unit: "tab" });
+    expect(action.args[1]).toMatchObject({ relation: AdviceRelation.In, quantity: { value: 100, unit: "mL" } });
+    for (const value of [views.row, views.course, views.native]) {
+      const en = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(value, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toMatch(/dissolve 2 tablets in 100 mL water/iu);
+      expect(th).toContain("ละลาย2 เม็ดในน้ำ 100 มิลลิลิตร");
+    }
+    const configured: AdviceFrame = { ...action, predicate: { lemma: "dissolve", display: "Clinic preparation",
+      realizer: "amount-duration", i18n: { th: "เตรียมยา" } }, args: [action.args[0],
+      { role: AdviceArgumentRole.Duration, text: "1 minute", normalized: "min", quantity: { value: 1, unit: "min" } }] };
+    expect(realizeInstructionAction(configured, "en")).toBe("Clinic preparation 2 tablets for 1 minute");
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it.each([AdviceRelation.With, AdviceRelation.Without])("retains the Chew dose and its independently measured %s vehicle", relation => {
+    const action: AdviceFrame = { force: AdviceForce.Instruction, polarity: AdvicePolarity.Affirm,
+      predicate: { lemma: "chew", display: "Chew" }, sourceText: "", span: { start: 0, end: 40 }, args: [
+        { role: AdviceArgumentRole.Amount, text: "1 tablet", quantity: { value: 1, unit: "tab" } },
+        { role: AdviceArgumentRole.Substance, text: "100 mL water", normalized: "water",
+          i18n: { en: "water", th: "น้ำ" }, relation, quantity: { value: 100, unit: "mL" } }
+      ] };
+    const graph = { sourceText: "", sourceLocale: "en", actions: [action] };
+    const before = JSON.stringify(graph), views = publicViews(graph);
+    for (const value of [views.row, views.course, views.native]) {
+      const en = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(value, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain(`Chew 1 tablet ${relation === AdviceRelation.With ? "with" : "without"} 100 mL water`);
+      expect(en.match(/1 tablet/gu)).toHaveLength(1);
+      expect(en.match(/100 mL/gu)).toHaveLength(1);
+      expect(th).toContain("1 เม็ด"); expect(th).toContain("100 มิลลิลิตร"); expect(th).toContain("น้ำ");
+      expect(th).toContain(relation === AdviceRelation.With ? "ด้วย" : "โดยไม่ใช้");
+    }
+    expect(realizeInstructionAction({ ...action, args: [action.args[0]] }, "en")).toBe("Chew 1 tablet");
+    expect(realizeInstructionAction({ ...action, polarity: AdvicePolarity.Negate }, "en"))
+      .toContain(`Do not chew 1 tablet ${relation === AdviceRelation.With ? "with" : "without"} 100 mL water`);
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it("recognizes an eat alias without merging distinct warning arguments or source spans", () => {
+    const action: AdviceFrame = { force: AdviceForce.Instruction, polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "eat-food", display: "Eat food" }, sourceText: "Do not eat food", span: { start: 0, end: 15 },
+      args: [{ role: AdviceArgumentRole.Object, text: "food", normalized: "food", conceptId: "food" }] };
+    const graph = { sourceText: action.sourceText, actions: [action] };
+    const warning: AdviceFrame = { ...action, predicate: { lemma: "eat", display: "Eat" } };
+    expect(instructionGraphCoversTypedWarnings(graph, [warning])).toBe(true);
+    expect(instructionGraphCoversTypedWarnings(graph, [{ ...warning, span: { start: 20, end: 35 } }])).toBe(false);
+    expect(instructionGraphCoversTypedWarnings(graph, [{ ...warning,
+      args: [{ role: AdviceArgumentRole.Object, text: "grapefruit", normalized: "grapefruit", conceptId: "grapefruit" }] }])).toBe(false);
   });
 });

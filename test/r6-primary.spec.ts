@@ -8598,3 +8598,94 @@ describe("current FHIR condition and annotation meaning", () => {
     expect(source).toEqual(before);
   });
 });
+
+describe("current display ownership beside independent FHIR metadata", () => {
+  it("retains nasal septum specificity beside a broader nose coding", () => {
+    const row: FhirDosage = { text: "Apply 1 g to the nasal septum.",
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+      site: { text: "nasal septum", coding: [{ system: "http://snomed.info/sct", code: "181195007" }] },
+      extension: [{ url: "urn:clinic:site-note", valueString: "Retain site detail" }] };
+    const before = JSON.stringify(row), native = importCanonicalCourse(row), r6 = toDosageDetails([row]);
+    expect(native.stages[0].administrations[0].target).toMatchObject({ text: "nasal septum" });
+    for (const value of [row, native, r6]) for (const style of ["short", "long"] as const) {
+      expect(formatSig(value, style, { locale: "en", realizationMode: "normalized" })).toContain("nasal septum");
+      expect(formatSig(value, style, { locale: "th", realizationMode: "normalized" })).toContain("ผนังกั้นจมูก");
+    }
+    const returned = toFhirR5Dosages(r6)[0];
+    expect(returned.site).toEqual(row.site);
+    expect(returned.doseAndRate).toEqual(row.doseAndRate);
+    expect(returned.text).toBe(row.text);
+    expect(returned.extension).toContainEqual(row.extension![0]);
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it.each([false, true])("retains an advice display on equivalent Codings (first display=%s)", firstDisplay => {
+    const coding = [{ system: "urn:clinic:advice", code: "do-not-crush", ...(firstDisplay ? { display: "Do not crush" } : {}) },
+      { system: "urn:clinic:alternate-advice", code: "no-crush", display: "Do not crush" }];
+    const component: FhirR6Dosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      additionalInstruction: [{ coding }], extension: [{ url: "urn:clinic:advice-note", valueString: "Keep both Codings" }] };
+    const input: FhirR6DosageInstruction = { step: [{ component: [component] }] };
+    const before = JSON.stringify(input), native = importCanonicalCourse(input), rows = toFhirR5Dosages(input);
+    expect(native.stages[0].administrations[0].additionalInstructions?.[0].coding).toEqual(coding);
+    for (const value of [input, native, rows]) {
+      const text = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toContain("1 tablet");
+      expect(text.match(/Do not crush/gu)).toHaveLength(1);
+    }
+    expect(rows[0].additionalInstruction?.[0].coding).toEqual(coding);
+    expect(toDosageDetails(rows).step[0].component[0].additionalInstruction).toEqual(component.additionalInstruction);
+    expect(toDosageDetails(rows).step[0].component[0].extension).toEqual(component.extension);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(["advice", "graph"] as const)("keeps a standalone clock window beside independent %s", channel => {
+    const warning = parseInstructionActions("Do not crush")[0];
+    const repeat = { extension: [{ url: TIMING_CLOCK_WINDOW_EXTENSION_URL, extension: [
+      { url: "start", valueTime: "08:00:00" }, { url: "end", valueTime: "20:00:00" },
+      { url: "endInclusive", valueBoolean: true }
+    ] }] };
+    const advice = channel === "advice" ? { additionalInstruction: [{ text: "Do not crush" }] }
+      : { extension: [buildInstructionGraphExtension({ sourceText: "Do not crush", sourceLocale: "en", actions: [warning] })!] };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ timing: { repeat }, ...advice }] }] };
+    const before = JSON.stringify(input), native = importCanonicalCourse(input), rows = toFhirR5Dosages(input);
+    expect(native.stages[0].administrations[0].schedule?.recurrence?.clockWindow)
+      .toMatchObject({ start: "08:00:00", end: "20:00:00" });
+    expect(native.stages[0].administrations[0].amounts).toBeUndefined();
+    for (const value of [input, native, rows]) for (const locale of ["en", "th"]) {
+      const text = formatSig(value, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain("08:00"); expect(text).toContain("20:00");
+      expect(text).toContain(locale === "en" ? "only between" : "เฉพาะช่วงเวลา");
+      expect(text.match(locale === "en" ? /Do not crush/gu : /ห้ามบด/gu)).toHaveLength(1);
+      const adviceOnly: FhirR6DosageInstruction = { step: [{ component: [advice] }] };
+      expect(formatSig(adviceOnly, "long", { locale, realizationMode: "normalized" }))
+        .toBe(locale === "en" ? "Do not crush." : "ห้ามบด.");
+    }
+    expect(toDosageDetails(rows).step[0].component[0].timing?.repeat).toEqual(repeat);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each([undefined, 3])("shows the once-only cycle interval independently of a %s-day authored bound", boundDays => {
+    const interval = { value: 28, unit: "d", code: "d", system: "http://unitsofmeasure.org" };
+    const boundsDuration = boundDays === undefined ? undefined : { value: boundDays, unit: "d", code: "d" };
+    const input: FhirR6DosageInstruction = { repeatCycle: interval,
+      modifierExtension: [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 1 }], step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, ...(boundsDuration ? { boundsDuration } : {}) } }
+      }] }] };
+    const before = JSON.stringify(input), native = importCanonicalCourse(input), rows = toFhirR5Dosages(input);
+    expect(native.cycleCount).toBe(1); expect(native.cycleInterval).toMatchObject(interval);
+    for (const value of [input, native, rows]) {
+      const en = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(value, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("1 tablet once daily");
+      expect(en).toContain("1 cycle total (cycle interval: 28 days)");
+      expect(en).not.toContain("Repeat this schedule");
+      expect(th).toContain("รวม 1 รอบ"); expect(th).toContain("ระยะรอบการใช้ยา: 28 วัน");
+      if (boundDays) { expect(en).toContain("for 3 days"); expect(th).toContain("3 วัน"); }
+    }
+    const returned = toDosageDetails(rows);
+    expect(returned.repeatCycle).toEqual(interval);
+    expect(returned.step[0].component[0].timing?.repeat?.boundsDuration).toEqual(boundsDuration);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+});
