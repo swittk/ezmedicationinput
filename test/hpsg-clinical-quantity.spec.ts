@@ -683,7 +683,7 @@ describe("HPSG clinical quantity grammar", () => {
   });
 
   it("keeps unsupported weight-rate suffixes visible without erasing the typed quantity", () => {
-    for (const source of ["5 mcg/kg/bolus IV"]) {
+    for (const source of ["5 mcg/kg/bolus IV", "5 mg/kg/month IV", "5 mg/kg/night IV"]) {
       const parsed = parseSig(source);
       expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
         status: "unsupported",
@@ -694,8 +694,10 @@ describe("HPSG clinical quantity grammar", () => {
     }
   });
 
-  it("represents a supported weekly weight-based rate directly", () => {
-    const parsed = parseSig("5 mg/kg/week IV");
+  it.each(["week", "w", "wk", "wks"])("represents a supported weekly weight-based rate directly: %s", (period) => {
+    const source = `5 mg/kg/${period} IV`;
+    const parsed = parseSig(source);
+    expect(parsed.fhir.text).toBe(source);
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
       status: "resolved", requiresPatientWeight: true
     });

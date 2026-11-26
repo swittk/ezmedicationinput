@@ -155,16 +155,16 @@ function clinicalDurationNumber(token: HpsgClauseContext["tokens"][number] | und
 }
 
 export function clinicalRatePeriodUnit(raw: string): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | undefined {
-  if (/^(?:h|hr|hrs|hour|hours)$/u.test(raw)) return FhirPeriodUnit.Hour;
-  if (/^(?:m|min|mins|minute|minutes)$/u.test(raw)) return FhirPeriodUnit.Minute;
-  return undefined;
+  const unit = mapIntervalUnit(raw);
+  return unit === FhirPeriodUnit.Hour || unit === FhirPeriodUnit.Minute ? unit : undefined;
 }
 
 function weightRatePeriodUnit(
   raw: string
 ): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | FhirPeriodUnit.Week | undefined {
-  return clinicalRatePeriodUnit(raw) ??
-    (/^(?:wk|wks|week|weeks)$/u.test(raw) ? FhirPeriodUnit.Week : undefined);
+  const unit = mapIntervalUnit(raw);
+  return unit === FhirPeriodUnit.Hour || unit === FhirPeriodUnit.Minute || unit === FhirPeriodUnit.Week
+    ? unit : undefined;
 }
 
 function hasAdministrationCue(context: HpsgClauseContext, before: number, allowPrecedingDose = false): boolean {
