@@ -123,7 +123,7 @@ function editedOperator(
   } };
 }
 
-/** Quantity annotations and Ratio endpoints use the same operator bridge as their owner.
+/** Quantity annotations and typed Ratio/Range endpoints share their owner's operator bridge.
  * Other Extension value choices remain opaque; this is not a general
  * extension-version converter or an object-tree normalizer. */
 const extensionPrimitiveFields = ["_valueCode", "_valueString", "_valueDecimal", "_valueTime", "_valueInteger", "_valueBoolean"] as const;
@@ -151,10 +151,24 @@ export function quantityAnnotationExtensions(
         ...(extension !== ratio.extension ? { extension } : {})
       };
     }
+    let range = item.valueRange;
+    if (range) {
+      const low = target === "r5" ? simpleQuantityForR5(range.low) : simpleQuantityForR6(range.low);
+      const high = target === "r5" ? simpleQuantityForR5(range.high) : simpleQuantityForR6(range.high);
+      const extension = range.extension ? quantityAnnotationExtensions(range.extension, target) : undefined;
+      if (low !== range.low || high !== range.high || extension !== range.extension) range = {
+        ...range,
+        ...(low !== range.low ? { low } : {}),
+        ...(high !== range.high ? { high } : {}),
+        ...(extension !== range.extension ? { extension } : {})
+      };
+    }
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
-    let current = quantity === item.valueQuantity && ratio === item.valueRatio && children === item.extension ? item : {
+    let current = quantity === item.valueQuantity && ratio === item.valueRatio &&
+      range === item.valueRange && children === item.extension ? item : {
       ...item, ...(quantity !== item.valueQuantity ? { valueQuantity: quantity } : {}),
       ...(ratio !== item.valueRatio ? { valueRatio: ratio } : {}),
+      ...(range !== item.valueRange ? { valueRange: range } : {}),
       ...(children !== item.extension ? { extension: children } : {}),
     };
     for (const field of extensionPrimitiveFields) {

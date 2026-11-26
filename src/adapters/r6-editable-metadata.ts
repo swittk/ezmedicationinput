@@ -439,6 +439,11 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
   } catch { return undefined; }
 }
 
+/** Phase totals remain in their scoped wrapper; other limits have a core mirror. */
+function hasCoreStepLimit(limit: FhirR6DoseLimit): boolean {
+  return limit.scope !== "dosage";
+}
+
 /** Shared per-limit ownership for a lifted policy and its scoped modifiers. */
 function reconcileSafetyScopes(
   safety: FhirR6DosageSafety,
@@ -512,13 +517,16 @@ function reconcileSafetyScopes(
     exactGroup(limit).live.push(index);
     if (limit.id) liveIds.set(limit.id, liveIds.has(limit.id) ? undefined : index);
   }
-  for (const policy of [saved.course, saved.step])
+  for (let index = 0; index < 2; index++) {
+    const policy = index === 0 ? saved.course : saved.step;
     for (const limit of policy?.doseLimit ?? []) {
+      if (index === 1 && !hasCoreStepLimit(limit)) continue;
       const group = exactGroup(limit);
       group.sourceCount++;
       sourceGroups.set(limit, group);
       if (limit.id) sourceIds.set(limit.id, (sourceIds.get(limit.id) ?? 0) + 1);
     }
+  }
   // Reserve exact survivors and unique declared identities across BOTH
   // policies before any anonymous edit can claim a live clinical shape.
   for (const [limit, group] of sourceGroups) {
@@ -535,6 +543,10 @@ function reconcileSafetyScopes(
     let changed = false;
     const limits: FhirR6DoseLimit[] = [];
     for (const limit of policy.doseLimit ?? []) {
+      if (phase && !hasCoreStepLimit(limit)) {
+        limits.push(limit);
+        continue;
+      }
       const group = sourceGroups.get(limit)!;
       const assigned = matches.get(limit);
       if (assigned !== undefined && (!phase || !unchangedStepOnly || group.sourceCount === group.live.length ||
@@ -621,9 +633,9 @@ export function liftSingleStepSafety(output: FhirR6DosageInstruction): void {
   const course = output.safety;
   // A dosage-scoped limit is relative to its containing policy. Lifting a
   // phase total into core course safety would change its meaning.
-  const scopedTotal = policy.doseLimit?.some(limit => limit.scope === "dosage");
+  const scopedTotal = policy.doseLimit?.some(limit => !hasCoreStepLimit(limit));
   const liftedLimits = scopedTotal
-    ? policy.doseLimit!.filter(limit => limit.scope !== "dosage") : policy.doseLimit;
+    ? policy.doseLimit!.filter(hasCoreStepLimit) : policy.doseLimit;
   let projected = policy;
   if (course || scopedTotal) {
     projected = { ...(course ?? policy) };

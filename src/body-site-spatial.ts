@@ -25,7 +25,7 @@ const SOURCE_TEXT_URL = "sourceText";
 
 /** Copy additional authored fields without recursively detaching opaque
  * metadata. Standard FHIR annotations retain their existing clone contract. */
-function copyAdditionalCodingField(target: FhirCoding, source: FhirCoding, key: string): void {
+function copyAdditionalCodingField(target: FhirR6Coding, source: FhirR6Coding, key: string): void {
   const fields = target as Record<string, unknown>;
   const value = (source as Record<string, unknown>)[key];
   switch (key) {
@@ -59,9 +59,9 @@ function sharedCodingFields(
 
 /** Convert known Quantity annotations at the R5 Coding boundary. Plain
  * codings and unrelated supplied fields retain their existing identities. */
-function spatialCodingForR5(coding: FhirCoding | undefined): FhirCoding | undefined {
+function spatialCodingForR5(coding: FhirR6Coding | undefined): FhirCoding | undefined {
   if (!coding || !coding.extension?.length && !coding._system && !coding._version &&
-      !coding._code && !coding._display && !coding._userSelected) return coding;
+      !coding._code && !coding._display && !coding._userSelected) return coding as FhirCoding | undefined;
   const extension = coding.extension?.length
     ? quantityAnnotationExtensions(coding.extension, "r5") as FhirExtension[] : coding.extension;
   let result = extension === coding.extension ? coding : { ...coding, extension };
@@ -71,7 +71,25 @@ function spatialCodingForR5(coding: FhirCoding | undefined): FhirCoding | undefi
     if (result === coding) result = { ...coding };
     result[field] = primitive;
   }
-  return result;
+  return result as FhirCoding;
+}
+
+/** Preserve the complete supplied concept while projecting its known annotations. */
+function spatialConceptForR5(concept: FhirR6CodeableConcept): FhirCodeableConcept {
+  let coding: FhirR6Coding[] | undefined;
+  for (let index = 0; index < (concept.coding?.length ?? 0); index++) {
+    const current = spatialCodingForR5(concept.coding![index])!;
+    if (current !== concept.coding![index]) coding ??= concept.coding!.slice(0, index);
+    coding?.push(current);
+  }
+  const extension = concept.extension ? quantityAnnotationExtensions(concept.extension, "r5") : undefined;
+  const text = quantityPrimitiveForR5(concept._text);
+  return (!coding && extension === concept.extension && text === concept._text ? concept : {
+    ...concept,
+    ...(coding ? { coding } : {}),
+    ...(extension !== concept.extension ? { extension } : {}),
+    ...(text !== concept._text ? { _text: text } : {})
+  }) as FhirCodeableConcept;
 }
 
 function bodySiteCodingToFhir(coding: BodySiteCode | undefined): FhirCoding | undefined {
@@ -124,6 +142,23 @@ export function cloneBodySiteSpatialRelation(
       }
     }
   }
+  if (relation.targetConcept) {
+    const concept = relation.targetConcept;
+    const targetConcept = { ...concept };
+    if (concept.coding) {
+      targetConcept.coding = [];
+      for (const source of concept.coding) {
+        const current = { ...source };
+        for (const key in source)
+          if (key !== "system" && key !== "code" && key !== "display")
+            copyAdditionalCodingField(current, source, key);
+        targetConcept.coding.push(current);
+      }
+    }
+    if (concept.extension) targetConcept.extension = cloneStructuredValue(concept.extension);
+    if (concept._text) targetConcept._text = cloneStructuredValue(concept._text);
+    cloned.targetConcept = targetConcept;
+  }
   return cloned;
 }
 
@@ -141,16 +176,18 @@ export function buildBodySiteSpatialRelationExtension(
   if (relation.relationText) {
     children.push({ url: RELATION_TEXT_URL, valueString: relation.relationText });
   }
-  const targetCoding = spatialCodingForR5(bodySiteCodingToFhir(relation.targetCoding));
-  if (relation.targetText || targetCoding?.code) {
-    const target: FhirCodeableConcept = {};
-    if (relation.targetText) {
-      target.text = relation.targetText;
+  if (relation.targetConcept) {
+    children.push({ url: TARGET_URL, valueCodeableConcept: spatialConceptForR5(relation.targetConcept) });
+    if (relation.targetConcept.text === undefined && relation.targetText !== undefined)
+      children.push({ url: TARGET_TEXT_URL, valueString: relation.targetText });
+  } else {
+    const targetCoding = spatialCodingForR5(bodySiteCodingToFhir(relation.targetCoding));
+    if (relation.targetText || targetCoding?.code) {
+      const target: FhirCodeableConcept = {};
+      if (relation.targetText) target.text = relation.targetText;
+      if (targetCoding?.code) target.coding = [targetCoding];
+      children.push({ url: TARGET_URL, valueCodeableConcept: target });
     }
-    if (targetCoding?.code) {
-      target.coding = [targetCoding];
-    }
-    children.push({ url: TARGET_URL, valueCodeableConcept: target });
   }
   if (relation.sourceText) {
     children.push({ url: SOURCE_TEXT_URL, valueString: relation.sourceText });
@@ -208,6 +245,10 @@ export function parseBodySiteSpatialRelationExtension(
     targetCoding: targetCoding?.code
       ? { ...targetCoding, code: targetCoding.code }
       : undefined,
+    ...(targetConcept && ((targetConcept.coding?.length ?? 0) > 1 ||
+      !targetCoding && targetConcept.coding?.length ||
+      Object.keys(targetConcept).some(key => key !== "coding" && key !== "text"))
+      ? { targetConcept } : {}),
     sourceText
   };
 }

@@ -154,7 +154,8 @@ function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | unde
       if (translation) addFieldSources(parts[index].extension!, source.extension);
       parts[index] = { ...source, ...parts[index] };
     }
-    else if (optionalField)
+    // An extension-only primitive remains active even without a scalar slot.
+    else if (optionalField && !(source.valueString === undefined && source._valueString))
       parts.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [source] });
     else parts.push(source);
   }

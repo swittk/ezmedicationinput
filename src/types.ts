@@ -689,6 +689,7 @@ export type FhirR6DosageCondition = FhirR6BackboneElement & {
   code: FhirR6CodeableConcept;
   details?: FhirR6CodeableConcept;
   operation?: "eq" | "ne" | "in" | "nin" | "gt" | "lt" | "ge" | "le" | "sa" | "eb" | "ap";
+  _operation?: FhirR6PrimitiveElement;
   text?: string;
   _text?: FhirR6PrimitiveElement;
 } & DosageConditionValue;
@@ -961,6 +962,8 @@ export interface BodySiteSpatialRelation {
   relationCoding?: FhirCoding;
   targetText?: string;
   targetCoding?: BodySiteCode;
+  /** Complete supplied concept when one selected Coding cannot carry all its data. */
+  targetConcept?: FhirR6CodeableConcept;
   sourceText?: string;
 }
 

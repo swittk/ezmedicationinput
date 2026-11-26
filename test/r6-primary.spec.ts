@@ -1,3 +1,6 @@
+import { parseBodySiteSpatialRelationExtension, buildBodySiteSpatialRelationExtension } from "../src/body-site-spatial";
+import { encodeR6SourceMetadata, decodeR6SourceMetadata } from "../src/dosage-course";
+import { R6_SCOPED_SAFETY_MODIFIER_URL } from "../src/adapters/r6-editable-metadata";
 import { ENGLISH_COURSE } from "../src/locales/course/en";
 import { decodeR5RetainedFields, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
 import { equalStructuredValues, cloneStructuredValue } from "../src/stable-structure";
@@ -8252,5 +8255,156 @@ describe("compatible anatomical refinements", () => {
       expect(JSON.stringify(value)).toBe(saved);
     }
     expect(JSON.stringify(input)).toBe(before);
+  });
+});
+
+
+describe("current FHIR primitive and phase annotations", () => {
+  const ucum = "http://unitsofmeasure.org";
+  const note = { url: "urn:clinic:authored-note", valueString: "Keep this annotation at its current owner." };
+  const dose = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+    timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } } };
+
+  it("accepts and retains the primitive annotation on a current condition operation", () => {
+    const condition = { code: { text: "blood glucose" }, operation: "gt" as const,
+      _operation: { id: "comparison", extension: [note] },
+      valueQuantity: { value: 180, unit: "mg/dL", system: ucum, code: "mg/dL" } };
+    const input: FhirR6DosageInstruction = { renderedInstruction: "Take 1 tablet if blood glucose is above 180 mg/dL.",
+      step: [{ component: [{ ...dose, condition: [condition] }] }] };
+    const before = structuredClone(input);
+    const returned = courseToR6(importCanonicalCourse(toFhirR5Dosages(input)));
+    expect(returned.step[0].component[0].condition).toContainEqual(condition);
+    expect(returned.renderedInstruction).toBe(input.renderedInstruction);
+    expect(returned.step[0].component[0].doseAndRate).toEqual(dose.doseAndRate);
+    expect(input).toEqual(before);
+  });
+
+  it("projects Quantity annotations inside a clinic reference range to strict R5", () => {
+    const tolerance = { url: "urn:clinic:tolerance", valueQuantity: {
+      value: 0.1, comparator: "~" as const, unit: "mg", system: ucum, code: "mg", extension: [note]
+    } };
+    const range = { id: "reference-range", extension: [note],
+      low: { value: 1, unit: "mg", system: ucum, code: "mg", extension: [tolerance] },
+      high: { value: 2, unit: "mg", system: ucum, code: "mg", id: "upper-reference" } };
+    const input: FhirR6DosageInstruction = { renderedInstruction: "Take 1 tablet twice daily.", step: [{ component: [{
+      ...dose, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab", extension: [
+        { url: "urn:clinic:reference-range", valueRange: range }
+      ] } }]
+    }] }] };
+    const before = structuredClone(input), rows = toFhirR5Dosages(input);
+    const emitted = rows[0].doseAndRate![0].doseQuantity!.extension![0].valueRange!;
+    const quantity = emitted.low!.extension![0].valueQuantity!;
+    expect(emitted.id).toBe(range.id);
+    expect(emitted.extension).toEqual([note]);
+    expect(emitted.high).toEqual(range.high);
+    expect(emitted.low!.comparator).toBeUndefined();
+    expect(quantity.comparator).toBeUndefined();
+    expect(getEmaQuantityComparator(quantity)).toBe("~");
+    expect(quantity.extension).toContainEqual(note);
+    const returned = courseToR6(importCanonicalCourse(rows));
+    const restored = returned.step[0].component[0].doseAndRate![0].doseQuantity!.extension![0].valueRange!;
+    expect(restored).toMatchObject({ id: range.id, extension: [note], high: range.high,
+      low: { value: 1, unit: "mg", system: ucum, code: "mg" } });
+    const restoredTolerance = restored.low!.extension![0].valueQuantity!;
+    expect(restoredTolerance).toMatchObject({ value: 0.1, unit: "mg", system: ucum, code: "mg" });
+    expect(getQuantityComparator(restoredTolerance)).toBe("~");
+    expect(restoredTolerance.extension).toContainEqual(note);
+    expect(input).toEqual(before);
+  });
+
+  it.each([false, true])("keeps a phase total active with a core period mirror: %s", mirrored => {
+    const total = { id: "phase-total", scope: "dosage" as const,
+      valueQuantity: { value: 3, unit: "tab", extension: [note] } };
+    const period = { id: "daily-limit", scope: "period" as const,
+      valueQuantity: { value: 2, unit: "tab" }, period: { value: 1, unit: "d", code: "d", system: ucum } };
+    const limits = mirrored ? [total, period] : [total];
+    const marker = encodeR6SourceMetadata(R6_SCOPED_SAFETY_MODIFIER_URL, { step: { doseLimit: limits } }, "safety");
+    const input: FhirR6DosageInstruction = { renderedInstruction: "Take 1 tablet twice daily, with a phase total of 3 tablets.",
+      safety: { modifierExtension: [marker], ...(mirrored ? { doseLimit: [period] } : {}) },
+      step: [{ component: [dose] }] };
+    const before = structuredClone(input), returned = courseToR6(importCanonicalCourse(toFhirR5Dosages(input)));
+    const active = returned.safety!.modifierExtension!.find(item => item.url === R6_SCOPED_SAFETY_MODIFIER_URL)!;
+    const scoped = decodeR6SourceMetadata(active, "safety") as { step: { doseLimit: unknown[] } };
+    expect(scoped.step.doseLimit).toEqual(limits);
+    expect(returned.safety!.doseLimit ?? []).toEqual(mirrored ? [period] : []);
+    expect(returned.renderedInstruction).toBe(input.renderedInstruction);
+    const options = { from: "2026-11-02T00:00:00Z", orderedAt: "2026-11-02T00:00:00Z", timeZone: "UTC",
+      durationValue: 3, durationUnit: FhirPeriodUnit.Day };
+    // Phase safety is retained and explicitly qualified by the existing supply API.
+    for (const current of [input, returned]) expect(calculateTotalUnits({ dosage: current, ...options }))
+      .toMatchObject({ totalUnits: 6, unit: "tab", quantityKind: "maximum",
+        explanation: expect.stringContaining("retained but not evaluated") });
+    expect(input).toEqual(before);
+  });
+
+  it("preserves the full supplied spatial target and its translated text", () => {
+    const target = { id: "left-eye-target", text: "left eye", extension: [note],
+      coding: [
+        { system: "http://snomed.info/sct", code: "1290031003", display: "Left eye",
+          _display: { id: "left-eye-display", extension: [note] } },
+        { system: "urn:clinic:body-site", code: "eye-left", display: "Left eye at this clinic" }
+      ], _text: { id: "target-text", extension: [{
+        url: "http://hl7.org/fhir/StructureDefinition/translation", extension: [
+          { url: "lang", valueCode: "th" }, { url: "content", valueString: "ตาซ้าย" }
+        ]
+      }] } };
+    const supplied = { text: "around the left eye", extension: [{
+      url: "urn:ezmedicationinput:body-site-spatial-relation", extension: [
+        { url: "relationText", valueString: "around" }, { url: "target", valueCodeableConcept: target }
+      ]
+    }] };
+    const before = structuredClone(supplied), relation = parseBodySiteSpatialRelationExtension(supplied)!;
+    expect(relation.targetCoding).toMatchObject({ system: "http://snomed.info/sct", code: "1290031003" });
+    expect(relation.targetText).toBe("left eye");
+    const rebuilt = buildBodySiteSpatialRelationExtension(relation)!;
+    expect(rebuilt.extension!.find(item => item.url === "target")!.valueCodeableConcept).toEqual(target);
+    const cloned = cloneBodySiteSpatialRelation(relation)!;
+    expect(cloned.targetConcept).toEqual(target);
+    expect(cloned.targetConcept).not.toBe(relation.targetConcept);
+    expect(cloned.targetConcept!.coding![0]).not.toBe(target.coding[0]);
+    expect(cloned.targetConcept!.coding![0]._display).not.toBe(target.coding[0]._display);
+    expect(cloned.targetConcept!._text).not.toBe(target._text);
+    expect(buildBodySiteSpatialRelationExtension(cloned)).toEqual(rebuilt);
+    expect(supplied).toEqual(before);
+  });
+
+  it.each([undefined, "supplied left eye"])("preserves the spatial target fallback without replacing supplied text: %s", text => {
+    const target = { id: "authored-target", ...(text === undefined ? {} : { text }), coding: [
+      { system: "http://snomed.info/sct", code: "1290031003" },
+      { system: "urn:clinic:body-site", code: "eye-left" }
+    ] };
+    const supplied = { extension: [{ url: "urn:ezmedicationinput:body-site-spatial-relation", extension: [
+      { url: "relationText", valueString: "around" }, { url: "target", valueCodeableConcept: target },
+      { url: "targetText", valueString: "authored fallback left eye" }
+    ] }] };
+    const relation = parseBodySiteSpatialRelationExtension(supplied)!;
+    expect(relation.targetText).toBe(text ?? "authored fallback left eye");
+    const rebuilt = buildBodySiteSpatialRelationExtension(relation)!;
+    expect(rebuilt.extension!.find(item => item.url === "target")!.valueCodeableConcept).toEqual(target);
+    expect(parseBodySiteSpatialRelationExtension({ extension: [rebuilt] })!.targetText)
+      .toBe(text ?? "authored fallback left eye");
+  });
+
+  it("keeps an unknown normalized argument value at its original active field", () => {
+    const normalized = { url: "normalized", _valueString: { id: "unknown-normalization", extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+    }] } };
+    const supplied: FhirExtension = { url: "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph",
+      extension: [{ url: "sourceText", valueString: "Drink water" }, { url: "action", extension: [
+        { url: "predicateLemma", valueString: "drink" }, { url: "force", valueCode: "instruction" },
+        { url: "spanStart", valueInteger: 0 }, { url: "spanEnd", valueInteger: 11 },
+        { url: "sourceText", valueString: "Drink water" }, { url: "argument", extension: [
+          { url: "role", valueCode: "object" }, { url: "text", valueString: "water" }, normalized
+        ] }
+      ] }] };
+    const before = structuredClone(supplied), graph = parseInstructionGraphExtension([supplied])!;
+    expect(graph.actions[0].args[0].text).toBe("water");
+    expect(graph.actions[0].args[0].normalized).toBeUndefined();
+    const returned = buildInstructionGraphExtension(graph)!;
+    const argument = returned.extension!.find(item => item.url === "action")!.extension!.find(item => item.url === "argument")!;
+    expect(argument.extension).toContainEqual(normalized);
+    expect(argument.extension!.find(item => item.url === "normalized")!.valueString).toBeUndefined();
+    expect(argument.extension!.some(item => item.url === "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source")).toBe(false);
+    expect(supplied).toEqual(before);
   });
 });
