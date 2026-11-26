@@ -8312,6 +8312,56 @@ describe("current FHIR primitive and phase annotations", () => {
     expect(input).toEqual(before);
   });
 
+  it.each(["doseRange", "rateRange", "boundsRange"] as const)(
+    "projects current Quantity annotations on a core %s without changing its endpoints", field => {
+      const unit = field === "doseRange" ? "mg" : field === "rateRange" ? "mL/h" : "d";
+      const tolerance = { url: "urn:clinic:tolerance", valueQuantity: {
+        id: "active-tolerance", value: 0.1, comparator: "~" as const, unit, system: ucum, code: unit,
+        extension: [note]
+      } };
+      const range = { id: "current-range", extension: [note, tolerance],
+        low: { value: 1, unit, system: ucum, code: unit },
+        high: { value: 2, unit, system: ucum, code: unit } };
+      const repeat = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day };
+      const component: FhirR6Dosage = field === "boundsRange"
+        ? { doseAndRate: [{ doseQuantity: { value: 1, unit: "tablet" } }],
+            timing: { repeat: { ...repeat, boundsRange: range } } }
+        : { doseAndRate: [{ [field]: range }], timing: { repeat } };
+      const source = field === "doseRange" ? "Take 1 to 2 mg daily."
+        : field === "rateRange" ? "Infuse at 1 to 2 mL/h daily."
+        : "Take 1 tablet daily for 1 to 2 days.";
+      const input: FhirR6DosageInstruction = { renderedInstruction: source, step: [{ component: [component] }] };
+      const before = structuredClone(input), rows = toFhirR5Dosages(input);
+      const readRange = (value: FhirDosage | FhirR6Dosage) => field === "boundsRange"
+        ? value.timing?.repeat?.boundsRange : value.doseAndRate?.[0]?.[field];
+      const projected = readRange(rows[0])!;
+      expect(projected.low).toEqual(range.low);
+      expect(projected.high).toEqual(range.high);
+      expect(projected.id).toBe(range.id);
+      expect(projected.extension).toContainEqual(note);
+      const quantity = projected.extension!.find(item => item.url === tolerance.url)!.valueQuantity!;
+      expect(quantity).toMatchObject({ id: "active-tolerance", value: 0.1, unit, system: ucum, code: unit });
+      expect(quantity.comparator).toBeUndefined();
+      expect(getEmaQuantityComparator(quantity)).toBe("~");
+      expect(quantity.extension).toContainEqual(note);
+      const returned = toDosageDetails(rows);
+      const restored = readRange(returned.step[0].component[0])!;
+      expect(restored.low).toEqual(range.low);
+      expect(restored.high).toEqual(range.high);
+      expect(restored.id).toBe(range.id);
+      expect(restored.extension).toContainEqual(note);
+      const restoredTolerance = restored.extension!.find(item => item.url === tolerance.url)!.valueQuantity!;
+      expect(restoredTolerance).toMatchObject({ id: "active-tolerance", value: 0.1, unit, system: ucum, code: unit });
+      expect(getQuantityComparator(restoredTolerance)).toBe("~");
+      expect(restoredTolerance.extension).toContainEqual(note);
+      expect(returned.renderedInstruction).toBe(source);
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const)
+        expect(formatSig(rows, style, { locale, realizationMode: "normalized" }))
+          .toBe(formatSig(input, style, { locale, realizationMode: "normalized" }));
+      expect(input).toEqual(before);
+    }
+  );
+
   it.each([false, true])("keeps a phase total active with a core period mirror: %s", mirrored => {
     const total = { id: "phase-total", scope: "dosage" as const,
       valueQuantity: { value: 3, unit: "tab", extension: [note] } };

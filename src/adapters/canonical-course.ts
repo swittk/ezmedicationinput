@@ -209,9 +209,11 @@ function rangeFromWire(r: FhirRange | FhirR6Range | undefined, r5 = false): Cano
   if (!r) return undefined;
   const low = r5 ? measureFromR5(r.low) : measureFromWire(r.low);
   const high = r5 ? measureFromR5(r.high) : measureFromWire(r.high);
-  return low === r.low && high === r.high
+  const extension = r.extension?.length ? quantityAnnotationExtensions(r.extension, "r6") : r.extension;
+  return low === r.low && high === r.high && extension === r.extension
     ? r
-    : { ...r, ...(r.low ? { low } : {}), ...(r.high ? { high } : {}) };
+    : { ...r, ...(r.low ? { low } : {}), ...(r.high ? { high } : {}),
+        ...(extension !== r.extension ? { extension } : {}) };
 }
 export function rangeFromFhir(r: FhirRange | FhirR6Range | undefined): CanonicalRange | undefined {
   return rangeFromWire(r);
@@ -2238,11 +2240,15 @@ function serializeRange(value: CanonicalRange, target: "r5" | "r6", duration = f
   const high = value.high ? q(value.high) : undefined;
   if (duration && low && high && low.code === high.code && low.system === high.system)
     low.unit = high.unit;
-  if (low === value.low && high === value.high) return value as FhirRange;
+  const rangeExtensions = (value as FhirR6Range).extension;
+  const extension = target === "r5" && rangeExtensions?.length
+    ? quantityAnnotationExtensions(rangeExtensions, "r5") : rangeExtensions;
+  if (low === value.low && high === value.high && extension === rangeExtensions) return value as FhirRange;
   return {
     ...value,
     ...(low ? { low } : {}),
     ...(high ? { high } : {}),
+    ...(extension !== rangeExtensions ? { extension } : {}),
   } as FhirRange;
 }
 /** Header/step metadata is shared fragment serialization, NOT a course in
