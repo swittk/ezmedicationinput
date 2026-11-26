@@ -4291,7 +4291,10 @@ describe("round76 shared current preview owners", () => {
       extension: [{ url: "urn:clinic:duration-note", valueString: "authored local interval" }] };
     const high = { ...low, value: 3, unit: "session blocks", code: "d" };
     const raw = course({ timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
-      ...(kind === "scalar" ? { boundsDuration: low } : { boundsRange: { low, high } }) } } });
+      ...(kind === "scalar" ? { boundsDuration: low } : { boundsRange: { low } }) } },
+      ...(kind === "range" ? { modifierExtension: [{ url: ANCHORED_COURSE_DURATION_EXTENSION_URL, extension: [
+        { url: "low", valueQuantity: low }, { url: "high", valueQuantity: high }
+      ] }] } : {}) });
     const rows = persist(toFhirR5Dosages(persist(raw)));
     for (const input of [persist(raw), rows, rows[0]]) {
       const before = persist(input), native = importCanonicalCourse(input);
@@ -4301,9 +4304,17 @@ describe("round76 shared current preview owners", () => {
         expect(text).not.toMatch(/for 2 hours|2 ชั่วโมง/u);
         if (kind === "range") { expect(text).toContain("3 session blocks"); expect(text).not.toMatch(/3 days|3 วัน/u); }
       }
-      const repeat = projectCanonicalCourse(native).fhirNext.step![0].component[0].timing!.repeat!;
-      if (kind === "scalar") expect(repeat.boundsDuration).toEqual(low);
-      else expect(repeat.boundsRange).toEqual({ low, high });
+      const projected = projectCanonicalCourse(native);
+      for (const component of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
+        const repeat = component.timing!.repeat!;
+        if (kind === "scalar") expect(repeat.boundsDuration).toEqual(low);
+        else {
+          expect(repeat.boundsRange).toEqual({ low });
+          expect(getAnchoredCourseDuration(component)?.valueRange).toEqual({ low, high });
+        }
+      }
+      if (kind === "range")
+        expect(native.stages[0].administrations[0].schedule?.recurrence?.courseLengthRange).toEqual({ low, high });
       expect(input).toEqual(before);
     }
   });
@@ -4349,17 +4360,26 @@ describe("round76 shared current preview owners", () => {
   });
 
   it("keeps opaque and standard duration endpoints separate in short previews", () => {
-    const raw = course({ timing: { repeat: { boundsRange: {
-      low: { value: 2, unit: "h", system: "urn:clinic:duration", code: "h" },
-      high: { value: 3, unit: "h", system: "http://unitsofmeasure.org", code: "h" },
-    } } } });
-    const rows = persist(toFhirR5Dosages(persist(raw)));
-    for (const input of [raw, rows, rows[0]]) for (const locale of ["en", "th"] as const) {
-      expect(formatSig(input, "short", { locale })).toContain("x2 h – 3h");
-      expect(formatSig(input, "short", { locale })).not.toContain("x2-3h");
+    const low = { value: 2, unit: "h", system: "urn:clinic:duration", code: "h" };
+    const high = { value: 3, unit: "h", system: "http://unitsofmeasure.org", code: "h" };
+    const raw = course({ timing: { repeat: { boundsRange: { low } } },
+      modifierExtension: [{ url: ANCHORED_COURSE_DURATION_EXTENSION_URL, extension: [
+        { url: "low", valueQuantity: low }, { url: "high", valueQuantity: high }
+      ] }] });
+    const before = persist(raw), rows = persist(toFhirR5Dosages(persist(raw)));
+    for (const input of [raw, rows, rows[0]]) {
+      for (const locale of ["en", "th"] as const) {
+        expect(formatSig(input, "short", { locale })).toContain("x2 h – 3h");
+        expect(formatSig(input, "short", { locale })).not.toContain("x2-3h");
+      }
+      const native = importCanonicalCourse(input), projected = projectCanonicalCourse(native);
+      expect(native.stages[0].administrations[0].schedule?.recurrence?.courseLengthRange).toEqual({ low, high });
+      for (const component of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
+        expect(component.timing?.repeat?.boundsRange).toEqual({ low });
+        expect(getAnchoredCourseDuration(component)?.valueRange).toEqual({ low, high });
+      }
     }
-    expect(projectCanonicalCourse(importCanonicalCourse(raw)).fhirNext.step![0].component[0].timing!.repeat!.boundsRange)
-      .toEqual(raw.step![0].component[0].timing!.repeat!.boundsRange);
+    expect(raw).toEqual(before);
   });
 
   it.each([false, true])("keeps member-only directions next to an independent warning, matching header=%s", matchingHeader => {

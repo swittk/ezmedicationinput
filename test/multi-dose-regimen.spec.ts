@@ -53,7 +53,7 @@ import { TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
 import { TIMING_FREQUENCY_MIN_EXTENSION_URL } from "../src/fhir";
 import { ADMINISTRATION_OFFSET_EXTENSION_URL } from "../src/fhir";
 import { CYCLE_DAY_ELIGIBILITY_EXTENSION_URL } from "../src/fhir";
-import { TIMING_ADMINISTRATION_DURATION_EXTENSION_URL } from "../src/fhir";
+import { TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL, getAnchoredCourseDuration } from "../src/fhir";
 import { buildBodySiteSpatialRelationExtension } from "../src/body-site-spatial";
 import { getQuantityComparator } from "../src/fhir-quantity-operator";
 import { simpleQuantityForR5 } from "../src/fhir-quantity-operator";
@@ -2921,23 +2921,35 @@ describe("round59 partial facts and complete authored directions", () => {
         ...(kind !== "upper only" ? { low: { value: 2, ...(kind !== "low missing" && kind !== "neither unit" ? { unit: "d" } : {}) } } : {}),
         high: { value: 3, ...(kind !== "high missing" && kind !== "neither unit" ? { unit: "d" } : {}) }
       };
-      const input = native({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat: { boundsRange: range } } });
-      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat: { boundsRange: fresh(range) } } };
+      const independentUnits = kind === "low missing" || kind === "high missing";
+      const coreRange = independentUnits ? { low: range.low } : range;
+      const modifierExtension = independentUnits ? [{ url: ANCHORED_COURSE_DURATION_EXTENSION_URL, extension: [
+        { url: "low", valueQuantity: range.low! }, { url: "high", valueQuantity: range.high }
+      ] }] : undefined;
+      const component = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { boundsRange: coreRange } }, ...(modifierExtension ? { modifierExtension } : {}) };
+      const input = native(component), row: FhirDosage = fresh(component);
       const before = fresh({ input, row });
-      for (const value of [row, ...views(input)]) for (const locale of ["en", "th"]) {
-        const short = kind === "low missing" ? "x2 – 3d" : kind === "high missing" ? "x2d – 3"
-          : kind === "neither unit" ? "x2 – 3" : kind === "upper only" ? "x<=3d" : "x2-3d";
-        const long = locale === "en"
-          ? kind === "low missing" ? "for 2 – 3 days" : kind === "high missing" ? "for 2 days – 3"
-            : kind === "neither unit" ? "for 2 – 3" : kind === "upper only" ? "for up to 3 days" : "for 2 to 3 days"
-          : kind === "low missing" ? "เป็นเวลา 2 – 3 วัน" : kind === "high missing" ? "เป็นเวลา 2 วัน – 3"
-            : kind === "neither unit" ? "เป็นเวลา 2 – 3" : kind === "upper only" ? "เป็นเวลา ไม่เกิน 3 วัน" : "เป็นเวลา 2 ถึง 3 วัน";
-        const options = { locale, realizationMode: "normalized" as const };
-        expect(formatSig(value, "short", options)).toBe((locale === "en" ? "1 tab " : "1 เม็ด ") + short);
-        expect(formatSig(value, "long", options)).toBe((locale === "en" ? "Use 1 tablet " : "ใช้ครั้งละ 1 เม็ด ") + long + ".");
+      for (const value of [row, ...views(input)]) {
+        const current = importCanonicalCourse(value);
+        expect(current.stages[0].administrations[0].schedule?.recurrence?.courseLengthRange).toEqual(range);
+        for (const locale of ["en", "th"]) {
+          const short = kind === "low missing" ? "x2 – 3d" : kind === "high missing" ? "x2d – 3"
+            : kind === "neither unit" ? "x2 – 3" : kind === "upper only" ? "x<=3d" : "x2-3d";
+          const long = locale === "en"
+            ? kind === "low missing" ? "for 2 – 3 days" : kind === "high missing" ? "for 2 days – 3"
+              : kind === "neither unit" ? "for 2 – 3" : kind === "upper only" ? "for up to 3 days" : "for 2 to 3 days"
+            : kind === "low missing" ? "เป็นเวลา 2 – 3 วัน" : kind === "high missing" ? "เป็นเวลา 2 วัน – 3"
+              : kind === "neither unit" ? "เป็นเวลา 2 – 3" : kind === "upper only" ? "เป็นเวลา ไม่เกิน 3 วัน" : "เป็นเวลา 2 ถึง 3 วัน";
+          const options = { locale, realizationMode: "normalized" as const };
+          expect(formatSig(value, "short", options)).toBe((locale === "en" ? "1 tab " : "1 เม็ด ") + short);
+          expect(formatSig(value, "long", options)).toBe((locale === "en" ? "Use 1 tablet " : "ใช้ครั้งละ 1 เม็ด ") + long + ".");
+        }
       }
       expect({ input, row }).toEqual(before);
-      expect(toFhirR5Dosages(input)[0].timing?.repeat?.boundsRange).toEqual(range);
+      const projected = toFhirR5Dosages(input)[0];
+      expect(projected.timing?.repeat?.boundsRange).toEqual(coreRange);
+      if (independentUnits) expect(getAnchoredCourseDuration(projected)?.valueRange).toEqual(range);
     });
 
   it.each([false, true])("keeps authored directions guarded beside a count cap and independent advice=%s", advice => {
