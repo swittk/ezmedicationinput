@@ -13,7 +13,7 @@ import {
   EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getBodySiteText, buildBodySiteAdministrationTargetCountExtension, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
-  type FormatOptions, type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
+  type FormatOptions, type FhirR6Extension, type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
   EventTiming, FhirPeriodUnit, AdviceRelation, AdviceArgumentRole, type CanonicalInstructionGraph, parseInstructionActions, cloneBodySiteSpatialRelation
 } from "../src/index";
 import {
@@ -7820,6 +7820,115 @@ describe("independent authored header and phase limits", () => {
       expect(calculateTotalUnits(options).totalUnits).toBe(start.endsWith("03") ? 1 : 2);
       if (start.endsWith("07")) expect(calculateTotalUnits({ ...options,
         from: "2027-01-05T00:00:00Z", durationValue: 2 }).totalUnits).toBe(0);
+    }
+  });
+});
+
+
+describe("current FHIR graph annotations and compatible dose ceilings", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const note: FhirExtension = { url: "urn:clinic:annotation", valueString: "retain clinic note" };
+  const child = (parent: FhirExtension, url: string) => parent.extension!.find(field => field.url === url)!;
+
+  it.each(["sourceLocale", "primaryAdministrationStart", "primaryAdministrationEnd"])(
+    "retains primitive metadata on the graph %s field", fieldName => {
+      const sourceText = "Swallow 1 tablet with water";
+      const input = buildInstructionGraphExtension({ sourceText, sourceLocale: "en",
+        primaryAdministrationSpan: { start: 0, end: sourceText.length },
+        actions: parseInstructionActions(sourceText) })!;
+      const field = child(input, fieldName);
+      const annotation = { id: fieldName + "-value", extension: [note] };
+      field.id = fieldName + "-field";
+      if (fieldName === "sourceLocale") field._valueCode = annotation;
+      else Object.assign(field, { _valueInteger: annotation });
+      const before = fresh(input), decoded = parseInstructionGraphExtension([fresh(input)])!;
+      expect(decoded.sourceLocale).toBe("en");
+      expect(decoded.primaryAdministrationSpan).toEqual({ start: 0, end: sourceText.length });
+      expect(child(buildInstructionGraphExtension(decoded)!, fieldName)).toEqual(field);
+      expect(input).toEqual(before);
+    }
+  );
+
+  it.each(["argument", "predicate"] as const)("keeps annotated %s translations with their own locale", owner => {
+    const sourceText = "Swallow with water";
+    const graph: CanonicalInstructionGraph = { sourceText, sourceLocale: "en", actions: parseInstructionActions(sourceText) };
+    const frame = graph.actions[0], argument = frame.args.find(arg => arg.text.toLowerCase().includes("water"))!;
+    expect(argument).toBeDefined();
+    const translations = owner === "argument" ? { en: "water", th: "น้ำ" } : { en: "swallow", th: "กลืน" };
+    if (owner === "argument") argument.i18n = translations;
+    else frame.predicate.i18n = translations;
+    const input = buildInstructionGraphExtension(graph)!;
+    const action = child(input, "action"), node = owner === "argument"
+      ? action.extension!.find(field => field.url === "argument" && child(field, "text").valueString === argument.text)!
+      : action;
+    const name = owner === "argument" ? "translation" : "predicateTranslation";
+    const entries = node.extension!.filter(field => field.url === name);
+    const thai = entries.find(field => child(field, "locale").valueCode === "th")!;
+    thai.id = "thai-translation";
+    child(thai, "locale")._valueCode = { id: "thai-locale", extension: [note] };
+    child(thai, "text")._valueString = { id: "thai-text", extension: [note] };
+    thai.extension!.push({ url: "urn:clinic:translation-note", valueString: "authored in Thai" });
+    const before = fresh(input), decoded = parseInstructionGraphExtension([fresh(input)])!;
+    expect(owner === "argument" ? decoded.actions[0].args.find(arg => arg.text === argument.text)!.i18n
+      : decoded.actions[0].predicate.i18n).toEqual(translations);
+    const rebuiltAction = child(buildInstructionGraphExtension(decoded)!, "action");
+    const rebuiltNode = owner === "argument"
+      ? rebuiltAction.extension!.find(field => field.url === "argument" && child(field, "text").valueString === argument.text)!
+      : rebuiltAction;
+    expect(rebuiltNode.extension!.filter(field => field.url === name)).toEqual(entries);
+    expect(input).toEqual(before);
+  });
+
+  it.each([3, undefined])("accepts a native cycle-count primitive companion with value %s", count => {
+    const extension: FhirR6Extension = { url: COURSE_CYCLE_COUNT_EXTENSION_URL,
+      ...(count === undefined ? {} : { valueInteger: count }),
+      _valueInteger: { id: "cycle-count", extension: [{ url: "urn:clinic:estimate",
+        valueQuantity: { value: 3, comparator: "~" } }] } };
+    const input: FhirR6DosageInstruction = { modifierExtension: [extension], step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { count: 2, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    }] }] };
+    const before = fresh(input);
+    expect(toDosageDetails(fresh(toFhirR5Dosages(input))).modifierExtension).toContainEqual(extension);
+    expect(input).toEqual(before);
+  });
+
+  it.each(["quantity", "range"] as const)("exposes the compatible ceiling for a %s dose in either limit order", kind => {
+    const volume = { value: 10, unit: "mL", id: "volume-cap" };
+    const mass = { value: 20, comparator: "<" as const, unit: "mg", id: "mass-cap" };
+    for (const limits of [[volume, mass], [mass, volume]]) {
+      const input: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [kind === "quantity" ? { doseQuantity: { value: 5, unit: "mL" } }
+          : { doseRange: { low: { value: 5, unit: "mL" }, high: { value: 15, unit: "mL" } } }],
+        safety: { doseLimit: limits.map(valueQuantity => ({ scope: "administration", valueQuantity })) }
+      }] }] };
+      const before = fresh(input), rows = toFhirR5Dosages(input);
+      expect(rows[0].maxDosePerAdministration).toEqual(volume);
+      expect(toDosageDetails(fresh(rows)).step![0].component[0].safety?.doseLimit)
+        .toEqual(input.step![0].component[0].safety!.doseLimit);
+      expect(toFhirR5Dosages(toDosageDetails(fresh(rows)))[0].maxDosePerAdministration).toEqual(volume);
+      expect(input).toEqual(before);
+    }
+  });
+
+  it.each(["administration", "lifetime"] as const)("keeps the tightest converted %s ceiling within the dose-compatible group", scope => {
+    const sameUnit = { value: 12, unit: "mL", id: "same-unit-cap" };
+    const converted = { value: 0.01, unit: "L", id: "tighter-volume-cap" };
+    const unrelated = { value: 20, unit: "mg", id: "mass-cap" };
+    const orders = [[sameUnit, converted], [converted, sameUnit],
+      [sameUnit, converted, unrelated], [sameUnit, unrelated, converted],
+      [converted, sameUnit, unrelated], [converted, unrelated, sameUnit],
+      [unrelated, sameUnit, converted], [unrelated, converted, sameUnit]];
+    for (const quantities of orders) {
+      const input: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 5, unit: "mL" } }],
+        safety: { doseLimit: quantities.map(valueQuantity => ({ scope, valueQuantity })) }
+      }] }] };
+      const before = fresh(input), rows = toFhirR5Dosages(input);
+      expect(scope === "administration" ? rows[0].maxDosePerAdministration : rows[0].maxDosePerLifetime).toEqual(converted);
+      expect(toDosageDetails(fresh(rows)).step![0].component[0].safety?.doseLimit)
+        .toEqual(input.step![0].component[0].safety!.doseLimit);
+      expect(input).toEqual(before);
     }
   });
 });

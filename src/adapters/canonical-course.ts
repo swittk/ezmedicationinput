@@ -1412,9 +1412,10 @@ function selectComparableMaximum(previous: SelectedR5Maximum, candidate: Selecte
 /** Select a comparable numeric upper bound for R5's singular maximum field.
  * Equal bounds retain the last annotated source; a strict bound wins an equal
  * inclusive one. Approximate siblings stay retained without replacing an
- * available definite upper bound. Only interleaved units allocate group state. */
+ * available definite upper bound. Prefer the dose-compatible group when known.
+ * Only interleaved units allocate group state. */
 export function selectR5Maximum(
-  current: R5MaximumSelection | undefined, quantity: CanonicalMeasure, index?: number
+  current: R5MaximumSelection | undefined, quantity: CanonicalMeasure, index?: number, dose?: CanonicalMeasure
 ): R5MaximumSelection {
   const operator = getQuantityComparator(quantity);
   const definite = quantity.value !== undefined && (!operator || operator === "<" || operator === "<=");
@@ -1451,6 +1452,12 @@ export function selectR5Maximum(
     const previous = current.groups.get(unit);
     if (previous && previous !== selected) selected = selectComparableMaximum(previous, selected);
     current.groups.set(unit, selected);
+  }
+  if (dose) {
+    const identity = maximumUnitKey(dose), dimension = maximumComparisonUnitKey(dose);
+    const compatible = (dimension === undefined ? undefined : current.groups.get(dimension)) ??
+      (identity === undefined ? undefined : current.groups.get(identity));
+    if (compatible) selected = compatible;
   }
   current.quantity = selected.quantity; current.definite = selected.definite;
   current.strict = selected.strict; current.index = selected.index;
@@ -2097,6 +2104,8 @@ function administrationToWire(
     let periodLimits: FhirRatio[] | undefined;
     let administrationMaximum: R5MaximumSelection | undefined, lifetimeMaximum: R5MaximumSelection | undefined;
     const limits = a.limits ?? [];
+    const amount = limits.length > 1 ? a.amounts?.find(value => value.quantity || value.range) : undefined;
+    const dose = amount?.quantity ?? amount?.range?.low ?? amount?.range?.high;
     for (let index = 0; index < limits.length; index++) {
       const limit = limits[index];
       if (!limit.amount) continue;
@@ -2115,9 +2124,9 @@ function administrationToWire(
         };
         (periodLimits ??= []).push(periodMaximumToR5(amount, period, limit.provenance));
       } else if (limit.scope === "administration")
-        administrationMaximum = selectR5Maximum(administrationMaximum, amount, index);
+        administrationMaximum = selectR5Maximum(administrationMaximum, amount, index, dose);
       else if (limit.scope === "lifetime")
-        lifetimeMaximum = selectR5Maximum(lifetimeMaximum, amount, index);
+        lifetimeMaximum = selectR5Maximum(lifetimeMaximum, amount, index, dose);
     }
     if (administrationMaximum) output.maxDosePerAdministration = simpleQuantityForR5(administrationMaximum.quantity);
     if (lifetimeMaximum) output.maxDosePerLifetime = simpleQuantityForR5(lifetimeMaximum.quantity);

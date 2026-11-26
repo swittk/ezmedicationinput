@@ -800,7 +800,7 @@ function isR5RepresentableSafetyLimit(limit: FhirR6DoseLimit): boolean {
 /** Singular R5 maxima expose the tightest comparable exact amount; all
  * other limits remain active siblings. The saved projection hash also
  * identifies rows written when singular fields exposed the last limit. */
-function r5ProjectedSafetyLimitIndices(limits: readonly FhirR6DoseLimit[], baseline?: string): Set<number> {
+function r5ProjectedSafetyLimitIndices(limits: readonly FhirR6DoseLimit[], baseline?: string, dose?: FhirQuantity): Set<number> {
   const indices = new Set<number>();
   let administrationSelection: R5MaximumSelection | undefined, lifetimeSelection: R5MaximumSelection | undefined;
   let lastAdministration: number | undefined, lastLifetime: number | undefined;
@@ -810,10 +810,10 @@ function r5ProjectedSafetyLimitIndices(limits: readonly FhirR6DoseLimit[], basel
     if (limit.scope === "period") indices.add(index);
     else if (limit.scope === "administration") {
       lastAdministration = index;
-      administrationSelection = selectR5Maximum(administrationSelection, limit.valueQuantity!, index);
+      administrationSelection = selectR5Maximum(administrationSelection, limit.valueQuantity!, index, dose);
     } else if (limit.scope === "lifetime") {
       lastLifetime = index;
-      lifetimeSelection = selectR5Maximum(lifetimeSelection, limit.valueQuantity!, index);
+      lifetimeSelection = selectR5Maximum(lifetimeSelection, limit.valueQuantity!, index, dose);
     }
   }
   let administration = administrationSelection?.index, lifetime = lifetimeSelection?.index;
@@ -848,7 +848,8 @@ function r5ProjectedSafetyLimitIndices(limits: readonly FhirR6DoseLimit[], basel
 export function reconcileR5SafetyEdits(
   retained: FhirR6DosageSafety,
   projected: FhirR6DosageSafety | undefined,
-  baseline?: string
+  baseline?: string,
+  dose?: FhirQuantity
 ): FhirR6DosageSafety | undefined {
   const oldLimits = retained.doseLimit ?? [];
   const live = projected?.doseLimit ?? [];
@@ -856,7 +857,7 @@ export function reconcileR5SafetyEdits(
   // An explicit Element.id owns its limit even after amount or order edits.
   // ID-less limits use independently retained annotations and unit/window
   // identity. Ambiguous rows never inherit arbitrary metadata.
-  const projectedIndices = r5ProjectedSafetyLimitIndices(oldLimits, baseline);
+  const projectedIndices = r5ProjectedSafetyLimitIndices(oldLimits, baseline, dose);
   const representable = oldLimits.map((_, index) => projectedIndices.has(index));
   // Amount is editable, not identity. A unique retained Ratio annotation or
   // clinical unit/window can own an anonymous limit; duplicate anonymous
@@ -1057,12 +1058,15 @@ export function reconcileR5SafetySnapshot(
     row.maxDosePerPeriod?.some(ratio => ratio.numerator && ratio.denominator &&
       (ratio.numerator.value === undefined || ratio.denominator.value === undefined));
   const projected = partialPeriods ? toR6Safety(row, true) : r5SafetyBaseline(row);
+  const amount = (retained.doseLimit?.length ?? 0) > 1
+    ? row.doseAndRate?.find(value => value.doseQuantity || value.doseRange) : undefined;
+  const dose = amount?.doseQuantity ?? amount?.doseRange?.low ?? amount?.doseRange?.high;
   // Historical fingerprints omitted partial Ratios and Coding.version.
   // Compare the complete saved wire projection before restoring metadata:
   // unchanged duplicate Ratios retain their distinct authored R6 texts.
   if (partialPeriods || baseline === compactProjectionFingerprint(projected)) {
     const saved: FhirDosage = {}, limits = retained.doseLimit ?? [];
-    for (const index of r5ProjectedSafetyLimitIndices(limits, baseline)) {
+    for (const index of r5ProjectedSafetyLimitIndices(limits, baseline, dose)) {
       const limit = limits[index];
       if (limit.scope === "period")
         (saved.maxDosePerPeriod ??= []).push(periodMaximumToR5(limit.valueQuantity!, limit.period!, limit));
@@ -1073,7 +1077,7 @@ export function reconcileR5SafetySnapshot(
     }
     if (equalStructuredValues(projected, toR6Safety(saved, true))) return row.safety ?? retained;
   }
-  return reconcileR5SafetyEdits(retained, projected, baseline);
+  return reconcileR5SafetyEdits(retained, projected, baseline, dose);
 }
 
 /** A lifted safety mirror and its R5 maxima are two views of one value.
@@ -1090,7 +1094,11 @@ export function reconcileLiftedR5Safety(row: EzDosage): FhirR6DosageSafety | und
   // Historical lifted rows did not carry a baseline. Their existing R5
   // maxima retain ownership; a safety-only input is independently authored.
   const projected = r5SafetyBaseline(row);
-  return projected && row.safety ? reconcileR5SafetyEdits(row.safety, projected) : row.safety;
+  if (!projected || !row.safety) return row.safety;
+  const amount = (row.safety.doseLimit?.length ?? 0) > 1
+    ? row.doseAndRate?.find(value => value.doseQuantity || value.doseRange) : undefined;
+  const dose = amount?.doseQuantity ?? amount?.doseRange?.low ?? amount?.doseRange?.high;
+  return reconcileR5SafetyEdits(row.safety, projected, undefined, dose);
 }
 
 /** Lift real R6 concepts once into the familiar flat R5 dosage shape. */

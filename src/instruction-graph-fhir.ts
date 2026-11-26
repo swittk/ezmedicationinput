@@ -129,9 +129,12 @@ function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | unde
   for (const source of sources ?? []) {
     let index = -1;
     const optionalField = source.url === "normalized" || source.url === "conceptId" || source.url === "quantity";
+    const translation = source.url === "translation" || source.url === "predicateTranslation";
+    const locale = translation ? parseTranslationNode(source).locale : undefined;
     for (let i = 0; i < activeFields; i++) {
       if (parts[i].url !== source.url || source.url === "tokenIndex" &&
-          parts[i].valueInteger !== source.valueInteger) continue;
+          parts[i].valueInteger !== source.valueInteger ||
+          translation && parseTranslationNode(parts[i]).locale !== locale) continue;
       index = i;
       break;
     }
@@ -144,7 +147,10 @@ function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | unde
         continue;
       }
     }
-    if (index >= 0) parts[index] = { ...source, ...parts[index] };
+    if (index >= 0) {
+      if (translation) addFieldSources(parts[index].extension!, source.extension);
+      parts[index] = { ...source, ...parts[index] };
+    }
     else if (optionalField)
       parts.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [source] });
     else parts.push(source);
@@ -435,12 +441,14 @@ export function buildInstructionGraphExtension(
     nested.push({ url: "opaque", ...(opaque.sourceId !== undefined ? { id: opaque.sourceId } : {}),
       extension: opaqueNested });
   }
+  let fieldSources: FhirExtension[] | undefined;
   if (graph.sourceExtensions) for (const field of graph.sourceExtensions) {
     if (field.url === "sourceText") {
       const { valueString: _sourceText, ...annotations } = field;
       nested[0] = { ...annotations, ...(graph.sourceText ? { valueString: graph.sourceText } : {}) };
-    } else nested.push(field);
+    } else (fieldSources ??= []).push(field);
   }
+  addFieldSources(nested, fieldSources);
   const result: FhirExtension = { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: nested };
   if (graph.sourceId !== undefined) result.id = graph.sourceId;
   return result;
@@ -449,13 +457,21 @@ export function buildInstructionGraphExtension(
 function firstRelation(coding:FhirCoding|undefined,raw:string|undefined):AdviceRelation|undefined {
   return getAdviceRelationByCoding(coding)??raw as AdviceRelation|undefined;
 }
-function parseTranslationNode(extension:FhirExtension):{locale?:string;text?:string} {
-  let locale:FhirExtension|undefined,text:FhirExtension|undefined;
-  for(const node of extension.extension??[])switch(node.url){
-    case "locale":if(!locale)locale=node;break;
-    case "text":if(!text)text=node;break;
+function parseTranslationNode(extension: FhirExtension): { locale?: string; text?: string; source: boolean } {
+  let locale: FhirExtension | undefined, text: FhirExtension | undefined;
+  let source = hasFieldMetadata(extension, "extension");
+  for (const node of extension.extension ?? []) switch (node.url) {
+    case "locale":
+      if (!locale) locale = node;
+      if (hasFieldMetadata(node, "valueCode")) source = true;
+      break;
+    case "text":
+      if (!text) text = node;
+      if (hasFieldMetadata(node, "valueString")) source = true;
+      break;
+    default: source = true;
   }
-  return {locale:locale?.valueCode,text:text?.valueString};
+  return { locale: locale?.valueCode, text: text?.valueString, source };
 }
 function hasFieldMetadata(field: FhirExtension, valueKey: string): boolean {
   for (const key in field) if (key !== "url" && key !== valueKey) return true;
@@ -517,7 +533,12 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
       if(hasFieldMetadata(entry,"extension"))(sourceExtensions??=[]).push(entry);
       break;
     case "argumentCoding":{const value=readCoding(entry.valueCoding);if(value)codings.push(value);break;}
-    case "translation":{const value=parseTranslationNode(entry);if(value.locale&&value.text)(i18n??={})[value.locale]=value.text;break;}
+    case "translation": {
+      const value = parseTranslationNode(entry);
+      if (value.locale && value.text) (i18n ??= {})[value.locale] = value.text;
+      if (value.source) (sourceExtensions ??= []).push(entry);
+      break;
+    }
     case "component":{
       let componentRole:FhirExtension|undefined,componentText:FhirExtension|undefined,componentCoding:FhirExtension|undefined;
       let componentSource:FhirExtension[]|undefined;
@@ -698,7 +719,12 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
       break;
     case "argument":{const value=parseArgumentExtension(field);if(value)args.push(value);break;}
     case "predicateCoding":{const value=readCoding(field.valueCoding);if(value)codings.push(value);break;}
-    case "predicateTranslation":{const value=parseTranslationNode(field);if(value.locale&&value.text)(translations??={})[value.locale]=value.text;break;}
+    case "predicateTranslation": {
+      const value = parseTranslationNode(field);
+      if (value.locale && value.text) (translations ??= {})[value.locale] = value.text;
+      if (value.source) (sourceExtensions ??= []).push(field);
+      break;
+    }
     case "predicateRealizerLocale": {
       const value = parseRealizerLocale(field);
       if (value) (locales ??= {})[value.locale] = value.config;
@@ -884,8 +910,18 @@ export function parseInstructionGraphExtension<T extends Pick<FhirExtension,"url
     case "graphRelation":{const relation=parseGraphRelation(field);if(relation)relations.push(relation);break;}
     case "opaque":{const span=parseOpaqueSpan(field);if(span)opaque.push(span);break;}
     case "coverage":if(!coverage)coverage=field;break;
-    case "primaryAdministrationStart":if(!start)start=field;break;
-    case "primaryAdministrationEnd":if(!end)end=field;break;
+    case "primaryAdministrationStart":
+      if (!start) {
+        start = field;
+        if (hasFieldMetadata(field, "valueInteger")) (sourceExtensions ??= []).push(field);
+      }
+      break;
+    case "primaryAdministrationEnd":
+      if (!end) {
+        end = field;
+        if (hasFieldMetadata(field, "valueInteger")) (sourceExtensions ??= []).push(field);
+      }
+      break;
     case "primaryOwnership":if(!ownership)ownership=field;break;
     case "sourceText":
       if (!source) {
@@ -893,7 +929,12 @@ export function parseInstructionGraphExtension<T extends Pick<FhirExtension,"url
         if (hasFieldMetadata(field, "valueString")) (sourceExtensions ??= []).push(field);
       }
       break;
-    case "sourceLocale":if(!locale)locale=field;break;
+    case "sourceLocale":
+      if (!locale) {
+        locale = field;
+        if (hasFieldMetadata(field, "valueCode")) (sourceExtensions ??= []).push(field);
+      }
+      break;
     default:(sourceExtensions??=[]).push(field);
   }
   if(!actions.length&&!opaque.length)return undefined;
