@@ -36,6 +36,7 @@ import {
   HpsgClinicalAdjunctFeature,
   HpsgConditionFeature,
   HpsgLexicalRule,
+  HpsgSign,
   lexicalSign
 } from "../signature";
 
@@ -255,7 +256,8 @@ function clinicalAdjunctSign(
   context: HpsgClauseContext,
   tokens: ReturnType<typeof overlappingAvailableTokens>,
   feature: HpsgClinicalAdjunctFeature,
-  consumedTokens = tokens
+  consumedTokens = tokens,
+  scopedCondition?: HpsgConditionFeature
 ) {
   return lexicalSign({
     type: "clinical-adjunct-sign",
@@ -265,7 +267,8 @@ function clinicalAdjunctSign(
     synsem: {
       head: {},
       valence: {},
-      cont: { clauseKind: "administration", clinicalAdjunct: feature }
+      cont: { clauseKind: "administration", clinicalAdjunct: feature,
+        ...(scopedCondition ? { scopedAdministrations: [{ condition: scopedCondition, head: {} }] } : {}) }
     },
     score: 56 + consumedTokens.length
   });
@@ -443,6 +446,37 @@ function withholdingAdjunct(
   return undefined;
 }
 
+/** Preserve the selected guard derivation and its independently typed scope. */
+function medicationGuardSign(
+  context: HpsgClauseContext,
+  guard: ParsedMedicationGuard,
+  withheld?: HpsgClinicalAdjunctFeature,
+  scopedCondition?: HpsgConditionFeature
+): HpsgSign | undefined {
+  const tokens = overlappingAvailableTokens(context, guard.start, guard.end);
+  if (!tokens.length) return undefined;
+  const localRanges = [{ start: guard.start, end: guard.end }];
+  if (guard.otherwise) localRanges.push({ ...guard.otherwise });
+  const consumedTokens = overlappingAvailableTokens(
+    context,
+    Math.min(...localRanges.map((range) => range.start)),
+    Math.max(...localRanges.map((range) => range.end))
+  ).filter((token) => localRanges.some((range) =>
+    token.sourceStart < range.end && range.start < token.sourceEnd
+  ));
+  const scope = clinicalAdjunctSign("hpsg.lex.clinical.condition", context, tokens, {
+    condition: withheld?.condition ?? guard.condition,
+    ...(withheld ? { conditionTarget: withheld.conditionTarget } : {}),
+    localRanges,
+    evidence: [{
+      rule: "hpsg.lex.clinical.condition",
+      kind: "condition",
+      ranges: localRanges.map((range) => ({ ...range }))
+    }]
+  }, consumedTokens, scopedCondition);
+  return scopeMedicationGuardSign(guard, scope);
+}
+
 export function medicationGuardLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.clinical.condition", (context, start) => {
     const lead = context.tokens[start];
@@ -452,33 +486,16 @@ export function medicationGuardLexicalRule(): HpsgLexicalRule<HpsgClauseContext>
     }
     const guard = medicationGuardForContext(context);
     if (!guard) return [];
-    const tokens = overlappingAvailableTokens(context, guard.start, guard.end);
-    if (!tokens.length) return [];
-    const localRanges = [{ start: guard.start, end: guard.end }];
-    if (guard.otherwise) localRanges.push({ ...guard.otherwise });
-    const consumedTokens = overlappingAvailableTokens(
-      context,
-      Math.min(...localRanges.map((range) => range.start)),
-      Math.max(...localRanges.map((range) => range.end))
-    ).filter((token) => localRanges.some((range) =>
-      token.sourceStart < range.end && range.start < token.sourceEnd
-    ));
-    // The procedural conditional construction owns which action this IF
-    // modifies, for both prefix and postfix order. Its matcher calls the
-    // pure frame helper, never this discovery function, so no recursion.
-    const scoped = getConditionFeatures(context).find(feature => feature.sourceStart === guard.start);
+    // Discovery selects the consequent once. Clinical targets keep their head;
+    // procedural targets still use the ordinary conditional scope construction.
+    const discovery = conditionDiscovery(context);
+    const clinical = discovery.signs.find(sign => sign.synsem.cont.scopedAdministrations?.some(
+      scoped => scoped.condition.sourceStart === guard.start));
+    if (clinical) return [clinical];
+    const scoped = discovery.features.find(feature => feature.sourceStart === guard.start);
     const withheld = scoped && withholdingAdjunct(context, scoped, guard.markerEnd, guard);
-    const scope = clinicalAdjunctSign("hpsg.lex.clinical.condition", context, tokens, {
-      condition: withheld?.condition ?? guard.condition,
-      ...(withheld ? { conditionTarget: withheld.conditionTarget } : {}),
-      localRanges,
-      evidence: [{
-        rule: "hpsg.lex.clinical.condition",
-        kind: "condition",
-        ranges: localRanges.map((range) => ({ ...range }))
-      }]
-    }, consumedTokens);
-    return [scopeMedicationGuardSign(guard, scope)];
+    const sign = medicationGuardSign(context, guard, withheld);
+    return sign ? [sign] : [];
   });
 }
 
@@ -713,6 +730,24 @@ function targetHasClinicalCondition(
   });
 }
 
+/** The clinical consequent already selected by the conditional owner retains
+ * source scope without becoming a procedure or losing its medication head. */
+function selectedClinicalGuardSign(
+  context: HpsgClauseContext, start: number, relation: AdviceRelation,
+  frame: AdviceFrame, guard: ParsedMedicationGuard | undefined
+): HpsgSign | undefined {
+  const lead = context.tokens[start];
+  if (!guard || lead.sourceStart < guard.start || lead.sourceStart >= guard.markerEnd) return undefined;
+  const condition: HpsgConditionFeature = {
+    relation, text: guard.text,
+    fullText: context.state.input.slice(Math.min(guard.start, frame.span.start), Math.max(guard.end, frame.span.end)).trim(),
+    sourceStart: guard.start, sourceEnd: guard.end,
+    targetStart: frame.span.start, targetEnd: frame.span.end,
+    safety: false, frames: [frame]
+  };
+  return medicationGuardSign(context, guard, undefined, condition);
+}
+
 function hasStrongBoundary(text: string): boolean {
   return /[.!?;]/u.test(text);
 }
@@ -817,7 +852,10 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           token.sourceEnd <= frame.span.start && /^[;.!?]$/u.test(token.original))) break;
       // Select the positive dose before procedural eligibility can skip it.
       // Its clinical condition cannot transfer to later counseling.
-      if (targetHasClinicalCondition(context, start, frame)) return [];
+      if (targetHasClinicalCondition(context, start, frame)) {
+        const sign = selectedClinicalGuardSign(context, start, relation, frame, guard);
+        return sign ? [sign] : [];
+      }
       if (isScopeTarget(context, frame)) {
         nextIndex = index;
         break;
@@ -857,15 +895,17 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
 
     const previous = frames
-      .filter((frame) => frame.span.end <= lead.sourceStart && isScopeTarget(context, frame))
+      .filter((frame) => frame.span.end <= lead.sourceStart &&
+        (targetHasClinicalCondition(context, start, frame) || isScopeTarget(context, frame)))
       .sort((a, b) => b.span.end - a.span.end)[0];
     if (!previous) return [];
     const gap = context.state.input.slice(previous.span.end, lead.sourceStart);
-    if (
-      hasStrongBoundary(gap) ||
-      (gap.trim() && !explicitlySequences(context, previous.span.end, lead.sourceStart))
-    ) return [];
-    if (targetHasClinicalCondition(context, start, previous)) return [];
+    if (hasStrongBoundary(gap)) return [];
+    if (targetHasClinicalCondition(context, start, previous)) {
+      const sign = selectedClinicalGuardSign(context, start, relation, previous, guard);
+      return sign ? [sign] : [];
+    }
+    if (gap.trim() && !explicitlySequences(context, previous.span.end, lead.sourceStart)) return [];
     const conditionEnd = postfixConditionEnd(context, start);
     const tokens = conditionTokens(context, lead.sourceStart, conditionEnd);
     if (!tokens.length) return [];
@@ -898,21 +938,28 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
 }
 
 
-const CONDITION_FEATURE_CACHE = new WeakMap<HpsgClauseContext, HpsgConditionFeature[]>();
+const CONDITION_FEATURE_CACHE = new WeakMap<HpsgClauseContext, {
+  signs: HpsgSign[]; features: HpsgConditionFeature[];
+}>();
 
-export function getConditionFeatures(context: HpsgClauseContext): HpsgConditionFeature[] {
+function conditionDiscovery(context: HpsgClauseContext) {
   const cached = CONDITION_FEATURE_CACHE.get(context);
   if (cached) return cached;
-  const result: HpsgConditionFeature[] = [];
+  const result = { signs: [] as HpsgSign[], features: [] as HpsgConditionFeature[] };
   const rule = conditionLexicalRule();
   for (let index = 0; index < context.limit; index += 1) {
     for (const sign of rule.match(context, index)) {
+      result.signs.push(sign);
       const condition = sign.synsem.cont.condition;
-      if (condition && !result.some((candidate) =>
+      if (condition && !result.features.some((candidate) =>
         candidate.sourceStart === condition.sourceStart && candidate.sourceEnd === condition.sourceEnd
-      )) result.push(condition);
+      )) result.features.push(condition);
     }
   }
   CONDITION_FEATURE_CACHE.set(context, result);
   return result;
+}
+
+export function getConditionFeatures(context: HpsgClauseContext): HpsgConditionFeature[] {
+  return conditionDiscovery(context).features;
 }

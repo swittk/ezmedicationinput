@@ -740,6 +740,46 @@ describe('HPSG coordination cadence scope', () => {
   });
 
   it.each([
+    ["Only if you can drink water, take 1 tablet daily for 2 days", []],
+    ["Only if you can drink water: take 1 tablet daily for 2 days; call the clinic", ["call"]],
+    ["Take 1 tablet daily for 2 days only if you can drink water", []],
+    ["Take 1 tablet daily for 2 days only if you can drink water; call the clinic", ["call"]],
+    ["Only if you can drink water, take 1 tablet daily for 2 days; drink 100 mL water", ["drink"]]
+  ] as const)("keeps an antecedent activity inside its clinical condition: %s", (source, outsideActions) => {
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect((clause.instructionGraph?.actions ?? []).map(action => action.predicate.lemma)).toEqual(outsideActions);
+    expect(clause.instructionScopes).toHaveLength(1);
+    const scope = clause.instructionScopes![0];
+    expect(source.slice(scope.span.start, scope.span.end).trim()).toMatch(/^Only if you can drink water[,:]?$|^only if you can drink water$/);
+    expect(source.slice(scope.target.start, scope.target.end).toLowerCase()).toContain("take 1 tablet");
+    for (const view of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const member = importCanonicalCourse(view).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.predicate).toMatchObject({ kind: "state", name: "you can drink water", expected: true });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      const en = formatSig(view, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(view, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).not.toMatch(/^Drink water|then drink water/i);
+      expect(th).not.toContain("จากนั้นดื่มน้ำ");
+      expect(en).toContain("only if you can drink water");
+      expect(th).toContain("you can drink water");
+      if (outsideActions[0] === "call") expect(en).toContain("Call the clinic.");
+      if (outsideActions[0] === "drink") expect(en).toMatch(/Drink 100 m[Ll] water\./);
+      const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 3 };
+      expect(nextDueDoses(view, { ...query, evaluateCondition: () => true })).toEqual([
+        "2026-12-01T09:00:00+00:00", "2026-12-02T09:00:00+00:00"
+      ]);
+      let rejected = 0;
+      expect(nextDueDoses(view, { ...query, evaluateCondition: () => { rejected++; return false; } })).toEqual([]);
+      expect(rejected).toBeGreaterThan(0);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
     ["If dizzy, do not chew 1 tablet", "Swallow 1 tablet daily", "dizzy"],
     ["ถ้าเวียนศีรษะ ห้ามเคี้ยว 1 เม็ด", "กลืน 1 เม็ด ทุกวัน", "เวียนศีรษะ"]
   ])("keeps quantified negative advice separate from positive PRN: %s", (advice, standing, symptom) => {
