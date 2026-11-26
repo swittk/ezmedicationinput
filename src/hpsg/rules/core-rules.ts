@@ -15,7 +15,6 @@ import { Token } from "../../parser-state";
 import { resolveBodySiteLexeme } from "../../body-site-grammar";
 import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, RouteCode, type ParseOptions } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
-import { buildTranslationPrimitiveElement } from "../../fhir-translations";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { frameActionDefinition } from "../../instruction-graph";
@@ -68,7 +67,7 @@ import {
   PRODUCT_FORM_MODIFIERS,
   PRODUCT_SOURCE_PREPOSITIONS,
   methodAuxiliaryVerbsForLocale,
-  productMethodRealizations,
+  productMethodRealization,
   coordinationConnectorKind,
   ROUTE_BLOCKED_BY_FOLLOWING_PARTITIVE_HEADS,
   ROUTE_SITE_PREPOSITIONS,
@@ -589,8 +588,7 @@ export function productLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const previousVerb = previous && isMedicationAdministrationMethod(
         normalizeTokenLower(previous), context.options
       ) ? normalizeTokenLower(previous) : undefined;
-      const methodRealizations = previousVerb ? productMethodRealizations(previousVerb, productPhrase) : undefined;
-      const methodText = methodRealizations?.en;
+      const method = previousVerb ? productMethodRealization(previousVerb, productPhrase) : undefined;
       signs.push(
         lexicalSign({
           type: "phrase-sign",
@@ -599,23 +597,12 @@ export function productLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           synsem: {
             head: {
               route: { code: route, text: ROUTE_TEXT[route] },
-              method: methodText && previousVerb
+              method: method && previousVerb
                 ? {
                   verb: previousVerb,
                   headClass: "administration",
-                  text: methodText,
-                  textElement: methodRealizations
-                    ? (() => {
-                        const translations: Record<string, string> = {};
-                        for (const locale of Object.keys(methodRealizations)) {
-                          const value = methodRealizations[locale];
-                          if (locale !== "en" && value) translations[locale] = value;
-                        }
-                        return Object.keys(translations).length
-                          ? buildTranslationPrimitiveElement(translations)
-                          : undefined;
-                      })()
-                    : undefined
+                  text: method.text,
+                  textElement: method.textElement
                 }
                 : undefined
             },
@@ -627,7 +614,7 @@ export function productLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
               : {},
             cont: { clauseKind: "administration" }
           },
-          score: 9 + span + (methodText ? 4 : 0)
+          score: 9 + span + (method ? 4 : 0)
         })
       );
     }

@@ -1,6 +1,7 @@
 import { LexKind, type LexToken } from "../lexer/token-types";
-import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirPeriodUnit, RouteCode } from "../types";
+import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirPeriodUnit, RouteCode, type FhirPrimitiveElement } from "../types";
 import { baseLanguageTag } from "../localization";
+import { buildTranslationPrimitiveElement } from "../fhir-translations";
 import {
   ACTION_SEQUENCE_MARKERS,
   ACTION_SEQUENCE_RELATION_SURFACES,
@@ -296,9 +297,22 @@ export const PRN_COMPACT_REASON_SEPARATORS = setOf(source.prnCompactReasonSepara
 export const SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR = routeCodeSet(source.siteRouteHintsAllowedInGrammar);
 export const PRODUCT_METHOD_REALIZATIONS = source.productMethodRealizations as
   Record<string, Partial<Record<string, Record<string, string>>>>;
-export function productMethodRealizations(verb: string, product: string): Record<string, string> | undefined {
+export function productMethodRealization(
+  verb: string, product: string
+): { text: string; textElement?: FhirPrimitiveElement } | undefined {
   const values = PRODUCT_METHOD_REALIZATIONS[verb]?.[product];
-  return values ? { ...values } : undefined;
+  const text = values?.en;
+  if (!text) return undefined;
+  const translations: Record<string, string> = {};
+  for (const locale of Object.keys(values)) {
+    const value = values[locale];
+    if (locale !== "en" && value) translations[locale] = value;
+  }
+  return {
+    text,
+    textElement: Object.keys(translations).length
+      ? buildTranslationPrimitiveElement(translations) : undefined
+  };
 }
 export const PRODUCT_FORM_MODIFIERS = setOf(source.productFormModifiers);
 export const PRODUCT_SOURCE_PREPOSITIONS = setOf(source.productSourcePrepositions);
