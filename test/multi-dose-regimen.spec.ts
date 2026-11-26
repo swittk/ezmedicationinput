@@ -1717,7 +1717,8 @@ describe("independent conditional counseling cannot absorb prescription timing",
       const source = `1 tab PO q6h PRN pain max 4 doses/day x7d; ${counseling}`;
       const p = parseSig(source);
       expect(p.fhir.timing?.repeat?.boundsDuration?.value).toBe(7);
-      expect(p.fhir.maxDosePerPeriod?.[0]?.numerator?.value).toBe(4);
+      expect(p.meta.canonical.clauses[0]?.schedule?.occurrenceCap).toEqual({ max: 4, period: 1, periodUnit: "d" });
+      expect(p.fhir.maxDosePerPeriod).toBeUndefined();
       expect(getDosageCondition(p.fhir)).toBeUndefined();
       expect(p.fhir.asNeeded).toBe(true);
       const base = { from: "2026-11-02T00:00:00+07:00", orderedAt: "2026-11-02T00:00:00+07:00", timeZone: "Asia/Bangkok" };

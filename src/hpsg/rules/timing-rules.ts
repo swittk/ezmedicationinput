@@ -78,6 +78,7 @@ import {
   MEAL_RELATION_BY_TOKEN,
   MEAL_TIMING_BY_RELATION,
   OCCURRENCE_COUNT_WORDS,
+  MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
   OCCURRENCE_COUNT_MODIFIERS,
   RANGE_CONNECTORS,
   RELATIVE_INTERVAL_TRAILING_RELATIONS,
@@ -94,6 +95,8 @@ import {
   HpsgClauseContext,
   maximumCountLeadAt,
   maximumDosePerPeriodAt,
+  maximumDosePeriodAt,
+  compactMaximumPeriodAt,
   occurrenceCapPeriodAt,
   isAmPmLower,
   isClockLikeLower,
@@ -796,6 +799,32 @@ function exactCountCardinalValue(token: Token | undefined): number | undefined {
   return value !== undefined && Number.isFinite(value) && Number.isInteger(value) && value > 0
     ? value
     : undefined;
+}
+
+/** One complete occurrence maximum is shared by the schedule chart and guard scope. */
+export function maximumOccurrenceAt(
+  context: Parameters<typeof maximumCountLeadAt>[0], start: number, firstLower?: string
+): { tokens: Token[]; headStart: number; count: number;
+  period?: NonNullable<ReturnType<typeof occurrenceCapPeriodAt>> } | undefined {
+  const lead = maximumCountLeadAt(context, start, firstLower);
+  if (!lead) return undefined;
+  const valueIndex = lead.headStart + lead.tokens.length;
+  const valueToken = context.tokens[valueIndex], occurrenceToken = context.tokens[valueIndex + 1];
+  // Once/twice/thrice lexicalize both the cardinal and occurrence noun.
+  const fusedCount = valueToken ? FREQUENCY_SIMPLE_WORDS[normalizeTokenLower(valueToken)] : undefined;
+  const count = fusedCount ?? exactCountCardinalValue(valueToken);
+  const occurrenceSurface = occurrenceToken && normalizeTokenLower(occurrenceToken);
+  const compact = occurrenceSurface ? compactMaximumPeriodAt(context, valueIndex + 1, occurrenceSurface) : undefined;
+  const explicitOccurrence = occurrenceToken && !context.state?.consumed.has(occurrenceToken.index) &&
+    OCCURRENCE_COUNT_WORDS.has(compact?.unitSurface ?? occurrenceSurface!);
+  if (!valueToken || context.state?.consumed.has(valueToken.index) ||
+      count === undefined || !explicitOccurrence && fusedCount === undefined) return undefined;
+  const countTokens = explicitOccurrence ? [valueToken, occurrenceToken] : [valueToken];
+  if (compact && "daypart" in compact.period) return undefined;
+  const maximumPeriod = compact?.period ?? maximumDosePeriodAt(context, valueIndex + countTokens.length);
+  const period = maximumPeriod && "period" in maximumPeriod ? maximumPeriod : undefined;
+  return { tokens: [...lead.tokens, ...countTokens, ...(period?.tokens ?? [])],
+    headStart: lead.headStart, count, ...(period ? { period } : {}) };
 }
 
 function frequencyRangeConnector(token: Token | undefined): boolean {
@@ -3017,63 +3046,46 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
             context, token.sourceStart, duration.tokens[duration.tokens.length - 1].sourceEnd
           )) return [duration];
     }
-    const maximumLead = maximumCountLeadAt(context, start, lower);
-    if (maximumLead) {
-      const valueIndex = start + maximumLead.length;
-      const valueToken = context.tokens.slice(valueIndex, valueIndex + 1).shift();
-      const occurrenceToken = context.tokens.slice(valueIndex + 1, valueIndex + 2).shift();
-      // Once/twice/thrice lexicalize both the cardinal and occurrence noun.
-      // They compose with the same maximum head as "two times", not a new
-      // recurring cadence and never an opaque argument of the PRN phrase.
-      const fusedCount = valueToken ? FREQUENCY_SIMPLE_WORDS[normalizeTokenLower(valueToken)] : undefined;
-      const countValue = fusedCount ?? exactCountCardinalValue(valueToken);
-      const explicitOccurrence = occurrenceToken && !context.state.consumed.has(occurrenceToken.index) &&
-        OCCURRENCE_COUNT_WORDS.has(normalizeTokenLower(occurrenceToken));
-      if (
-        valueToken && !context.state.consumed.has(valueToken.index) &&
-        countValue !== undefined && (explicitOccurrence || fusedCount !== undefined)
-      ) {
-        const countTokens = explicitOccurrence ? [valueToken, occurrenceToken] : [valueToken];
-        const period = occurrenceCapPeriodAt(context, valueIndex + countTokens.length);
-        if (period) {
-          const matched = [...maximumLead, ...countTokens, ...period.tokens];
-          signs.push(lexicalSign({
-            type: "schedule-sign",
-            rule: "hpsg.lex.schedule.occurrenceCap.maximum",
-            tokens: matched,
-            synsem: {
-              head: {
-                schedule: {
-                  sourceRanges: [{ start: matched[0].sourceStart, end: matched[matched.length - 1].sourceEnd }],
-                  occurrenceCap: {
-                    max: countValue,
-                    period: period.period,
-                    periodUnit: period.periodUnit
-                  }
-                }
-              },
-              valence: {},
-              cont: { clauseKind: "administration" }
-            },
-            score: 25 + matched.length
-          }));
-          return signs;
-        }
-        const matched = [...maximumLead, ...countTokens];
+    const maximum = MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(lower)
+      ? maximumOccurrenceAt(context, start, lower) : undefined;
+    if (maximum?.headStart === start) {
+      const { tokens: matched, count: countValue, period } = maximum;
+      if (period) {
         signs.push(lexicalSign({
           type: "schedule-sign",
-          rule: "hpsg.lex.schedule.count.maximum",
+          rule: "hpsg.lex.schedule.occurrenceCap.maximum",
           tokens: matched,
           synsem: {
-            head: { schedule: { countMax: countValue,
-              sourceRanges: [{ start: matched[0].sourceStart, end: matched[matched.length - 1].sourceEnd }] } },
+            head: {
+              schedule: {
+                sourceRanges: [{ start: matched[0].sourceStart, end: matched[matched.length - 1].sourceEnd }],
+                occurrenceCap: {
+                  max: countValue,
+                  period: period.period,
+                  periodUnit: period.periodUnit
+                }
+              }
+            },
             valence: {},
             cont: { clauseKind: "administration" }
           },
-          score: 18 + matched.length
+          score: 25 + matched.length
         }));
         return signs;
       }
+      signs.push(lexicalSign({
+        type: "schedule-sign",
+        rule: "hpsg.lex.schedule.count.maximum",
+        tokens: matched,
+        synsem: {
+          head: { schedule: { countMax: countValue,
+            sourceRanges: [{ start: matched[0].sourceStart, end: matched[matched.length - 1].sourceEnd }] } },
+          valence: {},
+          cont: { clauseKind: "administration" }
+        },
+        score: 18 + matched.length
+      }));
+      return signs;
     }
     const trailingOccurrenceToken = context.tokens[start + 1];
     const trailingTotalToken = context.tokens[start + 2];

@@ -4755,3 +4755,128 @@ describe("declared biological units and explicit dose prohibitions", () => {
       }]);
     });
 });
+
+
+describe("postfix clinical guards beside typed dose limits", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const cases = [
+    { locale: "en", dose: "Take 2 tablets q4h", guard: "if SBP > 160", prefix: "If SBP > 160, take 2 tablets q4h",
+      joins: [" ", ", ", " and "], quantity: "no more than 4 tablets/day", occurrence: "no more than 4 doses per day" },
+    { locale: "th", dose: "รับประทาน 2 เม็ด ทุก 4 ชั่วโมง", guard: "ถ้า SBP > 160", prefix: "ถ้า SBP > 160 ให้รับประทาน 2 เม็ด ทุก 4 ชั่วโมง",
+      joins: [" ", ", ", " และ "], quantity: "ไม่เกิน 4 เม็ดต่อวัน", occurrence: "ไม่เกิน 4 ครั้งต่อวัน" }
+  ].flatMap(language => (["quantity", "occurrence"] as const).flatMap(kind => [
+    ...language.joins.map(join => ({ locale: language.locale, kind,
+      source: language.dose + " " + language.guard + join + language[kind] })),
+    { locale: language.locale, kind, source: language.prefix + " " + language[kind] }
+  ]));
+
+  it.each(cases)("keeps $locale $kind ownership in $source", ({ locale, kind, source }) => {
+    const parsed = parsePublicSig(source, { locale });
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext),
+      fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+      const before = fresh(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(member.asNeeded).not.toBe(true);
+      expect(member.predicate).toMatchObject({ kind: "measurement", name: "sbp", operation: "gt", value: 160 });
+      expect(member.schedule?.recurrence).toMatchObject({ period: 4, periodUnit: "h" });
+      if (kind === "quantity") {
+        expect(member.limits).toMatchObject([
+          { scope: "period", amount: { value: 4, unit: "tab" }, period: { value: 1, unit: "d" } }
+        ]);
+        expect(member.schedule?.recurrence?.occurrenceCap).toBeUndefined();
+      } else {
+        expect(member.schedule?.recurrence?.occurrenceCap).toEqual({ max: 4, period: 1, periodUnit: "d" });
+        expect(member.limits).toBeUndefined();
+      }
+      const query = { dosage: input, from: "2026-01-01T00:00:00Z", orderedAt: "2026-01-01T00:00:00Z",
+        timeZone: "UTC", durationValue: 1, durationUnit: FhirPeriodUnit.Day };
+      expect(calculateTotalUnits({ ...query, evaluateCondition: () => true }).totalUnits)
+        .toBe(kind === "quantity" ? 4 : 8);
+      let calls = 0;
+      expect(calculateTotalUnits({ ...query, evaluateCondition: () => { calls++; return false; } }).totalUnits).toBe(0);
+      expect(calls).toBeGreaterThan(0);
+      expect(input).toEqual(before);
+    }
+  });
+
+  it.each([
+    ["Take 2 tablets q4h if SBP no more than 160 maximum 4 tablets/day", "en"],
+    ["รับประทาน 2 เม็ด ทุก 4 ชั่วโมง ถ้า SBP ไม่เกิน 160 ไม่เกิน 4 เม็ดต่อวัน", "th"]
+  ])("keeps the measurement comparison inside its predicate: %s", (source, locale) => {
+    const parsed = parsePublicSig(source, { locale });
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.predicate).toMatchObject({ kind: "measurement", name: "sbp", operation: "le", value: 160 });
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(member.limits).toMatchObject([
+        { scope: "period", amount: { value: 4, unit: "tab" }, period: { value: 1, unit: "d" } }
+      ]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+
+  it.each([
+    { source: "Take 2 tablets q4h only if pain persists max 4 tablets per day", locale: "en", quantity: true,
+      predicate: { kind: "state", name: "pain persists", expected: true } },
+    { source: "รับประทาน 2 เม็ด ทุก 4 ชั่วโมง เฉพาะเมื่อมีไข้ ไม่เกิน 4 เม็ดต่อวัน", locale: "th", quantity: true,
+      predicate: { kind: "state", name: "ไข้", expected: true } },
+    { source: "Take 2 tablets q4h unless dizzy no more than 4 doses/day", locale: "en", quantity: false,
+      predicate: { kind: "not", condition: { kind: "state", name: "dizzy", expected: true } } }
+  ])("keeps an explicitly licensed state guard beside its cap: $source", ({ source, locale, quantity, predicate }) => {
+    const parsed = parsePublicSig(source, { locale });
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.predicate).toMatchObject(predicate);
+      expect(member.asNeeded).not.toBe(true);
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ period: 4, periodUnit: "h" });
+      if (quantity) {
+        expect(member.limits).toMatchObject([
+          { scope: "period", amount: { value: 4, unit: "tab" }, period: { value: 1, unit: "d" } }
+        ]);
+      } else {
+        expect(member.schedule?.recurrence?.occurrenceCap).toEqual({ max: 4, period: 1, periodUnit: "d" });
+        expect(member.limits).toBeUndefined();
+      }
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([
+    ["4 doses/day", "en", 1, "d"], ["4 doses per day", "en", 1, "d"],
+    ["4 doses/24h", "en", 24, "h"], ["4 doses per 24 hours", "en", 24, "h"],
+    ["4 ครั้ง/วัน", "th", 1, "d"], ["4 ครั้งต่อวัน", "th", 1, "d"],
+    ["4 ครั้ง/24 ชั่วโมง", "th", 24, "h"], ["4 ครั้ง / 24 ชั่วโมง", "th", 24, "h"]
+  ] as const)("keeps the occurrence noun and recurring period in %s", (limit, locale, period, periodUnit) => {
+    const source = (locale === "en" ? "Take 2 tablets q4h PRN pain max "
+      : "รับประทาน 2 เม็ด ทุก 4 ชั่วโมง เมื่อปวด ไม่เกิน ") + limit;
+    const parsed = parsePublicSig(source, { locale });
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext),
+      fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+      const before = fresh(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(member.asNeeded).toBe(true);
+      expect(member.predicate).toBeUndefined();
+      expect(member.limits).toBeUndefined();
+      expect(member.schedule?.recurrence).toMatchObject({
+        period: 4, periodUnit: "h", occurrenceCap: { max: 4, period, periodUnit }
+      });
+      expect(member.schedule?.recurrence?.countMax).toBeUndefined();
+      expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
+      expect(calculateTotalUnits({ dosage: input, from: "2026-01-01T00:00:00Z", orderedAt: "2026-01-01T00:00:00Z",
+        timeZone: "UTC", durationValue: 2, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 16, unit: "tab", quantityKind: "maximum" });
+      expect(input).toEqual(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+});

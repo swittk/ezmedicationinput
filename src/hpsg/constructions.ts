@@ -10,6 +10,8 @@ import type { MedicationCondition, ParseOptions } from "../types";
 import { actionMatchAt } from "../instruction-graph";
 import { ACTION_DIRECTIVE_PREFIXES, normalizeTokenLower } from "./lexical-classes";
 import { explicitDoseLexicalEnd } from "./rules/core-rules";
+import { maximumDosePerPeriodAt } from "./rule-context";
+import { maximumOccurrenceAt } from "./rules/timing-rules";
 import { lexicalSign, type HpsgGuardExpression, type HpsgSynsem, type HpsgPhraseRule } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
 import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, type AdviceArgument, type AdviceFrame } from "../types";
@@ -840,7 +842,12 @@ export function parseMedicationGuard(
     tail = source.slice(lead.end, end);
   }
   const tokens = existingTokens ?? annotateLexTokens(lexInput(source));
+  const markerTokens = tokens.filter(token => token.sourceStart < lead.end && lead.start < token.sourceEnd);
+  if (!markerTokens.length) return undefined;
+  const marker = lexicalSign({ type: "guard-marker-sign", rule: "hpsg.lex.guard.marker", tokens: markerTokens,
+    synsem: { head: {}, valence: {}, cont: { guard: { marker: lead.marker } } }, score: 1 });
   const prefix = source.slice(0, lead.start).trim();
+  let scopedGuard: HpsgSign | undefined;
   if (!prefix || /[.;!?]$/u.test(prefix)) {
     const comma = tail.search(/[,;:]/u);
     end = Math.min(end, lead.end + (comma >= 0 ? comma : tail.length));
@@ -874,19 +881,35 @@ export function parseMedicationGuard(
       end = consequentStart;
       break;
     }
-  } else end = Math.min(end, lead.end + medicationGuardClauseBoundary(tail));
+  } else {
+    end = Math.min(end, lead.end + medicationGuardClauseBoundary(tail));
+    const lexicalContext = { tokens, options };
+    for (let index = 0; index < tokens.length; index++) {
+      const token = tokens[index];
+      if (token.sourceStart < lead.end) continue;
+      if (token.sourceStart >= end) break;
+      if (!maximumDosePerPeriodAt(lexicalContext, index) && !maximumOccurrenceAt(lexicalContext, index)) continue;
+      const capStart = token.sourceStart;
+      const context: GuardConstituentContext = { source, range: { start: lead.start, end: capStart },
+        ...(withholdingConsequent ? { withholdingConsequent } : {}) };
+      const predicate = guardPredicateConstituent(context, tokens, lead.end, capStart);
+      // Marker-sensitive guard composition licenses the preceding predicate;
+      // the cap's quantity/count daughters remain independently owned.
+      const guard = predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate);
+      if (!guard?.synsem.cont.clinicalAdjunct?.condition) continue;
+      end = capStart;
+      scopedGuard = guard;
+      break;
+    }
+  }
   let predicateStart = lead.end, predicateEnd = end;
   while (predicateStart < predicateEnd && /\s/u.test(source[predicateStart])) predicateStart++;
   while (predicateEnd > predicateStart && /[\s.!?;,]/u.test(source[predicateEnd - 1])) predicateEnd--;
   if (predicateStart >= predicateEnd) return undefined;
-  const markerTokens = tokens.filter(token => token.sourceStart < lead.end && lead.start < token.sourceEnd);
-  if (!markerTokens.length) return undefined;
   const context: GuardConstituentContext = { source, range: { start: lead.start, end },
     ...(withholdingConsequent ? { withholdingConsequent } : {}) };
-  const marker = lexicalSign({ type: "guard-marker-sign", rule: "hpsg.lex.guard.marker", tokens: markerTokens,
-    synsem: { head: {}, valence: {}, cont: { guard: { marker: lead.marker } } }, score: 1 });
-  const predicate = guardPredicateConstituent(context, tokens, predicateStart, predicateEnd);
-  const sign = predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate);
+  const predicate = scopedGuard ? undefined : guardPredicateConstituent(context, tokens, predicateStart, predicateEnd);
+  const sign = scopedGuard ?? (predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate));
   const condition = sign?.synsem.cont.clinicalAdjunct?.condition;
   return sign && condition ? { condition, start: lead.start, markerEnd: lead.end, end, text: source.slice(lead.start, end),
     otherwiseHold: Boolean(otherwise), ...(otherwise ? { otherwise } : {}),

@@ -343,18 +343,28 @@ function maximumTokensAvailable(context: QuantityLexicalContext, start: number, 
   return tokens;
 }
 
+/** A maximum head owns its leading separators and coordinated attachment. */
 export function maximumCountLeadAt(
   context: QuantityLexicalContext, start: number, firstLower?: string
-): Token[] | undefined {
-  const first = context.tokens[start];
-  const lower = firstLower ?? (first && normalizeTokenLower(first));
+): { tokens: Token[]; headStart: number } | undefined {
+  let headStart = start;
+  while (context.tokens[headStart]) {
+    const token = context.tokens[headStart], following = context.tokens[headStart + 1];
+    if (!INSTRUCTION_LEADING_SEPARATORS.has(token.original) && !(following &&
+        MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(normalizeTokenLower(following)) &&
+        coordinationConnectorKind(token.original) === "conjunction")) break;
+    headStart++;
+  }
+  const first = context.tokens[headStart];
+  const lower = headStart === start && firstLower !== undefined ? firstLower
+    : first && normalizeTokenLower(first);
   if (!lower || !MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(lower)) return undefined;
   for (const parts of MAXIMUM_COUNT_LEAD_SEQUENCES) {
     if (parts[0] !== lower) continue;
-    const tokens = maximumTokensAvailable(context, start, parts.length);
+    const tokens = maximumTokensAvailable(context, headStart, parts.length);
     if (!tokens) continue;
     if (tokens.every((candidate, offset) => offset === 0 || normalizeTokenLower(candidate) === parts[offset])) {
-      return tokens;
+      return { tokens, headStart };
     }
   }
   return undefined;
@@ -385,7 +395,28 @@ type MaximumDosePeriod = (
   | { tokens: Token[]; daypart: true }
 ) & { unitDenominator?: boolean };
 
-function maximumDosePeriodAt(
+/** The existing compact maximum denominator is shared by quantity and count nouns. */
+export function compactMaximumPeriodAt(
+  context: QuantityLexicalContext, unitIndex: number, unitSurface: string
+): { unitSurface: string; period: MaximumDosePeriod } | undefined {
+  const compactUnitPeriod = unitSurface.match(/^(.+?)\/([^/]+)$/u);
+  const compactAmount = compactUnitPeriod ? attachedNumberUnitAt(compactUnitPeriod[2]) : undefined;
+  const hybridValue = compactUnitPeriod && /^(?:\d+(?:\.\d+)?|\.\d+)$/u.test(compactUnitPeriod[2])
+    ? Number(compactUnitPeriod[2]) : undefined;
+  const followingUnit = hybridValue !== undefined && hybridValue > 0 ? context.tokens[unitIndex + 1] : undefined;
+  const hybridUnit = followingUnit && !context.state?.consumed.has(followingUnit.index)
+    ? mapIntervalUnit(normalizeTokenLower(followingUnit)) : undefined;
+  const compactPeriodSurface = compactAmount?.rawUnit ?? (hybridUnit ? normalizeTokenLower(followingUnit!) : compactUnitPeriod?.[2]);
+  const compactPeriodUnit = compactPeriodSurface ? mapIntervalUnit(compactPeriodSurface) : undefined;
+  const compactPeriod: MaximumDosePeriod | undefined = compactPeriodUnit
+    ? DAYPART_INTERVAL_TOKENS.has(compactPeriodSurface!)
+      ? { tokens: hybridUnit ? [followingUnit!] : [], daypart: true, unitDenominator: true }
+      : { tokens: hybridUnit ? [followingUnit!] : [], period: compactAmount?.value ?? (hybridUnit ? hybridValue! : 1), periodUnit: compactPeriodUnit, unitDenominator: true }
+    : undefined;
+  return compactPeriod ? { unitSurface: compactUnitPeriod![1], period: compactPeriod } : undefined;
+}
+
+export function maximumDosePeriodAt(
   context: QuantityLexicalContext,
   start: number
 ): MaximumDosePeriod | undefined {
@@ -436,16 +467,9 @@ export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: n
   headStart: number;
   comparative: boolean;
 } | undefined {
-  let headStart = start;
-  while (context.tokens[headStart]) {
-    const token = context.tokens[headStart], following = context.tokens[headStart + 1];
-    if (!INSTRUCTION_LEADING_SEPARATORS.has(token.original) && !(following &&
-        MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(normalizeTokenLower(following)) &&
-        coordinationConnectorKind(token.original) === "conjunction")) break;
-    headStart++;
-  }
-  const lead = maximumCountLeadAt(context, headStart);
-  if (!lead) return undefined;
+  const maximumHead = maximumCountLeadAt(context, start);
+  if (!maximumHead) return undefined;
+  const { tokens: lead, headStart } = maximumHead;
   const comparative = (DOSE_COMPARATOR_PREFIXES.get(normalizeTokenLower(lead[0])) ?? []).some(candidate =>
     candidate.comparator === "<=" && candidate.words.length === lead.length &&
     candidate.words.every((word, index) => normalizeTokenLower(lead[index]) === word));
@@ -480,29 +504,17 @@ export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: n
   const quantityTokens = maximumTokensAvailable(context, cursor, unitIndex + 1 - cursor);
   if (!quantityTokens) return undefined;
   const unitSurface = normalizeTokenLower(unitToken);
-  // `tablets/day` remains one lossless lexical token; split only this
-  // explicitly bounded dimensional suffix inside the maximum construction.
-  const compactUnitPeriod = unitSurface.match(/^(.+?)\/([^/]+)$/u);
-  const compactAmount = compactUnitPeriod ? attachedNumberUnitAt(compactUnitPeriod[2]) : undefined;
-  const hybridValue = compactUnitPeriod && /^(?:\d+(?:\.\d+)?|\.\d+)$/u.test(compactUnitPeriod[2])
-    ? Number(compactUnitPeriod[2]) : undefined;
-  const followingUnit = hybridValue !== undefined && hybridValue > 0 ? context.tokens[unitIndex + 1] : undefined;
-  const hybridUnit = followingUnit && !context.state?.consumed.has(followingUnit.index)
-    ? mapIntervalUnit(normalizeTokenLower(followingUnit)) : undefined;
-  const compactPeriodSurface = compactAmount?.rawUnit ?? (hybridUnit ? normalizeTokenLower(followingUnit!) : compactUnitPeriod?.[2]);
-  const compactPeriodUnit = compactPeriodSurface ? mapIntervalUnit(compactPeriodSurface) : undefined;
-  if (OCCURRENCE_COUNT_WORDS.has(unitSurface)) return undefined;
-  const unit = normalizeUnit(compactPeriodUnit ? compactUnitPeriod![1] : unitSurface, context.options);
+  const compact = compactMaximumPeriodAt(context, unitIndex, unitSurface);
+  // Quantitative count denominators belong to the occurrence-cap constituent.
+  // Daypart maxima retain their existing authored-only instruction owner.
+  if (OCCURRENCE_COUNT_WORDS.has(unitSurface) || compact && !("daypart" in compact.period) &&
+      OCCURRENCE_COUNT_WORDS.has(compact.unitSurface)) return undefined;
+  const unit = normalizeUnit(compact?.unitSurface ?? unitSurface, context.options);
   if (!unit) return undefined;
   matched.push(...quantityTokens);
   cursor = unitIndex + 1;
 
-  const compactPeriod: MaximumDosePeriod | undefined = compactPeriodUnit
-    ? DAYPART_INTERVAL_TOKENS.has(compactPeriodSurface!)
-      ? { tokens: hybridUnit ? [followingUnit!] : [], daypart: true, unitDenominator: true }
-      : { tokens: hybridUnit ? [followingUnit!] : [], period: compactAmount?.value ?? (hybridUnit ? hybridValue! : 1), periodUnit: compactPeriodUnit, unitDenominator: true }
-    : undefined;
-  const period: MaximumDosePeriod | undefined = periodFirst ?? compactPeriod ?? maximumDosePeriodAt(context, cursor);
+  const period: MaximumDosePeriod | undefined = periodFirst ?? compact?.period ?? maximumDosePeriodAt(context, cursor);
   if (!period) return undefined;
   // A comparative quantity followed by a bare cadence is an administered dose
   // ("at most 2 tablets daily"). A preceding medication amount makes that

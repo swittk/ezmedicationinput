@@ -11,11 +11,11 @@ import {
 } from '../lexer/meaning';
 import { LexKind } from '../lexer/token-types';
 import { EVENT_TIMING_TOKENS } from '../maps';
-import { maximumDosePerPeriodAt, parseClockToken } from '../hpsg/rule-context';
+import { maximumCountLeadAt, maximumDosePerPeriodAt, parseClockToken } from '../hpsg/rule-context';
 import { explicitDoseLexicalEnd, phaseAdjustmentAt } from '../hpsg/rules/core-rules';
 import {
   ordinalWeekStageSequence, followingCourseDurationHeaderAt,
-  treatmentRelativePeriodStartAt, recognizeCycles
+  treatmentRelativePeriodStartAt, recognizeCycles, maximumOccurrenceAt
 } from '../hpsg/rules/timing-rules';
 import { normalizeUnit } from '../unit-lexicon';
 import { FREQUENCY_SIMPLE_WORDS, mapFrequencyAdverb } from '../hpsg/timing-lexicon';
@@ -179,7 +179,8 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
     const token = tokens[i];
     // The existing maximum constituent owns its qualifier, amount and period.
     // Its internal numerals cannot introduce independent administrations.
-    const maximum = maximumDosePerPeriodAt(maximumContext, i);
+    const maximum = maximumCountLeadAt(maximumContext, i) &&
+      (maximumDosePerPeriodAt(maximumContext, i) ?? maximumOccurrenceAt(maximumContext, i));
     if (maximum) { i = maximum.headStart + maximum.tokens.length - 1; continue; }
     // A typed phase-adjustment predicate supplies a candidate boundary;
     // its complete dosage daughter is still checked by the boundary grammar.
