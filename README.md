@@ -98,9 +98,10 @@ the supported schema: `DosageInstruction.step[].component[]` contains R6
 The [published September 2026 snapshot](https://www.hl7.org/fhir/6.0.0-snapshot1/dosage.html)
 uses the same version label but defines `DosageDetails`; that schema is not a
 supported interchange target. The importer checks the current structural
-contract, not a datatype name or release tag absent from the JSON. A text-only
-object containing `renderedInstruction` is structurally valid in both schemas
-and is accepted; it cannot identify which release produced it.
+contract, not a datatype name or release tag absent from the JSON. Objects in
+the structural overlap are accepted, including text-only `renderedInstruction`
+objects and structured dosages using shared fields. Acceptance does not identify
+which release produced the object or add support for the September schema.
 TypeScript callers of the earlier R6 draft should replace `FhirR6DosageDetails`
 with `FhirR6DosageInstruction`. Its `step` property is optional, matching the
 current wire contract:

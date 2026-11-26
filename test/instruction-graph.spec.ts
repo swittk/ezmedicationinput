@@ -5593,3 +5593,34 @@ describe("complete action time realization", () => {
     }
   });
 });
+
+
+describe("required graph conditions beside independent Boolean guards", () => {
+  const sbp: MedicationCondition = { kind: "measurement", name: "SBP", operation: "gt", value: 160, text: "SBP > 160" };
+  const pulse: MedicationCondition = { kind: "measurement", name: "pulse", operation: "gt", value: 100, text: "pulse > 100" };
+  it.each([
+    ["standalone", sbp, "Take 1 tablet orally only if SBP > 160."],
+    ["conjunction", { kind: "all", conditions: [sbp, pulse] }, "Take 1 tablet orally only if SBP > 160 and pulse > 100."],
+    ["disjunction", { kind: "any", conditions: [sbp, pulse] }, "Take 1 tablet orally only if SBP > 160 or pulse > 100 if SBP > 160."],
+    ["negated disjunction", { kind: "not", condition: { kind: "any", conditions: [
+      { kind: "not", condition: sbp }, { kind: "not", condition: pulse }
+    ] } }, "Take 1 tablet orally unless not (SBP > 160) or not (pulse > 100)."],
+  ] as const)("retains the separately required condition with a %s", (_name, condition, expected) => {
+    const source = "Take 1 tablet if SBP > 160";
+    const marker = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en",
+      actions: parseInstructionActions("Take 1 tablet"),
+      primaryAdministrationSpan: { start: 0, end: 13 },
+      primaryOwnership: { administrationActionIndex: 0, dose: { actionIndex: 0, argumentIndex: 0 } },
+      relations: [{ kind: AdviceRelation.If, toActionIndex: 0, text: "if SBP > 160" }],
+      coverage: { complete: true, ratio: 1, understoodCharacters: source.length, opaqueCharacters: 0 }
+    })!;
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      route: { coding: [{ system: "http://snomed.info/sct", code: "26643006" }] }, extension: [marker] };
+    setDosageCondition(row, JSON.parse(JSON.stringify(condition)) as MedicationCondition);
+    for (const input of [[row], toDosageDetails([row]), importCanonicalCourse([row])]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(expected);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+});

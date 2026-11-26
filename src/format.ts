@@ -1297,8 +1297,11 @@ export function timingEventPreviewSchedule(
   schedule: CanonicalScheduleExpr | undefined
 ): CanonicalScheduleExpr | undefined {
   if (!schedule?.timingCode || schedule.when?.length || schedule.timeOfDay?.length) return schedule;
-  const when = timingPreviewDescriptor(schedule.timingCode)?.when;
-  return when?.length && timingCodeMatchesRecurrence(schedule) ? { ...schedule, when } : schedule;
+  const descriptor = timingPreviewDescriptor(schedule.timingCode);
+  const when = descriptor?.when;
+  const anchorOnly = descriptor?.frequency === undefined && descriptor?.period === undefined &&
+    descriptor?.periodUnit === undefined;
+  return when?.length && (anchorOnly || timingCodeMatchesRecurrence(schedule)) ? { ...schedule, when } : schedule;
 }
 
 function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string {
@@ -1381,9 +1384,10 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
     parts.push(`${count}x`);
   }
   if (timingText) parts.push(timingText);
-  if (schedule.when?.length) {
-    parts.push(schedule.offset !== undefined || schedule.offsetMin !== undefined || schedule.offsetMax !== undefined
-      ? collectWhenPhrases(schedule).join(" ") : schedule.when.join(" "));
+  const eventSchedule = timingCodeMatchesRecurrence(schedule) ? schedule : timingEventPreviewSchedule(schedule)!;
+  if (eventSchedule.when?.length) {
+    parts.push(eventSchedule.offset !== undefined || eventSchedule.offsetMin !== undefined || eventSchedule.offsetMax !== undefined
+      ? collectWhenPhrases(eventSchedule).join(" ") : eventSchedule.when.join(" "));
   }
   if (schedule.activityTiming?.length) parts.push(...formatActivityTimingEnglish(schedule));
   const eventWindow = describeEventWindowEnglish(schedule, words);
@@ -2298,9 +2302,12 @@ export function formatCanonicalClause(
     const condition = clause.clinicalAdjuncts?.condition;
     if (condition && !canFormatConditionInPrimary(localization) &&
         (!context.defaultText || !rendered.includes(context.defaultText))) {
-      // The complete default already guards its dose, including when wrapped
-      // by a callback. A replacement sentence retains the outer guard.
-      return appendClinicalConditionText(rendered, condition, localization.course ?? ENGLISH_COURSE);
+      // A callback may restyle the administration while retaining its explicit
+      // default guard. Only a replacement without that guard needs the fallback.
+      const words = localization.course ?? ENGLISH_COURSE;
+      const guard = normalizeInstructionText(appendClinicalConditionText("", condition, words));
+      if (!normalizeInstructionText(rendered).includes(guard))
+        return appendClinicalConditionText(rendered, condition, words);
     }
     return rendered;
   }

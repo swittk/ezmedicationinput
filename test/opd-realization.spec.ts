@@ -3352,7 +3352,8 @@ describe("round55: current clinical facts and independent graph meaning", () => 
           expect(text).not.toMatch(locale === "en" ? /only if\s+nausea/iu : /เฉพาะเมื่อ\s*nausea/u);
         } else {
           expect(text.match(/140/gu)).toHaveLength(1);
-          expect(text.match(/160/gu) ?? []).toHaveLength(variant === "opposite unless" ? 1 : 0);
+          // One OR arm does not subsume the independently required graph condition.
+          expect(text.match(/160/gu) ?? []).toHaveLength(variant === "any" || variant === "opposite unless" ? 1 : 0);
           if (variant === "opposite unless") {
             expect(text).toMatch(/(?:unless|เว้นแต่)\s*systolic BP > 160/u);
             expect(text).toMatch(locale === "en" ? /only if\s+systolic BP > 140/u : /เฉพาะเมื่อ\s*systolic BP > 140/u);

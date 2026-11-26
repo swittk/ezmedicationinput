@@ -705,7 +705,7 @@ function formatCanonicalBase(
     rendered = a.additionalInstructions?.length || a.patientInstruction
       ? directions + " " + rendered : directions;
   }
-  if (a.predicate && style !== "long" && !authoredQualifiers)
+  if (a.predicate && style !== "long" && !authoredQualifiers && !partialAuthoredDirections)
     rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   // The clause's calendar view needs a complete civil date. Partial FHIR
   // dateTimes (for example YYYY-MM) remain useful authored information; show

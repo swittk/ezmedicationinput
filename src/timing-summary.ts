@@ -84,11 +84,15 @@ const AFTERNOON_TIMING_PREVIEW: typeof TIMING_ABBREVIATIONS[string] = {
   code: EventTiming.Afternoon, when: [EventTiming.Afternoon]
 };
 
-/** Standard BED and the existing QHS shorthand share the same event anchor. */
+const BEDTIME_TIMING_PREVIEW: typeof TIMING_ABBREVIATIONS[string] = {
+  code: "BED", when: [EventTiming["Before Sleep"]]
+};
+
+/** Standard BED supplies an event anchor independently of the repeat cadence. */
 export function timingPreviewDescriptor(code: string) {
   if (code === EventTiming.Afternoon) return AFTERNOON_TIMING_PREVIEW;
   const lower = code.toLowerCase();
-  return TIMING_ABBREVIATIONS[lower === "bed" ? "qhs" : lower];
+  return lower === "bed" ? BEDTIME_TIMING_PREVIEW : TIMING_ABBREVIATIONS[lower];
 }
 
 /** Human previews also recognize existing SIG shorthand without treating it

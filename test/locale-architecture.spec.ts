@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveSigLocalization } from "../src/i18n";
+import { resolveSigLocalization, registerSigLocalization } from "../src/i18n";
 import {
   localizedConfig,
   localizedValue
@@ -9,7 +9,7 @@ import {
   resolveMedicationInstructionAction
 } from "../src/instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../src/instruction-concept-terminology";
-import { AdviceArgumentRole, AdviceRelation, RouteCode, FhirPeriodUnit, type FhirDosage, type FhirR6DosageInstruction, type FormatOptions } from "../src/types";
+import { AdviceArgumentRole, AdviceRelation, EventTiming, RouteCode, FhirPeriodUnit, type CanonicalDoseExpr, type FhirDosage, type FhirR6DosageInstruction, type FormatOptions } from "../src/types";
 import { suggestSig } from "../src/suggest";
 import { localizeAdviceRelation } from "../src/relation-terminology";
 import { shouldJoinAdjacentSourceTokens } from "../src/locale-detection";
@@ -378,6 +378,91 @@ describe("structured preview defaults", () => {
     expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized" })).toContain(`every ${period} to 4 hours`);
     for (const style of ["short", "long"] as const)
       expect(formatSig(source, style, { locale: "th", realizationMode: "normalized" })).toContain(`${period} ถึง 4 ชั่วโมง`);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+});
+
+
+describe("independent cadence and preview condition owners", () => {
+  const guard = { code: { coding: [{ system: "http://loinc.org", code: "8480-6",
+    display: "Systolic blood pressure" }], text: "sbp" }, operation: "gt" as const,
+    valueQuantity: { value: 160 }, text: "SBP > 160" };
+  const tablet = { doseQuantity: { value: 1, unit: "tab" } };
+
+  it.each([
+    ["en", "short", "1 tab Q2D HS"],
+    ["en", "long", "Use 1 tablet every other day at bedtime."],
+    ["th", "short", "1 เม็ด วันเว้นวัน ก่อนนอน"],
+    ["th", "long", "ใช้ครั้งละ 1 เม็ด วันเว้นวัน ก่อนนอน."],
+  ] as const)("keeps the BED anchor beside a typed cadence in %s %s", (locale, style, expected) => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [tablet],
+      timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BED" }] },
+        repeat: { frequency: 1, period: 2, periodUnit: FhirPeriodUnit.Day } }
+    }] }] };
+    const before = JSON.stringify(source);
+    expect(formatSig(source, style, { locale, realizationMode: "normalized" })).toBe(expected);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it("keeps explicit events and clocks authoritative over the BED fallback", () => {
+    for (const explicit of [{ when: [EventTiming.Morning] }, { timeOfDay: ["09:00:00"] }]) {
+      const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [tablet],
+        timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BED" }] },
+          repeat: { frequency: 1, period: 2, periodUnit: FhirPeriodUnit.Day, ...explicit } }
+      }] }] };
+      const text = formatSig(source, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toContain("every other day");
+      expect(text).not.toContain("bedtime");
+      expect(text).toMatch("when" in explicit ? /morning/u : /9:00\s*am/u);
+    }
+  });
+
+  it("keeps a restyled default guard on the dose before independent advice", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [tablet],
+      condition: [guard], additionalInstruction: [{ text: "Otherwise hold" }]
+    }] }] };
+    const before = JSON.stringify(source);
+    expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized", i18n: {
+      formatLong: context => context.defaultText.replace("Use", "Administer")
+    } })).toBe("Administer 1 tablet only if SBP > 160. Otherwise hold.");
+    expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized", i18n: {
+      formatLong: () => "Take this dose."
+    } })).toBe("Take this dose only if SBP > 160.");
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it.each(["en", "th"] as const)("guards partially authored dose directions once in %s", locale => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ text: "Swallow 1 tablet whole",
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }, condition: [guard]
+    }] }] };
+    const before = JSON.stringify(source);
+    for (const style of ["short", "long"] as const) {
+      const text = formatSig(source, style, { locale, realizationMode: "normalized" });
+      expect(text.match(/SBP > 160/gu)).toHaveLength(1);
+      expect(text).toContain("Swallow 1 tablet whole " + (locale === "en" ? "only if" : "เฉพาะเมื่อ") + " SBP > 160.");
+      expect(text).toContain(locale === "en" ? style === "short" ? "1x/d" : "once daily" : "วันละครั้ง");
+    }
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it("retains the supplying plain dose provider through regional and per-call composition", () => {
+    const english = resolveSigLocalization("en")!;
+    const provider = { ...english, locale: "facetdose", unitLabels: { tab: "custom tablets" },
+      formatDose(dose: CanonicalDoseExpr | string) {
+        return typeof dose === "string" ? dose : dose.value + " " + this.unitLabels[dose.unit as "tab"];
+      }
+    };
+    registerSigLocalization(provider);
+    registerSigLocalization({ locale: "facetdose-region", course: english.course });
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: ["ordered", "calculated"].map(code => ({
+      type: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/dose-rate-type", code }] }, ...tablet
+    })) }] }] };
+    const before = JSON.stringify(source);
+    const options: FormatOptions[] = [{ locale: "facetdose" }, { locale: "facetdose-region" },
+      { locale: "facetdose", i18n: { course: english.course } },
+      { locale: "other-facet", i18n: { inherit: "facetdose-region", course: english.course } }];
+    for (const option of options) expect(formatSig(source, "long", { ...option, realizationMode: "normalized" }))
+      .toBe("Use; Ordered dose: 1 custom tablets; Calculated dose: 1 custom tablets");
     expect(JSON.stringify(source)).toBe(before);
   });
 });

@@ -5102,8 +5102,8 @@ function conditionRelationBody(text: string, kind: AdviceRelation): string | und
   return body || undefined;
 }
 
-/** Retained predicate text identifies its source mirror without parsing the
- * graph again. Ownership survives edits to the enclosing Boolean operator. */
+/** A live guard subsumes retained graph wording only when every permitted
+ * alternative still requires that condition; no graph reparse is needed. */
 function primaryConditionOwnsSource(
   condition: MedicationCondition, source: string, negative: boolean, negated = false
 ): boolean {
@@ -5112,7 +5112,8 @@ function primaryConditionOwnsSource(
   if ("conditions" in condition) {
     if (!condition.conditions.length) return false;
     const owns = (child: MedicationCondition) => primaryConditionOwnsSource(child, source, negative, negated);
-    return condition.conditions.some(owns);
+    const conjunction = (condition.kind === "all") !== negated;
+    return conjunction ? condition.conditions.some(owns) : condition.conditions.every(owns);
   }
   const negativeLeaf = negated !== (condition.kind === "state" && !condition.expected);
   return negative === negativeLeaf && normalizedInstructionSurface(condition.text) === source;
