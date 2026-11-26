@@ -68,6 +68,16 @@ language conditionals. Reuse existing locale registries; no second parser,
 full language-pack framework, or ordinary-path performance regression.
 The concrete EN/TH course realizers live under src/locales/course/ and use the existing SigLocalization registry.
 
+## Maintenance of touched language seams (2026-11-27)
+
+When a fix touches locale-specific recognition or realization, move the affected
+logic into the existing language or lexical provider, or reuse the existing typed
+lexical/grammar owner. Shared composition, regimen binding, execution and FHIR
+remain locale-neutral. Use registered canonical tokens and language features.
+Keep the extraction local to the fix: no extra scan, cache, parallel parser,
+framework or unrelated rewrite. Preserve ordinary language behavior and verify
+the relevant registered-provider path.
+
 ## Native course authority (2026-11-16)
 
 The canonical clause/regimen pipeline now continues into a complete native

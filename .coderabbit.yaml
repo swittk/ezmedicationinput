@@ -75,7 +75,12 @@ reviews:
         realization. Shared clinical meaning, typed HPSG composition, execution
         and FHIR projection stay language-neutral. Reuse the existing semantic
         owner across consumers; avoid symptom-only rescue branches, duplicate
-        clinical policy and speculative abstractions. Locale providers are plain
+        clinical policy and speculative abstractions. When a fix touches locale-specific
+        recognition or realization, move that affected logic into the existing
+        language/lexical provider or reuse the existing typed lexical/grammar owner.
+        Keep this extraction local, preserve registered canonical tokens and verify
+        the provider path; no new scan, cache, parallel parser or framework.
+        Locale providers are plain
         immutable data; receiver rebinding and caller-misuse defenses are out of scope.
         Custom formatLong overrides own their returned whole-clause text; preserve
         their full context and defaults. Native rendering retains typed dose/advice
