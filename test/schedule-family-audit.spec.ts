@@ -6020,19 +6020,24 @@ describe("round79 reviewed cap, cadence and consumed-count ownership", () => {
     expect(saved.maxDosePerAdministration).toEqual(row.maxDosePerAdministration);
   });
 
-  it.each([[1, FhirPeriodUnit.Year], [12, FhirPeriodUnit.Month], [2, FhirPeriodUnit.Month]] as const)(
-    "keeps the %s %s month stride with a weekday and day-of-month selector", (period, periodUnit) => {
+  it.each([
+    [1, FhirPeriodUnit.Year, ["2026-01-15"]],
+    [12, FhirPeriodUnit.Month, ["2026-01-15"]],
+    [2, FhirPeriodUnit.Month, ["2026-01-15", "2026-07-16"]],
+    [1, FhirPeriodUnit.Month, ["2026-01-15", "2026-04-16", "2026-07-16", "2026-10-15"]],
+  ] as const)(
+    "keeps the %s %s month stride with a weekday and day-of-month selector", (period, periodUnit, days) => {
     const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
       amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { recurrence: {
-        period, periodUnit, clocks: ["09:00:00"], dayOfWeek: [FhirDayOfWeek.Thursday], monthDays: [15],
+        period, periodUnit, clocks: ["09:00:00"], dayOfWeek: [FhirDayOfWeek.Thursday], monthDays: [15, 16],
         calendarWindow: { start: "2026-01-01", end: "2026-12-31" },
       } },
     }] }] };
     for (const dosage of [fresh(course), ...forms(courseToR6(course))]) {
       const before = fresh(dosage);
-      expect(nextDueDoses(dosage, query)).toEqual(["2026-01-15T09:00:00+00:00"]);
+      expect(nextDueDoses(dosage, { ...query, limit: 5 })).toEqual(days.map(day => day + "T09:00:00+00:00"));
       expect(calculateTotalUnits({ dosage, ...query, durationValue: 365, durationUnit: FhirPeriodUnit.Day }))
-        .toMatchObject({ totalUnits: 1, unit: "tab" });
+        .toMatchObject({ totalUnits: days.length, unit: "tab" });
       expect(dosage).toEqual(before);
     }
   });
@@ -6202,7 +6207,8 @@ describe("current course bounds and measured execution", () => {
   });
 
   it.each([
-    ["ug/kg/min", 420], ["ug/(kg.min)", 420], ["ug/(kg.h)", 7]
+    ["ug/kg/min", 420], ["ug/(kg.min)", 420], ["ug/(min.kg)", 420],
+    ["ug/(kg.h)", 7], ["ug/(h.kg)", 7], ["ug/(kg.s)", 25200], ["ug/(s.kg)", 25200]
   ] as const)("measures the coded weight-rate denominator %s", (code, amount) => {
     const rate = { value: 0.1, unit: "ug/kg/min", system: "http://unitsofmeasure.org", code,
       extension: [{ url: "urn:clinic:rate-note", valueString: "authored rate" }] };
@@ -6289,12 +6295,12 @@ describe("current course bounds and measured execution", () => {
   });
 
   it.each([
-    ["quantity", "exact", 40, 4, 8, 200], ["quantity", "exact", 70, 5, 10, 200],
-    ["ratio", "exact", 70, 5, 10, 200], ["quantity", "range", 40, 5, 10, 200],
-    ["quantity", "range", 70, 5, 10, 200], ["quantity", "upper", 70, 5, 10, 200],
+    ["quantity", "exact", 40, 4, 8, 200], ["quantity", "exact", 70, 7, 7, 200],
+    ["ratio", "exact", 70, 7, 7, 200], ["quantity", "range", 40, 5, 10, 200],
+    ["quantity", "range", 70, 10, 10, 200], ["quantity", "upper", 70, 5, 10, 200],
     ["approximate", "upper", 70, 5, 10, 200],
-    ["quantity", "range", 40, 5, 9, 180], ["quantity", "range", 70, 5, 5, 180],
-  ] as const)("bounds a computed weighted %s with %s runtime at %s kg (%s/%s mL)",
+    ["quantity", "range", 40, 5, 9, 180], ["quantity", "range", 70, 9, 9, 180],
+  ] as const)("retains runtime feasibility for a weighted %s with %s runtime at %s kg (%s/%s mL)",
     (kind, runtime, weight, expected, expectedDay, dailyMaximum) => {
     const ucum = "http://unitsofmeasure.org";
     const context = { strengthRatio: {
@@ -6322,10 +6328,13 @@ describe("current course bounds and measured execution", () => {
       const half = calculateTotalUnits({ dosage, ...query, context, patientWeightKg: weight,
         durationValue: 12, durationUnit: FhirPeriodUnit.Hour });
       expect(half).toMatchObject({ totalUnits: expected, unit: "mL" });
-      if (runtime !== "exact") expect(half.quantityKind).toBe("maximum");
-      expect(calculateTotalUnits({ dosage, ...query, context, patientWeightKg: weight,
-        durationValue: 24, durationUnit: FhirPeriodUnit.Hour }))
-        .toMatchObject({ totalUnits: expectedDay, unit: "mL" });
+      const conflict = weight === 70 && runtime !== "upper";
+      if (runtime !== "exact" || conflict) expect(half.quantityKind).toBe("maximum");
+      expect(half.explanation?.includes("unevaluable maximum-dose constraint") ?? false).toBe(conflict);
+      const whole = calculateTotalUnits({ dosage, ...query, context, patientWeightKg: weight,
+        durationValue: 24, durationUnit: FhirPeriodUnit.Hour });
+      expect(whole).toMatchObject({ totalUnits: expectedDay, unit: "mL" });
+      expect(whole.explanation?.includes("unevaluable maximum-dose constraint") ?? false).toBe(conflict);
       expect(dosage).toStrictEqual(before);
     }
     expect({ row, context }).toStrictEqual(original);
@@ -6346,7 +6355,7 @@ describe("current course bounds and measured execution", () => {
     } } : row.timing);
   });
 
-  it("keeps a counted weighted infusion open until its capped doses finish", () => {
+  it.each(["09:00:00", "08:30:00"])("keeps the fixed infusion runtime before its %s successor", clock => {
     const ucum = "http://unitsofmeasure.org";
     const first: FhirDosage = {
       doseAndRate: [{ rateQuantity: { value: 0.1, unit: "mL/kg/h", code: "mL/kg/h", system: ucum } }],
@@ -6356,18 +6365,65 @@ describe("current course bounds and measured execution", () => {
       maxDosePerPeriod: [{ numerator: { value: 100, unit: "mg" }, denominator: { value: 24, unit: "h" } }],
     };
     const successor: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }],
-      timing: { repeat: { count: 1, timeOfDay: ["09:00:00"] } } };
+      timing: { repeat: { count: 1, timeOfDay: [clock] } } };
     const course: CanonicalCourse = { kind: "course", stages: [
       importCanonicalCourse(first).stages[0], importCanonicalCourse(successor).stages[0],
     ] };
     const context = { strengthRatio: { numerator: { value: 100, unit: "mg" }, denominator: { value: 5, unit: "mL" } } };
     for (const dosage of [course, courseToR5(course), courseToR6(course)]) {
       const before = structuredClone(dosage);
-      expect(calculateTotalUnits({ dosage, ...query, context, patientWeightKg: 70,
-        durationValue: 2, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 10, unit: "mL" });
-      expect(calculateTotalUnits({ dosage, ...query, context, patientWeightKg: 70,
-        durationValue: 3, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 16, unit: "mL" });
+      expect(calculateTotalUnits({ dosage, ...query, context, patientWeightKg: 40,
+        durationValue: 2, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 8, unit: "mL" });
+      expect(calculateTotalUnits({ dosage, ...query, context, patientWeightKg: 40,
+        durationValue: 3, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: clock === "09:00:00" ? 13 : 12, unit: "mL" });
+      expect(calculateTotalUnits({ dosage, ...query, context, patientWeightKg: 40,
+        durationValue: 4, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 13, unit: "mL" });
       expect(dosage).toStrictEqual(before);
+    }
+    // An upper allowance can estimate supply but cannot finish the phase at
+    // an invented runtime or release the successor at that estimated instant.
+    const upper = structuredClone(course);
+    upper.stages[0].administrations[0].schedule!.recurrence!.occurrenceDuration = undefined;
+    upper.stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationMax = 1;
+    for (const dosage of [upper, courseToR5(upper), courseToR6(upper)]) {
+      const before = structuredClone(dosage);
+      const result = calculateTotalUnits({ dosage, ...query, context, patientWeightKg: 40,
+        durationValue: 4, durationUnit: FhirPeriodUnit.Day });
+      expect(result).toMatchObject({ totalUnits: 12, unit: "mL", quantityKind: "maximum" });
+      expect(result.explanation).toContain("without a stated cutover");
+      expect(dosage).toStrictEqual(before);
+    }
+  });
+
+  it.each([
+    ["fixed45", 45, undefined, 4.5, 4.5, true],
+    ["range45to60", 45, 60, 6, 6, true],
+    ["range30to60", 30, 60, 4, 8, false],
+    ["upper60", undefined, 60, 4, 8, false],
+  ] as const)("retains the authored runtime floor when evaluating %s against an absolute maximum",
+    (_name, duration, durationMax, halfAmount, dayAmount, conflict) => {
+    const ucum = "http://unitsofmeasure.org";
+    const context = { strengthRatio: { numerator: { value: 125, unit: "mg", system: ucum, code: "mg" },
+      denominator: { value: 5, unit: "mL", system: ucum, code: "mL" } } };
+    const row: FhirDosage = {
+      doseAndRate: [{ rateQuantity: { value: 0.1, unit: "mL/kg/h", system: ucum, code: "mL/kg/h" } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"], durationUnit: FhirPeriodUnit.Minute,
+        ...(duration !== undefined ? { duration } : {}), ...(durationMax !== undefined ? { durationMax } : {}) } },
+      maxDosePerAdministration: { value: 0.1, unit: "g", system: ucum, code: "g" },
+      maxDosePerPeriod: [{ numerator: { value: 0.2, unit: "g", system: ucum, code: "g" },
+        denominator: { value: 24, unit: "h" } }],
+    };
+    for (const dosage of forms(row)) {
+      const before = structuredClone({ dosage, context });
+      for (const [hours, totalUnits] of [[12, halfAmount], [24, dayAmount]]) {
+        const result = calculateTotalUnits({ dosage, ...query, context, patientWeightKg: 60,
+          durationValue: hours, durationUnit: FhirPeriodUnit.Hour });
+        expect(result).toMatchObject({ totalUnits, unit: "mL", quantityKind: "maximum" });
+        expect(result.explanation?.includes("unevaluable maximum-dose constraint") ?? false).toBe(conflict);
+      }
+      expect({ dosage, context }).toStrictEqual(before);
     }
   });
 
@@ -6540,5 +6596,152 @@ describe("authored next-day and inherited recurrence ownership", () => {
     expect(parsed.meta.canonical.course!.stages[0].administrations[0].schedule?.recurrence?.count).toBe(1);
     expect(calculateTotalUnits({ dosage: parsed.fhirNext, ...query, durationValue: 5,
       durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(50);
+  });
+});
+
+describe("shared execution unit and event ownership", () => {
+  const ucum = "http://unitsofmeasure.org";
+  const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  const forms = (rows: FhirDosage | FhirDosage[]) => {
+    const input = structuredClone(rows);
+    return [importCanonicalCourse(input), input, toDosageDetails(Array.isArray(input) ? input : [input])];
+  };
+  const wire = (course: CanonicalCourse) => [course, courseToR5(course), courseToR6(course)];
+
+  it.each([
+    [0.5, "d", "2027-03-14T07:00:00-04:00"],
+    [12, "h", "2027-03-14T07:00:00-04:00"],
+    [1 / 14, "wk", "2027-03-14T07:00:00-04:00"],
+    [1, "d", "2027-03-14T18:00:00-04:00"],
+    [24, "h", "2027-03-14T19:00:00-04:00"],
+  ] as const)("resolves a %s %s phase displacement with the shared elapsed or civil owner", (value, unit, due) => {
+    const course: CanonicalCourse = { kind: "course", stages: [{
+      start: { anchor: "treatment-start", displacement: { value, code: unit, system: ucum } },
+      administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+        schedule: { recurrence: { count: 1 } } }],
+    }] };
+    const options = { orderedAt: "2027-03-13T18:00:00-05:00", from: "2027-03-13T18:00:00-05:00",
+      timeZone: "America/New_York" };
+    for (const dosage of wire(course)) {
+      const before = structuredClone(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([due]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 30, durationUnit: FhirPeriodUnit.Hour }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
+      expect(dosage).toStrictEqual(before);
+    }
+  });
+
+  it.each(["stage", "component"] as const)("uses the actual clock of a fractional %s start for its course length", owner => {
+    const boundary = { anchor: "treatment-start" as const, displacement: { value: 0.5, unit: "d" } };
+    const member: CanonicalAdministration = { kind: "administration",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      ...(owner === "component" ? { phaseStart: boundary } : {}),
+      schedule: { recurrence: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        clocks: ["08:00:00", "20:00:00"], courseLength: { value: 2, unit: "d" } } },
+    };
+    const course: CanonicalCourse = { kind: "course", stages: [{
+      ...(owner === "stage" ? { start: boundary } : {}), administrations: [member],
+    }] };
+    const options = { orderedAt: "2027-03-13T18:00:00-05:00", from: "2027-03-13T18:00:00-05:00",
+      timeZone: "America/New_York" };
+    for (const dosage of wire(course)) {
+      const before = structuredClone(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 6 })).toEqual([
+        "2027-03-14T08:00:00-04:00", "2027-03-14T20:00:00-04:00",
+        "2027-03-15T08:00:00-04:00", "2027-03-15T20:00:00-04:00",
+      ]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 4, unit: "tab" });
+      expect(dosage).toStrictEqual(before);
+    }
+  });
+
+  it.each([undefined, "active ingredient"])("sums annotated UCUM quantities using their coded basis (%s)", label => {
+    const rows: FhirDosage[] = [
+      { doseAndRate: [{ doseQuantity: { value: 200, unit: "mg" } }], timing: { repeat: { count: 1 } } },
+      { doseAndRate: [{ doseQuantity: { value: 1, system: ucum, code: "g{active}",
+        ...(label ? { unit: label } : {}), extension: [{ url: "urn:clinic:quantity-note", valueString: "retained" }] } }],
+        timing: { repeat: { count: 1 } } },
+    ];
+    for (const dosage of forms(rows)) {
+      const before = structuredClone(dosage);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 1200, unit: "mg" });
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day,
+        roundToMultiple: 500 })).toMatchObject({ totalUnits: 1500, unit: "mg" });
+      expect(dosage).toStrictEqual(before);
+    }
+    const repeated = importCanonicalCourse(structuredClone(rows));
+    repeated.cycleInterval = { value: 1, unit: "d" }; repeated.cycleCount = 2;
+    for (const dosage of wire(repeated)) {
+      const before = structuredClone(dosage);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 2, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 2400, unit: "mg" });
+      expect(dosage).toStrictEqual(before);
+    }
+  });
+
+  it("keeps opaque coded identities distinct during aggregation", () => {
+    const opaque = (value: number): FhirDosage => ({
+      doseAndRate: [{ doseQuantity: { value, system: "urn:clinic:units", code: "g" } }],
+      timing: { repeat: { count: 1 } },
+    });
+    const known: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 200, unit: "mg" } }],
+      timing: { repeat: { count: 1 } } };
+    for (const dosage of forms([opaque(1), opaque(2)])) {
+      const before = structuredClone(dosage);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "g" });
+      expect(dosage).toStrictEqual(before);
+    }
+    for (const dosage of forms([known, opaque(1)])) {
+      const before = structuredClone(dosage);
+      expect(() => calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toThrow(expect.objectContaining({ code: "incompatible-dose-units" }));
+      expect(dosage).toStrictEqual(before);
+    }
+  });
+
+  it.each([false, true])("retains fallback breakfast beside a configured night event (dated=%s)", dated => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { ...(dated ? { event: ["2026-01-01"] } : {}),
+        repeat: { when: [EventTiming["Before Breakfast"], EventTiming.Night] } } };
+    for (const dosage of forms(row)) {
+      const before = structuredClone(dosage);
+      for (const clock of [undefined, "22:00"]) {
+        const config = clock ? { eventClock: { [EventTiming.Night]: clock } } : undefined;
+        expect(nextDueDoses(dosage, { ...query, config, limit: 2 })).toEqual([
+          "2026-01-01T07:30:00+00:00", "2026-01-01T" + (clock ?? "21:00") + ":00+00:00",
+        ]);
+        expect(calculateTotalUnits({ dosage, ...query, config, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+          .toMatchObject({ totalUnits: 2, unit: "tab" });
+      }
+      expect(dosage).toStrictEqual(before);
+    }
+  });
+
+  it.each([
+    [150, "ug/kg", ucum, 0.1], [0.15, "mg/kg", ucum, 0.1],
+    [150, "ug", ucum, 0.2], [150, "ug/kg", "urn:clinic:units", 0.2],
+  ] as const)("compares a weight-normalized mass ceiling without inventing patient weight (%s %s %s)",
+    (value, code, system, totalUnits) => {
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 0.1, unit: "mg/kg", code: "mg/kg", system: ucum } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"] } },
+      maxDosePerPeriod: [{ numerator: { value, code, system },
+        denominator: { value: 24, unit: "h" } }],
+    };
+    for (const dosage of forms(row)) {
+      const before = structuredClone(dosage);
+      const expected = ["2026-01-01T08:00:00+00:00",
+        ...(totalUnits === 0.2 ? ["2026-01-01T20:00:00+00:00"] : [])];
+      expect(nextDueDoses(dosage, { ...query, limit: 3 })
+        .filter(stamp => Date.parse(stamp) < Date.parse("2026-01-02T00:00:00Z"))).toEqual(expected);
+      const result = calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day });
+      expect(result).toMatchObject({ totalUnits, unit: "mg/kg" });
+      expect(result.explanation?.includes("unevaluable maximum-dose constraint") ?? false).toBe(totalUnits === 0.2);
+      expect(dosage).toStrictEqual(before);
+    }
   });
 });

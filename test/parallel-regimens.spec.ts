@@ -4166,12 +4166,15 @@ describe("round55 execution preserves authored calendar and terminology meaning"
     for (const version of ["r5", "r6"] as const) {
       const input = wire(parsed.fhirNext, version), saved = JSON.stringify(input);
       if (duration === 1.5) {
-        // This existing representation cannot combine an elapsed fractional
-        // phase with a later civil-day pause. Do not round or silently omit it.
-        expect(() => nextDueDoses(input, { ...options, limit: 12 }))
-          .toThrow("Unsupported R6 step RelativeTime: requires a treatment-start offset");
-        expect(() => calculateTotalUnits({ dosage: input, ...options, durationValue: 6, durationUnit: Unit.Day }))
-          .toThrow("Unsupported R6 step RelativeTime: requires a treatment-start offset");
+        // The first phase ends at Jan2 noon; the two-day pause ends at
+        // Jan4 noon. Its successor keeps its clocks and its full two days.
+        expect(nextDueDoses(input, { ...options, limit: 12 })).toEqual([
+          "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",
+          "2026-01-02T08:00:00+00:00", "2026-01-04T20:00:00+00:00",
+          "2026-01-05T08:00:00+00:00", "2026-01-05T20:00:00+00:00",
+          "2026-01-06T08:00:00+00:00",
+        ]);
+        expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 6, durationUnit: Unit.Day }).totalUnits).toBe(11);
       } else {
         expect(nextDueDoses(input, { ...options, limit: 12 })).toEqual([
           "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",

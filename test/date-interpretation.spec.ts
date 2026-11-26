@@ -1586,7 +1586,8 @@ describe("explicit cadence with distributive weekday selectors", () => {
     for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext),
       fresh(toDosageDetails(fresh(parsed.fhir)))]) {
       const before = fresh(input);
-      expect(nextDueDoses(input, { ...query, limit: due.length })).toEqual(due);
+      expect(nextDueDoses(input, { ...query, limit: due.length + 1 })
+        .filter(stamp => Date.parse(stamp) < Date.parse("2026-11-30T00:00:00Z"))).toEqual(due);
       expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 7,
         durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: due.length, unit: "tab" });
       expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(english);
@@ -1611,7 +1612,8 @@ describe("explicit cadence with distributive weekday selectors", () => {
     expect(parsed.fhirNext.step![0].component[0].timing?.repeat).toMatchObject(expected);
     expect(parsed.meta.leftoverText).toBeUndefined();
     for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
-      expect(nextDueDoses(input, { ...query, limit: due.length })).toEqual(due);
+      expect(nextDueDoses(input, { ...query, limit: due.length + 1 })
+        .filter(stamp => Date.parse(stamp) < Date.parse("2026-11-30T00:00:00Z"))).toEqual(due);
       expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 7,
         durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: due.length, unit: "tab" });
     }

@@ -3496,6 +3496,17 @@ describe("round60 supported execution and quantity boundaries", () => {
       expect(nextDueDoses(input, query)).toEqual(expected);
       expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(4);
       expect(nextDueDoses(reopen(input), query)).toEqual(expected);
+      for (const dosage of [input, reopen(input)]) {
+        // The administration offset displaces the inclusive nominal end too:
+        // 02:00 remains eligible; the following 08:00 opportunity is excluded.
+        const throughNextOpportunity = nextDueDoses(dosage, { ...query, limit: 7 })
+          .filter(stamp => Date.parse(stamp) < Date.parse("2026-01-02T09:00:00Z"));
+        const throughDisplacedEnd = [...expected, "2026-01-02T02:00:00+00:00"];
+        expect(throughNextOpportunity).toEqual(bounded ? throughDisplacedEnd
+          : [...throughDisplacedEnd, "2026-01-02T08:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 33, durationUnit: Unit.Hour }).totalUnits)
+          .toBe(bounded ? 5 : 6);
+      }
       expect(JSON.stringify(input)).toBe(before);
     });
 
@@ -3834,6 +3845,12 @@ describe("round61 distinct-target typed NEXT ownership", () => {
           expect(nextDueDoses(dosage, query)).toEqual(next
             ? ["2026-12-02T22:00:00+00:00", "2026-12-03T06:00:00+00:00"]
             : ["2026-12-02T06:00:00+00:00", "2026-12-02T22:00:00+00:00"]);
+          for (const [from, totalUnits] of [
+            ["2026-12-02T22:00:00Z", 1],
+            [next ? "2026-12-03T06:00:00Z" : "2026-12-02T06:00:00Z", 2],
+          ] as const)
+            expect(calculateTotalUnits({ dosage, ...query, from, durationValue: 1, durationUnit: Unit.Hour }))
+              .toMatchObject({ totalUnits, unit: "drop" });
           if (next)
             expect(calculateTotalUnits({ dosage, ...query, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(3);
         }

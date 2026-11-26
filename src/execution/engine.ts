@@ -855,7 +855,8 @@ function expandTiming(code: string, config: NextDueDoseConfig, repeat: Canonical
 function expandWhenCodes(
   whenCodes: string[],
   config: NextDueDoseConfig,
-  repeat: CanonicalRecurrence
+  repeat: CanonicalRecurrence,
+  allowFallback = false
 ): ExpandedTime[] {
   const entries: ExpandedTime[] = [];
   const seen = new Set<string>();
@@ -863,7 +864,8 @@ function expandWhenCodes(
     if (code === TimingEvent.Immediate) {
       continue;
     }
-    const expansions = expandTiming(code, config, repeat);
+    let expansions = expandTiming(code, config, repeat);
+    if (!expansions.length && allowFallback) expansions = inferWhenFallbackEntries(code, repeat);
     for (const expansion of expansions) {
       const key = `${expansion.dayShift}|${expansion.time}`;
       if (seen.has(key)) {
@@ -908,50 +910,26 @@ const DEFAULT_WHEN_FALLBACK_CLOCKS: Record<string, string[]> = {
   [TimingEvent["Before Meal"]]: ["07:30:00", "12:00:00", "18:00:00"],
   [TimingEvent["After Meal"]]: ["08:30:00", "13:00:00", "19:00:00"],
 };
-function inferWhenFallbackEntries(whenCodes: string[], repeat: CanonicalRecurrence): ExpandedTime[] {
-  const entries: ExpandedTime[] = [];
-  const seen = new Set<string>();
+function inferWhenFallbackEntries(code: string, repeat: CanonicalRecurrence): ExpandedTime[] {
   const exactOffset = getExactTimingOffsetMinutes(repeat);
-  const addClock = (clock: string, code: string) => {
-    const normalized = normalizeClock(clock);
-    const adjusted =
-      exactOffset !== undefined
-        ? applyOffset(normalized, signedEventOffset(code, exactOffset ?? 0))
-        : { time: normalized, dayShift: 0 };
-    const key = `${adjusted.dayShift}|${adjusted.time}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    entries.push(adjusted);
-  };
-  for (const code of whenCodes) {
-    if (code === TimingEvent.Immediate) {
-      continue;
-    }
-    let fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[code];
-    if (exactOffset !== undefined) {
-      if (code === TimingEvent["Before Meal"] || code === TimingEvent["After Meal"]) {
-        fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[TimingEvent.Meal];
-      } else if (code in SPECIFIC_BEFORE_MEALS) {
-        fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[SPECIFIC_BEFORE_MEALS[code]];
-      } else if (code in SPECIFIC_AFTER_MEALS) {
-        fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[SPECIFIC_AFTER_MEALS[code]];
-      }
-    }
-    if (!fallbackClocks) {
-      continue;
-    }
-    for (const clock of fallbackClocks) {
-      addClock(clock, code);
+  let fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[code];
+  if (exactOffset !== undefined) {
+    if (code === TimingEvent["Before Meal"] || code === TimingEvent["After Meal"]) {
+      fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[TimingEvent.Meal];
+    } else if (code in SPECIFIC_BEFORE_MEALS) {
+      fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[SPECIFIC_BEFORE_MEALS[code]];
+    } else if (code in SPECIFIC_AFTER_MEALS) {
+      fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[SPECIFIC_AFTER_MEALS[code]];
     }
   }
-  return entries.sort((a, b) => {
-    if (a.dayShift !== b.dayShift) {
-      return a.dayShift - b.dayShift;
-    }
-    return a.time.localeCompare(b.time);
-  });
+  const entries: ExpandedTime[] = [];
+  for (const clock of fallbackClocks ?? []) {
+    const normalized = normalizeClock(clock);
+    entries.push(exactOffset !== undefined
+      ? applyOffset(normalized, signedEventOffset(code, exactOffset))
+      : { time: normalized, dayShift: 0 });
+  }
+  return entries;
 }
 /** Deferred callers retain their own quota and actual supply window. */
 type ExplicitEventStatus = { possible: boolean; from?: Date; end?: Date };
@@ -975,12 +953,9 @@ function exactTimingEventOccurrences(
 ): string[] | undefined {
   if (!timing.explicitEvents?.length) return undefined;
   const whenCodes = repeat?.anchors ?? [];
-  const expanded = repeat ? expandWhenCodes(whenCodes, config, repeat) : [];
+  const expanded = repeat ? expandWhenCodes(whenCodes, config, repeat, !repeat.clocks?.length) : [];
   for (const clock of repeat?.clocks ?? []) {
     expanded.push({ time: normalizeClock(clock), dayShift: 0 });
-  }
-  if (!expanded.length && repeat && whenCodes.length) {
-    expanded.push(...inferWhenFallbackEntries(whenCodes, repeat));
   }
   // Explicit dates already select their occurrences; never infer an ordinal
   // from the query anchor. Apply only the supplied month-day membership here.
@@ -1997,8 +1972,10 @@ function getRateQuantityUnit(rate: CanonicalMeasure): string | undefined {
     : rate.unit ?? (getDoseQuantityUnit(rate, false) || undefined);
   // UCUM groups the same weight and elapsed-time denominator with a dot.
   // Both weight resolution and infusion measurement consume this one meaning.
-  const grouped = unit?.match(/^(.+?)\/\(kg\.(s|min|h|d|wk)\)$/);
-  return grouped ? grouped[1] + "/kg/" + grouped[2] : unit;
+  const grouped = unit?.match(/^(.+?)\/\(([^.()]+)\.([^.()]+)\)$/);
+  const elapsed = grouped?.[2] === "kg" ? grouped[3] : grouped?.[3] === "kg" ? grouped[2] : undefined;
+  return grouped && elapsed && INFUSION_TIME_SECONDS[elapsed]
+    ? grouped[1] + "/kg/" + elapsed : unit;
 }
 function measuredRateQuantity(
   amount: CanonicalAmount,
@@ -2368,7 +2345,7 @@ function treatmentRelativeInstant(
     quantity === undefined ||
     !Number.isFinite(quantity) ||
     quantity < 0 ||
-    (unit !== "s" && unit !== "min" && unit !== "h" && !Number.isInteger(quantity))
+    ((unit === "mo" || unit === "a") && !Number.isInteger(quantity))
   ) {
     throw new Error("Unsupported R6 step RelativeTime: requires a treatment-start offset");
   }
@@ -2376,28 +2353,11 @@ function treatmentRelativeInstant(
     orderedAt = addLocalDays(orderedAt, 0, timeZone);
     sourceClock = LOCAL_DAY_START_CLOCK;
   }
-  switch (unit) {
-    case "s":
-    case "min":
-    case "h":
-      return new Date(
-        orderedAt.getTime() + quantity * (unit === "h" ? 3600000 : unit === "min" ? 60000 : 1000)
-      );
-    case "d":
-    case "wk": {
-      if (quantity === 0) return new Date(orderedAt.getTime());
-      const days = unit === "wk" ? quantity * 7 : quantity;
-      const result = addCalendarDaysAtClock(orderedAt, days, timeZone, sourceClock ?? getTimeParts(orderedAt, timeZone));
-      if (!result) throw new Error("Invalid R6 treatment-day offset");
-      return result;
-    }
-    case "mo":
-    case "a":
-      return quantity === 0 ? new Date(orderedAt.getTime())
-        : addCalendarMonths(orderedAt, quantity * (unit === "a" ? 12 : 1), timeZone, sourceClock);
-    default:
-      throw new Error("Unsupported R6 treatment-start time unit");
-  }
+  if (!unit) throw new Error("Unsupported R6 treatment-start time unit");
+  if (quantity === 0) return new Date(orderedAt.getTime());
+  const result = durationStepper(duration, timeZone, orderedAt, "recurrence", sourceClock)?.(orderedAt);
+  if (!result) throw new Error("Invalid R6 treatment-start offset");
+  return result;
 }
 /** A phase occupies instants strictly before its exclusive end. A point
  * completion already has the planner's +1ms fence; a duration ending at
@@ -2441,7 +2401,8 @@ function stageCalendarClock(
   }
   const offset = relative.displacement ?? relative.displacementRange?.low ?? relative.displacementRange?.high;
   const unit = getQuantityDurationUnit(offset);
-  if (unit === DurationUnit.Second || unit === DurationUnit.Minute || unit === DurationUnit.Hour)
+  if (unit === DurationUnit.Second || unit === DurationUnit.Minute || unit === DurationUnit.Hour ||
+      unit && (offset?.value ?? 0) > 0 && !normalizedCalendarInterval(offset?.value, unit))
     return getTimeParts(start, timeZone);
   return nextDay || dayStart ? LOCAL_DAY_START_CLOCK
     : sourceClock ?? getTimeParts(anchor, timeZone);
@@ -2481,7 +2442,8 @@ function parallelComponentCadence(
     ? boundary.displacement ?? boundary.displacementRange?.low ?? boundary.displacementRange?.high
     : offset;
   const unit = getQuantityDurationUnit(displacement);
-  const elapsed = unit === DurationUnit.Second || unit === DurationUnit.Minute || unit === DurationUnit.Hour;
+  const elapsed = unit === DurationUnit.Second || unit === DurationUnit.Minute || unit === DurationUnit.Hour ||
+    unit && (displacement?.value ?? 0) > 0 && !normalizedCalendarInterval(displacement?.value, unit);
   return {
     origin,
     capClock: elapsed
@@ -4625,7 +4587,7 @@ type PhaseCountOptions = NextDueDoseOptions & {
   /** Completion/range callers decide completeness after their own count admission. */
   explicitEventStatus?: ExplicitEventStatus;
   /** Only rounded course supply collects one remaining ceiling per contributing member. */
-  roundingLimits?: Map<string, { remaining: number | undefined; unit: string | undefined }>;
+  roundingLimits?: Map<string, { remaining: number | undefined; unit: CanonicalMeasure | undefined }>;
 };
 function requiresCompleteSupplyTiming(options: NextDueDoseOptions): boolean {
   const phase = options as PhaseCountOptions;
@@ -6646,8 +6608,9 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
     const duration = repeat.occurrenceDuration === 0 ? 0 : positiveNumber(repeat.occurrenceDuration);
     const durationMax = positiveNumber(repeat.occurrenceDurationMax);
     if (duration === undefined && durationMax && repeat.occurrenceDurationUnit) {
-      nextRepeat = { ...nextRepeat, occurrenceDuration: durationMax,
-        occurrenceDurationComparator: undefined, occurrenceDurationMax: undefined };
+      nextRepeat = { ...nextRepeat, occurrenceDurationRange: {
+        high: { value: durationMax, unit: repeat.occurrenceDurationUnit },
+      } };
       infusionDurationMaximum = true;
     }
   }
@@ -7020,34 +6983,16 @@ function weightResolvedAdministration(
   }
   const resolved = amounts || limits ? { ...dosage,
     ...(amounts ? { amounts } : {}), ...(limits ? { limits } : {}) } : dosage;
-  let first = amounts?.length === 1 ? amounts[0] : undefined;
+  const first = amounts?.length === 1 ? amounts[0] : undefined;
   const authored = dosage.amounts?.[0];
-  if (first && !first.quantity && !first.range &&
-      (first.rate !== authored?.rate || first.rateRatio !== authored?.rateRatio) &&
-      resolved.limits?.some(limit => limit.scope === "administration")) {
-    // Resolve the existing runtime allowance before bounding a weighted rate.
-    // Keep its original schedule for independent phase-completion decisions.
-    const maximal = prepareMaximumSupplyTiming(resolved, true);
-    const repeat = maximal.dosage.schedule?.recurrence;
-    if (repeat?.occurrenceDurationRange) {
-      const range = measuredRateDurationRange(first, repeat);
-      if (range) first = { ...first, range };
-    } else {
-      const quantity = measuredRateQuantity(first, repeat);
-      // An upper-only runtime still provides a maximum, never an exact dose.
-      if (quantity) first = maximal.infusionDurationMaximum
-        ? { ...first, range: { high: quantity } } : { ...first, quantity };
-    }
-  }
   // Apply an absolute upper bound to computed patient-specific quantities,
   // including range endpoints, before chronological cap admission.
   // Authored scalar doses and absolute range endpoints stay authored.
   if (first && (first.quantity !== authored?.quantity || first.range !== authored?.range)) {
-    const measured = first === amounts?.[0] ? resolved : { ...resolved, amounts: [first] };
-    const maximum = numericAdministrationLimits(measured, strength).administration;
+    const maximum = numericAdministrationLimits(resolved, strength).administration;
     const maximumValue = maximum?.value;
     if (maximum && maximumValue !== undefined) {
-      const multiplier = getAdministrationTargetMultiplier(measured, context);
+      const multiplier = getAdministrationTargetMultiplier(resolved, context);
       const boundedComputedQuantity = (
         quantity: CanonicalMeasure | undefined, source: CanonicalMeasure | undefined
       ): CanonicalMeasure | undefined => {
@@ -7092,16 +7037,18 @@ function weightResolvedSupplyCourse(
   }
   return stages ? { ...course, stages } : course;
 }
+type SupplyUnitResult = { unit?: CanonicalMeasure };
+type SupplyEntry = { total: TotalUnitsResult; unit?: CanonicalMeasure };
 function sumCourseUnits(
-  entries: Array<{
-    total: TotalUnitsResult;
-    unit: string | undefined;
-  }>,
+  entries: SupplyEntry[],
   options: CanonicalSupplyOptions,
-  lifetimeCeiling?: number
+  lifetimeCeiling?: number,
+  unitResult?: SupplyUnitResult
 ): TotalUnitsResult {
   let commonUnit: string | undefined;
+  let commonBasis: CanonicalMeasure | undefined;
   let zeroUnit: string | undefined;
+  let zeroBasis: CanonicalMeasure | undefined;
   let hasQuantity = false;
   let totalUnits = 0;
   let approximate: TotalUnitsResult["totalApproximateQuantity"];
@@ -7111,33 +7058,26 @@ function sumCourseUnits(
   let containerComparable = true;
   let maximum = false;
   const details: string[] = [];
+  const strength = measuredStrengthRatio(options.context);
   for (const { total, unit } of entries) {
     let quantity = total.totalUnits;
     if (quantity === 0) {
-      zeroUnit ??= unit;
+      zeroUnit ??= total.unit;
+      zeroBasis ??= unit;
     } else {
-      if (hasQuantity && (commonUnit === undefined) !== (unit === undefined))
-        throw new MedicationQuantityCalculationError("incompatible-dose-units",
-          "Cannot sum medication supply with both a nonzero unitless amount and a measured quantity.");
-      hasQuantity = true;
-      const targetUnit = commonUnit === undefined ? undefined : normalizeQuantityCapUnit(commonUnit);
-      const sourceUnit = unit === undefined ? undefined : normalizeQuantityCapUnit(unit);
-      if (targetUnit !== undefined && sourceUnit !== undefined && targetUnit !== sourceUnit) {
-        const translated = convertValue(
-          quantity,
-          sourceUnit,
-          targetUnit,
-          measuredStrengthRatio(options.context)
-        );
+      if (hasQuantity) {
+        const translated = convertQuantityValue(quantity, unit, commonBasis, strength);
         if (translated === null)
           throw new MedicationQuantityCalculationError(
             "incompatible-dose-units",
-            `Cannot sum medication supply expressed in ${commonUnit} and ${unit}. Provide a product strength or equivalent conversion before combining the dosages.`
+            `Cannot sum medication supply expressed in ${commonUnit} and ${total.unit}. Provide a product strength or equivalent conversion before combining the dosages.`
           );
         quantity = translated;
-      } else if (commonUnit === undefined) {
-        commonUnit = unit;
+      } else {
+        commonUnit = total.unit;
+        commonBasis = unit;
       }
+      hasQuantity = true;
     }
     totalUnits = roundCalculatedUnits(totalUnits + quantity);
     if (total.quantityKind === "maximum") maximum = true;
@@ -7224,6 +7164,7 @@ function sumCourseUnits(
     ...(approximate ? { totalApproximateQuantity: approximate } : {}),
     ...(ingredient ? { totalApproximateIngredientQuantity: ingredient } : {}),
   };
+  if (unitResult) unitResult.unit = hasQuantity ? commonBasis : zeroBasis;
   const context = options.context;
   if (containerComparable && context?.containerValue && context.containerValue > 0) {
     const containerUnit = context.containerUnit;
@@ -7250,8 +7191,8 @@ function sumCourseUnits(
           unit: containerUnit,
         };
     } else if (commonUnit && containerUnit) {
-      const containerQuantity = commonUnit.toLowerCase() === containerUnit.toLowerCase()
-        ? totalUnits : convertValue(totalUnits, commonUnit, containerUnit, measuredStrengthRatio(context));
+      const containerQuantity = convertQuantityValue(totalUnits, commonBasis,
+        { unit: containerUnit }, strength);
       if (containerQuantity !== null) {
         result.totalContainers = Math.ceil(containerQuantity / context.containerValue);
         result.totalContainerQuantity = { value: containerQuantity, unit: containerUnit };
@@ -7294,7 +7235,8 @@ function calculateTotalUnitsSingle(
     rangeAccepted?: SupplyAllocation[];
     capacityWindows?: readonly SupplyCapacityWindow[];
     roundingKey?: string;
-  }
+  },
+  unitResult?: SupplyUnitResult
 ): TotalUnitsResult {
   const { dosage: sourceDosage, roundToMultiple, context } = options;
   requireConsistentTimingCode(sourceDosage.schedule);
@@ -7338,7 +7280,7 @@ function calculateTotalUnitsSingle(
       evaluateCondition: options.evaluateCondition
         ? (condition, at) => options.evaluateCondition!(condition, formatZonedIso(shift(at, delta), timeZone))
         : undefined,
-    }, acceptedEventCount, localAccounting);
+    }, acceptedEventCount, localAccounting, unitResult);
     if (supplyAccounting?.acceptedTimes && localAccounting?.acceptedTimes)
       for (const stamp of localAccounting.acceptedTimes)
         supplyAccounting.acceptedTimes.push(shift(stamp, delta).toISOString());
@@ -7360,6 +7302,7 @@ function calculateTotalUnitsSingle(
   // why only part of the authored constraints could be evaluated.
   let unevaluatedMaximumDose = numericLimits.multiple;
   const doseForLimits = dosage.amounts?.[0]?.quantity;
+  if (unitResult) unitResult.unit = doseForLimits;
   const doseUnitForLimits = getDoseQuantityUnit(doseForLimits);
   const lifetime = numericLimits.lifetime;
   const lifetimeMaximum = lifetime ? remainingLifetimeSupply(dosage, options, lifetime, strength,
@@ -7768,7 +7711,7 @@ function calculateTotalUnitsSingle(
     roundingLimits.set(roundingKey, {
       remaining: lifetimeMaximum === undefined ? undefined :
         lifetimeMaximum + (supplyAccounting?.usedQuantity ?? 0),
-      unit: result.unit,
+      unit: doseForLimits,
     });
   // Handle containers
   const containerValue = context?.containerValue;
@@ -7845,7 +7788,7 @@ function calculateChronologicalCourseUnits(
   course: CanonicalCourse, originalOf: Map<CanonicalAdministration, CanonicalAdministration>,
   options: CanonicalSupplyOptions, zone: string, queryStart: Date, queryEnd: Date,
   anchor: Date, lifetimeUsage?: LifetimeCycleUsage,
-  memberTotals?: Map<string, TotalUnitsResult>
+  memberTotals?: Map<string, SupplyEntry>, unitResult?: SupplyUnitResult
 ): TotalUnitsResult {
       const events=chronologicalRepeatedEvents(course,{
         ...options,from:queryStart,orderedAt:anchor,limit:10000
@@ -7863,7 +7806,7 @@ function calculateChronologicalCourseUnits(
         group.count++;
         if (event.quantity !== undefined) group.quantity = (group.quantity ?? 0) + event.quantity;
       }
-      const entries:Array<{total:TotalUnitsResult;unit:string|undefined}>=[];
+      const entries: SupplyEntry[] = [];
       for(const [key, group] of byMember){
         const dosage:CanonicalAdministration={
           ...group.member,
@@ -7881,6 +7824,7 @@ function calculateChronologicalCourseUnits(
           calendarPredicate:options.evaluateCondition?undefined:group.member.calendarPredicate,
           excludedDates:undefined,excludedWeekdays:undefined,
         };
+        const measuredUnit: SupplyUnitResult = {};
         const total=calculateTotalUnitsSingle({
           ...options,dosage,from:queryStart,orderedAt:anchor,
           durationValue:(queryEnd.getTime()-queryStart.getTime())/1000,
@@ -7891,13 +7835,14 @@ function calculateChronologicalCourseUnits(
           actualPriorCount: options.priorDoseTimes?.length ?? 0,
           acceptedQuantity: group.quantity,
           roundingKey: key,
-        } : undefined);
+        } : undefined, measuredUnit);
         if (lifetimeUsage && hasLifetimeLimit(group.member))
           lifetimeUsage.set(key, (lifetimeUsage.get(key) ?? 0) + total.totalUnits);
-        entries.push({total,unit:total.unit});
-        memberTotals?.set(key, total);
+        const entry = { total, unit: measuredUnit.unit };
+        entries.push(entry);
+        memberTotals?.set(key, entry);
       }
-      return sumCourseUnits(entries,options);
+      return sumCourseUnits(entries, options, undefined, unitResult);
 }
 /** A single component shares its rolling quantity ceiling across active
  * cycles. If a feasible plan fills a cap-width partition of this query, no
@@ -7928,16 +7873,15 @@ function attainedChronologicalSupplyBound(
   return false;
 }
 function largerSupplyPlan(
-  first: TotalUnitsResult, second: TotalUnitsResult, context?: MedicationContext
-): TotalUnitsResult {
-  const comparable = first.unit === second.unit || !first.totalUnits || !second.totalUnits
-    ? second.totalUnits : first.unit && second.unit
-      ? convertValue(second.totalUnits, second.unit, first.unit, measuredStrengthRatio(context))
-      : null;
+  first: SupplyEntry, second: SupplyEntry, context?: MedicationContext
+): SupplyEntry {
+  const comparable = !first.total.totalUnits || !second.total.totalUnits
+    ? second.total.totalUnits
+    : convertQuantityValue(second.total.totalUnits, second.unit, first.unit, measuredStrengthRatio(context));
   if (comparable === null)
     throw new MedicationQuantityCalculationError("incompatible-dose-units",
       "Alternative supply plans have incompatible quantity units; provide a product strength before comparing them.");
-  return comparable > first.totalUnits ? second : first;
+  return comparable > first.total.totalUnits ? second : first;
 }
 /** A single parallel stage with independently owned limits can choose each
  * member's feasible clock plan separately. Shared caps and phase dependencies
@@ -7963,20 +7907,23 @@ function hasIndependentClockAlternatives(course: CanonicalCourse, zone: string, 
  * erase larger authored-clock quantities in a short query window. */
 function maximumChronologicalTimedCourseUnits(
   course: CanonicalCourse, options: CanonicalSupplyOptions, zone: string,
-  queryStart: Date, queryEnd: Date, anchor: Date, lifetimeUsage?: LifetimeCycleUsage
+  queryStart: Date, queryEnd: Date, anchor: Date, lifetimeUsage?: LifetimeCycleUsage,
+  unitResult?: SupplyUnitResult
 ): TotalUnitsResult {
   const maximum = maximumChronologicalSupplyCourse(course, options);
   if (!maximum.hasClockAlternative) return calculateChronologicalCourseUnits(
-    maximum.course, maximum.originalOf, options, zone, queryStart, queryEnd, anchor, lifetimeUsage);
+    maximum.course, maximum.originalOf, options, zone, queryStart, queryEnd, anchor, lifetimeUsage, undefined, unitResult);
   const independent = hasIndependentClockAlternatives(course, zone, anchor);
-  const upperMembers = independent ? new Map<string, TotalUnitsResult>() : undefined;
+  const upperMembers = independent ? new Map<string, SupplyEntry>() : undefined;
   const upperUsage = lifetimeUsage ? new Map(lifetimeUsage) : undefined;
   // A discarded clock plan must not contribute a member's rounding ceiling.
   const roundingLimits = (options as PhaseCountOptions).roundingLimits;
   const upperLimits = roundingLimits ? new Map(roundingLimits) : undefined;
   const upperOptions = upperLimits ? { ...options, roundingLimits: upperLimits } : options;
+  const upperUnit: SupplyUnitResult = {};
   const upper = calculateChronologicalCourseUnits(maximum.course, maximum.originalOf,
-    upperOptions, zone, queryStart, queryEnd, anchor, upperUsage, upperMembers);
+    upperOptions, zone, queryStart, queryEnd, anchor, upperUsage, upperMembers, upperUnit);
+  const upperEntry = { total: upper, unit: upperUnit.unit };
   if (attainedChronologicalSupplyBound(maximum.course, upper, options, queryStart, queryEnd)) {
     if (lifetimeUsage && upperUsage) {
       lifetimeUsage.clear();
@@ -7984,73 +7931,84 @@ function maximumChronologicalTimedCourseUnits(
     }
     if (roundingLimits && upperLimits)
       for (const [key, limit] of upperLimits) roundingLimits.set(key, limit);
+    if (unitResult) unitResult.unit = upperUnit.unit;
     return upper;
   }
   const authored = maximumChronologicalSupplyCourse(course, options, true);
   const authoredUsage = lifetimeUsage ? new Map(lifetimeUsage) : undefined;
-  const authoredMembers = independent ? new Map<string, TotalUnitsResult>() : undefined;
+  const authoredMembers = independent ? new Map<string, SupplyEntry>() : undefined;
   const authoredLimits = roundingLimits ? new Map(roundingLimits) : undefined;
   const authoredOptions = authoredLimits ? { ...options, roundingLimits: authoredLimits } : options;
+  const concreteUnit: SupplyUnitResult = {};
   const concrete = calculateChronologicalCourseUnits(authored.course, authored.originalOf,
-    authoredOptions, zone, queryStart, queryEnd, anchor, authoredUsage, authoredMembers);
-  const selected = largerSupplyPlan(upper, concrete, options.context);
-  const selectedLimits = selected === concrete ? authoredLimits : upperLimits;
+    authoredOptions, zone, queryStart, queryEnd, anchor, authoredUsage, authoredMembers, concreteUnit);
+  const concreteEntry = { total: concrete, unit: concreteUnit.unit };
+  const selected = largerSupplyPlan(upperEntry, concreteEntry, options.context);
+  const selectedLimits = selected === concreteEntry ? authoredLimits : upperLimits;
   if (upperMembers && authoredMembers) {
     const independentLimits = roundingLimits ? new Map(roundingLimits) : undefined;
-    const entries: Array<{ total: TotalUnitsResult; unit: string | undefined }> = [];
+    const entries: SupplyEntry[] = [];
     for (const [key, upperTotal] of upperMembers) {
       const authoredTotal = authoredMembers.get(key);
       const total = authoredTotal ? largerSupplyPlan(upperTotal, authoredTotal, options.context) : upperTotal;
-      entries.push({ total, unit: total.unit });
+      entries.push(total);
       const usage = total === authoredTotal ? authoredUsage : upperUsage;
       if (lifetimeUsage && usage?.has(key)) lifetimeUsage.set(key, usage.get(key)!);
-      if (independentLimits && total.totalUnits > 0) {
+      if (independentLimits && total.total.totalUnits > 0) {
         const limit = (total === authoredTotal ? authoredLimits : upperLimits)?.get(key);
         if (limit) independentLimits.set(key, limit);
       }
     }
     for (const [key, total] of authoredMembers) {
       if (upperMembers.has(key)) continue;
-      entries.push({ total, unit: total.unit });
+      entries.push(total);
       if (lifetimeUsage && authoredUsage?.has(key)) lifetimeUsage.set(key, authoredUsage.get(key)!);
-      if (independentLimits && total.totalUnits > 0) {
+      if (independentLimits && total.total.totalUnits > 0) {
         const limit = authoredLimits?.get(key);
         if (limit) independentLimits.set(key, limit);
       }
     }
     // Preserve the established whole-plan units/explanation when independently
     // choosing clocks does not increase the feasible supply.
-    const result = largerSupplyPlan(selected, sumCourseUnits(entries, options), options.context);
+    const independentUnit: SupplyUnitResult = {};
+    const independentTotal = sumCourseUnits(entries, options, undefined, independentUnit);
+    const result = largerSupplyPlan(selected, { total: independentTotal, unit: independentUnit.unit }, options.context);
     const limits = result === selected ? selectedLimits : independentLimits;
     if (roundingLimits && limits)
       for (const [key, limit] of limits) roundingLimits.set(key, limit);
-    return result;
+    if (unitResult) unitResult.unit = result.unit;
+    return result.total;
   }
-  const selectedUsage = selected === concrete ? authoredUsage : upperUsage;
+  const selectedUsage = selected === concreteEntry ? authoredUsage : upperUsage;
   if (lifetimeUsage && selectedUsage) {
     lifetimeUsage.clear();
     for (const [key, value] of selectedUsage) lifetimeUsage.set(key, value);
   }
   if (roundingLimits && selectedLimits)
     for (const [key, limit] of selectedLimits) roundingLimits.set(key, limit);
-  return selected;
+  if (unitResult) unitResult.unit = selected.unit;
+  return selected.total;
 }
 /** Untimed use allowances have no event timestamps. Resolve their original
  * phase windows through the capacity planner alongside the timed ledger. */
 function maximumChronologicalCourseUnits(
   course: CanonicalCourse, options: CanonicalSupplyOptions, zone: string,
-  queryStart: Date, queryEnd: Date, anchor: Date, lifetimeUsage?: LifetimeCycleUsage
+  queryStart: Date, queryEnd: Date, anchor: Date, lifetimeUsage?: LifetimeCycleUsage,
+  unitResult?: SupplyUnitResult
 ): TotalUnitsResult {
+  const timedUnit: SupplyUnitResult = {};
   const timed = maximumChronologicalTimedCourseUnits(
-    course, { ...options, roundToMultiple: undefined }, zone, queryStart, queryEnd, anchor, lifetimeUsage);
+    course, { ...options, roundToMultiple: undefined }, zone, queryStart, queryEnd, anchor, lifetimeUsage, timedUnit);
   for (const stage of course.stages) for (const member of stage.administrations) {
     if (!unscheduledOccurrenceCapacity(member)) continue;
+    const capacityUnit: SupplyUnitResult = {};
     const capacity = calculateCourseTotalUnits(course, { ...options, roundToMultiple: undefined },
-      undefined, undefined, undefined, undefined, lifetimeUsage, undefined, true);
-    return sumCourseUnits([{ total: timed, unit: timed.unit },
-      { total: capacity, unit: capacity.unit }], options);
+      undefined, undefined, undefined, undefined, lifetimeUsage, undefined, true, undefined, capacityUnit);
+    return sumCourseUnits([{ total: timed, unit: timedUnit.unit },
+      { total: capacity, unit: capacityUnit.unit }], options, undefined, unitResult);
   }
-  return options.roundToMultiple ? sumCourseUnits([{ total: timed, unit: timed.unit }], options) : timed;
+  if (unitResult) unitResult.unit = timedUnit.unit;
+  return options.roundToMultiple ? sumCourseUnits([{ total: timed, unit: timedUnit.unit }], options) : timed;
 }
 interface UnscheduledWindowPlan {
   dosage: CanonicalAdministration;
@@ -8071,15 +8029,17 @@ function calculateCourseTotalUnits(
   lifetimeUsage?: LifetimeCycleUsage,
   rangeUsage?: RangeCycleUsage,
   capacityOnly = false,
-  capacityWindows?: Map<string, UnscheduledWindowPlan>
+  capacityWindows?: Map<string, UnscheduledWindowPlan>,
+  unitResult?: SupplyUnitResult
 ): TotalUnitsResult {
   if (!(options as PhaseCountOptions).quantityEstimation)
     options = { ...options, quantityEstimation: true } as CanonicalSupplyOptions & PhaseCountOptions;
   if (capacityOnly && !capacityWindows) {
     const collected = new Map<string, UnscheduledWindowPlan>();
+    const ordinaryUnit: SupplyUnitResult = {};
     const ordinary = calculateCourseTotalUnits(course, { ...options, roundToMultiple: undefined },
-      cycleDefaultEnd, cycleIndex, sourceClock, rollingUsage, lifetimeUsage, rangeUsage, true, collected);
-    const entries = [{ total: ordinary, unit: ordinary.unit }];
+      cycleDefaultEnd, cycleIndex, sourceClock, rollingUsage, lifetimeUsage, rangeUsage, true, collected, ordinaryUnit);
+    const entries: SupplyEntry[] = [{ total: ordinary, unit: ordinaryUnit.unit }];
     for (const [key, plan] of collected) {
       plan.windows.sort((a, b) => a.start - b.start);
       const source = plan.dosage;
@@ -8100,6 +8060,7 @@ function calculateCourseTotalUnits(
         durationUnit: DurationUnit.Second, roundToMultiple: undefined,
       }, undefined, { actualPriorCount: options.priorDoseTimes?.length ?? 0, capacityWindows: past,
         ...(ranged ? { rangeAccepted: history } : { acceptedTimes: historyTimes }) });
+      const measuredUnit: SupplyUnitResult = {};
       const total = calculateTotalUnitsSingle({ ...options, dosage, roundToMultiple: undefined,
         ...(!ranged && historyTimes.length ? {
           priorDoseTimes: [...(options.priorDoseTimes ?? []), ...historyTimes],
@@ -8108,12 +8069,12 @@ function calculateCourseTotalUnits(
         actualPriorCount: options.priorDoseTimes?.length ?? 0,
         usedQuantity: lifetimeUsage?.get(key) ?? 0, capacityWindows: future, roundingKey: key,
         ...(ranged && history.length ? { rangePrior: history } : {}),
-      });
+      }, measuredUnit);
       if (lifetimeUsage && hasLifetimeLimit(source))
         lifetimeUsage.set(key, (lifetimeUsage.get(key) ?? 0) + total.totalUnits);
-      entries.push({ total, unit: total.unit });
+      entries.push({ total, unit: measuredUnit.unit });
     }
-    return qualifyCourseSupply(course, sumCourseUnits(entries, options));
+    return qualifyCourseSupply(course, sumCourseUnits(entries, options, undefined, unitResult));
   }
   course = executionCourseWithPeriodOffsets(selectedAlternativeCourse(course, options));
   // Finite phase completion and supply must see the same quantity dimensions.
@@ -8139,7 +8100,7 @@ function calculateCourseTotalUnits(
   if (!capacityOnly && !course.cycleInterval && repeatedStep &&
       (hasRollingCycleLimit(course) || hasTimedRangedCaps(course))) {
     return qualifyCourseSupply(course,
-      maximumChronologicalCourseUnits(course, options, zone, queryStart, queryEnd, anchor, lifetimeUsage));
+      maximumChronologicalCourseUnits(course, options, zone, queryStart, queryEnd, anchor, lifetimeUsage, unitResult));
   }
   const cycleAdvance = durationStepper(course.cycleInterval, zone, anchor);
   if (course.cycleInterval && !cycleAdvance)
@@ -8153,10 +8114,7 @@ function calculateCourseTotalUnits(
       course.cycleInterval?.value,
       parseBoundsDurationUnit(course.cycleInterval)
     );
-    const entries: Array<{
-      total: TotalUnitsResult;
-      unit: string | undefined;
-    }> = [];
+    const entries: SupplyEntry[] = [];
     const singleCycle = { ...course, cycleInterval: undefined };
     const priorCycleUsage = hasRollingCycleLimit(singleCycle)
       ? new Map<string, string[]>() : undefined;
@@ -8172,7 +8130,7 @@ function calculateCourseTotalUnits(
     const timedRangedCaps = hasTimedRangedCaps(singleCycle);
     if (!capacityOnly && (timedRangedCaps || priorCycleUsage && (rangeUsage || !definitelyNonOverlappingCycle(singleCycle, course.cycleInterval)))) {
       return qualifyCourseSupply(course, maximumChronologicalCourseUnits(course, options, zone,
-        queryStart, queryEnd, anchor, lifetimeUsage));
+        queryStart, queryEnd, anchor, lifetimeUsage, unitResult));
     }
     if (priorCycleUsage) options = { ...withActualReplayHistory(options, queryStart),
       prnOpportunityFrom: queryStart } as CanonicalSupplyOptions & PhaseCountOptions;
@@ -8205,6 +8163,7 @@ function calculateCourseTotalUnits(
         } as CanonicalSupplyOptions & PhaseCountOptions, cycleEnd, guard, originalClock, priorCycleUsage, undefined, rangeUsage, capacityOnly, capacityWindows);
       }
       if (windowEnd > windowStart) {
+        const measuredUnit: SupplyUnitResult = {};
         const total = calculateCourseTotalUnits(
           singleCycle,
           {
@@ -8223,21 +8182,22 @@ function calculateCourseTotalUnits(
           lifetimeUsage,
           rangeUsage,
           capacityOnly,
-          capacityWindows
+          capacityWindows,
+          measuredUnit
         );
-        entries.push({ total, unit: total.unit });
+        entries.push({ total, unit: measuredUnit.unit });
       }
       if(priorCycleUsage)trimRollingCycleHistory(singleCycle,priorCycleUsage,cycleEnd,zone);
       if(rangeUsage)trimRollingCycleHistory(singleCycle,rangeUsage,cycleEnd,zone);
       cycleStart = cycleEnd;
       guard += 1;
     }
-    return qualifyCourseSupply(course, sumCourseUnits(entries, options));
+    return qualifyCourseSupply(course, sumCourseUnits(entries, options, undefined, unitResult));
   }
   const anchored = options.orderedAt !== undefined;
   const assumedTreatmentStart = course.stages.length > 1 && !anchored;
   const treatmentStart = anchored ? coerceDate(options.orderedAt!, "orderedAt") : queryStart;
-  const entries: Array<{ total: TotalUnitsResult; unit: string | undefined }> = [];
+  const entries: SupplyEntry[] = [];
   let assumedOpenTransition = false;
   const eventCycleEnd = nextAbsoluteEventCycleBoundary(course, cycleDefaultEnd, cycleIndex);
   for (const { index, window } of treatmentStepWindows(
@@ -8355,6 +8315,7 @@ function calculateCourseTotalUnits(
       const acceptedTimes: string[] | undefined = rollingUsage &&
           (hasPeriodLimits(dosage) || getTimingOccurrenceCap(dosage.schedule?.recurrence))
         ? [] : undefined;
+      const measuredUnit: SupplyUnitResult = {};
       const total = calculateTotalUnitsSingle({
         ...options,
         dosage: bounded,
@@ -8371,7 +8332,7 @@ function calculateCourseTotalUnits(
           usedQuantity: lifetimeUsage?.get(key) ?? 0,
           actualPriorCount: options.priorDoseTimes?.length ?? 0,
           acceptedTimes, rangePrior, rangeAccepted, roundingKey: key,
-        } : undefined);
+        } : undefined, measuredUnit);
       if (rangeAccepted?.length && rangeUsage) {
         if (rangePrior) (rangePrior as SupplyAllocation[]).push(...rangeAccepted);
         else rangeUsage.set(key, rangeAccepted);
@@ -8383,10 +8344,10 @@ function calculateCourseTotalUnits(
       }
       if (lifetimeUsage && hasLifetimeLimit(dosage))
         lifetimeUsage.set(key, (lifetimeUsage.get(key) ?? 0) + total.totalUnits);
-      entries.push({ total, unit: total.unit });
+      entries.push({ total, unit: measuredUnit.unit });
     }
   }
-  const result = sumCourseUnits(entries, options);
+  const result = sumCourseUnits(entries, options, undefined, unitResult);
   const assumptions: string[] = [];
   if (assumedTreatmentStart)
     assumptions.push(
@@ -8448,35 +8409,33 @@ export function calculateTotalUnits(options: CanonicalSupplyOptions): TotalUnits
     if (!single) {
       if (options.roundToMultiple && options.roundToMultiple > 0) {
         const roundingLimits: NonNullable<PhaseCountOptions["roundingLimits"]> = new Map();
+        const measuredUnit: SupplyUnitResult = {};
         const total = calculateCourseTotalUnits(course, {
           ...options, roundToMultiple: undefined, roundingLimits,
-        } as CanonicalSupplyOptions & PhaseCountOptions);
+        } as CanonicalSupplyOptions & PhaseCountOptions,
+          undefined, undefined, undefined, undefined, undefined, undefined, false, undefined, measuredUnit);
         if (total.totalUnits === 0) return total;
         const strength = measuredStrengthRatio(options.context);
         let ceiling: number | undefined = 0;
         for (const limit of roundingLimits.values()) {
           if (limit.remaining === undefined) { ceiling = undefined; break; }
-          let amount: number | null = limit.remaining;
-          if (limit.unit !== total.unit) {
-            if (!limit.unit || !total.unit) { ceiling = undefined; break; }
-            amount = convertValue(limit.remaining, normalizeQuantityCapUnit(limit.unit),
-              normalizeQuantityCapUnit(total.unit), strength);
-          }
+          const amount = convertQuantityValue(limit.remaining, limit.unit, measuredUnit.unit, strength);
           if (amount === null) { ceiling = undefined; break; }
           ceiling += amount;
         }
         // Each contributing member owns one lifetime allowance across repeated
         // windows. An uncapped member leaves the combined course uncapped.
-        return sumCourseUnits([{ total, unit: total.unit }], options, ceiling);
+        return sumCourseUnits([{ total, unit: measuredUnit.unit }], options, ceiling);
       }
       return calculateCourseTotalUnits(course, options);
     }
     requireExecutableCourseContext(course, "calculating");
-    const total = calculateTotalUnits({ ...options, dosage: single });
+    const measuredUnit: SupplyUnitResult = {};
+    const total = calculateTotalUnitsSingle({ ...options, dosage: single }, undefined, undefined, measuredUnit);
     // Scalar rounding precedes its lifetime ceiling. The course summary owns
     // converted container totals and qualification without rounding again.
     return qualifyCourseSupply(course,
-      sumCourseUnits([{ total, unit: total.unit }], { ...options, roundToMultiple: undefined }));
+      sumCourseUnits([{ total, unit: measuredUnit.unit }], { ...options, roundToMultiple: undefined }));
   }
   const one = input as CanonicalAdministration;
   const choice = executionChoice(one);
@@ -8525,7 +8484,8 @@ function resolveExplicitClockEntries(
 ): ClockEntry[] {
   const when = repeat.anchors ?? [],
     clocks = repeat.clocks ?? [];
-  const entries = expandWhenCodes(when, config, repeat);
+  const allowFallback = !clocks.length && (dayFiltered || !repeat.frequency || !repeat.period || !repeat.periodUnit);
+  const entries = expandWhenCodes(when, config, repeat, allowFallback);
   // "BID with food" specifies TWO administrations chosen from the meal
   // context, not every breakfast/lunch/dinner. An exclusion weekday used
   // to force enumeration of three C/AC/PC meal clocks and thereby inflate
@@ -8545,12 +8505,6 @@ function resolveExplicitClockEntries(
   }
   for (const clock of clocks) entries.push({ time: normalizeClock(clock), dayShift: 0 });
   if (clocks.length) entries.sort((a, b) => a.dayShift - b.dayShift || a.time.localeCompare(b.time));
-  if (
-    !entries.length &&
-    !clocks.length &&
-    (dayFiltered || !repeat.frequency || !repeat.period || !repeat.periodUnit)
-  )
-    entries.push(...inferWhenFallbackEntries(when, repeat));
   return entries;
 }
 /** Whether a calendar-period frequency needs more days than its clock anchors.

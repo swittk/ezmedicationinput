@@ -55,6 +55,13 @@ export function convertValue(
         return (value * fFactor) / tFactor;
     }
 
+    // The same supported weight denominator cancels before mass-prefix conversion.
+    if (f.endsWith("/kg") && t.endsWith("/kg")) {
+        const fromMass = f.slice(0, -3), toMass = t.slice(0, -3);
+        if (MASS_UNITS[fromMass] !== undefined && MASS_UNITS[toMass] !== undefined)
+            return convertValue(value, fromMass, toMass);
+    }
+
     // 2. Cross-category conversion using strength
     if (strength && ((fCat === "mass" && tCat === "volume") || (fCat === "volume" && tCat === "mass"))) {
         const numUnit = strength.numerator.unit.toLowerCase();

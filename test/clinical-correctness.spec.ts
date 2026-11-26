@@ -3664,6 +3664,9 @@ describe("round79 current clinical preview ownership", () => {
         expect(text).toContain("follow-up");
         expect(text.includes(predecessor)).toBe(!explicit);
         if (!explicit) expect(text.indexOf(predecessor)).toBeLessThan(text.indexOf("follow-up"));
+        else expect(text).toContain(locale === "en"
+          ? "From 2 days after treatment start until follow-up: Use 2 mg once daily."
+          : "ตั้งแต่2 วันหลังเริ่มการรักษาจนถึงfollow-up: ใช้ครั้งละ 2 มิลลิกรัม วันละครั้ง.");
       }
     }
     expect(raw).toEqual(before);
