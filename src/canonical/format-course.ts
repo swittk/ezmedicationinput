@@ -15,7 +15,7 @@ import type {
   CanonicalSafety,
   RegimenPosition,
 } from "./course";
-import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole, administrationHasAmountFacts, administrationHasDatedStart } from "./course";
+import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole, administrationHasAmountFacts, administrationHasDatedStart, absoluteEventCycleDisplacement } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
 import { preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding } from "../timing-summary";
 import { canonicalClauseHasAdministrationSemantics } from "../ir";
@@ -343,7 +343,7 @@ export function prefersSourceInstruction(course: CanonicalCourse): boolean {
         (step) =>
           step.start ||
           step.end ||
-          step.count !== undefined ||
+          step.count !== undefined || step.countUnresolved ||
           step.safety ||
           step.administrations.some(
             (component) =>
@@ -484,7 +484,8 @@ function previewCourseWindows(
     const endAnchor = step.end?.anchor, end = treatmentStepOffsetDays(step.end);
     const choiceDependentStart = !step.start && priorOptional;
     windows.push({ start, end, startAnchor, endAnchor, choiceDependentStart, datedStart, datedEnd: false });
-    let activeEnd = end, repetitionResolved = true;
+    let activeEnd = end, repetitionResolved = !step.countUnresolved;
+    if (step.countUnresolved) activeEnd = undefined;
     if (step.count !== undefined && step.count !== 1) {
       // A later implicit start repeats its resolved elapsed span in execution.
       // Across DST that span is not the difference of nominal civil offsets,
@@ -507,7 +508,11 @@ function previewCourseWindows(
       if (gapAnchor === undefined) gapAnchor = startAnchor;
       if (startAnchor !== gapAnchor || (endAnchor !== undefined && endAnchor !== gapAnchor))
         mixedGapOrigins = true;
-      activeWindows.push({ start: repetitionResolved ? start : undefined, end: activeEnd });
+      // Nominal cycle gaps cannot promise no medication when an absolute
+      // event can move into the preceding cycle's tail.
+      const absoluteLead = course.cycleInterval &&
+        members.some(member => (absoluteEventCycleDisplacement(member) ?? 0) < 0);
+      activeWindows.push({ start: repetitionResolved && !absoluteLead ? start : undefined, end: activeEnd });
     }
   }
   return { windows, activeWindows, hasTimedStages, gapAnchor, mixedGapOrigins };
@@ -618,7 +623,7 @@ function courseNeedsAuthoredHeader(course: CanonicalCourse): boolean {
 function courseHasClinicalFacts(course: CanonicalCourse): boolean {
   if (course.cycleInterval || course.cycleCount !== undefined || course.cycleCountUnresolved || safetyHasClinicalFacts(course.safety)) return true;
   for (const stage of course.stages) {
-    if (stage.start || stage.end || stage.count !== undefined || safetyHasClinicalFacts(stage.safety)) return true;
+    if (stage.start || stage.end || stage.count !== undefined || stage.countUnresolved || safetyHasClinicalFacts(stage.safety)) return true;
     for (const a of stage.administrations) if (a.choice || administrationHasClinicalFacts(a)) return true;
   }
   return false;
@@ -897,7 +902,7 @@ export function formatCanonicalCourse(
     administration &&
     !only.start &&
     !only.end &&
-    only.count === undefined &&
+    only.count === undefined && !only.countUnresolved &&
     !oneOrCourse.cycleInterval &&
     oneOrCourse.cycleCount === undefined &&
     !oneOrCourse.cycleCountUnresolved &&
@@ -1218,12 +1223,12 @@ export function formatCanonicalCourse(
     );
     if (step.safety)
       rendered = appendDoseLimits(rendered, step.safety.limits, words, "stage", step.safety.ifExceeded);
-    if (!rendered.trim() && !step.start && !step.end && step.count === undefined) continue;
+    if (!rendered.trim() && !step.start && !step.end && step.count === undefined && !step.countUnresolved) continue;
     let timing = "";
     if (step.start || displayEnd || index > 0) {
       const previous = !step.start && !choiceDependentStart && !datedStart && index > 0
         ? oneOrCourse.stages[index - 1] : undefined;
-      const inheritedStart = previous && (previous.count === undefined || previous.count === 1)
+      const inheritedStart = previous && !previous.countUnresolved && (previous.count === undefined || previous.count === 1)
         ? treatmentStepOffsetQuantity(previous.end) : undefined;
       const reversedWindow = startAnchor === endAnchor &&
         startDays !== undefined && endDays !== undefined && endDays <= startDays;
@@ -1322,7 +1327,8 @@ export function formatCanonicalCourse(
       const limit = point ? words.upTo(point) : words.reviewTiming(step.end.description, "end");
       timing = timing ? timing + "; " + limit : limit;
     }
-    const stageCount = step.count !== undefined ? words.phaseCount(step.count) : "";
+    const stageCount = step.countUnresolved ? words.unresolvedPhaseCount
+      : step.count !== undefined ? words.phaseCount(step.count) : "";
     const heading = [timing, stageCount].filter(Boolean).join("; ");
     if (rendered.trim()) stages.push(heading ? `${heading}: ${rendered}` : rendered);
     else if (heading) stages.push(heading);

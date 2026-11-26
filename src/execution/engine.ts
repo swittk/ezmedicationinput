@@ -31,6 +31,7 @@ import {
   TimingEvent,
   numericAdministrationLimits,
   administrationHasDatedStart,
+  absoluteEventCycleDisplacement,
   hasPeriodLimits,
   measureOperator as getQuantityComparator,
   administrationCondition as getDosageCondition,
@@ -81,6 +82,8 @@ import { getDoseUnitSemantics, getQuantityDurationUnit } from "../unit-lexicon";
 import {
   TIMING_CODE_DAILY_FREQUENCIES,
   TIMING_CODE_HOURLY_PERIODS,
+  FIXED_TIMING_PERIOD_SECONDS as INFUSION_TIME_SECONDS,
+  matchesDailyCodeCadence,
   FHIR_GTS_TIMING_SYSTEM as GTS_TIMING_SYSTEM,
   FHIR_GTS_TIMING_CODES as GTS_TIMING_CODES,
 } from "../timing-summary";
@@ -1244,10 +1247,6 @@ function codedExecutionRecurrence(timing: CanonicalTiming | undefined, config: N
       matchesDailyCodeCadence(24 / hours, repeat)
     ? { ...repeat, frequency: 1, period: hours, periodUnit: DurationUnit.Hour } : repeat;
 }
-function matchesDailyCodeCadence(daily: number, repeat: CanonicalRecurrence): boolean {
-  const seconds = repeat.periodUnit ? INFUSION_TIME_SECONDS[repeat.periodUnit] : undefined;
-  return !!seconds && daily * repeat.period! * seconds === repeat.frequency! * 86400;
-}
 /** The known code supplies one concrete cadence inside an authored
  * repeat range. Only the execution copy is resolved; neither endpoint nor
  * its code is changed on the prescription. Explicit positions keep ownership. */
@@ -1267,8 +1266,12 @@ function licensedDailyRangeRecurrence(
   const maximum = Math.min(repeat.frequencyMax ?? repeat.frequency!,
     Math.floor(daily * (repeat.periodMax ?? repeat.period!) * seconds / 86400));
   if (minimum > maximum) return undefined;
-  return { ...repeat, frequency: daily >= 1 ? daily : 1, frequencyMax: undefined,
-    period: daily >= 1 ? 1 : 1 / daily, periodMax: undefined, periodUnit: DurationUnit.Day };
+  const coding = executionTimingCoding(timing);
+  const hours = isStandardTimingCoding(coding) && coding?.code
+    ? TIMING_CODE_HOURLY_PERIODS[coding.code.toUpperCase()] : undefined;
+  return { ...repeat, frequency: hours ? 1 : daily >= 1 ? daily : 1, frequencyMax: undefined,
+    period: hours ?? (daily >= 1 ? 1 : 1 / daily), periodMax: undefined,
+    periodUnit: hours ? DurationUnit.Hour : DurationUnit.Day };
 }
 /** Standard codes must agree with one another and overlap a complete repeat.
  * A disjoint frequency/period range cannot make contradictory facts executable. */
@@ -1954,9 +1957,6 @@ function isQuantityCapPeriod(period: number, unit: string | undefined): boolean 
  * This conversion is shared by supply and the chronological cap ledger:
  * scheduling never guesses a quantity from a bare rate or unknown duration.
  * Regular scalar tablet/drop paths never invoke the rate calculation. */
-const INFUSION_TIME_SECONDS: Readonly<Record<string, number>> = {
-  s: 1, min: 60, h: 3600, d: 86400, wk: 604800,
-};
 /** A positive quotient reverses the denominator's inequality. Two qualified
  * inputs determine a single bound only when their resulting directions agree. */
 function measuredRateComparator(
@@ -2840,7 +2840,7 @@ function treatmentStepWindow(
   course: CanonicalCourse,
   index: number,
   anchor: Date,
-  previousEnd: Date,
+  previousEnd: Date | undefined,
   timeZone: string,
   sourceClock?: TreatmentWallClock,
   predecessorClock?: TreatmentWallClock,
@@ -2853,11 +2853,15 @@ function treatmentStepWindow(
   nextStageIndex = index + 1
 ): TreatmentStepWindow {
   const stage = course.stages[index];
-  let start = repetitionWindow ? repetitionWindow.start : stage.start
+  let clinicalOpening = repetitionWindow ? repetitionWindow.start : stage.start
     ? stage.start.anchor === "previous-phase-next-day"
       ? previousPhaseNextDay(stage.start, index > 0 ? previousEnd : undefined, timeZone)
       : treatmentRelativeInstant(stage.start, anchor, timeZone, sourceClock)
     : predecessorPoint ?? previousEnd;
+  // The query floor locates an otherwise undated plan; it is not evidence
+  // that the clinical phase opened there. Authored bounds retain their origin.
+  let start = clinicalOpening ?? anchor;
+  if (stage.end && !clinicalOpening) clinicalOpening = start;
   if (index === 0 && !stage.start && !repetitionWindow && options?.orderedAt === undefined &&
       stage.administrations[0]?.schedule?.recurrence?.calendarWindow?.start) {
     // A fully dated initial phase supplies its own clinical opening. A late
@@ -2869,7 +2873,7 @@ function treatmentStepWindow(
       if (!dated) { allDated = false; break; }
       if (!opening || dated < opening) opening = dated;
     }
-    if (allDated && opening) start = opening;
+    if (allDated && opening) clinicalOpening = start = opening;
   }
   const capClock = repetitionWindow ? repetitionWindow.capClock
     : stageCalendarClock(course, index, start, anchor, timeZone, sourceClock, predecessorClock);
@@ -2888,7 +2892,7 @@ function treatmentStepWindow(
       dependencies = {
         completed: new Map(), waiting: new Map(), members: new Set(), pending: 0,
         resolve: (member, memberIndex, predecessor) => {
-          const resolved = resolveAdministrationWindow(member, stage, index, anchor, start, previousEnd,
+          const resolved = resolveAdministrationWindow(member, stage, index, anchor, start, previousEnd ?? anchor,
             timeZone, sourceClock, capClock, options, predecessorPoint, successorFloor,
             deferFiniteCompletion, capContext, predecessor, cycleEnd,
             member.sourceMember === undefined ? undefined : replacementEnds?.get(member.sourceMember));
@@ -2926,12 +2930,15 @@ function treatmentStepWindow(
       }
       if (pending.remaining) { dependencies!.pending++; continue; }
     }
-    const window = resolveAdministrationWindow(administration, stage, index, anchor, start, previousEnd,
+    const window = resolveAdministrationWindow(administration, stage, index, anchor, start, previousEnd ?? anchor,
       timeZone, sourceClock, capClock, options, predecessorPoint, successorFloor,
       deferFiniteCompletion, capContext, ownPredecessor, cycleEnd,
       sourceMember === undefined ? undefined : replacementEnds?.get(sourceMember));
     if (dependencies) window.sourceIndex = sourceIndex;
     administrations.push(window);
+    if (!clinicalOpening && (administration.phaseStart || administration.phaseOrigin ||
+        administration.schedule?.recurrence?.calendarWindow?.start || administration.schedule?.explicitEvents?.length))
+      clinicalOpening = window.recurrenceOrigin;
     completionPending ||= Boolean(window.completionPending);
     if (!window.endExclusive) allFinite = false;
     else if (!latest || window.endExclusive > latest.end)
@@ -2982,6 +2989,10 @@ function treatmentStepWindow(
       if (!replacement || boundary < replacement) replacement = boundary;
     }
     if (replacement && (!end || replacement < end)) {
+      // A dated successor has already replaced a phase whose only opening
+      // was the query fallback. Resolve its empty window before order checks.
+      if (!clinicalOpening && replacement <= start)
+        return { start: replacement, end: replacement, capClock, administrations: [] };
       end = replacement;
       completionPoint = undefined;
     }
@@ -3097,7 +3108,7 @@ function* treatmentStepWindows(
   capContext?: MedicationContext,
   cycleEnd?: Date
 ): Generator<PlannedTreatmentStep, void, AcceptedStageCompletion | undefined> {
-  let previousEnd = anchor;
+  let previousEnd: Date | undefined = options?.orderedAt !== undefined ? anchor : undefined;
   let predecessorPoint: Date | undefined, predecessorClock = sourceClock;
   for (let index = 0; index < course.stages.length; index++) {
     const stage = course.stages[index];
@@ -3135,6 +3146,8 @@ function* treatmentStepWindows(
       predecessorPoint = window.completionPoint;
       predecessorClock = window.completionPoint
         ? getTimeParts(window.completionPoint, timeZone) : window.capClock;
+      // An already-replaced phase has no remaining repetition to expand.
+      if (!window.administrations.length && window.end.getTime() === window.start.getTime()) break;
       if (repetition + 1 < repetitions) {
         if (window.completionPoint) {
           repetitionWindow = undefined;
@@ -3364,12 +3377,6 @@ function trimRollingCycleHistory<T extends string | SupplyAllocation>(
   }
 }
 
-/** Absolute-event ownership stays nominal; both execution fences follow
- * the event's elapsed displacement. Relative recurrence keeps its own origin. */
-function absoluteEventCycleDisplacement(administration: CanonicalAdministration): number | undefined {
-  return administration.schedule?.explicitEvents?.length
-    ? (getAdministrationOffsetMinutes(administration) ?? 0) * 60000 : undefined;
-}
 function absoluteEventCycleBoundary(
   administration: CanonicalAdministration, boundary?: Date
 ): Date | undefined {
@@ -4949,7 +4956,7 @@ function intervalEventWindow(repeat: CanonicalRecurrence | undefined):
 function usesClockWindowCadence(repeat: CanonicalRecurrence): boolean {
   return !repeat.clocks?.length && !repeat.anchors?.length &&
     (usesIntervalCadence(repeat) ||
-      repeat.frequency === 1 && repeat.period === 1 && repeat.periodUnit === DurationUnit.Day);
+      positiveInteger(repeat.frequency) !== undefined && repeat.period === 1 && repeat.periodUnit === DurationUnit.Day);
 }
 function isWakingHoursInterval(repeat: CanonicalRecurrence | undefined): boolean {
   return (
@@ -5013,26 +5020,36 @@ function generateWakingHoursIntervalSeries(
         throw new Error("Cannot execute a waking-hours interval unless configured WAKE precedes HS");
       }
       if (wake && sleep) {
-        let candidate = continuousElapsed && cadenceAnchor
-          ? seekIntervalNearQuery(cadenceAnchor, wake, repeat, timeZone) : wake;
-        if (candidate < wake) candidate = advance(candidate) ?? sleep;
-        let intervalIterations = 0;
-        while (
-          (candidate < sleep || (includeEnd && candidate.getTime() === sleep.getTime())) &&
-          intervalIterations < 10000
-        ) {
-          if (
-            candidate >= from &&
-            (!orderedAt || candidate >= orderedAt) &&
-            (!courseEnd || candidate < courseEnd)
+        if (clockWindow && repeat.frequency! > 1 && repeat.period === 1 && repeat.periodUnit === DurationUnit.Day) {
+          // The authored window bounds the same evenly distributed frequency
+          // plan as any elapsed period; institution clocks cannot escape it.
+          const generated = generateFrequencyPerPeriodSeries(wake, from, limit - results.length,
+            { frequency: repeat.frequency, period: (sleep.getTime() - wake.getTime()) / 1000,
+              periodUnit: DurationUnit.Second }, timeZone, orderedAt,
+            courseEnd && courseEnd < sleep ? courseEnd : sleep);
+          results.push(...generated);
+        } else {
+          let candidate = continuousElapsed && cadenceAnchor
+            ? seekIntervalNearQuery(cadenceAnchor, wake, repeat, timeZone) : wake;
+          if (candidate < wake) candidate = advance(candidate) ?? sleep;
+          let intervalIterations = 0;
+          while (
+            (candidate < sleep || (includeEnd && candidate.getTime() === sleep.getTime())) &&
+            intervalIterations < 10000
           ) {
-            results.push(formatZonedIso(candidate, timeZone));
-            if (results.length >= limit) break;
+            if (
+              candidate >= from &&
+              (!orderedAt || candidate >= orderedAt) &&
+              (!courseEnd || candidate < courseEnd)
+            ) {
+              results.push(formatZonedIso(candidate, timeZone));
+              if (results.length >= limit) break;
+            }
+            const next = advance(candidate);
+            if (!next || next <= candidate) break;
+            candidate = next;
+            intervalIterations += 1;
           }
-          const next = advance(candidate);
-          if (!next || next <= candidate) break;
-          candidate = next;
-          intervalIterations += 1;
         }
       }
     }
@@ -5664,14 +5681,13 @@ function derivePriorCountFromHistory(
       defaultClock: inferredLocalClock(orderedAt, timeZone),
       calendarDays,
     });
-    return count + generated.length;
+    for (const candidate of generated) recordCandidate(new Date(candidate));
+    return count;
   }
   if (repeat.frequency && repeat.period && repeat.periodUnit) {
     const { clocks, daily, configured } = resolveFrequencyCadence(timing, repeat, config);
     if (!daily) {
-      return (
-        count +
-        generateFrequencyPerPeriodSeries(
+      const generated = generateFrequencyPerPeriodSeries(
           orderedAt,
           orderedAt,
           normalizedCount ?? 100000,
@@ -5683,8 +5699,9 @@ function derivePriorCountFromHistory(
           calendarDays,
           configured,
           enforceDayFilter ? dayFilter : undefined
-        ).length
-      );
+        );
+      for (const candidate of generated) recordCandidate(new Date(candidate));
+      return count;
     }
     if (clocks.length === 0) {
       return count;
@@ -6498,6 +6515,11 @@ function requireExecutableCourseContext(
     throw new MedicationQuantityCalculationError("course-cycle-count-unresolved",
       "The authored finite course count is unknown. Resolve that count before " + operation +
       "; the recurrence and original count annotation remain retained.");
+  for (const stage of course.stages)
+    if (stage.countUnresolved)
+      throw new MedicationQuantityCalculationError("step-repeat-unresolved",
+        "The authored treatment step count is unknown. Resolve that count before " + operation +
+        "; the stage and original count annotation remain retained.");
   const issue = getCourseContextIssue(course);
   if (issue)
     throw new MedicationQuantityCalculationError(

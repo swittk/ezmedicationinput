@@ -70,6 +70,20 @@ export const TIMING_CODE_HOURLY_PERIODS: Readonly<Record<string, number>> = {
   Q1H: 1, Q2H: 2, Q3H: 3, Q4H: 4, Q6H: 6, Q8H: 8
 };
 
+/** Exact elapsed scales used to compare a numeric cadence, without assigning
+ * calendar-month lengths or choosing clinic clocks. */
+export const FIXED_TIMING_PERIOD_SECONDS: Readonly<Record<string, number>> = {
+  s: 1, min: 60, h: 3600, d: 86400, wk: 604800,
+};
+
+/** One exact cadence comparison for execution and clinical preview. */
+export function matchesDailyCodeCadence(
+  daily: number, repeat: { frequency?: number; period?: number; periodUnit?: string }
+): boolean {
+  const seconds = repeat.periodUnit ? FIXED_TIMING_PERIOD_SECONDS[repeat.periodUnit] : undefined;
+  return !!seconds && daily * repeat.period! * seconds === repeat.frequency! * 86400;
+}
+
 /** Standard coding has its own clinical meaning; free SIG shorthand stays lexical. */
 export function timingCodeMeaning(coding: { system?: string; code?: string } | undefined): string | undefined {
   return coding?.system === FHIR_GTS_TIMING_SYSTEM && coding.code === "PM"

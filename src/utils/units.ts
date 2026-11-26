@@ -1,4 +1,4 @@
-import { getDoseQuantityUnit, getStandardDoseUnitCoding, stripTerminalUcumAnnotations } from "../maps";
+import { getDoseQuantityUnit, getStandardDoseUnitCoding, stripUcumAnnotations } from "../maps";
 
 export const MASS_UNITS: Record<string, number> = {
     kg: 1000000,
@@ -127,7 +127,7 @@ export function getQuantityComparisonUnit(quantity: QuantityUnit | undefined): s
     if (quantity?.system === "http://unitsofmeasure.org" && quantity.code) {
         // Explicit UCUM codes retain their identity. Lexical aliases such as U
         // are licensed for authored unit labels, not for coded quantities.
-        const code = stripTerminalUcumAnnotations(quantity.code);
+        const code = stripUcumAnnotations(quantity.code);
         const supported = getStandardDoseUnitCoding(unit);
         // UCUM permits both l and L for litre; SI prefix case stays significant.
         if (supported?.system !== quantity.system || supported.code !== code &&

@@ -22,6 +22,7 @@ import type { CanonicalCourse, CanonicalStage, CanonicalAdministration } from ".
 import { administrationHasAmountFacts } from "../canonical/course";
 import {
   administrationFromR5,
+  stageFromFields,
   amountFromWire,
   administrationFromR6,
   boundaryFromR6,
@@ -84,21 +85,6 @@ function addWarning(warnings: string[], warning: string): void {
     known.add(warning);
     warnings.push(warning);
   }
-}
-/** Native typed facts come from metadata fragments, not from a whole other
- * external course. Foreign annotations are kept on the source envelope. */
-function stageFromFields(
-  fields: Omit<FhirR6DosageStep, "component">,
-  members: CanonicalAdministration[]
-): CanonicalStage {
-  return {
-    administrations: members,
-    start: boundaryFromR6(fields.start),
-    end: boundaryFromR6(fields.end),
-    count: fields.count,
-    safety: safetyFromWire(fields.safety, true),
-    provenance: fields,
-  };
 }
 /** A translation describes its authored wording, while unrelated primitive
  * annotations still belong to the current header slot. Callers retain the

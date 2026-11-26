@@ -3513,7 +3513,8 @@ describe("round60 supported execution and quantity boundaries", () => {
       expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(4);
       expect(nextDueDoses(reopen(input), query)).toEqual(expected);
       for (const dosage of [input, reopen(input)]) {
-        // The administration offset displaces the inclusive nominal end too:
+        // The retained native/R5/R6 bound is nominal. The separate administration
+        // delay displaces each occurrence, including the inclusive terminal one:
         // 02:00 remains eligible; the following 08:00 opportunity is excluded.
         const throughNextOpportunity = nextDueDoses(dosage, { ...query, limit: 7 })
           .filter(stamp => Date.parse(stamp) < Date.parse("2026-01-02T09:00:00Z"));
@@ -4152,8 +4153,10 @@ describe("round74 independent count history and cadence origins", () => {
         calendarWindow: { start: "2026-01-02" }, ...(count === undefined ? {} : { count }) };
       if (explicitOrigin) member.phaseStart = relative(0);
       const input = wire({ kind: "course", stages: [{ administrations: [member] }] }, version);
-      const before = JSON.stringify(input), query = { ...options, from: "2026-01-02T00:00:00Z", limit: 2 };
-      expect(nextDueDoses(input, query)).toEqual((explicitOrigin ? [3, 5] : [2, 4])
+      const before = JSON.stringify(input), query = { ...options, from: "2026-01-02T00:00:00Z", limit: 3 };
+      const expectedDays = explicitOrigin ? count === undefined ? [3, 5, 7] : [3, 5]
+        : count === undefined ? [2, 4, 6] : [2, 4];
+      expect(nextDueDoses(input, query)).toEqual(expectedDays
         .map(day => "2026-01-0" + day + "T09:00:00+00:00"));
       expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits)
         .toBe(explicitOrigin ? 0 : 1);

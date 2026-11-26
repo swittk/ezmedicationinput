@@ -69,6 +69,8 @@ import {
   getMealTimingGroup,
   intervalTimingPreviewDescriptor, isCompactIntervalTimingCode,
   TIMING_CODE_DAILY_FREQUENCIES,
+  TIMING_CODE_HOURLY_PERIODS,
+  matchesDailyCodeCadence,
   timingPreviewDescriptor,
   inferDailyOccurrenceCount,
   type MealTimingGroup,
@@ -463,6 +465,12 @@ export function frequencyDisplay(
   const periodMax = schedule?.periodMax;
   const periodUnit = schedule?.periodUnit;
   const timingCode = uppercaseTimingCode ? schedule?.timingCode?.toUpperCase() : schedule?.timingCode;
+  const hours = timingCode ? TIMING_CODE_HOURLY_PERIODS[timingCode.toUpperCase()] : undefined;
+  if (hours && !schedule?.when?.length && !schedule?.timeOfDay?.length &&
+      frequencyMax === undefined && periodMax === undefined &&
+      matchesDailyCodeCadence(24 / hours, schedule!))
+    return { mode: "code-period", countPrefix: "none", timingCode,
+      codePeriod: { period: hours, periodUnit: FhirPeriodUnit.Hour } };
   const rangedPeriod = periodMax !== undefined && periodMax !== period;
   const countPrefix = frequency !== undefined &&
     (rangedPeriod || frequency !== 1 || frequencyMax !== undefined && frequencyMax !== frequency)
@@ -1300,6 +1308,10 @@ export function timingCodeMatchesRecurrence(
       schedule.frequencyMax === undefined && schedule.period === undefined &&
       schedule.periodMax === undefined && schedule.periodUnit === undefined;
   }
+  const hours = TIMING_CODE_HOURLY_PERIODS[code.toUpperCase()];
+  if (hours && !schedule.when?.length && !schedule.timeOfDay?.length &&
+      schedule.frequencyMax === undefined && schedule.periodMax === undefined &&
+      matchesDailyCodeCadence(24 / hours, schedule)) return true;
   const frequency = code === "QOD" ? 1 : daily ?? interval!.frequency ?? 1;
   const period = code === "QOD" ? 2 : interval?.period ?? 1;
   const unit = interval?.periodUnit ?? FhirPeriodUnit.Day;

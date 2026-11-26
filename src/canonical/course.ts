@@ -248,6 +248,8 @@ export interface CanonicalStage {
   start?: CanonicalBoundary;
   end?: CanonicalBoundary;
   count?: number;
+  /** Authored stage repetition with a primitive companion but no known scalar. */
+  countUnresolved?: true;
   safety?: CanonicalSafety;
   provenance?: Record<string, unknown>;
 }
@@ -299,6 +301,13 @@ export const recurrenceCap = (r: CanonicalRecurrence | undefined) => r?.occurren
 export const administrationCycleDays = (a: CanonicalAdministration) => a.cycleDays;
 export const recurrenceClockWindow = (r: CanonicalRecurrence | undefined) => r?.clockWindow;
 export const recurrenceEventWindow = (r: CanonicalRecurrence | undefined) => r?.eventWindow;
+/** Absolute-event ownership stays nominal; both execution fences follow
+ * the event's elapsed displacement. Relative recurrence keeps its own origin. */
+export function absoluteEventCycleDisplacement(administration: CanonicalAdministration): number | undefined {
+  return administration.schedule?.explicitEvents?.length
+    ? (administration.delayMinutes ?? 0) * 60000 : undefined;
+}
+
 /** An unconditional dated phase owns its calendar opening. An explicit
  * clock refines that date; an event or condition cannot prove an opening. */
 export function administrationHasDatedStart(a: CanonicalAdministration): boolean {

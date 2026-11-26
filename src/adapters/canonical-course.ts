@@ -943,14 +943,8 @@ export function courseFromR6(raw: FhirR6DosageInstructionInput, sourceContext = 
     const administrations: CanonicalAdministration[] = [];
     for (const component of step.component)
       administrations.push(administrationFromR6(component, sourceContext));
-    stages.push({
-      administrations,
-      start: boundaryFromR6(step.start),
-      end: boundaryFromR6(step.end),
-      count: step.count,
-      safety: safetyFromWire(stepSafety, true),
-      provenance: record(safetyOwner && !step.safety ? { ...step, safety: stepSafety } : step),
-    });
+    stages.push(stageFromFields(safetyOwner && !step.safety ? { ...step, safety: stepSafety } : step,
+      administrations));
   }
   const cycleCount = getCourseCycleCount(raw);
   const course: CanonicalCourse = {
@@ -2268,12 +2262,33 @@ export function courseMetadataToWire(
   assign(out, "safety", safetyToWire(course.safety, raw?.safety));
   return out;
 }
+/** Native typed facts come from metadata fragments, not from a whole other
+ * external course. Foreign annotations are kept on the source envelope. */
+export function stageFromFields(
+  fields: Omit<FhirR6DosageStep, "component">,
+  members: CanonicalAdministration[]
+): CanonicalStage {
+  const stage: CanonicalStage = {
+    administrations: members,
+    start: boundaryFromR6(fields.start),
+    end: boundaryFromR6(fields.end),
+    count: fields.count,
+    safety: safetyFromWire(fields.safety, true),
+    provenance: record(fields),
+  };
+  if (fields.count === undefined && fields._count !== undefined) stage.countUnresolved = true;
+  return stage;
+}
 export function stageMetadataToWire(stage: CanonicalStage): Omit<FhirR6DosageStep, "component"> {
   const out: Record<string, unknown> = Object.assign({}, stage.provenance);
   delete out.component;
   assign(out, "start", boundaryToWire(stage.start));
   assign(out, "end", boundaryToWire(stage.end));
   assign(out, "count", stage.count);
+  if (stage.countUnresolved && stage.count === undefined && out._count === undefined)
+    out._count = { extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+    }] };
   assign(
     out,
     "safety",

@@ -101,6 +101,7 @@ export const THAI_COURSE: CourseLanguage = {
   throughDay: (last) => `ถึงวันที่ ${last}`,
   noDoseDays: (first, last) => `งดยาในวันที่ ${first}–${last}.`,
   noDoseWindow: (start, end) => `งดยาตั้งแต่${start}จนถึง${end}.`,
+  unresolvedPhaseCount: "ยังไม่ระบุจำนวนครั้งที่ทำซ้ำระยะนี้",
   phaseCount: (count) => `ทำซ้ำระยะนี้รวม ${count} ครั้ง`,
   repeatCount: (count) => `จำนวน ${count} รอบ`,
   repeatCycle: (interval, exact, count) => {

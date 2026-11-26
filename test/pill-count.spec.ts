@@ -1,3 +1,4 @@
+import { convertQuantityValue } from "../src/utils/units";
 import { describe, expect, it } from "vitest";
 import { parserStateFromFhir } from "../src/fhir";
 import { calculateTotalUnits, formatSig, getDosageCondition, parseSig as parseBatch, importCanonicalCourse, nextDueDoses, toDosageDetails, toFhirR5Dosages, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src/index";
@@ -1734,7 +1735,11 @@ describe("ranged lifetime supply remains attainable", () => {
 
   it("preserves the strict lower endpoint when counting feasible administrations", () => {
     const row = ranged(4);
-    row.doseAndRate![0].doseRange!.low!.comparator = ">";
+    row.doseAndRate![0].doseRange!.low!.extension = [{
+      url: "http://ema.europa.eu/fhir/extension/comparator", valueCoding: {
+        system: "http://spor.ema.europa.eu/v1/lists/100000000008", code: "100000000051",
+      },
+    }];
     for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
       expect(calculateTotalUnits({ dosage, ...options }).totalUnits).toBe(3);
     }
@@ -1888,4 +1893,21 @@ describe("recognized duration labels and qualified scheduling quantities", () =>
       expect(parsed.fhirNext.renderedInstruction).toBe(source);
     }
   );
+});
+
+
+describe("supported compound quantity annotations", () => {
+  const quantity = (code: string, system = "http://unitsofmeasure.org") => ({ code, system });
+  it("uses the existing dimensional conversion for annotations on either term", () => {
+    expect(convertQuantityValue(1, quantity("mg{drug}/kg"), quantity("mg/kg"))).toBe(1);
+    expect(convertQuantityValue(1, quantity("mg{drug}/kg{patient}"), quantity("g/kg"))).toBe(0.001);
+    expect(convertQuantityValue(1, quantity("mL{solution}/kg"), quantity("L/kg"))).toBe(0.001);
+  });
+  it("retains normalized-weight, case-sensitive and opaque code distinctions", () => {
+    expect(convertQuantityValue(1, quantity("mg{drug}/kg"), quantity("mg"))).toBeNull();
+    expect(convertQuantityValue(1, quantity("ML{solution}"), quantity("mL"))).toBeNull();
+    expect(convertQuantityValue(1, quantity("mg{drug}/kg", "https://example.org/local-units"), quantity("mg/kg"))).toBeNull();
+    expect(convertQuantityValue(1, quantity("dose{local}", "https://example.org/local-units"),
+      quantity("dose{local}", "https://example.org/local-units"))).toBe(1);
+  });
 });

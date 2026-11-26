@@ -1,6 +1,6 @@
 import type { MedicationCondition } from "../src/types";
 import { describe, expect, it } from "vitest";
-import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits, evaluateMedicationCondition, toDosageDetails, toFhirR5Dosages, formatSig } from "../src/index";
+import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits, evaluateMedicationCondition, toDosageDetails, toFhirR5Dosages, formatSig, formatParseBatch } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
 import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount } from "../src/dosage-course";
@@ -2805,7 +2805,8 @@ describe("round23 execution families", () => {
       // One dose per source window: 1.5 in days 1–2 and 1.5 in days 3–4.
       expect(supply(course, 4).totalUnits).toBe(3);
       expect(supply(course, 2).totalUnits).toBe(2);
-      expect(supply(course, 4, { priorDoseTimes: ["2026-01-01T08:00:00Z"] }).totalUnits).toBe(0);
+      expect(supply(course, 95, { from: "2026-01-01T09:00:00Z", durationUnit: Unit.Hour,
+        priorDoseTimes: ["2026-01-01T08:00:00Z"] }).totalUnits).toBe(0);
       expect(nextDueDoses(course, { ...options, limit: 3 })).toEqual([]);
       expect(member.schedule?.recurrence?.countMax).toBe(1);
       expect(JSON.stringify(course)).toBe(retained);
@@ -5666,5 +5667,206 @@ describe("standard and typed infusion-duration successor uncertainty", () => {
       } else expect(() => calculateTotalUnits(query)).toThrow(expect.objectContaining({ code: "course-duration-unresolved" }));
       expect(JSON.stringify(input)).toBe(original);
     }
+  });
+});
+
+
+describe("shared current cadence, phase and quantity owners", () => {
+  const origin = "2026-01-01T00:00:00Z";
+  const query = { orderedAt: origin, from: origin, timeZone: "UTC", limit: 3 };
+  const ucum = "http://unitsofmeasure.org";
+  const gts = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+  const member = (recurrence: NonNullable<CanonicalAdministration["schedule"]>["recurrence"]): CanonicalAdministration => ({
+    kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { recurrence },
+  });
+  const course = (administration: CanonicalAdministration): CanonicalCourse => ({
+    kind: "course", stages: [{ administrations: [administration] }],
+  });
+  const views = (native: CanonicalCourse) => {
+    const wire = projectCanonicalCourse(native);
+    return [native, wire.fhir, wire.fhirNext];
+  };
+  const supply = (dosage: Parameters<typeof nextDueDoses>[0], extra = {}) => calculateTotalUnits({
+    dosage, ...query, durationValue: 1, durationUnit: Unit.Day, ...extra,
+  });
+
+  it("keeps the elapsed hourly code inside a period range at its authored clock", () => {
+    const administration = member({ frequency: 1, period: 4, periodMax: 7,
+      periodUnit: Unit.Hour, clocks: ["08:00:00"] });
+    administration.schedule!.code = { coding: [{ system: gts, code: "Q4H" }] };
+    for (const input of views(course(administration))) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T12:00:00+00:00", "2026-01-01T16:00:00+00:00",
+      ]);
+      expect(supply(input).totalUnits).toBe(4);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const daily = member({ frequency: 1, frequencyMax: 3, period: 1, periodUnit: Unit.Day });
+    daily.schedule!.code = { coding: [{ system: gts, code: "BID" }] };
+    expect(nextDueDoses(daily, { ...query, limit: 2 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",
+    ]);
+  });
+
+  it("previews a compatible aggregate hourly code with its elapsed spacing", () => {
+    const administration = member({ frequency: 6, period: 1, periodUnit: Unit.Day });
+    administration.schedule!.code = { coding: [{ system: gts, code: "Q4H" }] };
+    for (const input of views(course(administration))) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "short", { locale: "en", realizationMode: "normalized" })).toContain("Q4H");
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("every 4 hours");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("ทุก 4 ชั่วโมง");
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-01-01T00:00:00+00:00", "2026-01-01T04:00:00+00:00", "2026-01-01T08:00:00+00:00",
+      ]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const positioned = member({ frequency: 6, period: 1, periodUnit: Unit.Day,
+      clocks: ["08:00:00", "10:00:00", "12:00:00", "14:00:00", "16:00:00", "18:00:00"] });
+    positioned.schedule!.code = administration.schedule!.code;
+    expect(nextDueDoses(positioned, query)).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-01T10:00:00+00:00", "2026-01-01T12:00:00+00:00",
+    ]);
+    expect(formatSig(positioned, "long", { locale: "en" })).not.toContain("every 4 hours");
+  });
+
+  it("clips an elapsed undated predecessor without reordering authored starts", () => {
+    const first = member({ frequency: 2, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00", "20:00:00"] });
+    first.amounts![0].quantity!.unit = "drop";
+    const next = member({ frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["18:00:00"],
+      calendarWindow: { start: "2026-12-05" } });
+    next.amounts![0].quantity = { value: 2, unit: "drop" };
+    const native: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [first] }, { administrations: [next] },
+    ] };
+    for (const input of views(native)) {
+      const before = JSON.stringify(input);
+      const early = { from: "2026-12-05T07:00:00Z", timeZone: "UTC", limit: 2 };
+      expect(nextDueDoses(input, early)).toEqual(["2026-12-05T08:00:00+00:00", "2026-12-05T18:00:00+00:00"]);
+      const late = { from: "2026-12-05T19:00:00Z", timeZone: "UTC", limit: 2 };
+      expect(nextDueDoses(input, late)).toEqual(["2026-12-06T18:00:00+00:00", "2026-12-07T18:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...late, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(2);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const late = { from: "2026-12-05T19:00:00Z", timeZone: "UTC", limit: 1 };
+    const repeated = { ...native, stages: [{ ...native.stages[0], count: 2 }, native.stages[1]] };
+    expect(nextDueDoses(repeated, late)).toEqual(["2026-12-06T18:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage: repeated, ...late, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(2);
+    expect(nextDueDoses(course(first), late)).toEqual(["2026-12-05T20:00:00+00:00"]);
+    const authored: CanonicalCourse = { ...native, stages: [
+      { ...native.stages[0], start: { anchor: "treatment-start", displacement: { value: 1, unit: "d" } } },
+      native.stages[1],
+    ] };
+    expect(() => nextDueDoses(authored, { ...query, orderedAt: "2026-12-05T00:00:00Z" }))
+      .toThrow(expect.objectContaining({ code: "invalid-stage-order" }));
+  });
+
+  it("keeps an unknown step count active instead of assuming one repetition", () => {
+    const first = member({ frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"] });
+    const next = member({ frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"] });
+    next.amounts![0].quantity!.value = 2;
+    const ordinary: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [first], end: { anchor: "treatment-start", displacement: { value: 1, unit: "d" } } },
+      { administrations: [next] },
+    ] };
+    const unknown: FhirR6DosageInstruction = projectCanonicalCourse(ordinary).fhirNext;
+    unknown.step![0]._count = { id: "phase-repetitions", extension: [
+      { url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown" },
+      { url: "https://example.org/current-count-note", valueString: "retain annotation" },
+    ] };
+    const native = importCanonicalCourse(unknown);
+    expect(native.stages[0].countUnresolved).toBe(true);
+    const projected = projectCanonicalCourse(native);
+    expect(projected.fhirNext.step![0]._count).toEqual(unknown.step![0]._count);
+    for (const input of [native, projected.fhir, unknown]) {
+      const before = JSON.stringify(input);
+      expect(() => nextDueDoses(input, query)).toThrow(expect.objectContaining({ code: "step-repeat-unresolved" }));
+      expect(() => supply(input, { durationValue: 3 })).toThrow(expect.objectContaining({ code: "step-repeat-unresolved" }));
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("Phase repetition count is unspecified");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const single: FhirR6DosageInstruction = { step: [{ ...unknown.step![0], end: undefined }] };
+    const batch = fromFhir(single, { locale: "en", realizationMode: "normalized" });
+    expect(formatParseBatch(batch, "long")).toContain("Phase repetition count is unspecified");
+    expect(formatSig(toFhirR5Dosages(single)[0], "long", { locale: "en", realizationMode: "normalized" }))
+      .toContain("Phase repetition count is unspecified");
+    expect(supply(ordinary, { durationValue: 3 }).totalUnits).toBe(5);
+    const twice = { ...ordinary, stages: [{ ...ordinary.stages[0], count: 2 }, ordinary.stages[1]] };
+    expect(supply(twice, { durationValue: 3 }).totalUnits).toBe(4);
+  });
+
+  it("deduplicates a loading instant shared by inferred historical cadence", () => {
+    const administration = member({ anchors: [EventTiming.Immediate], frequency: 2,
+      period: 48, periodUnit: Unit.Hour, count: 2 });
+    for (const input of views(course(administration))) {
+      const before = JSON.stringify(input);
+      const options = { ...query, from: "2026-01-02T00:00:00Z" };
+      expect(nextDueDoses(input, options)).toEqual(["2026-01-02T00:00:00+00:00"]);
+      expect(supply(input, options).totalUnits).toBe(1);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    // A configured first recurrence at 08:00 is distinct from the 00:00 loading instant.
+    expect(nextDueDoses(administration, { ...query, from: "2026-01-01T01:00:00Z", config: {
+      frequencyDefaults: { byFrequency: { "freq:2/per:48h": ["08:00:00", "20:00:00"] } },
+    } })).toEqual(["2026-01-01T08:00:00+00:00"]);
+  });
+
+  it("keeps a variable daily count inside its explicit clock window", () => {
+    const administration = member({ frequency: 1, frequencyMax: 2, period: 1, periodUnit: Unit.Day,
+      clockWindow: { start: "08:00:00", end: "10:00:00" } });
+    for (const input of views(course(administration))) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T09:00:00+00:00", "2026-01-02T08:00:00+00:00",
+      ]);
+      expect(supply(input).totalUnits).toBe(2);
+      expect(supply(input, { from: "2026-01-01T19:30:00Z", durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const once = member({ frequency: 1, period: 1, periodUnit: Unit.Day,
+      clockWindow: { start: "08:00:00", end: "10:00:00" } });
+    expect(nextDueDoses(once, { ...query, limit: 2 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
+    ]);
+  });
+
+  it("compares annotations on compound unit components without changing source units", () => {
+    const administration = member({ frequency: 2, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00", "20:00:00"] });
+    administration.amounts = [{ range: {
+      low: { value: 1, unit: "mg{drug}/kg", code: "mg{drug}/kg", system: ucum },
+      high: { value: 2, unit: "mg/kg", code: "mg/kg", system: ucum },
+    } }];
+    administration.limits = [{ scope: "period", amount: { value: 3, unit: "mg/kg", code: "mg/kg", system: ucum },
+      period: { value: 24, unit: "h" } }];
+    expect(supply(administration)).toMatchObject({ totalUnits: 3, unit: "mg/kg", quantityKind: "maximum" });
+    // Wire Range endpoints use one authored code; the cap keeps its distinct
+    // unannotated code. Native mixed endpoints remain checked above.
+    const wireMember: CanonicalAdministration = { ...administration, amounts: [{ range: {
+      low: administration.amounts[0].range!.low,
+      high: { ...administration.amounts[0].range!.low, value: 2 },
+    } }] };
+    for (const input of views(course(wireMember))) {
+      const before = JSON.stringify(input);
+      expect(supply(input)).toMatchObject({ totalUnits: 3, unit: "mg{drug}/kg", quantityKind: "maximum" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(administration.amounts[0].range!.low!.code).toBe("mg{drug}/kg");
+  });
+
+  it("omits a global cycle pause when an absolute event can lead its nominal cycle", () => {
+    const source = (delayMinutes: number): CanonicalCourse => ({ kind: "course", cycleInterval: { value: 28, unit: "d" },
+      stages: [{ end: { anchor: "treatment-start", displacement: { value: 27, unit: "d" } },
+        administrations: [{ ...member(undefined), delayMinutes,
+          schedule: { explicitEvents: ["2026-01-29T00:30:00Z"] } }] }],
+    });
+    for (const input of views(source(-60))) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...query, from: "2026-01-28T00:00:00Z", limit: 1 }))
+        .toEqual(["2026-01-28T23:30:00+00:00"]);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).not.toMatch(/no (?:dose|medication)/i);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(formatSig(source(0), "long", { locale: "en", realizationMode: "normalized" })).toMatch(/no (?:dose|medication)/i);
   });
 });

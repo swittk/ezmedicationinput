@@ -2083,12 +2083,11 @@ const SNOMED_UNIT_BY_CODE = new Map<string, string>(
 );
 
 
-/** Remove only terminal UCUM annotations without changing the unit code.
- * Callers retain their own terminology and case rules. */
-export function stripTerminalUcumAnnotations(code: string): string {
+/** Remove non-dimensional UCUM annotations for comparison only.
+ * Callers retain their own terminology, supported-unit and case rules. */
+export function stripUcumAnnotations(code: string): string {
   if (code.indexOf("{") < 0) return code;
-  const annotation = code.match(/(?:\{[^{}]*\})+$/u);
-  return annotation?.index ? code.slice(0, annotation.index) : code;
+  return code.replace(/\{[^{}]*\}/gu, "");
 }
 
 /** Resolve standard codes and plain unit labels to the same calculation unit.
@@ -2105,7 +2104,7 @@ export function getDoseQuantityUnit(
   let code = quantity.code;
   if (!includeOpaqueCode && code && (!quantity.system || quantity.system === "http://unitsofmeasure.org")) {
     // Keep the authored code and display untouched.
-    code = stripTerminalUcumAnnotations(code);
+    code = stripUcumAnnotations(code);
   }
   const fallbackCode = includeOpaqueCode || !quantity.system || quantity.system === "http://unitsofmeasure.org"
     ? code : undefined;

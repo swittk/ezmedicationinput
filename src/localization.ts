@@ -220,6 +220,7 @@ export interface CourseLanguage {
   noDoseDays(first: number, last: number): string;
   noDoseWindow(start: string, end: string): string;
   phaseCount(count: number): string;
+  unresolvedPhaseCount: string;
   repeatCount(count: number): string;
   repeatCycle(interval: string, exact: boolean, count?: number): string;
 }

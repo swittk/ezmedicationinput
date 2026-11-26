@@ -1119,7 +1119,10 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
         (child.url === "dosageDetails" || child.url === "component" &&
           child.extension?.some(field => field.url === "site" &&
             field.valueCodeableReference?.reference?.display)) ||
-        (child.url === "step" || child.url === "course") && child.extension?.some(field => field.url === "safety"))))
+        (child.url === "step" || child.url === "course") && child.extension?.some(field =>
+          field.url === "safety" || child.url === "step" && (field.url === "count" ||
+            field.url === "retainedField" && field.extension?.some(part =>
+              part.url === "name" && part.valueString === "_count"))))))
     return true;
   const primary = dosage.doseAndRate?.[0];
   // Native source ownership preserves directions beside independent advice.
@@ -1311,7 +1314,8 @@ function formatParseBatchContents(
   if(steps&&steps.length>1)return whole;
   if(batch.fhirNext.repeatCycle||batch.fhirNext.safety||course?.cycleCount!==undefined||course?.cycleCountUnresolved)
     return style==="short"?batch.shortText:batch.longText;
-  for(const step of steps??[])if(step.start||step.end||step.count!==undefined||step.safety)
+  for(const step of steps??[])if(step.start||step.end||step.count!==undefined||
+      "countUnresolved" in step&&step.countUnresolved||step.safety)
     return style==="short"?batch.shortText:batch.longText;
   const text:string[]=[];
   const members=batch.meta.canonical.course?.stages[0]?.administrations;
