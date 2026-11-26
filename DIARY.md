@@ -16188,3 +16188,19 @@ and native R6 Period metadata retain their supplied clinical facts.
 
 Validation: 8961 normal tests, strict types, build and four distribution
 tests passed.
+
+
+## 2026-11-26 — Native wording and source coverage
+
+Medication guards remain attached to their administration before independent
+advice and dose ceilings are composed. Whole-clause formatters receive complete
+localized defaults and retain their exact return. Authored course and member
+directions have separate coverage from permission to replay clinical text,
+including standalone parser items and ordinary R5/R6 conversion. Compact course
+exports retain their existing size bound.
+
+Clinical duration denominators, procedural clock conditions, annotated units
+and equivalent cadences reuse their established semantic owners. FHIR projection
+retains phase-total limits, current quantities, primitive annotations and unknown
+extensions. Substantive clinical, terminology and distribution assertions remain
+part of review coverage.
