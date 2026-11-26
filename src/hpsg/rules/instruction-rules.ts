@@ -874,9 +874,9 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!first || context.state.consumed.has(first.index)) {
       return [];
     }
-    // "No more than 100 mL/hr" inside a recognized rate is a quantity,
-    // not free instruction text. Other advice remains an independent sign.
-    if (context.clinicalCache.rateTokenIndices?.has(first.index)) return [];
+    // A recognized quantity or cumulative limit owns its complete phrase.
+    // Other advice remains an independent sign.
+    if (context.clinicalCache.quantityTokenIndices?.has(first.index)) return [];
     const activityDay = registeredActivityDayAt(context, start);
     if (activityDay) return [activityDay];
     const administrationWindow = administrationWindowInstructionAt(context, start);
@@ -973,7 +973,7 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       // A dimensional constituent keeps its numeral even when an earlier
       // administration cannot license it as a rate. Its maximum-dose owner
       // may still consume the complete phrase; free advice must not swallow it.
-      if (context.clinicalCache.rateTokenIndices?.has(token.index) ||
+      if (context.clinicalCache.quantityTokenIndices?.has(token.index) ||
           context.clinicalCache.unlicensedRateTokenIndices?.has(token.index)) break;
       if (!bodyTokens.length && isScheduleLead(context, cursor)) {
         return [];

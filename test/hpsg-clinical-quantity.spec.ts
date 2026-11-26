@@ -4461,6 +4461,31 @@ describe("round80 dated single-administration duration ownership", () => {
 
 
 describe("qualified maximum and omitted-unit ownership", () => {
+  it.each([
+    ["no more than", "mg/6h"], ["no more than", "mg per 6h"],
+    ["no more than", "mg per 6 hours"], ["not more than", "mg/6h"],
+    ["maximum", "mg/6h"]
+  ])("keeps the %s compact or spaced %s ceiling on its medication", (lead, unitPeriod) => {
+    const source = "Give 5 mg IV q2h, " + lead + " 10 " + unitPeriod;
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 5, unit: "mg" });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      period: 2, periodUnit: "h", maxDosePerPeriod: [
+        { amount: 10, unit: "mg", period: 6, periodUnit: "h" }
+      ]
+    });
+    for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 5, unit: "mg" });
+      expect(row.doseAndRate?.[0].rateQuantity).toBeUndefined();
+      expect(row.doseAndRate?.[0].rateRatio).toBeUndefined();
+      expect(row.timing?.repeat).toMatchObject({ period: 2, periodUnit: "h" });
+      expect(row.maxDosePerPeriod).toMatchObject([
+        { numerator: { value: 10, unit: "mg" }, denominator: { value: 6, unit: "h" } }
+      ]);
+    }
+  });
+
   it.each(["not more than", "no more than"])("keeps the one-tablet PRN dose distinct from its daily %s limit", lead => {
     const parsed = parsePublicSig("Take 1 tablet as needed for pain, " + lead + " 4 tablets per day");
     expect(parsed.meta.canonical.clauses).toHaveLength(1);

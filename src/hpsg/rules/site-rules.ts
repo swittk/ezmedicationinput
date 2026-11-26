@@ -489,7 +489,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const lower = normalizeTokenLower(token);
     // A licensed "at ~100 mL/hr" rate is not an unknown body site.
     // Reuse the preceding clinical lexical contribution; no extra scan.
-    if (context.clinicalCache.rateTokenIndices?.has(token.index)) return signs;
+    if (context.clinicalCache.quantityTokenIndices?.has(token.index)) return signs;
     // The complete licensed NEXT + day/daypart nominal owns its modifier.
     // Outside that constituent, ordinary site anchoring remains available.
     const nextDay = nextDayOnsetAt(context.tokens, start, context.limit);

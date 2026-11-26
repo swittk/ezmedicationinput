@@ -25,6 +25,7 @@ import {
   DOSE_FRACTION_ARTICLES,
   EVENT_ARTICLE_TOKENS,
   MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
+  MAXIMUM_COUNT_LEAD_TOKENS,
   MAXIMUM_COUNT_LEAD_SEQUENCES,
   MAXIMUM_PERIOD_PREPOSITIONS,
   MAXIMUM_PERIOD_MODIFIERS,
@@ -48,9 +49,9 @@ export interface HpsgClauseContext {
     quantityLookahead?: Map<number, HpsgSign[]>;
     medicationGuardScanned?: true;
     medicationGuard?: ParsedMedicationGuard;
-    /** Tokens already owned by a dimensional rate constituent. Site/advice
-     * fallbacks reuse this fact instead of treating a qualified rate as prose. */
-    rateTokenIndices?: Set<number>;
+    /** Tokens owned by a complete dimensional quantity or cumulative limit.
+     * Numeric, site and advice fallbacks must not detach its daughters. */
+    quantityTokenIndices?: Set<number>;
     /** A recognized per-time expression still owns its numeral when no rate
      * head licenses it. Scalar-dose fallback must not detach that numeral. */
     unlicensedRateTokenIndices?: Set<number>;
@@ -403,8 +404,13 @@ export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: n
       ? { tokens: hybridUnit ? [followingUnit!] : [], daypart: true, unitDenominator: true }
       : { tokens: hybridUnit ? [followingUnit!] : [], period: compactAmount?.value ?? (hybridUnit ? hybridValue! : 1), periodUnit: compactPeriodUnit, unitDenominator: true }
     : undefined;
-  const period = periodFirst ?? compactPeriod ?? maximumDosePeriodAt(context, cursor);
+  const period: MaximumDosePeriod | undefined = periodFirst ?? compactPeriod ?? maximumDosePeriodAt(context, cursor);
   if (!period) return undefined;
+  // A comparative quantity followed by a bare cadence is an administered dose
+  // ("at most 2 tablets daily"). An explicit maximum head, initial period or
+  // denominator owns a cumulative limit; every competing rule shares this choice.
+  if (!periodFirst && !MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(lead[0])) &&
+      !period.unitDenominator && period.tokens.length <= 1) return undefined;
   if (!periodFirst) matched.push(...period.tokens);
   return { tokens: matched, amount, unit, period };
 }

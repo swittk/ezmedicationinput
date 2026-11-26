@@ -1098,8 +1098,7 @@ function comparativeDoseAt(
   if (!qualified) return undefined;
   // An explicit cumulative period belongs to the maximum. A bare daily
   // cadence can still modify an administered comparative dose.
-  const maximum = maximumDosePerPeriodAt(context, start);
-  if (maximum && (maximum.period.unitDenominator || maximum.period.tokens.length > 1)) return undefined;
+  if (maximumDosePerPeriodAt(context, start)) return undefined;
   const { comparator, value, numericIndex, rawUnit } = qualified;
   const compactUnit = rawUnit ? normalizeUnit(rawUnit, context.options) : undefined;
   if (rawUnit && !compactUnit) return undefined;
@@ -1151,7 +1150,7 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!tokens || !token) {
       return [];
     }
-    if (context.clinicalCache.rateTokenIndices?.has(token.index) ||
+    if (context.clinicalCache.quantityTokenIndices?.has(token.index) ||
         context.clinicalCache.unlicensedRateTokenIndices?.has(token.index)) return [];
     const supplementalDose = supplementalDoseAfter(context, start);
     if (supplementalDose) return [supplementalDose];

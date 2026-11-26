@@ -2610,6 +2610,10 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     for (const sign of context.clinicalCache.quantityLookahead?.get(rateHead?.marker ?? start) ?? [])
       if (sign.synsem.head.dose?.clinicalQuantity?.representation === "rate-quantity") return [];
     const rateConstraint = rateHead?.licensed;
+    // Publish the same typed ownership as dimensional quantities. Advice and
+    // scalar fallbacks must not compete for a complete maximum's daughters.
+    const owned = context.clinicalCache.quantityTokenIndices ??= new Set<number>();
+    for (const token of matched) owned.add(token.index);
     if ("daypart" in period || rateConstraint) {
       // Unsupported dimensional constraints and dayparts retain their complete
       // authored instruction without inventing a rate or cumulative limit.

@@ -732,7 +732,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   if (!token || !available(context, start)) return [];
   // A complete numeric or qualified daughter owns its suffix, including an
   // unlicensed rate phrase. Its bare value must not become a competing rate.
-  if (context.clinicalCache.rateTokenIndices?.has(token.index) ||
+  if (context.clinicalCache.quantityTokenIndices?.has(token.index) ||
       context.clinicalCache.unlicensedRateTokenIndices?.has(token.index)) return [];
   const division = dividedDoseCountSign(context, start);
   if (division) return [division];
@@ -804,7 +804,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
       tokens: [token, ...volume.tokens], synsem: volume.synsem,
       warnings: volume.warnings, score: volume.score + 1
     }) : volume;
-    const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
+    const owned = context.clinicalCache.quantityTokenIndices ??= new Set<number>();
     for (const token of sign.tokens) owned.add(token.index);
     const signs = [sign];
     (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
@@ -839,7 +839,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   if (weight) {
     // Weight rates own the same external AT/@ marker as fixed rates.
     // Publish ownership before the site fallback examines that marker.
-    const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
+    const owned = context.clinicalCache.quantityTokenIndices ??= new Set<number>();
     for (const token of weight.tokens) owned.add(token.index);
     const signs = [weight];
     (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
@@ -848,7 +848,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   const rate = qualifyClinicalSign(context, phraseStart, quantityEnd,
     fixedRate(context, quantityEnd, value, expression, phraseStart, comparator), comparator);
   if (rate) {
-    const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
+    const owned = context.clinicalCache.quantityTokenIndices ??= new Set<number>();
     for (const token of rate.tokens) owned.add(token.index);
     const signs = [rate];
     (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
