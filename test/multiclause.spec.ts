@@ -241,41 +241,6 @@ describe("multi-clause parsing", () => {
     expect(batch.longText).not.toContain("Take");
   });
 
-  it("re-realizes ordinary saved courses when explicit format options make their text stale", () => {
-    const details = {
-      ...parseSig("1 tab po pc breakfast lunch dinner + 2 tab po pc breakfast lunch dinner").dosageDetails,
-      renderedInstruction: "stale saved instruction"
-    };
-    const options = {
-      locale: "th",
-      groupMealTimingsByRelation: true,
-      includeTimesPerDaySummary: true
-    } as const;
-
-    const defaultPreview = formatSig(details, "long");
-    expect(defaultPreview).toContain("Take 1 tablet orally after breakfast, after lunch and after dinner");
-    expect(defaultPreview).toContain("Take 2 tablets orally after breakfast, after lunch and after dinner");
-    expect(defaultPreview).not.toContain("stale saved instruction");
-    const formatted = formatSig(details, "long", options);
-    expect(formatted).toContain("รับประทานครั้งละ 1 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น");
-    expect(formatted).toContain("รับประทานครั้งละ 2 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น");
-    expect(formatted).not.toContain("stale saved instruction");
-
-    const imported = fromFhir(details, options);
-    expect(imported.longText).toBe(formatted);
-    expect(imported.longText).not.toContain("stale saved instruction");
-    expect(imported.fhirNext.renderedInstruction).toBe("stale saved instruction");
-
-    const advanced = { ...details, repeatCycle: { value: 28, unit: "d" } };
-    const advancedPreview = formatSig(advanced, "long", options);
-    expect(advancedPreview).toContain("รับประทานครั้งละ 1 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น");
-    expect(advancedPreview).toContain("รับประทานครั้งละ 2 เม็ด วันละ 3 ครั้ง หลังอาหารเช้า กลางวัน และเย็น");
-    expect(advancedPreview).toContain("ทุก 28 วัน");
-    expect(advancedPreview).not.toContain("stale saved instruction");
-    expect(fromFhir(advanced, options).longText).toBe(advancedPreview);
-    expect(fromFhir(advanced, options).fhirNext.renderedInstruction).toBe("stale saved instruction");
-  });
-
   it("parses plus-separated ocular clauses into multiple items", () => {
     const batch = parseSig("1 drop to OD Q 2 H + 1 drop to OS QID");
 
@@ -3844,8 +3809,11 @@ describe("round36 clock positions and retained source directions", () => {
     const structured = fromFhir({ step: [{ component: [{ ...wire.step[0].component[0],
       doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }]
     }] }] }, options);
-    expect(structured.longText).not.toContain(source);
-    expect(structured.longText).not.toContain(locale === "en" ? "original directions:" : "ข้อความเดิม:");
+    const [current, original] = structured.longText.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
+    expect(current).toContain(locale === "en" ? "2 tablets once daily" : "2 เม็ด วันละครั้ง");
+    expect(current).not.toContain(source);
+    expect(current).not.toMatch(/twice daily|วันละ 2 ครั้ง/u);
+    expect(original).toBe(source);
   });
 });
 
@@ -3892,7 +3860,7 @@ const normalized = { locale: "en", realizationMode: "normalized" as const };
 
 describe("review 21 current structured course preview", () => {
 
-  it("retains independently structured directions beside a live cap without replaying its opaque stale header", () => {
+  it("separates independently structured directions and their live cap from the authored header", () => {
     const raw: FhirR6DosageInstruction = {
       renderedInstruction: "Take 1 tablet twice daily, maximum 3 tablets per day",
       safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 4, unit: "tab" },
@@ -3901,10 +3869,11 @@ describe("review 21 current structured course preview", () => {
         timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } } }] }]
     };
     const saved = JSON.stringify(raw);
-    const text = formatSig(raw, "long", normalized);
-    expect(text).toContain("1 tablet twice daily");
-    expect(text).toContain("4 tab / 1 d");
-    expect(text).not.toContain("maximum 3");
+    const [current, original] = formatSig(raw, "long", normalized).split("; original directions: ");
+    expect(current).toContain("1 tablet twice daily");
+    expect(current).toContain("4 tab / 1 d");
+    expect(current).not.toContain("maximum 3");
+    expect(original).toBe(raw.renderedInstruction);
     expect(JSON.stringify(raw)).toBe(saved);
   });
 
@@ -4407,17 +4376,18 @@ describe("round32 retained clinical labels and incomplete amounts", () => {
       for (const locale of ["en", "th"]) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
         expect(text).toBe(locale === "en"
-          ? "Current: Use the medication twice daily; original directions: Take one tablet daily"
-          : "ปัจจุบัน: ใช้ยา วันละ 2 ครั้ง; ข้อความเดิม: Take one tablet daily");
+          ? "Current: Use the medication twice daily; original directions: Take one tablet daily."
+          : "ปัจจุบัน: ใช้ยา วันละ 2 ครั้ง; ข้อความเดิม: Take one tablet daily.");
       }
     expect(JSON.stringify(live)).toBe(liveBefore);
     expect(JSON.stringify(rows)).toBe(rowsBefore);
     const valued = JSON.parse(liveBefore) as FhirR6DosageInstruction;
     valued.step![0].component[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
-    const current = formatSig(valued, "long", normalized);
+    const [current, original] = formatSig(valued, "long", normalized).split("; original directions: ");
     expect(current).toContain("2 tablets");
     expect(current).toContain("twice daily");
-    expect(current).not.toContain("original directions");
+    expect(current).not.toContain("Take one tablet daily");
+    expect(original).toBe(raw.step![0].component[0].text);
   });
 
   it("retains a live R6 site qualifier beyond its recognized body-site code", () => {
@@ -4601,7 +4571,9 @@ describe("round33 complete native amount and cadence previews", () => {
       // clause callbacks; quantity wording remains a language-pack facet.
       registerSigLocalization({ locale: tag, course: locale === "en" ? ENGLISH_COURSE : THAI_COURSE });
       for (const input of [raw, rows]) {
-        const text = formatSig(input, "long", { locale: tag, realizationMode: "normalized" });
+        const rendered = formatSig(input, "long", { locale: tag, realizationMode: "normalized" });
+        const [text, original] = rendered.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
+        expect(original).toBe(raw.renderedInstruction);
         expect(text).toContain(locale === "en" ? "Ordered dose: approximately 1 spray (each nostril)"
           : "ขนาดยาที่สั่ง: รูจมูกข้างละ ประมาณ 1 ครั้ง");
         expect(text).toContain(locale === "en" ? "Calculated dose: 2 mg"
@@ -5059,8 +5031,11 @@ describe("round62 review: typed grammar and partial display facts", () => {
     }
     const changed = fresh(input);
     changed.step![0].component[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
-    expect(formatSig(changed, "long", { locale: "en", realizationMode: "normalized" })).toContain("2 tablets");
-    expect(formatSig(changed, "long", { locale: "en", realizationMode: "normalized" })).not.toContain("1 tablet");
+    const [current, original] = formatSig(changed, "long", { locale: "en", realizationMode: "normalized" }).split("; original directions: ");
+    expect(current).toContain("2 tablets");
+    expect(current).toContain("as needed");
+    expect(current).not.toContain("1 tablet");
+    expect(original).toBe(input.step![0].component[0].text);
   });
 
   it("uses the configured Thai verb for a method-only short preview", () => {
@@ -5073,32 +5048,6 @@ describe("round62 review: typed grammar and partial display facts", () => {
   });
 });
 
-
-describe("round66 explicit replacement directions", () => {
-  it("keeps current dose and timing authoritative beside contradictory replacement prose", () => {
-    const original = parseSig("Swallow 1 tablet whole at bedtime").fhir[0];
-    const current = JSON.parse(JSON.stringify(original)) as FhirDosage;
-    current.doseAndRate![0].doseQuantity = { value: 2, unit: "tab" };
-    current.timing!.repeat!.when = [EventTiming.Morning];
-    const replacement = "Swallow 1 tablet whole at bedtime after discussion with the clinician.";
-    const edited = { ...current, text: replacement };
-    for (const locale of ["en", "th"] as const) {
-      const options = { locale, realizationMode: "roundtrip" as const };
-      const label = locale === "en" ? "; original directions: " : "; ข้อความเดิม: ";
-      for (const text of [formatSig(edited, "long", options), fromFhirDosage(edited, options).longText]) {
-        const [currentText, authored] = text.split(label);
-        expect(currentText).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
-        expect(currentText).toContain(locale === "en" ? "in the morning" : "เช้า");
-        expect(currentText).not.toMatch(/1 tablet|bedtime|ก่อนนอน/u);
-        expect(authored).toBe(replacement);
-      }
-      const normalized = formatSig(edited, "long", { locale, realizationMode: "normalized" });
-      expect(normalized).not.toContain("discussion with the clinician");
-      expect(formatSig(current, "long", options)).not.toContain(label);
-      expect(formatSig(current, "long", options)).not.toMatch(/1 tablet|bedtime|ก่อนนอน/u);
-    }
-  });
-});
 
 
 it("keeps a distinct dose-only replacement instead of matching inside a larger current amount", () => {

@@ -724,15 +724,16 @@ function formatCanonicalBaseNative(
     : clause;
   const authoredPrimary = partialAuthoredDirections && sourceOwnsPrimary && (!deferredDirections || a.predicate)
     ? a.text : undefined;
+  const primaryDirections = authoredPrimary && a.predicate ? deferredDirections ?? {} : undefined;
   let rendered = formatNativeCanonicalClause(displayClause, style, env.localization, options,
-    style === "long" ? authoredPrimary : undefined);
+    style === "long" ? authoredPrimary : undefined, primaryDirections);
   if (authoredQualifiers) {
     const directions = a.predicate ? appendMedicationConditionText(a.text!, a.predicate, options, env) : a.text!;
     rendered = a.additionalInstructions?.length || a.patientInstruction
       ? directions + " " + rendered : directions;
   }
   if (style !== "long" && !authoredQualifiers)
-    rendered = composeNativePrimaryDirections(rendered, authoredPrimary, a.predicate, words);
+    rendered = composeNativePrimaryDirections(rendered, authoredPrimary, a.predicate, words, primaryDirections);
   // The clause's calendar view needs a complete civil date. Partial FHIR
   // dateTimes (for example YYYY-MM) remain useful authored information; show
   // their original values instead of inventing a missing month/day or hiding
@@ -797,12 +798,10 @@ function formatCanonicalBaseNative(
   // Partial method, route, timing or guard facts cannot replace source-only
   // dose directions. A typed amount or graph retains its established owner;
   // do not infer missing semantics by comparing localized renderings.
-  if (partialAuthoredDirections && !authoredPrimary) {
-    const directions = a.text!;
-    if (rendered.trim().replace(/[.!?]+$/u, "") !== directions.trim().replace(/[.!?]+$/u, "")) {
-      if (deferredDirections) deferredDirections.text = directions;
-      else rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), directions);
-    }
+  const directions = primaryDirections?.text ?? (partialAuthoredDirections && !authoredPrimary ? a.text : undefined);
+  if (directions && rendered.trim().replace(/[.!?]+$/u, "") !== directions.trim().replace(/[.!?]+$/u, "")) {
+    if (deferredDirections) deferredDirections.text = directions;
+    else rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), directions);
   }
   return rendered;
 }

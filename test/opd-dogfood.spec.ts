@@ -1785,10 +1785,13 @@ describe("round30 interchange meaning", () => {
     const before = JSON.stringify(row);
     const options = { locale: "th", realizationMode: "normalized" as const };
     for (const actual of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
-      expect(actual).toMatch(/1 เม็ด/u);
-      expect(actual).toContain(scope === "administration" ? "max per administration: 2 tab" :
+      const [current, original] = actual.split("; ข้อความเดิม: ");
+      expect(current).toMatch(/1 เม็ด/u);
+      expect(current).toContain("วันละครั้ง");
+      expect(current).toContain(scope === "administration" ? "max per administration: 2 tab" :
         scope === "lifetime" ? "max lifetime: 2 tab" : "max per period: 2 tab / 1 d");
-      expect(actual).not.toMatch(/Take one tablet/u);
+      expect(current).not.toMatch(/Take one tablet/u);
+      expect(original).toBe(row.text);
     }
     const currentCap = scope === "administration" ? "max per administration: 2 tab" :
       scope === "lifetime" ? "max lifetime: 2 tab" : "max per period: 2 tab / 1 d";

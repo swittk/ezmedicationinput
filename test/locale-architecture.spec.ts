@@ -480,8 +480,8 @@ describe("independent cadence and preview condition owners", () => {
       const text = formatSig(source, style, { locale, realizationMode: "normalized" });
       expect(text.match(/SBP > 160/gu)).toHaveLength(1);
       expect(text).toContain("Swallow 1 tablet whole");
-      const active = text.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0];
-      expect(active).toMatch(new RegExp((locale === "en" ? "only if" : "เฉพาะเมื่อ") + " SBP > 160", "iu"));
+      const authored = text.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[1];
+      expect(authored).toBe("Swallow 1 tablet whole " + (locale === "en" ? "only if" : "เฉพาะเมื่อ") + " SBP > 160.");
       expect(text).toContain(locale === "en" ? style === "short" ? "1x/d" : "once daily" : "วันละครั้ง");
     }
     expect(JSON.stringify(source)).toBe(before);
@@ -508,11 +508,12 @@ describe("complete native clause defaults", () => {
         expect(native.match(/SBP > 160/gu)).toHaveLength(1);
         expect(native).toContain(text.replace(/\.$/u, ""));
         expect(native).toContain(locale === "en" ? "once daily" : "วันละครั้ง");
-        if (text.startsWith("Swallow"))
-          expect(native).toMatch(locale === "en"
-            ? /^Only if SBP > 160: Current: .*; original directions: Swallow 1 tablet whole\. Call the clinic\.$/u
-            : /^เฉพาะเมื่อ SBP > 160: ปัจจุบัน: .*; ข้อความเดิม: Swallow 1 tablet whole\. Call the clinic\.$/u);
-        else expect(native).toBe(text.replace(/\.$/u, "") +
+        if (text.startsWith("Swallow")) {
+          const [current, authored] = native.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
+          expect(current).toContain("Call the clinic");
+          expect(authored).toBe("Swallow 1 tablet whole " + (locale === "en" ? "only if" : "เฉพาะเมื่อ") + " SBP > 160.");
+          expect(authored).not.toContain("Call the clinic");
+        } else expect(native).toBe(text.replace(/\.$/u, "") +
           (locale === "en" ? " only if" : " เฉพาะเมื่อ") + " SBP > 160. Call the clinic.");
         let calls = 0;
         expect(formatSig(input, "long", { locale, realizationMode: "normalized", i18n: {

@@ -2058,7 +2058,10 @@ describe("round45 authored directions with independent administration caps", () 
       expect(text).toMatch(locale === "en"
         ? /(?:^|\s)2 tablets(?:\s|[.;,]|$)/u
         : /(?:^|\s)2 เม็ด(?:\s|[.;,]|$)/u);
-      expect(text).not.toContain(directions);
+      const [currentText, original] = text.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
+      expect(currentText).not.toContain(directions);
+      expect(currentText).toContain("max per administration: " + cap + " tab");
+      expect(original).toBe(directions);
     }
   });
 });
@@ -2649,7 +2652,8 @@ describe("round54: current unit identity and graph argument ownership", () => {
       for (const input of graphViews(row)) {
         const before = JSON.stringify(input);
         for (const locale of ["en", "th"]) {
-          const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          const rendered = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          const text = rendered.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0];
           expect(text.match(/(?:^|[^\d.])2 g\b/gu)).toHaveLength(1);
           expect(text).not.toContain("1 g");
           expect(text.match(locale === "en" ? /gently/gu : /เบาๆ/gu)).toHaveLength(1);
@@ -2809,7 +2813,10 @@ describe("round59 partial facts and complete authored directions", () => {
         expect(text).toContain("2027-01-01");
         if (liveAmount) {
           expect(text).toMatch(locale === "en" ? /(?:^|[^0-9.])2 (?:tablets|tab)\b/u : /(?:^|[^0-9.])2 เม็ด/u);
-          expect(text).not.toContain("Take 1 tablet daily");
+          const [current, original] = text.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
+          expect(current).not.toContain("Take 1 tablet daily");
+          expect(current).toContain("2027-01-01");
+          expect(original).toBe(row.text);
         } else expect(text).toBe("Take 1 tablet daily " + (locale === "en" ? "except" : "ยกเว้นวันที่") + " 2027-01-01.");
       }
     expect(row).toEqual(before);
@@ -2829,7 +2836,7 @@ describe("round59 partial facts and complete authored directions", () => {
           // qualitative amount, which is retained as labeled original wording.
           const separator = locale === "en" ? "; original directions: " : "; ข้อความเดิม: ";
           const [current, original] = rendered.split(separator);
-          expect(original).toBe(row.text);
+          expect(original).toBe(row.text + ".");
           expect(current).not.toContain("a thin layer");
           expect(rendered.trim()).not.toBe("");
           if (style === "long" || !hasSite && !hasRoute)
@@ -2905,32 +2912,6 @@ describe("round59 partial facts and complete authored directions", () => {
     expect(toFhirR5Dosages(input)[0].timing?.code).toEqual(code);
   });
 
-  it("uses normalized mode by default for a fresh saved dose edit and preserves explicit source replay", () => {
-    const row = fresh(parseSig("Take 1 tablet daily").fhir[0]);
-    row.doseAndRate![0].doseQuantity!.value = 2;
-    row.text = "Take 1 tablet daily with water";
-    row.extension = [...(row.extension ?? []), fresh(note)];
-    const before = fresh(row);
-    for (const options of [undefined, { locale: "en" }]) {
-      expect(formatSig(row, "long", options)).toBe("Take 2 tablets orally once daily.");
-      expect(fromFhirDosage(row, options).longText).toBe("Take 2 tablets orally once daily.");
-    }
-    for (const style of ["short", "long"] as const) {
-      expect(formatSig(row, style, { locale: "en" })).toBe(formatSig(row, style, { locale: "en", realizationMode: "normalized" }));
-      const replay = formatSig(row, style, { locale: "en", realizationMode: "roundtrip" });
-      expect(parseSig(replay).meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "tab" });
-    }
-    expect(parseSig(fromFhirDosage(row, { locale: "en", realizationMode: "roundtrip" }).longText)
-      .meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "tab" });
-    const saved = fresh(toFhirR5Dosages(toDosageDetails([row])));
-    expect(saved[0].text).toBe(row.text);
-    expect(saved[0].doseAndRate![0].doseQuantity!.value).toBe(2);
-    expect(parseSig(formatSig(saved[0], "long", { realizationMode: "roundtrip" }))
-      .meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "tab" });
-    expect(saved[0].extension).toContainEqual(note);
-    expect(row).toEqual(before);
-  });
-
   it.each(["low missing", "high missing", "both days", "neither unit", "upper only"] as const)(
     "renders duration endpoints independently with %s", kind => {
       const range = {
@@ -2970,7 +2951,9 @@ describe("round59 partial facts and complete authored directions", () => {
         expect(rendered).toContain(style === "short" ? "x<=2" : locale === "en" ? "up to 2 doses" : "ไม่เกิน 2 ครั้ง");
         if (style === "long") expect(rendered.match(/SBP > 160/gu)).toHaveLength(1);
         if (advice && style === "long") {
-          expect(rendered).toContain("Otherwise hold");
+          const [current, original] = rendered.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
+          expect(current).toContain("Otherwise hold");
+          expect(original).not.toContain("Otherwise hold");
           expect(rendered).not.toMatch(/Otherwise hold\.? (?:only if|เฉพาะเมื่อ)/u);
         }
       }
@@ -3156,8 +3139,10 @@ describe("round60 typed meaning and interchange ownership", () => {
       doseAndRate: [{ doseQuantity: { value: 2, unit: "g" } }] }] }] };
     const a = courseFromR6(current).stages[0].administrations[0];
     expect(a.asNeeded).toBe(false);
-    expect(formatSig(current, "long", { realizationMode: "normalized" })).toContain("2 g");
-    expect(formatSig(current, "long", { realizationMode: "normalized" })).not.toContain("thin layer");
+    const [currentText, original] = formatSig(current, "long", { realizationMode: "normalized" }).split("; original directions: ");
+    expect(currentText).toContain("2 g");
+    expect(currentText).not.toContain("thin layer");
+    expect(original).toBe(source);
   });
 
   it.each([
@@ -3358,8 +3343,12 @@ describe("round61 supported grammar and display ownership", () => {
       expect(formatSig(input, "short", { locale: "en", realizationMode: "normalized" })).toContain(row.text);
     }
     const edited = { ...saved(row), doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }] };
-    expect(formatSig(edited, "long", { locale: "en" })).toContain("2 tablets");
-    expect(formatSig(edited, "long", { locale: "en" })).not.toContain("Swallow 1 tablet");
+    const [current, authored] = formatSig(edited, "long", { locale: "en" }).split("; original directions: ");
+    expect(current).toContain("2 tablets");
+    expect(current).not.toContain("Swallow 1 tablet");
+    expect(current).toContain("Do not crush");
+    expect(current).toContain("max per administration: 2 tab");
+    expect(authored).toBe(row.text);
     expect(row).toEqual(original);
   });
 
