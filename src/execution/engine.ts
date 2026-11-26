@@ -505,28 +505,32 @@ function prepareTimingCodeCadence(dosage: CanonicalAdministration): CanonicalAdm
   const coding = executionTimingCoding(timing);
   const hours = isStandardTimingCoding(coding) && coding?.code
     ? TIMING_CODE_HOURLY_PERIODS[coding.code.toUpperCase()] : undefined;
-  let recurrence: CanonicalRecurrence;
-  if (hours) recurrence = { ...repeat, frequency: 1, period: hours, periodUnit: DurationUnit.Hour };
-  else {
+  let frequency: number, period: number, periodUnit: DurationUnit;
+  if (hours) {
+    frequency = 1;
+    period = hours;
+    periodUnit = DurationUnit.Hour;
+  } else {
     const daily = standardTimingCodeFrequency(coding);
     if (daily === undefined) return dosage;
-    recurrence = daily >= 1 ? { ...repeat, frequency: daily, period: 1, periodUnit: DurationUnit.Day }
-      : { ...repeat, frequency: 1, period: 1 / daily, periodUnit: DurationUnit.Day };
+    frequency = daily >= 1 ? daily : 1;
+    period = daily >= 1 ? 1 : 1 / daily;
+    periodUnit = DurationUnit.Day;
   }
+  let daily: number | undefined;
   if (repeat && (repeat.frequency !== undefined || repeat.period !== undefined || repeat.periodUnit !== undefined)) {
-    const periodUnit = repeat.periodUnit ?? recurrence.periodUnit!;
+    daily = frequency * 86400 / (period * INFUSION_TIME_SECONDS[periodUnit]);
+    periodUnit = repeat.periodUnit ?? periodUnit;
     const seconds = INFUSION_TIME_SECONDS[periodUnit];
     if (!seconds) return dosage;
-    const daily = recurrence.frequency! * 86400 /
-      (recurrence.period! * INFUSION_TIME_SECONDS[recurrence.periodUnit!]);
-    const frequency = repeat.frequency ?? (repeat.period !== undefined
-      ? daily * repeat.period * seconds / 86400 : recurrence.frequency!);
-    const period = repeat.period ?? frequency * 86400 / (daily * seconds);
+    frequency = repeat.frequency ?? (repeat.period !== undefined
+      ? daily * repeat.period * seconds / 86400 : frequency);
+    period = repeat.period ?? frequency * 86400 / (daily * seconds);
     if (!positiveInteger(frequency) || !positiveNumber(period)) return dosage;
-    recurrence = { ...repeat, frequency, period, periodUnit };
-    if (!matchesDailyCodeCadence(daily, recurrence)) return dosage;
   }
-  return { ...dosage, schedule: { ...timing, recurrence } };
+  const recurrence: CanonicalRecurrence = Object.assign({}, repeat, { frequency, period, periodUnit });
+  if (daily !== undefined && !matchesDailyCodeCadence(daily, recurrence)) return dosage;
+  return Object.assign({}, dosage, { schedule: Object.assign({}, timing, { recurrence }) });
 }
 /**
  * Make an executable copy of imported range timing without changing the
