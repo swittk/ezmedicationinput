@@ -3461,14 +3461,14 @@ describe("review 26 independent partial phase boundaries", () => {
     }
     const options = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-08T00:00:00Z",
       timeZone: "UTC", limit: 4,
-      config: { frequencyDefaultsByCode: { QID: ["08:00", "12:00", "16:00", "20:00"] } } };
+      config: { frequencyDefaults: { byCode: { QID: ["07:15", "11:30", "15:45", "21:00"] } } } };
     expect(() => nextDueDoses(parsed.fhirNext, options)).toThrow(/relative|resolv|anchor/iu);
     // A clinician can still use the independently complete right-eye track.
     const rightOnly = { ...parsed.fhirNext, step: parsed.fhirNext.step!.map(step => ({ ...step,
       component: step.component.filter(a => a.site?.concept?.text === "right eye") })) };
     expect(nextDueDoses(rightOnly, options)).toEqual([
-      "2026-01-08T08:00:00+00:00", "2026-01-08T12:00:00+00:00",
-      "2026-01-08T16:00:00+00:00", "2026-01-08T20:00:00+00:00"
+      "2026-01-08T07:15:00+00:00", "2026-01-08T11:30:00+00:00",
+      "2026-01-08T15:45:00+00:00", "2026-01-08T21:00:00+00:00"
     ]);
     expect(calculateTotalUnits({ dosage: rightOnly, ...options,
       durationValue: 1, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 4, unit: "drop" });

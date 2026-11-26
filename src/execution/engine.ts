@@ -1,4 +1,4 @@
-import { preferredTimingCoding as executionTimingCoding, timingCodeMeaning } from "../timing-summary";
+import { preferredTimingCoding as executionTimingCoding, timingCodeMeaning, timingPreviewDescriptor } from "../timing-summary";
 /** Version-neutral medication execution kernel. All interchange decoding
  * happens in adapters/canonical-course. Calendar, count, phase and supply
  * calculations operate on native clinical facts, never FHIR storage markers. */
@@ -1179,8 +1179,11 @@ function resolveFrequencyCadence(
     codeClocks = configuredCodeClocks;
     if (codeClocks === undefined && isStandardTimingCoding(coding)) {
       const meaning = timingCodeMeaning(coding);
-      codeClocks = meaning && meaning !== coding?.code
-        ? DEFAULT_WHEN_FALLBACK_CLOCKS[meaning]
+      const descriptor = meaning ? timingPreviewDescriptor(meaning) : undefined;
+      // Standard event-only codes retain the authored cadence and share the
+      // same event clock resolution as an explicit timing anchor.
+      codeClocks = descriptor?.when?.length && descriptor.frequency === undefined && descriptor.period === undefined
+        ? expandWhenCodes(descriptor.when, config, effectiveRepeat, true).map(entry => entry.time)
         : DEFAULT_FREQUENCY_DEFAULTS.byCode[normalizedCode];
     }
   }
@@ -1218,8 +1221,12 @@ function codedExecutionRecurrence(timing: CanonicalTiming | undefined, config: N
   const repeat = timing?.recurrence;
   if (!repeat || !timing?.code || repeat.clocks?.length || repeat.anchors?.length ||
       timing.explicitEvents?.length) return repeat;
-  if (repeat.frequency === 1 && (repeat.period !== 2 || repeat.periodUnit !== DurationUnit.Day)) return repeat;
   const coding = executionTimingCoding(timing);
+  const meaning = isStandardTimingCoding(coding) ? timingCodeMeaning(coding) : undefined;
+  const descriptor = meaning ? timingPreviewDescriptor(meaning) : undefined;
+  if (descriptor?.when?.length && descriptor.frequency === undefined && descriptor.period === undefined)
+    return { ...repeat, clocks: resolveFrequencyCadence(timing, repeat, config, coding).clocks };
+  if (repeat.frequency === 1 && (repeat.period !== 2 || repeat.periodUnit !== DurationUnit.Day)) return repeat;
   if (repeat.frequency && repeat.period && repeat.periodUnit === DurationUnit.Day &&
       standardTimingCodeFrequency(coding) === 0.5 && matchesDailyCodeCadence(0.5, repeat)) {
     // Equivalent aggregate QOD repeats share the same alternate-day clinic grid.
@@ -1866,7 +1873,8 @@ function maximumUnscheduledCapCount(
     const count = maximumCapacityWithRollingLimits(
       intervals, cap, quantityCaps, options.priorDoseTimes, timeZone, packed, range, weightedPrior, remaining, quotaLimits
     );
-    if (!range || !quantityCaps.length || (range.low === range.high && !quotaLimits)) return count;
+    if (!range || (!range.strictLow && !range.strictHigh &&
+        (!quantityCaps.length || (range.low === range.high && !quotaLimits)))) return count;
     let possibleSlots = ranges.reduce((total, range) => total + (range.last - range.first + 1) * cap.max, 0);
     if (options.priorDoseTimes?.length || weightedPrior?.length) {
       const used = new Map<number, number>();
@@ -2093,7 +2101,7 @@ function executableQuantityCaps(
     }
     if (!hasNumericDose || !dose?.value) continue;
     if (
-      (maximumOperator && maximumOperator !== "~") ||
+      (maximumOperator && maximumOperator !== "~" && maximumOperator !== "<=") ||
       (periodOperator && periodOperator !== "~") ||
       maximum === undefined ||
       !Number.isFinite(maximum) ||
@@ -6852,12 +6860,12 @@ function prepareMeasuredDose(
   // expression evaluation or rate conversion. This is also the dominant
   // calculation path for pre-existing callers.
   if (
-    quantity &&
+    quantity && operator !== "ad" &&
     Number.isFinite(quantity.value) &&
     quantity.value! > 0
   )
-    // The known numeric amount stays useful even when qualified by <=,
-    // >= or ~. Its original comparator remains in the caller's FHIR data.
+    // A finite upper or approximate amount remains useful; an ad target
+    // does not state the administered quantity. Source qualifiers stay intact.
     return dosage;
   let range = first.range;
   if (!quantity && !range && (first.rate || first.rateRatio)) {
@@ -6915,7 +6923,8 @@ function prepareMeasuredDose(
       }
     }
   }
-  if (!quantity || quantity.value === undefined || !Number.isFinite(quantity.value) || quantity.value <= 0) {
+  if (!quantity || quantity.comparator === "ad" || quantity.value === undefined ||
+      !Number.isFinite(quantity.value) || quantity.value <= 0) {
     throw new MedicationQuantityCalculationError(
       "dose-amount-unresolved",
       "The administered dose is not a single known positive quantity. Provide the applicable dose, range choice, or evaluated expression."
@@ -8287,6 +8296,10 @@ function calculateCourseTotalUnits(
           "timing-required",
           "Stage " + (index + 1) + " has no executable frequency or dosing time for one component."
         );
+      const nominalEnd = end.getTime() - (getAdministrationOffsetMinutes(dosage) ?? 0) * 60000;
+      // A delayed member may open at or after the actual query cutoff.
+      // Clip that empty nominal window before constructing local bounds.
+      if (nominalEnd <= member.recurrenceOrigin.getTime()) continue;
       const bounded: CanonicalAdministration = {
         ...dosage,
         phaseOrigin: undefined,
@@ -8304,7 +8317,7 @@ function calculateCourseTotalUnits(
             courseLengthRange: undefined,
             calendarWindow: {
               start: member.recurrenceOrigin.toISOString(),
-              end: new Date(end.getTime() - (getAdministrationOffsetMinutes(dosage) ?? 0) * 60000 - 1).toISOString(),
+              end: new Date(nominalEnd - 1).toISOString(),
             },
           },
         },
