@@ -5765,3 +5765,20 @@ describe("independent graph locale annotations", () => {
     expect(input).toEqual(before);
   });
 });
+
+describe("plain count maximum identity", () => {
+  it.each(["administration", "lifetime"] as const)("selects the tighter unitless %s limit in both orders", scope => {
+    for (const values of [[1, 2], [2, 1]]) {
+      const input = course({ doseAndRate: [{ doseQuantity: { value: 1 } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+        safety: { doseLimit: values.map(value => ({ scope, valueQuantity: { value } })) }
+      });
+      const before = persist(input), rows = toFhirR5Dosages(input);
+      expect(scope === "administration" ? rows[0].maxDosePerAdministration : rows[0].maxDosePerLifetime)
+        .toEqual({ value: 1 });
+      expect(numericAdministrationLimits(importCanonicalCourse(input).stages[0].administrations[0])[scope])
+        .toEqual({ value: 1 });
+      expect(input).toEqual(before);
+    }
+  });
+});

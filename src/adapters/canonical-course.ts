@@ -1347,8 +1347,8 @@ export interface R5MaximumSelection extends SelectedR5Maximum {
 }
 function sameMaximumIdentity(left: CanonicalMeasure, right: CanonicalMeasure): boolean {
   return sameCodedQuantityUnit(left, right) ||
-    left.unit !== undefined && left.unit === right.unit &&
-    left.system === right.system && left.code === right.code;
+    left.unit === right.unit && left.system === right.system && left.code === right.code &&
+    (left.unit !== undefined || !left.system && !left.code);
 }
 function unitKeyPart(value: string | undefined): string {
   return value === undefined ? "-" : value.length + ":" + value;
@@ -1356,7 +1356,7 @@ function unitKeyPart(value: string | undefined): string {
 function maximumUnitKey(quantity: CanonicalMeasure): string | undefined {
   return quantity.system && quantity.code
     ? "c" + unitKeyPart(quantity.system) + unitKeyPart(quantity.code)
-    : quantity.unit !== undefined
+    : quantity.unit !== undefined || !quantity.system && !quantity.code
       ? "u" + unitKeyPart(quantity.system) + unitKeyPart(quantity.code) + unitKeyPart(quantity.unit)
       : undefined;
 }
