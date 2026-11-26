@@ -63,7 +63,7 @@ import {
   hasUnrecognizedEditMetadata,
   retainField,
   readRetainedField,
-  withR5CountMinimum, withR5DurationMinimum, withR5PeriodMinimum,
+  withTimingCountMinimum, withTimingDurationMinimum, withTimingPeriodMinimum,
   encodeR6SourceMetadata,
   decodeR6SourceMetadata,
   dosageMatchesSavedProjection,
@@ -1147,9 +1147,9 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       repeat = value;
     }
   }
-  if (target === "r5" && repeat?.countMax !== undefined) repeat = withR5CountMinimum(repeat);
-  if (target === "r5" && repeat?.durationMax !== undefined) repeat = withR5DurationMinimum(repeat);
-  if (target === "r5" && repeat?.periodMax !== undefined) repeat = withR5PeriodMinimum(repeat);
+  if (repeat?.countMax !== undefined) repeat = withTimingCountMinimum(repeat);
+  if (repeat?.durationMax !== undefined) repeat = withTimingDurationMinimum(repeat);
+  if (repeat?.periodMax !== undefined) repeat = withTimingPeriodMinimum(repeat);
   // Import has already separated executable values from metadata-only wire
   // positions. The immutable native timing keeps its imported event projection.
   const events = original?.event ?? t.explicitEvents;
@@ -1334,7 +1334,14 @@ function updateNativeTimingAnnotations(
   );
   return target;
 }
-interface SelectedR5Maximum { quantity: CanonicalMeasure; definite: boolean; strict: boolean; index?: number }
+interface SelectedR5Maximum {
+  quantity: CanonicalMeasure;
+  /** A same-code label can establish a comparison scale without rewriting the winning quantity. */
+  comparisonBasis?: CanonicalMeasure;
+  definite: boolean;
+  strict: boolean;
+  index?: number;
+}
 export interface R5MaximumSelection extends SelectedR5Maximum {
   groups?: Map<string, SelectedR5Maximum>;
 }
@@ -1376,6 +1383,27 @@ function preferMaximum(
   if (strict !== previousStrict) return strict;
   return index === undefined || previousIndex === undefined || index >= previousIndex;
 }
+function selectComparableMaximum(previous: SelectedR5Maximum, candidate: SelectedR5Maximum): SelectedR5Maximum {
+  const sameIdentity = sameMaximumIdentity(previous.quantity, candidate.quantity);
+  const candidateBasis = candidate.comparisonBasis ?? candidate.quantity;
+  let previousBasis = previous.comparisonBasis ?? previous.quantity;
+  if (sameIdentity && !getQuantityComparisonUnit(previousBasis) && getQuantityComparisonUnit(candidateBasis)) {
+    previous.comparisonBasis = previousBasis = candidateBasis;
+  }
+  const value = convertQuantityValue(candidate.quantity.value!, candidateBasis, previousBasis);
+  if (value === null) return candidate;
+  if (!preferMaximum(value, candidate.strict, candidate.index, previous.quantity.value!,
+      previous.strict, previous.index, candidateBasis, previousBasis)) return previous;
+  if (!sameIdentity) return candidate;
+  // Identity and compatible-unit indexes can refer to the same group. Update
+  // that group in place so a lower code-only bound keeps its established scale.
+  previous.quantity = candidate.quantity;
+  previous.strict = candidate.strict;
+  previous.index = candidate.index;
+  previous.comparisonBasis = getQuantityComparisonUnit(candidateBasis) ? candidateBasis : previousBasis;
+  return previous;
+}
+
 /** Select a comparable numeric upper bound for R5's singular maximum field.
  * Equal bounds retain the last annotated source; a strict bound wins an equal
  * inclusive one. Approximate siblings stay retained without replacing an
@@ -1391,48 +1419,37 @@ export function selectR5Maximum(
     if (!current.definite) { current.quantity = quantity; current.strict = strict; current.index = index; }
     return current;
   }
+  const candidate: SelectedR5Maximum = { quantity, definite, strict, index };
   if (!current.groups) {
-    // Preserve distinct identities before a physical replacement can hide a
-    // prior code's minimum from a later same-code quantity without a label.
-    if (sameMaximumIdentity(current.quantity, quantity)) {
-      const value = convertQuantityValue(quantity.value!, quantity, current.quantity);
-      if (value !== null) {
-        if (preferMaximum(value, strict, index, current.quantity.value!, current.strict, current.index)) {
-          current.quantity = quantity; current.strict = strict; current.index = index;
-        }
-        return current;
-      }
-    }
+    if (sameMaximumIdentity(current.quantity, quantity)) return selectComparableMaximum(current, candidate);
     current.groups = new Map();
-    const previous = { quantity: current.quantity, definite: current.definite, strict: current.strict, index: current.index };
+    const previous: SelectedR5Maximum = {
+      quantity: current.quantity, comparisonBasis: current.comparisonBasis,
+      definite: current.definite, strict: current.strict, index: current.index
+    };
     const previousKey = maximumUnitKey(previous.quantity);
     if (previousKey !== undefined) current.groups.set(previousKey, previous);
-    const previousUnit = maximumComparisonUnitKey(previous.quantity);
+    const previousUnit = maximumComparisonUnitKey(previous.comparisonBasis ?? previous.quantity);
     if (previousUnit !== undefined) current.groups.set(previousUnit, previous);
   }
-  const candidate: SelectedR5Maximum = { quantity, definite, strict, index };
-  let selected = candidate, selectedValue = quantity.value!;
-  const key = maximumUnitKey(quantity), unit = maximumComparisonUnitKey(quantity);
-  // Identity and compatible-unit groups retain their own minima. A code-only
-  // quantity never borrows a dimension from another limit's display label.
-  for (let group = 0; group < 2; group++) {
-    const groupKey = group === 0 ? key : unit;
-    if (groupKey === undefined) continue;
-    const previous = current.groups.get(groupKey);
-    if (!previous) { current.groups.set(groupKey, candidate); continue; }
-    const previousValue = convertQuantityValue(previous.quantity.value!, previous.quantity, quantity);
-    if (previousValue === null || preferMaximum(quantity.value!, strict, index,
-        previousValue, previous.strict, previous.index, quantity, previous.quantity)) {
-      current.groups.set(groupKey, candidate);
-      continue;
-    }
-    if (preferMaximum(previousValue, previous.strict, previous.index,
-        selectedValue, selected.strict, selected.index, previous.quantity, selected.quantity)) {
-      selected = previous; selectedValue = previousValue;
-    }
+  let selected = candidate;
+  const key = maximumUnitKey(quantity);
+  if (key !== undefined) {
+    const previous = current.groups.get(key);
+    if (previous) selected = selectComparableMaximum(previous, selected);
+    current.groups.set(key, selected);
+  }
+  // Resolve identity first: a labeled same-code sibling establishes the
+  // scale for the group's minimum, even if that minimum has no display unit.
+  const unit = maximumComparisonUnitKey(selected.comparisonBasis ?? selected.quantity);
+  if (unit !== undefined) {
+    const previous = current.groups.get(unit);
+    if (previous && previous !== selected) selected = selectComparableMaximum(previous, selected);
+    current.groups.set(unit, selected);
   }
   current.quantity = selected.quantity; current.definite = selected.definite;
   current.strict = selected.strict; current.index = selected.index;
+  current.comparisonBasis = selected.comparisonBasis;
   return current;
 }
 

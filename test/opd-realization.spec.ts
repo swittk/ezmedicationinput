@@ -928,6 +928,7 @@ describe("round36 configured identity and active cadence", () => {
     const method = { coding: { ...coding, display: "Bedside preparation" } };
     expect(resolveMedicationInstructionActionForMethod(method, options)?.code).toBe("bedside");
     expect(resolveMedicationInstructionActionForMethod({ coding }, options)?.code).toBe("first");
+    expect(resolveMedicationInstructionAction("Bedside preparation", options)).toBeUndefined();
     const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], method: { coding: [method.coding] } };
     for (const input of [row, toDosageDetails([row])])
       expect(formatSig(input, "long", { ...options, locale: "th", realizationMode: "normalized" })).toContain("เตรียมข้างเตียง");
@@ -3506,7 +3507,12 @@ describe("round55: current clinical facts and independent graph meaning", () => 
         .toBe(locale === "en" ? "Use the medication for up to 3 doses." : "ใช้ยา ไม่เกิน 3 ครั้ง.");
     }
     expect(JSON.stringify(raw)).toBe(before);
-    expect(toFhirR5Dosages(raw)[0].timing?.repeat?.count).toBeUndefined();
+    const repeat = toFhirR5Dosages(raw)[0].timing?.repeat;
+    expect(repeat?.countMax).toBe(3);
+    expect(repeat?.count).toBeUndefined();
+    expect(repeat?._count?.extension).toContainEqual({
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+    });
   });
 });
 

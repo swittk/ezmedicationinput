@@ -10,6 +10,7 @@ import {
 } from "./types";
 import { cloneStructuredValue } from "./stable-structure";
 import { mergeTranslationPrimitiveElement } from "./fhir-translations";
+import { quantityAnnotationExtensions, quantityPrimitiveForR5 } from "./fhir-quantity-operator";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -54,6 +55,23 @@ function sharedCodingFields(
   // identity (including source annotations) rather than allocating a second
   // coding shell solely to protect a caller from mutating its result.
   return coding?.code ? coding : undefined;
+}
+
+/** Convert known Quantity annotations at the R5 Coding boundary. Plain
+ * codings and unrelated supplied fields retain their existing identities. */
+function spatialCodingForR5(coding: FhirCoding | undefined): FhirCoding | undefined {
+  if (!coding || !coding.extension?.length && !coding._system && !coding._version &&
+      !coding._code && !coding._display && !coding._userSelected) return coding;
+  const extension = coding.extension?.length
+    ? quantityAnnotationExtensions(coding.extension, "r5") as FhirExtension[] : coding.extension;
+  let result = extension === coding.extension ? coding : { ...coding, extension };
+  for (const field of ["_system", "_version", "_code", "_display", "_userSelected"] as const) {
+    const primitive = quantityPrimitiveForR5(coding[field]);
+    if (primitive === coding[field]) continue;
+    if (result === coding) result = { ...coding };
+    result[field] = primitive;
+  }
+  return result;
 }
 
 function bodySiteCodingToFhir(coding: BodySiteCode | undefined): FhirCoding | undefined {
@@ -116,14 +134,14 @@ export function buildBodySiteSpatialRelationExtension(
     return undefined;
   }
   const children: FhirExtension[] = [];
-  const relationCoding = sharedCodingFields(relation.relationCoding);
+  const relationCoding = spatialCodingForR5(sharedCodingFields(relation.relationCoding));
   if (relationCoding?.code) {
     children.push({ url: RELATION_URL, valueCoding: relationCoding });
   }
   if (relation.relationText) {
     children.push({ url: RELATION_TEXT_URL, valueString: relation.relationText });
   }
-  const targetCoding = bodySiteCodingToFhir(relation.targetCoding);
+  const targetCoding = spatialCodingForR5(bodySiteCodingToFhir(relation.targetCoding));
   if (relation.targetText || targetCoding?.code) {
     const target: FhirCodeableConcept = {};
     if (relation.targetText) {

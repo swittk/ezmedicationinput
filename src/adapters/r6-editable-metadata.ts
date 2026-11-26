@@ -406,13 +406,18 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
       };
       if (!Object.keys(course).length) course = undefined;
       if (retiredStepPolicy) return { ...saved, course, step: {}, owner: undefined };
-    } else if (course) {
+    } else {
       const { doseLimit: _limits, ifExceeded: _action, modifierExtension: _modifiers, ...metadata } = current;
-      course = { ...metadata,
-        ...(course.doseLimit !== undefined ? { doseLimit: course.doseLimit } : {}),
-        ...(course.ifExceeded !== undefined ? { ifExceeded: course.ifExceeded } : {}),
-        ...(course.modifierExtension !== undefined ? { modifierExtension: course.modifierExtension } : {}) };
-    } else step = current;
+      // The unchanged projection supplies annotations; the owning policy
+      // supplies its scoped clinical fields, including a wrapper-only phase total.
+      const policy = course ?? step;
+      const restored = { ...policy, ...metadata,
+        ...(policy.doseLimit !== undefined ? { doseLimit: policy.doseLimit } : {}),
+        ...(policy.ifExceeded !== undefined ? { ifExceeded: policy.ifExceeded } : {}),
+        ...(policy.modifierExtension !== undefined ? { modifierExtension: policy.modifierExtension } : {}) };
+      if (course) course = restored;
+      else step = restored;
+    }
     const retained = { ...saved, course, step };
     let owner: FhirR6DosageStep | undefined;
     const componentIds = saved.ownerComponentIds?.length ? new Set(saved.ownerComponentIds) : undefined;
@@ -614,22 +619,32 @@ export function liftSingleStepSafety(output: FhirR6DosageInstruction): void {
     return;
   }
   const course = output.safety;
+  // A dosage-scoped limit is relative to its containing policy. Lifting a
+  // phase total into core course safety would change its meaning.
+  const scopedTotal = policy.doseLimit?.some(limit => limit.scope === "dosage");
+  const liftedLimits = scopedTotal
+    ? policy.doseLimit!.filter(limit => limit.scope !== "dosage") : policy.doseLimit;
   let projected = policy;
-  if (course) {
-    projected = { ...course };
-    if (course.doseLimit || policy.doseLimit)
-      projected.doseLimit = [...(course.doseLimit ?? []), ...(policy.doseLimit ?? [])];
-    if (policy.ifExceeded && policy.ifExceeded !== course.ifExceeded)
-      projected.ifExceeded = course.ifExceeded ? course.ifExceeded + "\n" + policy.ifExceeded : policy.ifExceeded;
-    if (course.modifierExtension?.length || policy.modifierExtension?.length ||
-        course.ifExceeded !== policy.ifExceeded) {
+  if (course || scopedTotal) {
+    projected = { ...(course ?? policy) };
+    if (course?.doseLimit || liftedLimits?.length)
+      projected.doseLimit = [...(course?.doseLimit ?? []), ...(liftedLimits ?? [])];
+    else delete projected.doseLimit;
+    if (policy.ifExceeded && policy.ifExceeded !== course?.ifExceeded) {
+      projected.ifExceeded = course?.ifExceeded ? course.ifExceeded + "\n" + policy.ifExceeded : policy.ifExceeded;
+      // A primitive translation describes its complete text. Distinct action
+      // translations remain on their original, separately scoped policies.
+      if (course?.ifExceeded) delete projected._ifExceeded;
+      else if (policy._ifExceeded) projected._ifExceeded = policy._ifExceeded;
+      else delete projected._ifExceeded;
+    }
+    if (scopedTotal || course?.modifierExtension?.length || policy.modifierExtension?.length ||
+        course?.ifExceeded !== policy.ifExceeded) {
       // R6 cannot carry sole-step safety. A must-understand wrapper keeps
-      // each action and modifier tied to its own policy's limits.
+      // phase totals, actions and modifiers tied to their owning policy.
       projected.modifierExtension = [encodeR6SourceMetadata(R6_SCOPED_SAFETY_MODIFIER_URL,
         { course, step: policy }, "safety")];
     }
-    // Distinct source IDs/annotations stay in the source record below. The
-    // active policy includes every known limit and both authored actions.
   }
   // The policy belongs to the phase, including when an identified component
   // later moves elsewhere. Preserve an authored phase ID; otherwise give this

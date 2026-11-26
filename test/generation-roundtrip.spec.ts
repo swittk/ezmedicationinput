@@ -987,24 +987,19 @@ describe("round23 R5 external identity and source preservation", () => {
     }
   });
 
-  it("retires changed safety source once while retaining recognized child metadata", () => {
-    const original = toDosageDetails([{ sequence: 1, doseAndRate: [{ doseQuantity: q(1) }] }], undefined,
-      { step: [{ sequence: 1, safety: { doseLimit: [{ scope: "dosage", valueInteger: 3 }] } }] });
-    const marker = original.extension!.find(item => item.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL)!;
-    marker.extension!.find(item => item.url === "projected")!.id = "retired-projected-id";
-    original.safety!.doseLimit![0].valueInteger = 4;
-    let current = r6Save(original);
-    expect(current.safety!.doseLimit).toEqual([{ scope: "dosage", valueInteger: 4 }]);
-    expect(current.extension!.find(item => item.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL)).toBeUndefined();
-    const history = current.extension!.filter(item => item.url === DOSAGE_RECONCILIATION_SOURCE_URL);
-    const retainedChildren: Array<typeof marker> = [];
-    for (const item of history) retainedChildren.push(...(item.extension ?? []));
-    expect(retainedChildren).toContainEqual(marker);
-    for (let save = 0; save < 3; save++) {
-      current = r6Save(current);
-      expect(current.safety!.doseLimit).toEqual([{ scope: "dosage", valueInteger: 4 }]);
-      expect(current.extension!.filter(item => item.url === DOSAGE_RECONCILIATION_SOURCE_URL)).toEqual(history);
-    }
+  it("retains an independently supplied phase total and its policy metadata", () => {
+    const safety = { id: "phase-policy", doseLimit: [{ id: "phase-total",
+      scope: "dosage" as const, valueInteger: 3,
+      extension: [{ url: "urn:clinic:phase-note", valueString: "retain" }] }] };
+    const output = toDosageDetails([{ sequence: 1, doseAndRate: [{ doseQuantity: q(1) }] }], undefined,
+      { step: [{ sequence: 1, safety }] });
+    const before = persist(output);
+    const marker = output.safety?.modifierExtension?.find(item => item.url === R6_SCOPED_SAFETY_MODIFIER_URL);
+    expect(marker).toBeDefined();
+    expect(decodeR6SourceMetadata(marker!, "safety")).toMatchObject({ step: safety });
+    expect(output.safety?.doseLimit).toBeUndefined();
+    expect(fromDosageDetails(output).course.step?.[0].safety).toEqual(safety);
+    expect(output).toEqual(before);
   });
 
   it("preserves an authored condition bridge ID while consuming the plain generated bridge", () => {
@@ -3096,7 +3091,7 @@ describe("round37 interchange phase, limit and source ownership", () => {
     }
   });
 
-  it("retains a coded minimum across an intervening compatible physical maximum", () => {
+  it("keeps the tighter physical maximum while retaining the coded group minimum", () => {
     const coded = { value: 2, system: "urn:clinic:a", code: "x", unit: "mg" };
     const amounts = [coded, { value: 1, system: "http://unitsofmeasure.org", code: "mg", unit: "mg" },
       { value: 3, system: "urn:clinic:a", code: "x" }];
@@ -3104,7 +3099,7 @@ describe("round37 interchange phase, limit and source ownership", () => {
     const input = course({ safety: { doseLimit: limits } });
     const before = JSON.stringify(input);
     const rows = toFhirR5Dosages(input);
-    expect(rows[0].maxDosePerAdministration).toEqual(coded);
+    expect(rows[0].maxDosePerAdministration).toEqual(amounts[1]);
     expect(toDosageDetails(rows).step![0].component[0].safety?.doseLimit).toEqual(limits);
     expect(JSON.stringify(input)).toBe(before);
   });

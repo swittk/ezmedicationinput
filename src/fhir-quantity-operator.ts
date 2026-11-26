@@ -11,7 +11,11 @@
  * EMA http://spor.ema.europa.eu/v1/lists/100000000008
  * HL7 http://hl7.org/fhir/quantity-comparator
  */
-import { DOSAGE_RECONCILIATION_SOURCE_URL } from "./dosage-course";
+/** Inactive retained wire data is shared by the version-boundary codecs.
+ * Keep this identifier in the leaf codec so annotation conversion does not
+ * initialize the course importer or clinical grammar. */
+export const DOSAGE_RECONCILIATION_SOURCE_URL =
+  "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source";
 import type { FhirQuantity, FhirR6Quantity, FhirSimpleQuantity,
   FhirR6SimpleQuantity, FhirR6Extension, FhirPrimitiveElement, FhirR6PrimitiveElement } from "./types";
 
@@ -119,7 +123,7 @@ function editedOperator(
   } };
 }
 
-/** Quantity annotations and Ratio numerators use the same operator bridge as their owner.
+/** Quantity annotations and Ratio endpoints use the same operator bridge as their owner.
  * Other Extension value choices remain opaque; this is not a general
  * extension-version converter or an object-tree normalizer. */
 export function quantityAnnotationExtensions(
@@ -135,9 +139,14 @@ export function quantityAnnotationExtensions(
     }
     const quantity = target === "r5" ? quantityForR5(item.valueQuantity) : quantityFromWire(item.valueQuantity);
     let ratio = item.valueRatio;
-    if (ratio?.numerator) {
+    if (ratio) {
       const numerator = target === "r5" ? quantityForR5(ratio.numerator) : quantityFromWire(ratio.numerator);
-      if (numerator !== ratio.numerator) ratio = { ...ratio, numerator };
+      const denominator = target === "r5" ? simpleQuantityForR5(ratio.denominator) : simpleQuantityForR6(ratio.denominator);
+      if (numerator !== ratio.numerator || denominator !== ratio.denominator) ratio = {
+        ...ratio,
+        ...(numerator !== ratio.numerator ? { numerator } : {}),
+        ...(denominator !== ratio.denominator ? { denominator } : {})
+      };
     }
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
     const current = quantity === item.valueQuantity && ratio === item.valueRatio && children === item.extension ? item : {

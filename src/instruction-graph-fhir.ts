@@ -304,6 +304,14 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
     if (field.url === "sourceText") {
       const { valueString: _sourceText, ...annotations } = field;
       nested[sourceTextIndex] = { ...annotations, ...(frame.sourceText ? { valueString: frame.sourceText } : {}) };
+    } else if (field.url === "predicateRealizerLocale") {
+      const locale = field.extension?.find(part => part.url === "locale")?.valueCode;
+      const current = locale === undefined ? -1 : nested.findIndex(part =>
+        part.url === field.url && part.extension?.some(child => child.url === "locale" && child.valueCode === locale));
+      // Imported realizer configuration is immutable. Its annotated node owns
+      // the complete locale fields, including explicit false and unknown data.
+      if (current >= 0) nested[current] = field;
+      else nested.push(field);
     } else nested.push(field);
   }
   const result: FhirExtension = { url: "action", extension: nested };
@@ -545,14 +553,20 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
 /** Decode a locale-specific realizer configuration as a data-only facet.
  * No language-specific licensing occurs in this interchange reader. */
 function parseRealizerLocale(extension:FhirExtension):{
-  locale:string;config:NonNullable<NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"]>[string]
+  locale:string;config:NonNullable<NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"]>[string];
+  source?: FhirExtension;
 }|undefined {
   let locale:FhirExtension|undefined,fallback:FhirExtension|undefined,
     implicit:FhirExtension|undefined,direct:FhirExtension|undefined,
     directDose:FhirExtension|undefined,durationPrefix:FhirExtension|undefined;
   let routePhrases:Record<string,string>|undefined;
   const activities:string[]=[],sites:string[]=[];
-  for(const field of extension.extension??[])switch(field.url){
+  let annotated = hasFieldMetadata(extension, "extension");
+  for(const field of extension.extension??[]) {
+    const valueKey = field.extension ? "extension" : field.valueBoolean !== undefined ? "valueBoolean"
+      : field.valueCode !== undefined ? "valueCode" : "valueString";
+    if (hasFieldMetadata(field, valueKey)) annotated = true;
+    switch(field.url){
     case "locale":if(!locale)locale=field;break;
     case "fallbackObject":if(!fallback)fallback=field;break;
     case "implicitMedicationObject":if(!implicit)implicit=field;break;
@@ -560,6 +574,8 @@ function parseRealizerLocale(extension:FhirExtension):{
     case "directDose":if(!directDose)directDose=field;break;
     case "administrationDurationPrefix":if(!durationPrefix)durationPrefix=field;break;
     case "routePhrase": {
+      if (field.extension?.some(part => part.url !== "route" && part.url !== "text" ||
+          hasFieldMetadata(part, part.url === "route" ? "valueCode" : "valueString"))) annotated = true;
       const route=field.extension?.find(part=>part.url==="route")?.valueCode;
       const text=field.extension?.find(part=>part.url==="text")?.valueString;
       if(route!==undefined&&text!==undefined)(routePhrases??={})[route]=text;
@@ -567,9 +583,11 @@ function parseRealizerLocale(extension:FhirExtension):{
     }
     case "suppressActivityConcept":if(field.valueString)activities.push(field.valueString);break;
     case "suppressSiteConcept":if(field.valueString)sites.push(field.valueString);break;
+    default: annotated = true; break;
+    }
   }
   if(!locale?.valueCode)return undefined;
-  return {locale:locale.valueCode,config:{fallbackObject:fallback?.valueString,
+  return {locale:locale.valueCode,...(annotated ? { source: extension } : {}),config:{fallbackObject:fallback?.valueString,
     implicitMedicationObject:implicit?.valueBoolean,directSiteObject:direct?.valueBoolean,
     directDose:directDose?.valueBoolean,routePhrases,administrationDurationPrefix:durationPrefix?.valueString,
     suppressActivityConcepts:activities.length?activities:undefined,suppressSiteConcepts:sites.length?sites:undefined}};
@@ -605,7 +623,12 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
     case "argument":{const value=parseArgumentExtension(field);if(value)args.push(value);break;}
     case "predicateCoding":{const value=readCoding(field.valueCoding);if(value)codings.push(value);break;}
     case "predicateTranslation":{const value=parseTranslationNode(field);if(value.locale&&value.text)(translations??={})[value.locale]=value.text;break;}
-    case "predicateRealizerLocale":{const value=parseRealizerLocale(field);if(value)(locales??={})[value.locale]=value.config;break;}
+    case "predicateRealizerLocale": {
+      const value = parseRealizerLocale(field);
+      if (value) (locales ??= {})[value.locale] = value.config;
+      if (!value || value.source) (sourceExtensions ??= []).push(field);
+      break;
+    }
     // Actual historically persisted locale annotations, not new grammar rules.
     case "predicateRealizerThaiFallbackObject":if(!legacyFallback)legacyFallback=field;break;
     case "predicateRealizerThaiSuppressActivityConcept":if(field.valueString)legacyActivities.push(field.valueString);break;

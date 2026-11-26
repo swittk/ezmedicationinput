@@ -3,7 +3,7 @@ import { resolveMedicationInstructionActionForMethod, selectMedicationInstructio
 import {
   setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays, attachQualifiedR5AmountDetails,
   getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
-  retainField, readRetainedField, DOSAGE_RECONCILIATION_SOURCE_URL, withR5CountMinimum, withR5DurationMinimum, withR5PeriodMinimum
+  retainField, readRetainedField, DOSAGE_RECONCILIATION_SOURCE_URL, withTimingCountMinimum, withTimingDurationMinimum, withTimingPeriodMinimum
 } from "./dosage-course";
 import type { ParseOptions, FhirDayOfWeek } from "./types";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
@@ -2043,11 +2043,11 @@ export function canonicalToFhir(
   const schedule = clause.schedule;
   Object.assign(dosage, serializeCanonicalSchedule(schedule, options, clause.clinicalQuantity));
   if (schedule?.countMax !== undefined && dosage.timing?.repeat)
-    dosage.timing.repeat = withR5CountMinimum(dosage.timing.repeat);
+    dosage.timing.repeat = withTimingCountMinimum(dosage.timing.repeat);
   if (schedule?.administrationDurationMax !== undefined && dosage.timing?.repeat)
-    dosage.timing.repeat = withR5DurationMinimum(dosage.timing.repeat);
+    dosage.timing.repeat = withTimingDurationMinimum(dosage.timing.repeat);
   if (schedule?.periodMax !== undefined && dosage.timing?.repeat)
-    dosage.timing.repeat = withR5PeriodMinimum(dosage.timing.repeat);
+    dosage.timing.repeat = withTimingPeriodMinimum(dosage.timing.repeat);
   if (schedule?.maxDosePerPeriod?.length) {
     dosage.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => {
       const numerator = buildFhirDoseQuantity(maximum.amount, maximum.unit);

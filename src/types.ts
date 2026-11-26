@@ -465,6 +465,7 @@ export interface FhirTimingRepeat extends FhirElement {
   boundsPeriod?: FhirPeriod;
   boundsRange?: FhirRange;
   frequency?: number;
+  _frequency?: FhirPrimitiveElement;
   frequencyMax?: number;
   /** Duration of each administration occurrence. */
   duration?: number;
@@ -493,8 +494,9 @@ export interface FhirTimingRepeat extends FhirElement {
 /** R6 Snapshot 1 adds period-local interlacing windows to Timing.repeat.
  * These are not R5 Timing fields and must remain confined to the R6 wire type. */
 export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration" | "boundsRange" | "boundsPeriod" | "extension" |
-  "_count" | "_duration" | "_period" | "_dayOfWeek" | "_timeOfDay" | "_when">, FhirR6Element {
+  "_count" | "_frequency" | "_duration" | "_period" | "_dayOfWeek" | "_timeOfDay" | "_when">, FhirR6Element {
   _count?: FhirR6PrimitiveElement;
+  _frequency?: FhirR6PrimitiveElement;
   _duration?: FhirR6PrimitiveElement;
   _period?: FhirR6PrimitiveElement;
   _dayOfWeek?: Array<FhirR6PrimitiveElement | null>;
