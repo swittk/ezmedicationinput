@@ -126,6 +126,7 @@ function editedOperator(
 /** Quantity annotations and Ratio endpoints use the same operator bridge as their owner.
  * Other Extension value choices remain opaque; this is not a general
  * extension-version converter or an object-tree normalizer. */
+const extensionPrimitiveFields = ["_valueCode", "_valueString", "_valueDecimal", "_valueTime", "_valueInteger", "_valueBoolean"] as const;
 export function quantityAnnotationExtensions(
   source: FhirR6Extension[], target: "r5" | "r6"
 ): FhirR6Extension[] {
@@ -151,11 +152,17 @@ export function quantityAnnotationExtensions(
       };
     }
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
-    const current = quantity === item.valueQuantity && ratio === item.valueRatio && children === item.extension ? item : {
+    let current = quantity === item.valueQuantity && ratio === item.valueRatio && children === item.extension ? item : {
       ...item, ...(quantity !== item.valueQuantity ? { valueQuantity: quantity } : {}),
       ...(ratio !== item.valueRatio ? { valueRatio: ratio } : {}),
       ...(children !== item.extension ? { extension: children } : {}),
     };
+    for (const field of extensionPrimitiveFields) {
+      const primitive = quantityPrimitiveForWire(item[field], target);
+      if (primitive === item[field]) continue;
+      if (current === item) current = { ...item };
+      current[field] = primitive;
+    }
     if (current !== item) result ??= source.slice(0, index);
     result?.push(current);
   }

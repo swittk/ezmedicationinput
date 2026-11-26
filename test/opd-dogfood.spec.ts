@@ -2845,14 +2845,15 @@ describe("round50 explicit interchange scope and primitive ownership", () => {
       }
     });
 
-  it.each(["both", "bridge", "core"] as const)("keeps independent core and promoted clock annotations separate (%s)", owner => {
+  it.each(["both", "bridge", "core", "null-core"] as const)("keeps independent core and promoted clock annotations separate (%s)", owner => {
     const core = [{ id: "core-note", extension: [{ url: "urn:clinic:core-note", valueString: "independent core annotation" }] }];
     const bridgeNote = { id: "clock-note", extension: [{ url: "urn:clinic:clock-note", valueString: "authored bridge annotation" }] };
     const bridge: FhirExtension = { id: "clock-carrier", url: TIMING_ADDITIONAL_CLOCK_EXTENSION_URL,
       valueTime: "08:00:00", ...(owner !== "core" ? { _valueTime: bridgeNote } : {}) };
     const rows: FhirDosage[] = [{ id: "clock-dose", doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: {
       frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
-      ...(owner !== "bridge" ? { _timeOfDay: core } : {}), extension: [bridge],
+      ...(owner !== "bridge" ? { _timeOfDay: core } : {}),
+      ...(owner === "null-core" ? { timeOfDay: [null] } : {}), extension: [bridge],
     } } }];
     const before = persist(rows);
     let wire = toDosageDetails(rows);

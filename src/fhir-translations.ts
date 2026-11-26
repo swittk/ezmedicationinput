@@ -4,6 +4,7 @@ import {
   FhirR6PrimitiveElement,
   FhirR6Extension
 } from "./types";
+import { quantityAnnotationExtensions } from "./fhir-quantity-operator";
 
 export const FHIR_TRANSLATION_EXTENSION_URL =
   "http://hl7.org/fhir/StructureDefinition/translation";
@@ -42,54 +43,21 @@ export function mergeI18nRecords(
   return Object.keys(merged).length ? merged : undefined;
 }
 
-export function cloneExtension(extension: FhirR6Extension): FhirExtension {
-  return {
-    url: extension.url,
-    extension: extension.extension?.map(cloneExtension),
-    valueCode: extension.valueCode,
-    valueString: extension.valueString,
-    valueCoding: extension.valueCoding
-      ? {
-        system: extension.valueCoding.system,
-        code: extension.valueCoding.code,
-        display: extension.valueCoding.display,
-        _display: clonePrimitiveElement(extension.valueCoding._display),
-        i18n: cloneI18nRecord(extension.valueCoding.i18n),
-        extension: extension.valueCoding.extension?.map(cloneExtension)
-      }
-      : undefined,
-    valueCodeableConcept: extension.valueCodeableConcept
-      ? {
-        text: extension.valueCodeableConcept.text,
-        _text: clonePrimitiveElement(extension.valueCodeableConcept._text),
-        coding: extension.valueCodeableConcept.coding?.map((coding) => ({
-          system: coding.system,
-          code: coding.code,
-          display: coding.display,
-          _display: clonePrimitiveElement(coding._display),
-          i18n: cloneI18nRecord(coding.i18n),
-          extension: coding.extension?.map(cloneExtension)
-        })),
-        extension: extension.valueCodeableConcept.extension?.map(cloneExtension)
-      }
-      : undefined
-  };
-}
-
 export function cloneExtensions(
   extensions: FhirR6Extension[] | undefined
 ): FhirExtension[] | undefined {
-  return extensions?.length ? extensions.map(cloneExtension) : undefined;
+  return extensions?.length
+    ? quantityAnnotationExtensions(extensions, "r5") as FhirExtension[] : undefined;
 }
 
 export function clonePrimitiveElement(
   element: FhirR6PrimitiveElement | undefined
 ): FhirPrimitiveElement | undefined {
-  if (!element?.extension?.length) {
-    return undefined;
-  }
+  if (!element) return undefined;
+  const { extension, ...metadata } = element;
   return {
-    extension: element.extension.map(cloneExtension)
+    ...metadata,
+    ...(extension ? { extension: cloneExtensions(extension) } : {})
   };
 }
 
@@ -118,7 +86,7 @@ export function buildTranslationPrimitiveElement(
 
   for (const extension of baseExtensions) {
     if (extension.url !== FHIR_TRANSLATION_EXTENSION_URL) {
-      nextExtensions.push(cloneExtension(extension));
+      nextExtensions.push(extension);
     }
   }
 
@@ -133,13 +101,9 @@ export function buildTranslationPrimitiveElement(
     }
   }
 
-  if (!nextExtensions.length) {
-    return undefined;
-  }
-
-  return {
-    extension: nextExtensions
-  };
+  const { extension: _extensions, ...metadata } = base ?? {};
+  if (!nextExtensions.length) return Object.keys(metadata).length ? metadata : undefined;
+  return { ...metadata, extension: nextExtensions };
 }
 
 export function mergeTranslationPrimitiveElement(

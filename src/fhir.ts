@@ -383,24 +383,24 @@ export function getTimingEvents(timing: Pick<FhirTiming, "event"> | undefined): 
   return events ?? source as string[];
 }
 
-/** Read the current wire clock field. A supplied core field, including an empty
- * array, owns its edit; the bridge is the clock field only when core is absent. */
+/** Core clock values take priority over the bridge. Null primitive positions
+ * carry metadata only; an explicitly empty clock array remains an empty field. */
 export function getTimingClocks(
   repeat: Pick<FhirR6TimingRepeat, "timeOfDay" | "extension"> | undefined
 ): string[] | undefined {
   if (!repeat) return undefined;
+  let clocks: string[] | undefined;
   if (repeat.timeOfDay !== undefined) {
     const source = repeat.timeOfDay;
-    let clocks: string[] | undefined;
     for (let index = 0; index < source.length; index++) {
       const clock = source[index];
       if (clock === null) clocks ??= source.slice(0, index) as string[];
       else if (clocks) clocks.push(clock);
     }
-    return clocks ?? source as string[];
+    const values = clocks ?? source as string[];
+    if (values.length || !source.length) return values;
   }
-  if (!repeat.extension?.length) return undefined;
-  let clocks: string[] | undefined;
+  if (!repeat.extension?.length) return clocks;
   for (const item of repeat.extension) {
     if (item.url !== TIMING_ADDITIONAL_CLOCK_EXTENSION_URL) continue;
     if (typeof item.valueTime === "string") (clocks ??= []).push(item.valueTime);
@@ -441,7 +441,8 @@ export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDa
   let bridgeIndex = 0;
   let bridgeMetadata: FhirR6TimingRepeat["_timeOfDay"];
   let bridgeClocks: FhirTimingRepeat["timeOfDay"];
-  let bridgeMatches = wireSource !== undefined && wireSource.timeOfDay === undefined;
+  let bridgeMatches = wireSource !== undefined &&
+    (sourceClocks === undefined || sourceClocks.length > 0 && !sourceClocks.some(clock => clock !== null));
   for (const marker of repeat.extension ?? []) {
     if (marker.url !== TIMING_ADDITIONAL_CLOCK_EXTENSION_URL) { kept.push(marker); continue; }
     (markers ??= []).push(marker);
@@ -1849,9 +1850,9 @@ export function serializeCanonicalSchedule(
         ...(high ? { high: simpleQuantityForR5(high) } : {}) }
     }];
     hasRepeat = true;
-  } else if (schedule?.administrationDuration !== undefined && schedule.administrationDurationUnit &&
-      !schedule.administrationDurationComparator) {
-    repeat.duration = schedule.administrationDuration;
+  } else if (schedule && (schedule.administrationDuration !== undefined || schedule.administrationDurationMax !== undefined) &&
+      schedule.administrationDurationUnit && !schedule.administrationDurationComparator) {
+    if (schedule.administrationDuration !== undefined) repeat.duration = schedule.administrationDuration;
     repeat.durationUnit = schedule.administrationDurationUnit;
     if (schedule.administrationDurationMax !== undefined) {
       repeat.durationMax = schedule.administrationDurationMax;

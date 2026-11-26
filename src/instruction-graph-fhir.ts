@@ -126,12 +126,14 @@ function addRelation(
 function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | undefined): void {
   if (!sources?.length) return;
   const activeFields = parts.length;
+  let codingIndex = 0;
   for (const source of sources ?? []) {
     let index = -1;
     const optionalField = source.url === "normalized" || source.url === "conceptId" || source.url === "quantity";
     const translation = source.url === "translation" || source.url === "predicateTranslation";
     const locale = translation ? parseTranslationNode(source).locale : undefined;
-    for (let i = 0; i < activeFields; i++) {
+    const repeatedCoding = source.url === "predicateCoding" || source.url === "argumentCoding";
+    for (let i = repeatedCoding ? codingIndex : 0; i < activeFields; i++) {
       if (parts[i].url !== source.url || source.url === "tokenIndex" &&
           parts[i].valueInteger !== source.valueInteger ||
           translation && parseTranslationNode(parts[i]).locale !== locale) continue;
@@ -148,6 +150,7 @@ function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | unde
       }
     }
     if (index >= 0) {
+      if (repeatedCoding) codingIndex = index + 1;
       if (translation) addFieldSources(parts[index].extension!, source.extension);
       parts[index] = { ...source, ...parts[index] };
     }
@@ -503,6 +506,7 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     quantity:FhirExtension|undefined;
   const codings:FhirCoding[]=[],components:NonNullable<AdviceArgument["components"]>=[];
   let i18n:Record<string,string>|undefined,sourceExtensions:FhirExtension[]|undefined;
+  let codingSources: FhirExtension[] | undefined;
   for(const entry of extension.extension??[])switch(entry.url){
     case "role":
       if(!role)role=entry;
@@ -512,8 +516,14 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
       if(!text)text=entry;
       if(hasFieldMetadata(entry,"valueString"))(sourceExtensions??=[]).push(entry);
       break;
-    case "relation":if(!relation)relation=entry;break;
-    case "relationCoding":if(!relationCoding)relationCoding=entry;break;
+    case "relation":
+      if(!relation)relation=entry;
+      if(hasFieldMetadata(entry,"valueCode"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "relationCoding":
+      if(!relationCoding)relationCoding=entry;
+      if(hasFieldMetadata(entry,"valueCoding"))(sourceExtensions??=[]).push(entry);
+      break;
     case "normalized":
       if(!normalized)normalized=entry;
       if(hasFieldMetadata(entry,"valueString"))(sourceExtensions??=[]).push(entry);
@@ -526,13 +536,32 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
       if(!coding)coding=entry;
       if(hasFieldMetadata(entry,"valueCoding")||hasCodingMetadata(entry.valueCoding))(sourceExtensions??=[]).push(entry);
       break;
-    case "spanStart":if(!spanStart)spanStart=entry;break;
-    case "spanEnd":if(!spanEnd)spanEnd=entry;break;
+    case "spanStart":
+      if(!spanStart)spanStart=entry;
+      if(hasFieldMetadata(entry,"valueInteger"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "spanEnd":
+      if(!spanEnd)spanEnd=entry;
+      if(hasFieldMetadata(entry,"valueInteger"))(sourceExtensions??=[]).push(entry);
+      break;
     case "quantity":
       if(!quantity)quantity=entry;
       if(hasFieldMetadata(entry,"extension"))(sourceExtensions??=[]).push(entry);
       break;
-    case "argumentCoding":{const value=readCoding(entry.valueCoding);if(value)codings.push(value);break;}
+    case "argumentCoding": {
+      const value = readCoding(entry.valueCoding);
+      if (value) {
+        if (codingSources || hasFieldMetadata(entry, "valueCoding")) {
+          if (!codingSources) {
+            codingSources = [];
+            for (const coding of codings) codingSources.push({ url: "argumentCoding", valueCoding: coding });
+          }
+          codingSources.push(entry);
+        }
+        codings.push(value);
+      }
+      break;
+    }
     case "translation": {
       const value = parseTranslationNode(entry);
       if (value.locale && value.text) (i18n ??= {})[value.locale] = value.text;
@@ -575,6 +604,7 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
   if(extension.id!==undefined)result.sourceId=extension.id;
   if(relationCoding?.valueCoding)result.sourceRelationCoding=readCoding(relationCoding.valueCoding);
   if(components.length)result.components=components;
+  if (codingSources) for (const field of codingSources) (sourceExtensions ??= []).push(field);
   if(sourceExtensions)result.sourceExtensions=sourceExtensions;
   if(spanStart?.valueInteger!==undefined&&spanEnd?.valueInteger!==undefined)
     result.span={start:spanStart.valueInteger,end:spanEnd.valueInteger};
@@ -662,6 +692,7 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
   let translations:Record<string,string>|undefined;
   let locales:NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"]|undefined;
   let sourceExtensions:FhirExtension[]|undefined;
+  let codingSources: FhirExtension[] | undefined;
   for(const field of extension.extension??[])switch(field.url){
     case "predicateLemma":
       if(!lemma)lemma=field;
@@ -702,7 +733,14 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
       if(!modality)modality=field;
       if(hasFieldMetadata(field,"valueCode"))(sourceExtensions??=[]).push(field);
       break;
-    case "relation":if(!relation)relation=field;break;case "relationCoding":if(!relationCoding)relationCoding=field;break;
+    case "relation":
+      if(!relation)relation=field;
+      if(hasFieldMetadata(field,"valueCode"))(sourceExtensions??=[]).push(field);
+      break;
+    case "relationCoding":
+      if(!relationCoding)relationCoding=field;
+      if(hasFieldMetadata(field,"valueCoding"))(sourceExtensions??=[]).push(field);
+      break;
     case "predicateDisplay":
       if(!display)display=field;
       if(hasFieldMetadata(field,"valueString"))(sourceExtensions??=[]).push(field);
@@ -718,7 +756,20 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
       if(hasFieldMetadata(field,"valueInteger"))(sourceExtensions??=[]).push(field);
       break;
     case "argument":{const value=parseArgumentExtension(field);if(value)args.push(value);break;}
-    case "predicateCoding":{const value=readCoding(field.valueCoding);if(value)codings.push(value);break;}
+    case "predicateCoding": {
+      const value = readCoding(field.valueCoding);
+      if (value) {
+        if (codingSources || hasFieldMetadata(field, "valueCoding")) {
+          if (!codingSources) {
+            codingSources = [];
+            for (const coding of codings) codingSources.push({ url: "predicateCoding", valueCoding: coding });
+          }
+          codingSources.push(field);
+        }
+        codings.push(value);
+      }
+      break;
+    }
     case "predicateTranslation": {
       const value = parseTranslationNode(field);
       if (value.locale && value.text) (translations ??= {})[value.locale] = value.text;
@@ -771,6 +822,7 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
     args,span:{start:start.valueInteger,end:end.valueInteger},sourceText:source.valueString??"",sequenceIndex:sequence?.valueInteger};
   if(extension.id!==undefined)frame.sourceId=extension.id;
   if(relationCoding?.valueCoding)frame.sourceRelationCoding=readCoding(relationCoding.valueCoding);
+  if (codingSources) for (const field of codingSources) (sourceExtensions ??= []).push(field);
   if(sourceExtensions)frame.sourceExtensions=sourceExtensions;
   return frame;
 }

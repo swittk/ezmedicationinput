@@ -465,6 +465,7 @@ export interface FhirTimingRepeat extends FhirElement {
   /** Primitive metadata may represent an unspecified lower count without inventing a value. */
   _count?: FhirPrimitiveElement;
   countMax?: number;
+  _countMax?: FhirPrimitiveElement;
   boundsDuration?: FhirQuantity;
   boundsPeriod?: FhirPeriod;
   boundsRange?: FhirRange;
@@ -477,12 +478,16 @@ export interface FhirTimingRepeat extends FhirElement {
   /** Primitive annotation for a stated or unspecified lower duration. */
   _duration?: FhirPrimitiveElement;
   durationMax?: number;
+  _durationMax?: FhirPrimitiveElement;
   durationUnit?: FhirPeriodUnit;
+  _durationUnit?: FhirPrimitiveElement;
   period?: number;
   /** Primitive annotation for a stated or unspecified lower period. */
   _period?: FhirPrimitiveElement;
   periodMax?: number;
+  _periodMax?: FhirPrimitiveElement;
   periodUnit?: FhirPeriodUnit;
+  _periodUnit?: FhirPrimitiveElement;
   dayOfWeek?: Array<FhirDayOfWeek | null>;
   /** Primitive metadata corresponding positionally to dayOfWeek. */
   _dayOfWeek?: Array<FhirPrimitiveElement | null>;
@@ -494,13 +499,21 @@ export interface FhirTimingRepeat extends FhirElement {
   _when?: Array<FhirPrimitiveElement | null>;
   /** Exact event offset in minutes. */
   offset?: number;
+  _offset?: FhirPrimitiveElement;
 }
 
 /** R6 Snapshot 1 adds period-local interlacing windows to Timing.repeat.
  * These are not R5 Timing fields and must remain confined to the R6 wire type. */
 export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration" | "boundsRange" | "boundsPeriod" | "extension" |
-  "_count" | "_frequency" | "_frequencyMax" | "_duration" | "_period" | "_dayOfWeek" | "_timeOfDay" | "_when">, FhirR6Element {
+  "_count" | "_countMax" | "_frequency" | "_frequencyMax" | "_duration" | "_durationMax" | "_durationUnit" |
+  "_period" | "_periodMax" | "_periodUnit" | "_dayOfWeek" | "_timeOfDay" | "_when" | "_offset">, FhirR6Element {
   _count?: FhirR6PrimitiveElement;
+  _countMax?: FhirR6PrimitiveElement;
+  _durationMax?: FhirR6PrimitiveElement;
+  _durationUnit?: FhirR6PrimitiveElement;
+  _periodMax?: FhirR6PrimitiveElement;
+  _periodUnit?: FhirR6PrimitiveElement;
+  _offset?: FhirR6PrimitiveElement;
   _frequency?: FhirR6PrimitiveElement;
   _frequencyMax?: FhirR6PrimitiveElement;
   _duration?: FhirR6PrimitiveElement;
@@ -677,6 +690,7 @@ export type FhirR6DosageCondition = FhirR6BackboneElement & {
   details?: FhirR6CodeableConcept;
   operation?: "eq" | "ne" | "in" | "nin" | "gt" | "lt" | "ge" | "le" | "sa" | "eb" | "ap";
   text?: string;
+  _text?: FhirR6PrimitiveElement;
 } & DosageConditionValue;
 
 /** FHIR R6 DosageSafety.doseLimit.value[x] is a required choice. */

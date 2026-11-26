@@ -1,4 +1,4 @@
-import { getDoseQuantityUnit } from "../maps";
+import { getDoseQuantityUnit, getStandardDoseUnitCoding, stripTerminalUcumAnnotations } from "../maps";
 
 export const MASS_UNITS: Record<string, number> = {
     kg: 1000000,
@@ -117,6 +117,13 @@ export function sameCodedQuantityUnit(left: QuantityUnit | undefined, right: Qua
 
 /** The calculation unit shared by numeric comparison and compatible-unit indexing. */
 export function getQuantityComparisonUnit(quantity: QuantityUnit | undefined): string {
+    if (quantity?.system === "http://unitsofmeasure.org" && quantity.code) {
+        // Explicit UCUM codes retain their identity. Lexical aliases such as U
+        // are licensed for authored unit labels, not for coded quantities.
+        const code = stripTerminalUcumAnnotations(quantity.code);
+        const supported = getStandardDoseUnitCoding(code);
+        if (supported?.system !== quantity.system || supported.code !== code) return "";
+    }
     return normalizeQuantityCapUnit(getDoseQuantityUnit(quantity, false));
 }
 

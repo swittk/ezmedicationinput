@@ -1466,9 +1466,11 @@ export function selectR5Maximum(
     current.groups.set(unit, selected);
   }
   if (dose) {
-    const identity = maximumUnitKey(dose), dimension = maximumComparisonUnitKey(dose);
-    const compatible = (dimension === undefined ? undefined : current.groups.get(dimension)) ??
-      (identity === undefined ? undefined : current.groups.get(identity));
+    const identity = maximumUnitKey(dose);
+    const coded = identity === undefined ? undefined : current.groups.get(identity);
+    const dimension = maximumComparisonUnitKey(dose) ??
+      (coded ? maximumComparisonUnitKey(coded.comparisonBasis ?? coded.quantity) : undefined);
+    const compatible = (dimension === undefined ? undefined : current.groups.get(dimension)) ?? coded;
     if (compatible) selected = compatible;
   }
   current.quantity = selected.quantity; current.definite = selected.definite;
