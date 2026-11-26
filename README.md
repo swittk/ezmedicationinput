@@ -353,6 +353,12 @@ Whole-course wording is a typed optional `course` facet on the existing
 `SigLocalization` registration. It complements the same `formatShort` and
 `formatLong` clause hooks—there is no separate registry or second parser.
 
+The `formatLong` callback receives the complete clause, `defaultText`, and
+`formatDefault(style)`. Its returned string is the final clause wording: custom
+formatters may wrap or replace the whole clause and are responsible for that
+wording. Built-in defaults compose medication conditions and independent advice
+from typed facts.
+
 ```ts
 import {
   importCanonicalCourse,

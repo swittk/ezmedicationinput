@@ -326,7 +326,7 @@ describe("shared timing article roles", () => {
 
 
 describe("structured preview defaults", () => {
-  it("keeps the dose guard inside wrapped long defaults and retains a whole-sentence fallback", () => {
+  it("keeps guarded whole-clause defaults and accepts a complete wording override", () => {
     const source: FhirR6DosageInstruction = { step: [{ component: [{
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       condition: [{ code: { coding: [{ system: "http://loinc.org", code: "8480-6",
@@ -346,7 +346,7 @@ describe("structured preview defaults", () => {
         .toBe((index === 0 ? "" : "Directions: ") + expected);
     }
     expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized",
-      i18n: { formatLong: () => "Take this dose." } })).toBe("Take this dose only if SBP > 160.");
+      i18n: { formatLong: () => "Take this dose." } })).toBe("Take this dose.");
     expect(JSON.stringify(source)).toBe(before);
   });
 
@@ -427,26 +427,45 @@ describe("independent cadence and preview condition owners", () => {
     } })).toBe("Administer 1 tablet only if SBP > 160. Otherwise hold.");
     expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized", i18n: {
       formatLong: () => "Take this dose."
-    } })).toBe("Take this dose only if SBP > 160.");
+    } })).toBe("Take this dose.");
     expect(JSON.stringify(source)).toBe(before);
   });
 
-  it.each(["en", "th"] as const)("keeps identical independent advice from satisfying a replaced dose guard in %s", locale => {
+  it.each(["en", "th"] as const)("preserves native guard ownership and exact whole-clause overrides in %s", locale => {
     const advice = locale === "en" ? "Recheck BP only if SBP > 160" : "Recheck BP เฉพาะเมื่อ SBP > 160";
     const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [tablet],
-      condition: [guard], additionalInstruction: [{ text: advice }]
+      condition: [guard], additionalInstruction: [{ text: advice }],
+      extension: [{ url: "https://example.test/source-note", valueString: "Keep this source detail" }]
     }] }] };
     const before = JSON.stringify(source);
     const dose = "Administer 1 tablet";
     const guardText = locale === "en" ? "only if" : "เฉพาะเมื่อ";
+    const nativeDose = locale === "en" ? "Use 1 tablet" : "ใช้ครั้งละ 1 เม็ด";
+    expect(formatSig(source, "long", { locale, realizationMode: "normalized" }))
+      .toBe(`${nativeDose} ${guardText} SBP > 160. ${advice}.`);
+    const expectedDefault = `Use 1 tablet ${guardText} SBP > 160. ${advice}.`;
     for (const prefix of ["", "Directions: "]) {
+      let calls = 0;
       const text = formatSig(source, "long", { locale, realizationMode: "normalized", i18n: {
-        formatLong: context => prefix + context.defaultText.replace(
-          `Use 1 tablet ${guardText} SBP > 160.`, dose + ".")
+        formatLong: context => {
+          calls++;
+          expect(context.style).toBe("long");
+          expect(context.defaultText).toBe(expectedDefault);
+          expect(context.formatDefault("long")).toBe(expectedDefault);
+          expect(context.clause.dose).toMatchObject({ value: 1, unit: "tab" });
+          expect(context.clause.clinicalAdjuncts?.condition).toMatchObject({ kind: "measurement", operation: "gt", value: 160 });
+          expect(context.clause.additionalInstructions).toEqual(expect.arrayContaining([expect.objectContaining({ text: advice })]));
+          return prefix + context.defaultText.replace(`Use 1 tablet ${guardText} SBP > 160.`, dose + ".");
+        }
       } });
-      expect(text).toBe(`${prefix}${dose} ${guardText} SBP > 160. ${advice}.`);
-      expect(text.match(/SBP > 160/gu)).toHaveLength(2);
+      expect(text).toBe(`${prefix}${dose}. ${advice}.`);
+      expect(calls).toBe(1);
     }
+    expect(formatSig(source, "long", { locale, realizationMode: "normalized", i18n: {
+      formatLong: context => "Directions: " + context.formatDefault("long")
+        .replace(`Use 1 tablet ${guardText} SBP > 160.`, dose + ".")
+        .replace("Recheck BP", "Repeat B.P.") + " Call clinic if needed."
+    } })).toBe(`Directions: ${dose}. ${advice.replace("Recheck BP", "Repeat B.P.")}. Call clinic if needed.`);
     expect(JSON.stringify(source)).toBe(before);
   });
 

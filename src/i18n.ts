@@ -146,11 +146,6 @@ export function appendClinicalConditionText(text: string, condition: MedicationC
   return (trimmed ? trimmed + " " : "") + (negated ? words.unless : words.onlyIf) + " " + body + ".";
 }
 
-/** Custom callbacks retain the existing outer guard fallback. */
-export function canFormatConditionInPrimary(localization?: SigLocalization): boolean {
-  return !localization?.formatLong || isBuiltinSigFormatter(localization.formatLong);
-}
-
 export interface SigFormatContext {
   readonly style: "short" | "long";
   readonly clause: CanonicalSigClause;
@@ -187,6 +182,8 @@ export interface SigLocalization {
   readonly course?: CourseLanguage;
   formatDose?(dose: CanonicalDoseExpr | string, style: "short" | "long", scope?: SigDoseScope): string | undefined;
   formatShort?(context: SigShortContext): string;
+  /** Overrides the complete clause; the callback owns its returned wording.
+   * Context and default renderings still describe the full clause. */
   formatLong?(context: SigLongContext): string;
 }
 
@@ -201,20 +198,6 @@ const THAI_ADMINISTRATION_WINDOW_TRANSLATIONS = new Map(
     .filter((entry) => entry.i18n?.th)
     .map((entry) => [entry.text.toLowerCase().trim(), entry.i18n!.th!] as const)
 );
-
-type SigFormatter = NonNullable<SigLocalization["formatShort"] | SigLocalization["formatLong"]>;
-const BUILTIN_SIG_FORMATTERS = new WeakSet<SigFormatter>();
-
-/** Bundled formatters own the built-in clinical condition placement. */
-export function isBuiltinSigFormatter(formatter: SigFormatter): boolean {
-  return BUILTIN_SIG_FORMATTERS.has(formatter);
-}
-
-function registerBuiltinSigLocalization(localization: SigLocalization): void {
-  if (localization.formatShort) BUILTIN_SIG_FORMATTERS.add(localization.formatShort);
-  if (localization.formatLong) BUILTIN_SIG_FORMATTERS.add(localization.formatLong);
-  registerSigLocalization(localization);
-}
 
 const REGISTERED_LOCALIZATIONS = new Map<string, SigLocalization>();
 // An inherited regional view is valid while BOTH its exact registration and
@@ -302,7 +285,7 @@ export function resolveSigLocalization(
   return result;
 }
 
-registerBuiltinSigLocalization({
+registerSigLocalization({
   locale: "en",
   course: ENGLISH_COURSE,
   formatDose: formatDoseEnglish,
@@ -367,7 +350,7 @@ function createThaiLocalization(): SigLocalization {
   };
 }
 
-registerBuiltinSigLocalization(createThaiLocalization());
+registerSigLocalization(createThaiLocalization());
 
 // Thai formatting helpers
 const ROUTE_SHORT: Partial<Record<RouteCode, string>> = {

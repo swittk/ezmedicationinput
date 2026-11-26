@@ -10,7 +10,7 @@ import {
   type LocalizedTimingGrammar
 } from "./localized-timing";
 import { ParserState } from "./parser-state";
-import { appendClinicalConditionText, canFormatConditionInPrimary, type SigLocalization, type SigLongContext, type SigShortContext, type SigDoseScope } from "./i18n";
+import { appendClinicalConditionText, type SigLocalization, type SigLongContext, type SigShortContext, type SigDoseScope } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { composedCodedWarningActionSources } from "./advice";
@@ -1686,8 +1686,7 @@ function applyEnglishAdministrationModality(verb: string, clause: CanonicalSigCl
 }
 
 function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | undefined, words: CourseLanguage,
-  resolvedMethod?: SigLongContext["resolvedMethod"], condition?: MedicationCondition,
-  conditionParts?: { before: string; after: string }): string {
+  resolvedMethod?: SigLongContext["resolvedMethod"], condition?: MedicationCondition): string {
   const hasCanonicalAdministration = canonicalClauseHasAdministrationSemantics(clause);
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
@@ -2009,7 +2008,6 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       })) continue;
       parts.push(value);
     }
-    if (conditionParts) conditionParts.after = parts.length ? " " + parts.join(" ").trim() : "";
     if (condition) parts.unshift(appendClinicalConditionText(verb, condition, words));
     return parts.join(" ").trim() || `${verb}.`;
   }
@@ -2048,25 +2046,18 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     // alongside its current structured clinical guard.
     if (primaryConditions?.length)
       effectiveBase = attachInstructionGraphPrimaryConditions(effectiveBase, primaryConditions, "en");
-    let before = "", after = "";
     if (preFlowsIntoAdministration && preGraphInstruction) {
       const rawPre = preGraphInstruction.replace(/[.!?]+$/, "");
       const pre = rawPre ? rawPre.charAt(0).toUpperCase() + rawPre.slice(1) : rawPre;
-      before = `${pre}; ${sequenceSurface} `;
-      effectiveBase = before + effectiveBase.charAt(0).toLowerCase() + effectiveBase.slice(1);
+      effectiveBase = `${pre}; ${sequenceSurface} ${effectiveBase.charAt(0).toLowerCase()}${effectiveBase.slice(1)}`;
     }
     if (postFlowsFromAdministration && postGraphInstruction) {
       const post = postGraphInstruction.charAt(0).toLowerCase() + postGraphInstruction.slice(1);
-      after = `; ${sequenceSurface} ${post}`;
-      if (!/[.!?]$/.test(after)) after += ".";
-      effectiveBase = effectiveBase.replace(/[.!?]+$/, "") + after;
+      effectiveBase = `${effectiveBase.replace(/[.!?]+$/, "")}; ${sequenceSurface} ${post}`;
+      if (!/[.!?]$/.test(effectiveBase)) effectiveBase += ".";
     }
     if (leadingInstructionText && effectiveBase && entersPrimaryWithThen) {
       const leading = leadingInstructionText.replace(/[.!?]+$/, "");
-      if (conditionParts) {
-        conditionParts.before = `${leading}; ${sequenceSurface} ` + before.charAt(0).toLowerCase() + before.slice(1);
-        conditionParts.after = after + (trailingInstructionText ? " " + trailingInstructionText : "");
-      }
       return [
         `${leading}; ${sequenceSurface} ${effectiveBase.charAt(0).toLowerCase()}${effectiveBase.slice(1)}`,
         trailingInstructionText
@@ -2075,10 +2066,6 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     const effectiveTrailing = trailingInstructionText && graphContinuesWithThen
       ? `${sequenceSurface.charAt(0).toUpperCase()}${sequenceSurface.slice(1)} ${trailingInstructionText.charAt(0).toLowerCase()}${trailingInstructionText.slice(1)}`
       : trailingInstructionText;
-    if (conditionParts) {
-      conditionParts.before = (leadingInstructionText ? leadingInstructionText + " " : "") + before;
-      conditionParts.after = after + (effectiveTrailing ? " " + effectiveTrailing : "");
-    }
     return [leadingInstructionText, effectiveBase, effectiveTrailing].filter(Boolean).join(" ").trim();
   };
   if (!body) {
@@ -2257,11 +2244,6 @@ export function formatCanonicalClause(
   }
   let shortDefault: string | undefined;
   let longDefault: string | undefined;
-  const condition = clause.clinicalAdjuncts?.condition;
-  // Only a custom guarded preview needs the already-owned surrounding pieces.
-  // Keep independent advice outside the callback fallback for the dose.
-  const conditionParts = style === "long" && condition && !canFormatConditionInPrimary(localization)
-    ? { before: "", after: "" } : undefined;
 
   const formatDefault = (target: "short" | "long") => {
     switch (target) {
@@ -2273,7 +2255,7 @@ export function formatCanonicalClause(
       case "long":
         if (longDefault === undefined) {
           longDefault = formatLong(clause, options, localization?.course ?? ENGLISH_COURSE, resolvedMethod,
-            condition, conditionParts);
+            clause.clinicalAdjuncts?.condition);
         }
         return longDefault;
     }
@@ -2316,31 +2298,7 @@ export function formatCanonicalClause(
       instructionActionMap: options?.instructionActionMap,
       resolvedMethod
     };
-    const rendered = localization.formatLong(context);
-    if (condition && conditionParts &&
-        (!context.defaultText || !rendered.includes(context.defaultText))) {
-      // Exact retained pieces came from typed composition, not prose inference.
-      // Their conditions belong to those instructions, never to this dose.
-      let start = 0, end = rendered.length;
-      if (conditionParts.before) {
-        const index = rendered.indexOf(conditionParts.before);
-        if (index >= 0) start = index + conditionParts.before.length;
-      }
-      if (conditionParts.after) {
-        const index = rendered.lastIndexOf(conditionParts.after);
-        if (index >= start) end = index;
-      }
-      const administration = rendered.slice(start, end);
-      const words = localization.course ?? ENGLISH_COURSE;
-      const guard = normalizeInstructionText(appendClinicalConditionText("", condition, words));
-      if (!normalizeInstructionText(administration).includes(guard)) {
-        const guarded = appendClinicalConditionText(administration, condition, words);
-        const dose = end < rendered.length && conditionParts.after.charAt(0) === ";"
-          ? guarded.slice(0, -1) : guarded;
-        return rendered.slice(0, start) + dose + rendered.slice(end);
-      }
-    }
-    return rendered;
+    return localization.formatLong(context);
   }
 
   return formatDefault(style);
