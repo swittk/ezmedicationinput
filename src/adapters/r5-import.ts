@@ -50,7 +50,7 @@ import {
   offsetCadenceFingerprint,
   matchesOffsetCadence,
   matchesDosageProjectionFingerprint,
-  dosageTextFingerprint, getDosageSourceTextAgreement, dosageHasAgreedSourceText,
+  dosageTextFingerprint, getDosageSourceTextAgreement, dosageHasAgreedSourceText, getFreshDoseSource,
   getDosageSourceProjectionFingerprint, getDosageSourceTextFingerprint,
   isRenderedInstructionMarker,
   hasUnrecognizedEditMetadata,
@@ -1943,13 +1943,22 @@ export function courseFromR5(
     allTexts = true;
   let structuredWasEdited = false, allTextsWereEdited = true;
   let effectiveDosages: readonly (FhirDosage | EzDosage)[] = dosages;
+  let unverifiedAuthoredRows: Set<FhirDosage | EzDosage> | undefined;
   for (let index = 0; index < dosages.length; index++) {
     const dosage = dosages[index];
-    if (!hasInstructionBaseline && !dosage.extension?.length) continue;
+    const unownedText = !hasInstructionBaseline && dosage.text?.trim() && !getFreshDoseSource(dosage);
+    if (!hasInstructionBaseline && !dosage.extension?.length) {
+      if (unownedText) (unverifiedAuthoredRows ??= new Set()).add(dosage);
+      continue;
+    }
     const before = hasInstructionBaseline ? snapshot.rows[index] : undefined;
     const projection = before?.projection ?? getDosageSourceProjectionFingerprint(dosage),
       text = before?.text ?? getDosageSourceTextFingerprint(dosage);
-    if (projection === undefined || text === undefined) continue;
+    if (projection === undefined || text === undefined) {
+      if (unownedText && projection === undefined && text === undefined)
+        (unverifiedAuthoredRows ??= new Set()).add(dosage);
+      continue;
+    }
     const projectionMatches = matchesDosageProjectionFingerprint(dosage, projection);
     const textMatches = text === dosageTextFingerprint(dosage);
     if (!projectionMatches || !textMatches) instructionStillMatches = false;
@@ -2132,6 +2141,15 @@ export function courseFromR5(
     if (effectiveDosages.length === 1 && effectiveDosages[0].text)
       header.renderedInstruction = effectiveDosages[0].text;
   }
+  // Whole-course and parser source proofs have already been selected above.
+  // A fresh unmarked member's wording remains authored source beside its facts.
+  const importMember = (row: FhirDosage | EzDosage): CanonicalAdministration => {
+    const member = administrationFromR5(row, sourceContext);
+    const provenance = member.provenance!;
+    if (unverifiedAuthoredRows?.has(row) && provenance.sourceTextVerified === undefined)
+      provenance.sourceTextVerified = false;
+    return member;
+  };
   if (effectiveDosages.length === 1 && !course?.step?.length) {
     const row = effectiveDosages[0],
       sequence = row.sequence ?? 1;
@@ -2141,7 +2159,7 @@ export function courseFromR5(
         "Invalid Dosage.sequence was preserved in the component and projected into the first stage for correction."
       );
     const result = courseFromFields(header, [
-      { administrations: [administrationFromR5(row, sourceContext)] },
+      { administrations: [importMember(row)] },
     ], replacementInstruction !== undefined ? true : snapshot.sourceAgreement, headerCovered, membersCovered);
     return withPreservedSourceExtension(
       withReconciliationSources(withReconciliationWarnings(result, warnings), reconciliationSources),
@@ -2159,7 +2177,7 @@ export function courseFromR5(
       );
     let members = groups.get(sequence);
     if (!members) groups.set(sequence, (members = []));
-    members.push(administrationFromR5(row, sourceContext));
+    members.push(importMember(row));
   }
   const metadata = new Map<number, NonNullable<EzCourseMetadata["step"]>[number]>();
   for (const step of course?.step ?? []) {

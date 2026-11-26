@@ -1,7 +1,7 @@
 import { TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
 import { getDoseUnitKind, getQuantityDurationUnit } from "./unit-lexicon";
 import { joinLocalizedList } from "./utils/text";
-import { ENGLISH_COURSE, ENGLISH_DAY_NAMES } from "./locales/course/en";
+import { ENGLISH_COURSE, ENGLISH_DAY_NAMES, ENGLISH_CLAUSE_TIMING } from "./locales/course/en";
 import type { CourseLanguage } from "./localization";
 import { buildCanonicalSigClauses, canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
@@ -240,6 +240,9 @@ export function routeCodeFromDisplayText(text: string | undefined, includeOtic: 
   if (!normalized) {
     return undefined;
   }
+  if (normalized.includes("inhal")) {
+    return RouteCode["Respiratory tract route (qualifier value)"];
+  }
   if (normalized.includes("mouth") || normalized.includes("oral")) {
     return RouteCode["Oral route"];
   }
@@ -276,9 +279,6 @@ export function routeCodeFromDisplayText(text: string | undefined, includeOtic: 
   }
   if (normalized.includes("nasal")) {
     return RouteCode["Nasal route"];
-  }
-  if (normalized.includes("inhal")) {
-    return RouteCode["Respiratory tract route (qualifier value)"];
   }
   return undefined;
 }
@@ -1047,14 +1047,21 @@ function describeCalendarEventsEnglish(
  * @param schedule Calendar-day membership from grammar or a structured import.
  * @returns An English monthly day phrase when a selection is present.
  */
+export function dayOfMonthUsesSingleMonth(schedule: CanonicalScheduleExpr | undefined): boolean {
+  return schedule?.periodUnit !== FhirPeriodUnit.Month ||
+    (schedule.period === undefined || schedule.period === 1) &&
+    (schedule.periodMax === undefined || schedule.periodMax === 1);
+}
+
 function describeDayOfMonth(schedule: CanonicalScheduleExpr | undefined): string | undefined {
   const days = schedule?.dayOfMonth ?? [];
   if (!days.length) return undefined;
   const sorted = [...days].sort((a, b) => a - b);
   const contiguous = sorted.every((day, index) => !index || day === sorted[index - 1] + 1);
-  if (sorted.length === 1) return `on day ${sorted[0]} of each month`;
-  return contiguous ? `on days ${sorted[0]}–${sorted[sorted.length - 1]} of each month`
-    : `on days ${sorted.join(" and ")} of each month`;
+  const period = dayOfMonthUsesSingleMonth(schedule) ? " of each month" : "";
+  if (sorted.length === 1) return `on day ${sorted[0]}${period}`;
+  return contiguous ? `on days ${sorted[0]}–${sorted[sorted.length - 1]}${period}`
+    : `on days ${sorted.join(" and ")}${period}`;
 }
 
 function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1073,6 +1080,10 @@ function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string 
   return days.length ? `on ${joinWithAnd(days)}` : undefined;
 }
 
+function durationEndpointPrefix(comparator: CanonicalScheduleExpr["durationComparator"], bound: string): string {
+  return (!comparator || comparator === "~" ? bound : "") + (comparator ?? "");
+}
+
 export function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefined {
   const durationUnit = schedule.durationUnit ??
     (schedule.durationUnitLabel ? " " + schedule.durationUnitLabel : undefined);
@@ -1089,7 +1100,7 @@ export function formatDurationShort(schedule: CanonicalScheduleExpr): string | u
   }
   const upperUnit = durationMaxUnit ?? durationUnit ?? "";
   if (schedule.duration === undefined)
-    return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${upperUnit}`;
+    return `x${durationEndpointPrefix(schedule.durationMaxComparator, "<=")}${stripTrailingZero(schedule.durationMax!)}${upperUnit}`;
   const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
       (schedule.durationMax !== schedule.duration || upperUnit !== durationUnit ||
@@ -1154,7 +1165,7 @@ export function describeDuration(
   const label = (value: number, endpointUnit = unit, unitCode = schedule.durationUnit): string =>
     unitCode ? words.timeUnit(unitCode, value) ?? endpointUnit : endpointUnit;
   if (schedule.duration === undefined)
-    return `${text.coursePrefix} ${schedule.durationMaxComparator ?? text.upper}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax!, upperUnit, upperUnitCode)}`.trim();
+    return `${text.coursePrefix} ${durationEndpointPrefix(schedule.durationMaxComparator, text.upper)}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax!, upperUnit, upperUnitCode)}`.trim();
   const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
       (schedule.durationMax !== schedule.duration || upperUnit !== unit ||
@@ -1355,7 +1366,9 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
   ) {
     parts.push(`${stripTrailingZero(schedule.frequency)}x/d`);
   } else if (schedule.period !== undefined && schedule.periodUnit &&
-      !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.frequency === undefined && schedule.frequencyMax === undefined &&
+      !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.period === 1 &&
+        (schedule.periodMax === undefined || schedule.periodMax === 1) &&
+        schedule.frequency === undefined && schedule.frequencyMax === undefined &&
         (schedule.dayOfMonth?.length ?? 0) > 1)) {
     const base = stripTrailingZero(schedule.period);
     const qualifier =
@@ -1429,6 +1442,8 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
   }
   const occurrenceCap = describeOccurrenceCapEnglish(schedule);
   if (occurrenceCap) parts.push(occurrenceCap);
+  const clockWindow = describeClockWindow(schedule);
+  if (clockWindow) parts.push(clockWindow);
   if (clause.prn?.enabled) {
     const reason = getPreferredCanonicalPrnReasonText(clause.prn.reason, clause.prn.reasons);
     if (reason) {
@@ -1445,6 +1460,7 @@ interface LongAdministrationTimingParts {
   frequency?: string;
   event?: string;
   eventWindow?: string;
+  clockWindow?: string;
   activities: string[];
   calendarEvents?: string;
   dayOfWeek?: string;
@@ -1467,6 +1483,14 @@ interface RichAdministrationParts {
 }
 
 /** Locale realizers supply words; their clinical timing order is shared. */
+export function describeClockWindow(
+  schedule: CanonicalScheduleExpr | undefined, timing = ENGLISH_CLAUSE_TIMING
+): string | undefined {
+  const window = schedule?.clockWindow;
+  return window ? timing.clockWindow(window.start.slice(0, 5), window.end.slice(0, 5),
+    Boolean(window.endInclusive)) : undefined;
+}
+
 export function appendLongAdministrationTiming(
   parts: string[], timing: LongAdministrationTimingParts, richTiming?: RichAdministrationParts
 ): void {
@@ -1478,6 +1502,7 @@ export function appendLongAdministrationTiming(
     if (richTiming.clock) parts.push(richTiming.clock);
   }
   if (timing.eventWindow) parts.push(timing.eventWindow);
+  if (timing.clockWindow) parts.push(timing.clockWindow);
   for (const activity of timing.activities) parts.push(activity);
   if (timing.calendarEvents) parts.push(timing.calendarEvents);
   if (timing.dayOfWeek) parts.push(timing.dayOfWeek);
@@ -1816,6 +1841,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
 
   const timingParts: LongAdministrationTimingParts = {
     frequency: timing.frequency, event: timing.event, eventWindow: eventWindowPart,
+    clockWindow: describeClockWindow(schedule),
     activities: formatActivityTimingEnglish(schedule), calendarEvents: calendarEventPart,
     dayOfWeek: dayPart, dayOfMonth: monthDayPart, calendarBounds: calendarBoundsPart,
     count: countPart, administrationDuration: administrationDurationPart,
@@ -2220,14 +2246,6 @@ export function formatNativeCanonicalClause(
       }
       return `${rendered.replace(/[.。]$/u, "")}; ${qualifier.replace(/[.。]$/u, "")}.`;
     }
-  }
-  const clockWindow = clause.schedule?.clockWindow;
-  if (clockWindow) {
-    const schedule = { ...clause.schedule, clockWindow: undefined };
-    const rendered = formatNativeCanonicalClause({ ...clause, schedule }, style, localization, options, authoredPrimary, deferredDirections);
-    const start = clockWindow.start.slice(0, 5);
-    const end = clockWindow.end.slice(0, 5);
-    return `${rendered.replace(/[.。]$/u, "")} ${native.timing.clockWindow(start, end, Boolean(clockWindow.endInclusive))}.`;
   }
   const offset = clause.schedule?.administrationOffsetMinutes;
   if (offset !== undefined && Number.isFinite(offset)) {

@@ -3285,37 +3285,34 @@ describe("round37 interchange phase, limit and source ownership", () => {
     }
   });
 
-  it("keeps unchanged site counts and uses a newly submitted target count", () => {
+  it("retains a fresh current target count with its dose, clock, limit and authored directions", () => {
     const countUrl = "urn:ezmedicationinput:body-site-administration-target-count";
-    const source = "Apply 1 g to each of 2 lesions daily max 2 g/day";
+    const source = "Apply 1 g to each of 3 lesions daily max 2 g/day";
     const input: FhirDosage = {
       text: source, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }], timing: { repeat: daily },
       maxDosePerPeriod: [{ numerator: { value: 2, unit: "g" }, denominator: { value: 1, unit: "d" } }],
-      site: { text: "lesions", extension: [{ url: countUrl, valueInteger: 2 }] },
+      site: { text: "lesions", extension: [{ url: countUrl, id: "authored-count", valueInteger: 3 }] },
     };
-    let row = persist(projectCanonicalCourse(importCanonicalCourse(input)).fhir[0]);
-    expect(formatSig(row, "long", { realizationMode: "roundtrip" })).toBe(source);
-    row = persist(row);
-    const marker = { ...row.site!.extension!.find(item => item.url === countUrl)!, id: "unchanged-count-new-annotation" };
-    row.site!.extension = [marker];
-    expect(importCanonicalCourse(row).stages[0].administrations[0].targetCount).toBe(2);
-    row = persist(row);
-    row.site!.extension![0].valueInteger = 3;
-    const edited = formatSig(row, "long", { realizationMode: "roundtrip" });
-    expect(edited).not.toContain("2 lesions");
-    expect(edited).toMatch(/\b1 g\b/);
-    expect(edited).toContain("across 3 sites");
-    expect(edited).toContain("max per period: 2 g / 1 d");
-    expect(edited).not.toMatch(/1 g (?:to )?each/);
-    expect(edited).toBe(formatSig(persist(row), "long", { realizationMode: "roundtrip" }));
-    expect(row.text).toBe(source);
-    for (let save = 0; save <= 3; save++) {
-      const native = importCanonicalCourse(row);
-      expect(native.stages[0].administrations[0].targetCount).toBe(3);
-      const output = projectCanonicalCourse(native);
-      expect(JSON.stringify(output.fhirNext)).toContain(source);
-      if (save < 3) row = persist(output.fhir[0]);
+    const before = persist(input), native = importCanonicalCourse(input);
+    const output = projectCanonicalCourse(native);
+    const r6 = output.fhirNext, returned = toFhirR5Dosages(r6)[0];
+    expect(native.stages[0].administrations[0].targetCount).toBe(3);
+    for (const row of [input, output.fhir[0], returned]) {
+      expect(row.doseAndRate).toEqual(input.doseAndRate);
+      expect(row.timing).toEqual(input.timing);
+      expect(row.site).toEqual(input.site);
+      expect(row.text).toBe(source);
     }
+    expect(r6.step![0].component[0].site?.concept).toEqual(input.site);
+    for (const value of [input, native, r6, returned]) {
+      const text = formatSig(value, "long", { locale: "en", realizationMode: "roundtrip" });
+      expect(text).toContain("1 g");
+      expect(text).toContain("8:00 am");
+      expect(text).toContain("across 3 sites");
+      expect(text).toContain("max per period: 2 g / 1 d");
+      expect(text).toContain(source);
+    }
+    expect(input).toEqual(before);
   });
 
   it.each([false, true])("shows a source-less ordinary R5 rate Ratio in both previews (dose=%s)", dose => {
@@ -4337,13 +4334,10 @@ describe("round42 interop current public contracts", () => {
     expect(ordinary.step![0].component[0].extension?.some(item => item.url === DOSAGE_RETAINED_R5_SEQUENCE_URL)).toBeFalsy();
   });
 
-  it("honors roundtrip mode in edited R5 localization callbacks while suppressing the removed rate", () => {
+  it("preserves authored rate directions and an independent cap in fresh R5 roundtrip callbacks", () => {
     const text = "Infuse 5 mL/h, maximum 10 mL per administration";
-    const row = persist(toFhirR5Dosages([{
-      text, doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }],
-      maxDosePerAdministration: { value: 10, unit: "mL" },
-    }])[0]);
-    delete row.doseAndRate;
+    const row: FhirDosage = { text, maxDosePerAdministration: { value: 10, unit: "mL" } };
+    const before = persist(row);
     const seen: string[] = [];
     const options: FormatOptions = { locale: "en", realizationMode: "roundtrip", i18n: {
       formatShort(context) { seen.push(context.realizationMode); return context.defaultText; },
@@ -4355,10 +4349,16 @@ describe("round42 interop current public contracts", () => {
     expect(new Set(seen)).toEqual(new Set(["roundtrip"]));
     expect(imported.longText).toBe(direct);
     for (const preview of [imported.shortText, imported.longText, direct]) {
-      expect(preview).not.toContain("5 mL");
-      expect(preview).toContain("10 mL");
+      expect(preview).toContain(text);
+      expect(preview).toContain("max per administration: 10 mL");
     }
-    expect(row.text).toBe(text);
+    const r6 = toDosageDetails([row]), returned = toFhirR5Dosages(r6)[0];
+    expect(importCanonicalCourse(row).stages[0].administrations[0].amounts).toBeUndefined();
+    expect(r6.step![0].component[0].doseAndRate).toBeUndefined();
+    expect(returned.doseAndRate).toBeUndefined();
+    expect(returned.maxDosePerAdministration).toEqual(row.maxDosePerAdministration);
+    expect(returned.text).toBe(text);
+    expect(row).toEqual(before);
   });
 
   it("keeps metadata-only clock bridge outside core clocks beside a when anchor", () => {
@@ -4946,34 +4946,35 @@ describe("round45 public interop preservation", () => {
 
   const spatialUrl = "urn:ezmedicationinput:body-site-spatial-relation";
   const ear = { text: "ear", coding: [{ system: "http://snomed.info/sct", code: "117590005", display: "Ear-related structure" }] };
-  it.each(["en", "th"] as const)("uses newly submitted coherent site spatial text through R6/R5 %s previews", locale => {
-    const source: FhirDosage = { text: "Apply 1 g below the ear daily, max 2 g per day",
+  it.each(["en", "th"] as const)("retains a fresh coherent above-ear site through R5/R6 %s previews", locale => {
+    const source: FhirDosage = { text: "Apply 1 g above the ear daily, max 2 g per day",
       doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }], timing: { repeat: daily },
       maxDosePerPeriod: [{ numerator: { value: 2, unit: "g" }, denominator: { value: 1, unit: "d" } }],
       site: { ...persist(ear), extension: [{ url: spatialUrl, id: "spatial-marker", extension: [
-        { url: "relationText", valueString: "below", id: "relation-text" },
+        { url: "relationText", valueString: "above", id: "relation-text" },
         { url: "target", valueCodeableConcept: persist(ear) },
       ] }] },
     };
-    let row = persist(toFhirR5Dosages([source]))[0];
-    expect(formatSig(row, "long", { locale, realizationMode: "roundtrip" })).toBe(source.text);
-    expect(formatSig(row, "long", { locale, realizationMode: "roundtrip" })).toBe(source.text);
-    row = persist(row);
-    row.site!.extension![0].extension![0].valueString = "above";
-    const edited = persist(row), r6 = toDosageDetails([row]);
-    const saved = persist(toFhirR5Dosages(r6))[0];
+    const before = persist(source), native = importCanonicalCourse(source);
+    const r6 = toDosageDetails([source]), returned = toFhirR5Dosages(r6)[0];
     for (const realizationMode of ["normalized", "roundtrip"] as const) {
       const options = { locale, realizationMode };
-      for (const text of [formatSig(row, "long", options), formatSig(persist(row), "long", options),
-        formatSig(r6, "long", options), formatSig(saved, "long", options)]) {
+      for (const value of [source, native, r6, returned]) {
+        const text = formatSig(value, "long", options);
         expect(text).toContain(locale === "en" ? "above the ear" : "เหนือหู");
         expect(text).not.toContain(locale === "en" ? "below" : "ใต้หู");
-        expect(text.match(/[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*g\b/g)).toEqual(["1 g", "2 g"]);
+        expect(text).toContain("1 g");
+        expect(text).toContain(locale === "en" ? "8:00 am" : "08:00");
+        expect(text).toContain("max per period: 2 g / 1 d");
+        expect(text).toContain(source.text!);
       }
     }
-    expect(row).toEqual(edited);
-    expect(r6.step![0].component[0].site?.concept).toEqual(edited.site);
-    expect(saved.site).toEqual(edited.site);
+    expect(source).toEqual(before);
+    expect(r6.step![0].component[0].site?.concept).toEqual(source.site);
+    expect(returned.site).toEqual(source.site);
+    expect(returned.timing).toEqual(source.timing);
+    expect(returned.doseAndRate).toEqual(source.doseAndRate);
+    expect(returned.text).toBe(source.text);
   });
 
   it("keeps a complete authored spatial site label", () => {

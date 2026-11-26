@@ -14,10 +14,10 @@ import {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getBodySiteText, buildBodySiteAdministrationTargetCountExtension, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
   type FormatOptions, type FhirR6Extension, type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
-  EventTiming, FhirPeriodUnit, AdviceRelation, AdviceArgumentRole, type CanonicalInstructionGraph, parseInstructionActions, cloneBodySiteSpatialRelation
+  EventTiming, FhirPeriodUnit, RouteCode, AdviceRelation, AdviceArgumentRole, type CanonicalInstructionGraph, parseInstructionActions, cloneBodySiteSpatialRelation
 } from "../src/index";
 import {
-  canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, getTimingClocks,
+  canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, getTimingClocks,
   toFhir as parserStateToFhir, getAdministrationOffsetMinutes, ADMINISTRATION_OFFSET_EXTENSION_URL,
   buildInfusionCarrierMaterialStructureDefinition, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL
 } from "../src/fhir";
@@ -27,7 +27,7 @@ import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "
 import {
   setDosageExcludedDates, getDosageExcludedDates, getDosageExcludedWeekdays, getDosageCalendarDayCondition,
   DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageAlternativeChoice,
-  setDosageAlternativeChoice, buildDosageAlternativeChoiceStructureDefinition
+  setDosageAlternativeChoice, buildDosageAlternativeChoiceStructureDefinition, conditionToR6
 } from "../src/dosage-course";
 
 import { COURSE_CYCLE_COUNT_EXTENSION_URL } from "../src/dosage-course";
@@ -7968,4 +7968,177 @@ describe("current weight-normalized maximum compatibility", () => {
       expect(JSON.stringify(input)).toBe(before);
     }
   });
+});
+
+
+describe("current structured preview qualifiers", () => {
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day };
+  const dose = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+  const views = (input: FhirR6DosageInstruction) => {
+    const r5 = toFhirR5Dosages(input);
+    const returned = toDosageDetails(r5);
+    return { r5, returned, values: [input, importCanonicalCourse(input), r5, returned] };
+  };
+
+  it.each(["dose and interval", "interval only", "count only", "authored count only"])(
+    "qualifies an annotated unknown finite cycle count with %s", variant => {
+      const count: FhirR6Extension = { url: COURSE_CYCLE_COUNT_EXTENSION_URL,
+        _valueInteger: { id: "unknown-cycle-count", extension: [{
+          url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+        }] } };
+      const input: FhirR6DosageInstruction = {
+        ...(variant === "dose and interval" ? { step: [{ component: [{ ...dose, timing: { repeat: daily } }] }] } : {}),
+        ...(variant === "authored count only" ? { renderedInstruction: "Follow the treatment plan." } : {}),
+        ...(!variant.endsWith("count only") ? { repeatCycle: { value: 28, unit: "d", code: "d", system: "http://unitsofmeasure.org" } } : {}),
+        modifierExtension: [count]
+      };
+      const before = JSON.stringify(input);
+      const { returned, values } = views(input);
+      expect(importCanonicalCourse(input).cycleCount).toBeUndefined();
+      expect(importCanonicalCourse(input).cycleCountUnresolved).toBe(true);
+      expect(returned.modifierExtension).toContainEqual(count);
+      for (const value of values)
+        for (const locale of ["en", "th"])
+          for (const style of ["short", "long"] as const) {
+            const text = formatSig(value, style, { locale, realizationMode: "normalized" });
+            expect(text).toContain(locale === "en" ? "Unresolved cycle timing" : "ยังระบุเวลาในรอบไม่ได้");
+            expect(text).not.toContain(locale === "en" ? "Repeat this schedule every" : "ทำซ้ำแผนการใช้ยานี้ทุก");
+            if (!variant.endsWith("count only")) expect(text).toContain(locale === "en" ? "28 days" : "28 วัน");
+            if (variant === "dose and interval") expect(text).toContain(locale === "en" ? "1 tab" : "1 เม็ด");
+            if (variant === "authored count only") expect(text).toContain(input.renderedInstruction!);
+          }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  );
+
+  it.each(["oral inhalation", "oral", "coded oral"])("honors the current %s route", variant => {
+    const route = { text: variant === "oral" ? "oral" : "oral inhalation",
+      ...(variant === "coded oral" ? { coding: [{ system: "http://snomed.info/sct", code: RouteCode["Oral route"] }] } : {}) };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ route,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "puff" } }] }] }] };
+    const before = JSON.stringify(input);
+    const { returned, values } = views(input);
+    expect(returned.step?.[0].component?.[0].route).toEqual(route);
+    for (const value of values) {
+      const en = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(value, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("1 puff");
+      expect(th).toContain("1 พัฟ");
+      if (variant === "oral inhalation") {
+        expect(en).toContain("via inhalation");
+        expect(th).toMatch(/^สูด/u);
+        expect(th).not.toContain("รับประทาน");
+      } else {
+        expect(en).toContain("orally");
+        expect(th).toMatch(/^รับประทาน/u);
+      }
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it("retains each fresh alternative's authored handling advice beside its current dose", () => {
+    const source = "Take 1 tablet daily. Wear gloves when handling.";
+    const rows: FhirDosage[] = [
+      { sequence: 1, text: source, ...dose, timing: { repeat: daily }, maxDosePerAdministration: { value: 1, unit: "tab" } },
+      { sequence: 1, text: "Take 5 mL daily.", doseAndRate: [{ doseQuantity: { value: 5, unit: "mL" } }], timing: { repeat: daily } }
+    ];
+    rows.forEach((row, index) => setDosageAlternativeChoice(row, {
+      groupId: "medication-form", branchId: "form-" + index, selectionBehavior: "exactly-one"
+    }));
+    const before = JSON.stringify(rows);
+    const r6 = toDosageDetails(rows);
+    const returned = toFhirR5Dosages(r6);
+    expect(returned[0].text).toBe(source);
+    expect(returned[0].doseAndRate?.[0].doseQuantity?.value).toBe(1);
+    expect(returned[1].doseAndRate?.[0].doseQuantity?.value).toBe(5);
+    for (const value of [rows, importCanonicalCourse(rows), r6, returned])
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(value, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? "Choose one:" : "เลือกอย่างใดอย่างหนึ่ง:");
+        expect(text).toContain(locale === "en" ? "Use 1 tablet once daily" : "ใช้ครั้งละ 1 เม็ด วันละครั้ง");
+        expect(text).toContain(locale === "en" ? "Use 5 mL once daily" : "ใช้ครั้งละ 5 มิลลิลิตร วันละครั้ง");
+        expect(text.match(/Wear gloves when handling/gu)).toHaveLength(1);
+      }
+    expect(formatSig(rows[0], "long", { realizationMode: "normalized" })).toContain("Wear gloves when handling");
+    const parsed = parseSig("Take 1 tablet daily");
+    expect(formatSig(parsed.fhir, "long", { locale: "en" })).toBe(parsed.longText);
+    expect(JSON.stringify(rows)).toBe(before);
+  });
+
+  it.each(["en", "th"])("keeps a dose's clock window and guard before independent advice in %s", locale => {
+    const condition: MedicationCondition = { kind: "measurement", name: "sbp", operation: "gt", value: 160, text: "SBP > 160" };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ ...dose,
+      timing: { repeat: { ...daily, extension: [{ url: TIMING_CLOCK_WINDOW_EXTENSION_URL, extension: [
+        { url: "start", valueTime: "08:00:00" }, { url: "end", valueTime: "12:00:00" }, { url: "endInclusive", valueBoolean: true }
+      ] }] } }, condition: [conditionToR6(condition)], additionalInstruction: [{ text: "Otherwise hold" }]
+    }] }] };
+    const before = JSON.stringify(input);
+    const { returned, values } = views(input);
+    const expected = locale === "en"
+      ? "Use 1 tablet once daily only between 08:00 and 12:00 each day only if SBP > 160. Otherwise hold."
+      : "ใช้ครั้งละ 1 เม็ด วันละครั้ง เฉพาะช่วงเวลา 08:00–12:00 ทุกวัน เฉพาะเมื่อ SBP > 160. Otherwise hold.";
+    for (const value of values) {
+      expect(formatSig(value, "long", { locale, realizationMode: "normalized" })).toBe(expected);
+      let calls = 0;
+      expect(formatSig(value, "long", { locale, realizationMode: "normalized", i18n: {
+        inherit: locale, formatLong: context => {
+          calls++;
+          expect(context.clause.schedule?.clockWindow).toMatchObject({ start: "08:00:00", end: "12:00:00" });
+          expect(context.clause.clinicalAdjuncts?.condition).toMatchObject(condition);
+          expect(context.defaultText).toBe(expected);
+          expect(context.formatDefault("long")).toBe(expected);
+          expect(context.formatDefault("short")).toContain("160");
+          return "Clinic wording exactly.";
+        }
+      } })).toBe("Clinic wording exactly.");
+      expect(calls).toBe(1);
+    }
+    expect(returned.step?.[0].component?.[0].timing).toEqual(input.step?.[0].component?.[0].timing);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each([1, 2])("retains a %s-month interval beside two calendar days", period => {
+    const repeat = { period, periodUnit: FhirPeriodUnit.Month,
+      extension: [1, 15].map(valuePositiveInt => ({ url: TIMING_DAY_OF_MONTH_EXTENSION_URL, valuePositiveInt })) };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ ...dose, timing: { repeat } }] }] };
+    const before = JSON.stringify(input);
+    const { returned, values } = views(input);
+    expect(returned.step?.[0].component?.[0].timing?.repeat).toEqual(repeat);
+    for (const value of values)
+      for (const locale of ["en", "th"])
+        for (const style of ["short", "long"] as const) {
+          const text = formatSig(value, style, { locale, realizationMode: "normalized" });
+          expect(text).toContain(locale === "en" ? "on days 1 and 15" : "วันที่ 1 และ 15");
+          if (period === 1) expect(text).toContain(locale === "en" ? "of each month" : "ของทุกเดือน");
+          else {
+            expect(text).toContain(locale === "en" ? style === "short" ? "Q2MO" : "every 2 months" : "ทุก 2 เดือน");
+            expect(text).not.toContain(locale === "en" ? "of each month" : "ของทุกเดือน");
+          }
+        }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(["upper approximate", "upper exact", "scalar approximate"])(
+    "retains the bound and approximation independently for %s duration", variant => {
+      const sourceQuantity = { value: 2, unit: "wk", code: "wk", system: "http://unitsofmeasure.org",
+        ...(variant.endsWith("approximate") ? { comparator: "~" as const } : {}) };
+      const quantity = variant === "scalar approximate" ? sourceQuantity : simpleQuantityForR5(sourceQuantity);
+      const repeat = { ...daily, ...(variant.startsWith("upper") ? { boundsRange: { high: quantity } } : { boundsDuration: quantity }) };
+      const input: FhirR6DosageInstruction = { step: [{ component: [{ ...dose, timing: { repeat } }] }] };
+      const before = JSON.stringify(input);
+      const { returned, values } = views(input);
+      expect(returned.step?.[0].component?.[0].timing?.repeat).toEqual(repeat);
+      for (const value of values)
+        for (const locale of ["en", "th"]) {
+          const short = formatSig(value, "short", { locale, realizationMode: "normalized" });
+          const long = formatSig(value, "long", { locale, realizationMode: "normalized" });
+          expect(short).toContain(variant === "upper approximate" ? "x<=~2wk" : variant === "upper exact" ? "x<=2wk" : "x~2wk");
+          if (variant.startsWith("upper")) expect(long).toContain(locale === "en" ? "up to" : "ไม่เกิน");
+          else expect(long).not.toContain(locale === "en" ? "up to" : "ไม่เกิน");
+          if (variant.endsWith("approximate")) expect(long).toContain("~2");
+          expect(long).toContain(locale === "en" ? "weeks" : "สัปดาห์");
+        }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  );
 });

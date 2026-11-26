@@ -5676,7 +5676,7 @@ describe("independent primary graph rendering owners", () => {
           const before = JSON.stringify(input);
           const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
           expect(text).toContain(locale === "en" ? en : th);
-          expect(text.match(/(?:^|[^0-9:])(?:08:00(?::00)?|8:00\s*am)(?![0-9:])/giu)).toHaveLength(1);
+          expect(text.match(/(?:^|[^0-9:])0?8:00(?::00)?(?:\s*am\b|(?![0-9:]|\s*[ap]m\b))/giu)).toHaveLength(1);
           expect(text).not.toMatch(/\bTake\b|รับประทาน/u);
           if (quantity !== undefined)
             expect(text.match(locale === "en" ? /10 mL/gu : /10 มิลลิลิตร/gu)).toHaveLength(1);
@@ -5779,7 +5779,7 @@ describe("independent primary graph rendering owners", () => {
       for (const locale of ["en", "th"]) {
         const before = JSON.stringify(input), text = formatSig(input, "long", { locale, realizationMode: "normalized" });
         expect(text).toContain(source.startsWith("Wash") ? locale === "en" ? "face" : "ใบหน้า" : "mouth");
-        expect(text.match(/(?:^|[^0-9:])(?:08:00(?::00)?|8:00\s*am)(?![0-9:])/giu)).toHaveLength(1);
+        expect(text.match(/(?:^|[^0-9:])0?8:00(?::00)?(?:\s*am\b|(?![0-9:]|\s*[ap]m\b))/giu)).toHaveLength(1);
         if (siteOn) expect(text).toMatch(locale === "en" ? /on (?:the )?face/u : /บนใบหน้า/u);
         else expect(text).not.toMatch(locale === "en" ? /(?:Wash|Rinse) on /u : /ล้าง(?:บน|บริเวณ)/u);
         expect(text).not.toMatch(/at at|เวลา\s*เวลา/u);
@@ -5807,8 +5807,8 @@ describe("independent primary graph rendering owners", () => {
         else expect(text).toContain("mouth");
         expect(text).not.toMatch(locale === "en" ? /Rinse on /u : /ล้าง(?:บน|บริเวณ)/u);
         if (times[0] === "08:00:00") {
-          expect(text.match(/(?:^|[^0-9:])(?:08:00(?::00)?|8:00\s*am)(?![0-9:])/giu)).toHaveLength(1);
-          expect(text.match(/(?:^|[^0-9:])(?:20:00(?::00)?|8:00\s*pm)(?![0-9:])/giu)).toHaveLength(1);
+          expect(text.match(/(?:^|[^0-9:])0?8:00(?::00)?(?:\s*am\b|(?![0-9:]|\s*[ap]m\b))/giu)).toHaveLength(1);
+          expect(text.match(/(?:^|[^0-9:])(?:20:00(?::00)?(?![0-9:]|\s*[ap]m\b)|0?8:00(?::00)?\s*pm\b)/giu)).toHaveLength(1);
         } else {
           expect(text.match(locale === "en" ? /breakfast/gu : /อาหารเช้า/gu)).toHaveLength(1);
           if (times.length > 1) expect(text.match(locale === "en" ? /bedtime/gu : /ก่อนนอน/gu)).toHaveLength(1);
@@ -5864,8 +5864,14 @@ describe("independent primary graph rendering owners", () => {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
         expect(text).toMatch(locale === "en" ? /^Do not /u : /^ห้าม/u);
         expect(text).toContain(expected);
-        if (material) expect(text.match(/(?:^|[^0-9:])08:00(?::00)?(?![0-9:])/gu)).toHaveLength(1);
-        else expect(text.match(locale === "en" ? /10 mL/gu : /10 มิลลิลิตร/gu)).toHaveLength(1);
+        if (material) {
+          expect(text.match(/(?:^|[^0-9:])08:00(?::00)?(?![0-9:]|\s*[ap]m\b)/gu)).toHaveLength(1);
+          const complete = locale === "en"
+            ? /^Do not rinse (?:the )?mouth with (?:mouthwash|water) at 08:00(?::00)?\.$/u
+            : material === "mouthwash" ? /^ห้ามบ้วนปากด้วยmouthwash เวลา 08:00(?::00)?\.$/u
+              : /^ห้ามล้างmouthด้วยน้ำ เวลา 08:00(?::00)?\.$/u;
+          expect(text).toMatch(complete);
+        } else expect(text.match(locale === "en" ? /10 mL/gu : /10 มิลลิลิตร/gu)).toHaveLength(1);
         expect(JSON.stringify(input)).toBe(before);
       }
     }
@@ -6092,5 +6098,94 @@ describe("independent primary graph rendering owners", () => {
       expect(en).toMatch(unit === "spray" ? /(?:^|[^0-9.])1 sprays?\b/u : /(?:^|[^0-9.])1 mL\b/u);
       expect(en.toLowerCase()).toContain("gently");
     }
+  });
+});
+
+
+describe("complete typed action participants", () => {
+  it.each([
+    { head: "Rinse the mouth", relation: AdviceRelation.In, polarity: AdvicePolarity.Negate,
+      args: [
+        { role: AdviceArgumentRole.Theme, text: "the applicator", normalized: "applicator", i18n: { th: "อุปกรณ์ทายา" } },
+        { role: AdviceArgumentRole.Site, text: "the sink", normalized: "sink", relation: AdviceRelation.In, i18n: { th: "อ่างล้างมือ" } }
+      ], en: "Do not rinse applicator in sink", th: "ห้ามล้างอุปกรณ์ทายาในอ่างล้างมือ" },
+    { head: "Wash the hands", relation: AdviceRelation.On, polarity: AdvicePolarity.Negate,
+      args: [
+        { role: AdviceArgumentRole.Theme, text: "the dressing", normalized: "dressing", i18n: { th: "ผ้าปิดแผล" } },
+        { role: AdviceArgumentRole.Site, text: "the wound", normalized: "wound", relation: AdviceRelation.On, i18n: { th: "แผล" } }
+      ], en: "Do not wash dressing on wound", th: "ห้ามล้างผ้าปิดแผลบนแผล" },
+    { head: "Rinse the mouth", relation: AdviceRelation.Before, polarity: AdvicePolarity.Affirm,
+      args: [
+        { role: AdviceArgumentRole.Site, text: "the mouth", normalized: "mouth", i18n: { th: "ปาก" } },
+        { role: AdviceArgumentRole.Activity, text: "brushing", normalized: "brushing", relation: AdviceRelation.Before, i18n: { th: "แปรงฟัน" } },
+        { role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00:00", relation: AdviceRelation.On }
+      ], en: "Rinse mouth before brushing at 08:00:00", th: "ล้างปากก่อนแปรงฟัน เวลา 08:00:00" },
+    { head: "Apply cream", relation: undefined, polarity: AdvicePolarity.Affirm,
+      args: [
+        { role: AdviceArgumentRole.Object, text: "cream", normalized: "cream", i18n: { th: "ครีม" } },
+        { role: AdviceArgumentRole.Site, text: "a fingertip", normalized: "fingertip", relation: AdviceRelation.With, i18n: { th: "ปลายนิ้ว" } }
+      ], en: "Apply cream with fingertip", th: "ทาครีมร่วมกับปลายนิ้ว" },
+    { head: "Apply cream", relation: undefined, polarity: AdvicePolarity.Affirm,
+      args: [
+        { role: AdviceArgumentRole.Object, text: "cream", normalized: "cream", i18n: { th: "ครีม" } },
+        { role: AdviceArgumentRole.Site, text: "forearm", normalized: "forearm", relation: AdviceRelation.On, i18n: { th: "ท่อนแขน" } }
+      ], en: "Apply cream on forearm", th: "ทาครีมบนท่อนแขน" }
+  ])("retains the complete selected action: $en", ({ head, relation, polarity, args, en, th }) => {
+    const frame: AdviceFrame = { ...parseInstructionActions(head)[0], sourceText: "", relation, polarity, args };
+    const unknown = { url: "https://example.org/fhir/StructureDefinition/handling-note", valueString: "retain" };
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: "", actions: [frame] })!, unknown] };
+    const before = JSON.stringify(row);
+    const r6 = toDosageDetails([row]);
+    const returned = toFhirR5Dosages(r6)[0];
+    for (const [locale, expected] of [["en", en], ["th", th]]) {
+      expect(realizeInstructionAction(frame, locale)).toBe(expected);
+      for (const value of [row, importCanonicalCourse([row]), r6, returned])
+        expect(formatSig(value, "long", { locale, realizationMode: "normalized" })).toBe(expected + ".");
+    }
+    expect(parseInstructionGraphExtension(returned.extension)?.actions[0]).toMatchObject({ polarity, args });
+    expect(returned.extension).toContainEqual(unknown);
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it("retains a quantified medicine name in the single current chew action", () => {
+    const source = "Chew 2 tablets of calcium carbonate";
+    const parsed = parsePublicSig(source);
+    const before = JSON.stringify(parsed.fhirNext);
+    const graph = parseInstructionGraphExtension(parsed.fhir[0].extension)!;
+    expect(graph.sourceText).toBe(source);
+    expect(graph.actions[0].args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Amount, quantity: { value: 2, unit: "tab" }
+    }));
+    for (const value of [importCanonicalCourse(parsed.fhirNext), parsed.fhir, parsed.fhirNext]) {
+      const en = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(value, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toBe("Chew 2 tablets calcium carbonate.");
+      expect(th).toBe("เคี้ยว 2 เม็ดcalcium carbonate.");
+    }
+    expect(JSON.stringify(parsed.fhirNext)).toBe(before);
+    expect(realizeInstructionAction(parseInstructionActions(source)[0], "en"))
+      .toBe("Chew 2 tablets of calcium carbonate");
+  });
+
+  it("keeps both marked dilution clocks out of the destination slot", () => {
+    const source = "Dilute 1 mL at 08:00 and at 20:00";
+    const parsed = parsePublicSig(source);
+    const action = parseInstructionActions(source)[0];
+    const times = action.args.filter(arg => arg.role === AdviceArgumentRole.Time);
+    expect(times.map(arg => arg.normalized)).toEqual(["08:00:00", "20:00:00"]);
+    expect(times.map(arg => source.slice(arg.span!.start, arg.span!.end))).toEqual(["08:00", "20:00"]);
+    expect(action.args.some(arg => arg.role === AdviceArgumentRole.Destination)).toBe(false);
+    expect(action.args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Amount, quantity: { value: 1, unit: "mL" }
+    }));
+    const before = JSON.stringify(parsed.fhirNext);
+    for (const value of [importCanonicalCourse(parsed.fhirNext), parsed.fhir, parsed.fhirNext]) {
+      expect(formatSig(value, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Dilute 1 mL at 08:00:00 at 20:00:00.");
+      expect(formatSig(value, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("เจือจาง 1 มิลลิลิตร เวลา 08:00:00 เวลา 20:00:00.");
+    }
+    expect(parseInstructionGraphExtension(parsed.fhir[0].extension)?.sourceText).toBe(source);
+    expect(JSON.stringify(parsed.fhirNext)).toBe(before);
   });
 });

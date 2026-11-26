@@ -62,7 +62,7 @@ export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirC
   const unqualified = canonical?.replace(/^(?:left|right|both) /u, "");
   if (unqualified && unqualified !== canonical) {
     const baseCode = DEFAULT_BODY_SITE_SNOMED[unqualified]?.coding;
-    if (baseCode?.code && (baseCode.code === coding.code ||
+    if (baseCode?.code && (baseCode.code === coding.code || BODY_SITE_REFINEMENTS[baseCode.code]?.broader === coding.code ||
         !codedRefinement?.lateralized && baseCode.code === codedRefinement?.broader) &&
         (baseCode.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM)) return false;
   }

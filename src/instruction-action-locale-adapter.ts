@@ -137,6 +137,8 @@ export function instructionSiteRelation(
 }
 
 function siteRelationObject(input: InstructionActionRealizationInput): string | undefined {
+  if (input.theme && input.site)
+    return joinLocalizedTokens(input.locale, [input.theme, instructionSiteRelation(input), input.site]);
   const object = input.site ?? input.theme ?? input.container;
   return object ? joinLocalizedTokens(input.locale, [instructionSiteRelation(input), object]) : undefined;
 }
@@ -211,7 +213,7 @@ export function realizeTimeArgument(c: InstructionActionRealizationInput): strin
 
 /** The same typed complements feed either locale's word order. */
 function relationDurationContent(c: InstructionActionRealizationInput) {
-  const object = c.amount ?? c.theme ?? c.site;
+  const object = c.theme ? joinLocalizedTokens(c.locale, [c.amount, c.theme]) : c.amount ?? c.site;
   const target = c.duration ?? c.activity;
   const relation = target && (c.duration
     ? relationHasGrammarFeature(c.frame.relation, "durationComplement") || relationHasGrammarFeature(c.frame.relation, "durationLead")

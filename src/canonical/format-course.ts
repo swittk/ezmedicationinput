@@ -178,7 +178,10 @@ function formatCourseTimeQuantity(quantity: CanonicalMeasure, words: CourseLangu
 }
 /** Clinical validity is determined here. The language realizes either a
  * known repetition or an uninterpreted source-qualified interval. */
-function formatCourseRepeatCycle(cycle: CanonicalMeasure, words: CourseLanguage, count?: number): string {
+function formatCourseRepetition(course: CanonicalCourse, words: CourseLanguage): string {
+  const cycle = course.cycleInterval;
+  const unresolved = course.cycleCountUnresolved ? words.unresolvedCycleTiming("") + "." : "";
+  if (!cycle) return course.cycleCount !== undefined ? words.repeatCount(course.cycleCount) : unresolved;
   const unit = getQuantityDurationUnit(cycle);
   const exact =
     !getQuantityComparator(cycle) &&
@@ -186,7 +189,9 @@ function formatCourseRepeatCycle(cycle: CanonicalMeasure, words: CourseLanguage,
     Number.isFinite(cycle.value) &&
     cycle.value > 0 &&
     Boolean(unit);
-  return words.repeatCycle(formatCourseTimeQuantity(cycle, words), exact, count);
+  const repetition = words.repeatCycle(formatCourseTimeQuantity(cycle, words),
+    exact && !course.cycleCountUnresolved, course.cycleCount);
+  return unresolved ? repetition + " " + unresolved : repetition;
 }
 
 /** Read a typed treatment-start quantity without reinterpreting its calendar unit.
@@ -611,7 +616,7 @@ function courseNeedsAuthoredHeader(course: CanonicalCourse): boolean {
   return true;
 }
 function courseHasClinicalFacts(course: CanonicalCourse): boolean {
-  if (course.cycleInterval || course.cycleCount !== undefined || safetyHasClinicalFacts(course.safety)) return true;
+  if (course.cycleInterval || course.cycleCount !== undefined || course.cycleCountUnresolved || safetyHasClinicalFacts(course.safety)) return true;
   for (const stage of course.stages) {
     if (stage.start || stage.end || stage.count !== undefined || safetyHasClinicalFacts(stage.safety)) return true;
     for (const a of stage.administrations) if (a.choice || administrationHasClinicalFacts(a)) return true;
@@ -865,16 +870,14 @@ export function formatCanonicalCourse(
   }
   if (oneOrCourse.stages.length === 0 && !oneOrCourse.safety?.limits?.length &&
       !oneOrCourse.safety?.ifExceeded && !oneOrCourse.cycleInterval &&
-      oneOrCourse.cycleCount === undefined) return "";
+      oneOrCourse.cycleCount === undefined && !oneOrCourse.cycleCountUnresolved) return "";
   const environment = courseEnvironment(options);
   // Treatment-start offsets restart with the repeating course. Use that
   // same origin for active windows and their medication-free intervals.
   const words = environment.words;
   const cycleStart = oneOrCourse.cycleInterval ? words.cycleStart : undefined;
   if (oneOrCourse.stages.length === 0) {
-    const repetition = oneOrCourse.cycleInterval
-      ? formatCourseRepeatCycle(oneOrCourse.cycleInterval, words, oneOrCourse.cycleCount)
-      : oneOrCourse.cycleCount === undefined ? "" : words.repeatCount(oneOrCourse.cycleCount);
+    const repetition = formatCourseRepetition(oneOrCourse, words);
     // With no administrations, source may be the only dose/manner directions,
     // but can also contain an older cap. Label it beside current structured
     // facts using the same source/current distinction as timing-only members.
@@ -1343,13 +1346,10 @@ export function formatCanonicalCourse(
       }
     }
   }
-  if (oneOrCourse.cycleInterval) {
-    stages.push(formatCourseRepeatCycle(oneOrCourse.cycleInterval, words, oneOrCourse.cycleCount));
-  } else if (oneOrCourse.cycleCount !== undefined) {
-    stages.push(words.repeatCount(oneOrCourse.cycleCount));
-  }
+  const repetition = formatCourseRepetition(oneOrCourse, words);
+  if (repetition) stages.push(repetition);
   const rendered = stages.join(options?.separator ??
-    (hasTimedStages || oneOrCourse.cycleInterval || oneOrCourse.cycleCount !== undefined
+    (hasTimedStages || oneOrCourse.cycleInterval || oneOrCourse.cycleCount !== undefined || oneOrCourse.cycleCountUnresolved
       ? " " : words.stageSeparator));
   const current = oneOrCourse.safety
     ? appendDoseLimits(rendered, oneOrCourse.safety.limits, words, "course", oneOrCourse.safety.ifExceeded)

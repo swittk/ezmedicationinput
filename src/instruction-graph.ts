@@ -637,8 +637,15 @@ function timeArgumentsFromParts(
     // Every daughter in this relation scope was consumed completely.
     return times;
   }
-  const single = timeArgumentFromParts(parts, start, singleEnd, input, false, options, nominalComplement);
-  return single ? [single] : undefined;
+  const member = members[0];
+  if (!member) return undefined;
+  const bounds = semanticArgumentBounds(parts, member.start, Math.min(member.end, singleEnd));
+  const single = timeArgumentFromParts(parts, bounds.start, bounds.endExclusive,
+    input, false, options, nominalComplement);
+  return single ? [{ ...single, span: {
+    start: offset + parts[bounds.start].sourceStart,
+    end: offset + parts[bounds.endExclusive - 1].sourceEnd
+  } }] : undefined;
 }
 
 function coordinatedTypedArgumentFromParts(
@@ -3903,8 +3910,8 @@ function defaultActionAccompaniment(c: ActionRealizationContext, arg: AdviceArgu
     arg.role === AdviceArgumentRole.Material ||
     // The explicit relation owns a nominal accompaniment independently of
     // the medication object, including typed Object and Theme arguments.
-    ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
-      relationHasSemanticClass(relation, "accompaniment"));
+    ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme ||
+      arg.role === AdviceArgumentRole.Site) && relationHasSemanticClass(relation, "accompaniment"));
   if (!materialArgument || !relation ||
       !(relationHasSemanticClass(relation, "accompaniment") || relationHasSemanticClass(relation, "locative")))
     return undefined;
@@ -3920,11 +3927,7 @@ const DEFAULT_ACTION_REALIZER = (
   const { objectArg, relationTargetArg, amountArg } = selected;
   const object = !objectArg ? undefined : objectArg.role === AdviceArgumentRole.Site ? c.site
     : objectArg.role === AdviceArgumentRole.Substance ? c.substance : c.theme;
-  const objectSource = normalizedInstructionSurface(objectArg?.text ?? "");
-  const amountSource = normalizedInstructionSurface(amountArg?.text ?? "");
-  const amount = objectSource && amountSource && objectSource.includes(amountSource)
-    ? undefined
-    : c.amount;
+  const amount = c.amount;
   const profile = localeRealizationProfile(c.locale);
   const appendLocale = (base: string, value: string | undefined): string =>
     value ? `${base}${base ? profile.tokenSeparator : ""}${value}` : base;
@@ -4140,7 +4143,8 @@ function realizeAction(
         (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time ||
           arg.role === AdviceArgumentRole.Result) &&
         (relationHasSemanticClass(temporalRelation, "temporal") ||
-          additionalTime && arg.role === AdviceArgumentRole.Time &&
+          arg.role === AdviceArgumentRole.Time &&
+          (additionalTime || arg.relation !== undefined && arg.relation !== frame.relation) &&
           relationHasGrammarFeature(temporalRelation, "timeComplement"))) {
       (temporalAdjuncts ??= []).push(arg.relation || !temporalRelation ? arg : { ...arg, relation: temporalRelation });
     } else firstArguments[arg.role] ??= arg;
@@ -4151,10 +4155,17 @@ function realizeAction(
   };
   const definition = instructionActionDefinitionForRealization(frame);
   const label = actionLabel(frame, locale, definition, roundtripSafe);
-  const amount = first(AdviceArgumentRole.Amount);
+  let amount = first(AdviceArgumentRole.Amount);
   const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
   const defaultArguments = realizerKey === "default" ? defaultActionArguments(frame) : undefined;
-  const objectArg = defaultArguments?.objectArg;
+  const objectArg = defaultArguments?.objectArg ?? (realizerKey === "relation-duration"
+    ? firstArguments[AdviceArgumentRole.Theme] ?? firstArguments[AdviceArgumentRole.Object] : undefined);
+  if (objectArg) {
+    const objectSource = normalizedInstructionSurface(objectArg.text);
+    const amountArg = defaultArguments?.amountArg ?? firstArguments[AdviceArgumentRole.Amount];
+    const amountSource = normalizedInstructionSurface(amountArg?.text ?? "");
+    if (objectSource && amountSource && objectSource.includes(amountSource)) amount = undefined;
+  }
   const theme = objectArg && (objectArg.role === AdviceArgumentRole.Theme || objectArg.role === AdviceArgumentRole.Object)
     ? translatedArgument(objectArg, locale) : first(AdviceArgumentRole.Theme) ?? first(AdviceArgumentRole.Object);
   const container = first(AdviceArgumentRole.Container);
@@ -4269,10 +4280,11 @@ export function realizeRichPrimaryWithCanonicalDose(
   // Generated realization composes an owned Amount from its typed facts,
   // independently of an opaque nominal remainder or the requested parse locale.
   // Verified roundtrip source replay remains separate from this display copy.
+  const realizer = frame.predicate.realizer ?? frameActionDefinition(frame, options)?.realizer ?? "default";
   const normalizeAmount = Boolean(sourceAmount && clause.dose &&
     (options?.realizationMode !== "roundtrip" || !frame.sourceText) &&
     frame.args.some(arg => arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
-    (frame.predicate.realizer ?? frameActionDefinition(frame, options)?.realizer ?? "default") === "default");
+    (realizer === "default" || realizer === "relation-duration"));
   if (sourceAmount && (conflictingAmount || normalizeAmount))
     frame = frameWithReconciledAmount(frame, sourceAmount, clause.dose, true);
   if (clause.method && !actionMatchesCanonicalMethod(frame, clause, options)) {
@@ -5045,7 +5057,8 @@ export function instructionGraphRichPrimaryAction(
   const rich = action.relation || action.args.some(arg => [
     AdviceArgumentRole.Duration, AdviceArgumentRole.Time, AdviceArgumentRole.Activity,
     AdviceArgumentRole.Material, AdviceArgumentRole.Result, AdviceArgumentRole.Destination,
-    AdviceArgumentRole.Substance, AdviceArgumentRole.Manner
+    AdviceArgumentRole.Substance, AdviceArgumentRole.Manner,
+    AdviceArgumentRole.Object, AdviceArgumentRole.Theme
   ].indexOf(arg.role) >= 0);
   const suppliesMissingHead = !clause.method && clause.dose && action.args.some(arg =>
     arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, clause.dose));

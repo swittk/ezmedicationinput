@@ -1,3 +1,4 @@
+import { bodySiteTextConflictsWithCoding } from "./body-site-target";
 import { joinLocalizedList } from "./utils/text";
 import type { CourseLanguage } from "./localization";
 import { ENGLISH_COURSE, ENGLISH_CLAUSE_TIMING } from "./locales/course/en";
@@ -11,6 +12,8 @@ import {
   describeDuration, describeAdministrationDuration, type DurationWording,
   appendLongAdministrationTiming,
   composeNativePrimaryDirections,
+  describeClockWindow,
+  dayOfMonthUsesSingleMonth,
   richGraphAdministrationTail,
   instructionGraphMatchesDose,
   normalizeInstructionText,
@@ -1680,6 +1683,12 @@ function translateSiteThai(
   if (spatial) {
     return qualified(spatial);
   }
+  const definitionTranslation = THAI_SITE_DEFINITION_TRANSLATIONS[normalized] ?? THAI_SITE_TRANSLATIONS[normalized];
+  if (definitionTranslation && (!code || !bodySiteTextConflictsWithCoding(site, { code }))) {
+    return qualified(applyBodySiteAttributiveModifiersThai(
+      site, definitionTranslation, resolvedPhrase?.resolutionCanonical
+    ));
+  }
   if (code) {
     const translatedByCode = THAI_SITE_CODE_TRANSLATIONS[code];
     if (translatedByCode) {
@@ -1697,16 +1706,9 @@ function translateSiteThai(
     );
     return qualified(inherited);
   }
-  const definitionTranslation = THAI_SITE_DEFINITION_TRANSLATIONS[normalized];
   if (definitionTranslation) {
     return qualified(applyBodySiteAttributiveModifiersThai(
       site, definitionTranslation, resolvedPhrase?.resolutionCanonical
-    ));
-  }
-  const direct = THAI_SITE_TRANSLATIONS[normalized];
-  if (direct) {
-    return qualified(applyBodySiteAttributiveModifiersThai(
-      site, direct, resolvedPhrase?.resolutionCanonical
     ));
   }
   return qualified(site);
@@ -1759,9 +1761,10 @@ function describeDayOfMonthThai(schedule: CanonicalScheduleExpr | undefined): st
   if (!days.length) return undefined;
   const sorted = [...days].sort((a, b) => a - b);
   const contiguous = sorted.every((day, index) => !index || day === sorted[index - 1] + 1);
+  const period = dayOfMonthUsesSingleMonth(schedule) ? " ของทุกเดือน" : "";
   return contiguous && sorted.length > 1
-    ? `วันที่ ${sorted[0]}–${sorted[sorted.length - 1]} ของทุกเดือน`
-    : `วันที่ ${sorted.join(" และ ")} ของทุกเดือน`;
+    ? `วันที่ ${sorted[0]}–${sorted[sorted.length - 1]}${period}`
+    : `วันที่ ${sorted.join(" และ ")}${period}`;
 }
 
 function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1954,7 +1957,8 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
   } else if (schedule.timingCode && !codeText && timingCodeMatchesRecurrence(schedule)) {
     parts.push(schedule.timingCode);
   } else if (schedule.period && schedule.periodUnit &&
-      !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.frequency === undefined &&
+      !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.period === 1 &&
+        (schedule.periodMax === undefined || schedule.periodMax === 1) && schedule.frequency === undefined &&
         (schedule.dayOfMonth?.length ?? 0) > 1)) {
     const base = stripTrailingZero(schedule.period);
     const qualifier =
@@ -2012,6 +2016,8 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
   }
   const occurrenceCap = describeOccurrenceCapThai(schedule);
   if (occurrenceCap) parts.push(occurrenceCap);
+  const clockWindow = describeClockWindow(schedule, THAI_CLAUSE_TIMING);
+  if (clockWindow) parts.push(clockWindow);
   const asNeeded = formatAsNeededThai(clause);
   if (asNeeded) {
     parts.push(asNeeded);
@@ -2181,6 +2187,7 @@ function formatLongThai(
 
   const timingParts = {
     frequency: timing.frequency, event: timing.event, eventWindow: eventWindowPart,
+    clockWindow: describeClockWindow(schedule, THAI_CLAUSE_TIMING),
     activities: formatActivityTimingThai(schedule), calendarEvents: calendarEventPart,
     dayOfWeek: dayPart, dayOfMonth: monthDayPart, calendarBounds: calendarBoundsPart,
     count: countPart, administrationDuration: administrationDurationPart,

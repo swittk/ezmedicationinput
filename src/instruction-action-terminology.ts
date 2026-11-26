@@ -30,43 +30,7 @@ export interface MedicationInstructionActionCodeSystem {
   }>;
 }
 
-interface ActionSource {
-  code: string;
-  semanticClass: string;
-  display: string;
-  i18n?: Record<string, string>;
-  roundtripI18n?: Record<string, string>;
-  aliases?: string[];
-  directiveOnlyAliases?: string[];
-  sequenceAliases?: string[];
-  localeAliases?: Record<string, string[]>;
-  separableAliases?: Array<{ lead: string; particle: string }>;
-  procedural?: boolean;
-  argumentParser?: MedicationInstructionActionDefinition["argumentParser"];
-  realizer?: MedicationInstructionActionDefinition["realizer"];
-  argumentParserConfig?: MedicationInstructionActionDefinition["argumentParserConfig"];
-  realizerConfig?: MedicationInstructionActionDefinition["realizerConfig"];
-  methodBoundMannerConcepts?: string[];
-  continuationLicenses?: MedicationInstructionActionDefinition["continuationLicenses"];
-  continuationAfterRelations?: MedicationInstructionActionDefinition["continuationAfterRelations"];
-  administrationDurationIntroducers?: MedicationInstructionActionDefinition["administrationDurationIntroducers"];
-  preferredRelationSemanticClasses?: MedicationInstructionActionDefinition["preferredRelationSemanticClasses"];
-  contextualCodings?: MedicationInstructionActionDefinition["contextualCodings"];
-  contextualSemanticComponents?: MedicationInstructionActionDefinition["contextualSemanticComponents"];
-  administrationMethod?: FhirCoding;
-  verbRouteHint?: MedicationInstructionActionDefinition["verbRouteHint"];
-  methodRouteOverride?: MedicationInstructionActionDefinition["methodRouteOverride"];
-  suppressMethodRouteHint?: boolean;
-  applicationVerb?: boolean;
-  primaryAdministrationHead?: boolean;
-  supportVerb?: boolean;
-  safetyScopeTarget?: boolean;
-  acceptsAmount?: boolean;
-  definesDose?: boolean;
-  coding?: FhirCoding;
-  externalCodings?: FhirCoding[];
-  semanticComponents?: MedicationInstructionActionDefinition["semanticComponents"];
-}
+type ActionSource = MedicationInstructionActionDefinition;
 
 const DEFAULT_ACTIONS = (source.actions as ActionSource[]).map(normalizeDefinition);
 const DEFAULT_BY_CODE = new Map<string, MedicationInstructionActionDefinition>();
