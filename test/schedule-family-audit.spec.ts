@@ -6289,10 +6289,13 @@ describe("current course bounds and measured execution", () => {
   });
 
   it.each([
-    ["quantity", "exact", 40, 4], ["quantity", "exact", 70, 5],
-    ["ratio", "exact", 70, 5], ["quantity", "range", 40, 5],
-    ["quantity", "range", 70, 5], ["quantity", "upper", 70, 5], ["approximate", "upper", 70, 5],
-  ] as const)("bounds a computed weighted %s with %s runtime at %s kg", (kind, runtime, weight, expected) => {
+    ["quantity", "exact", 40, 4, 8, 200], ["quantity", "exact", 70, 5, 10, 200],
+    ["ratio", "exact", 70, 5, 10, 200], ["quantity", "range", 40, 5, 10, 200],
+    ["quantity", "range", 70, 5, 10, 200], ["quantity", "upper", 70, 5, 10, 200],
+    ["approximate", "upper", 70, 5, 10, 200],
+    ["quantity", "range", 40, 5, 9, 180], ["quantity", "range", 70, 5, 5, 180],
+  ] as const)("bounds a computed weighted %s with %s runtime at %s kg (%s/%s mL)",
+    (kind, runtime, weight, expected, expectedDay, dailyMaximum) => {
     const ucum = "http://unitsofmeasure.org";
     const context = { strengthRatio: {
       numerator: { value: 100, code: "mg", system: ucum },
@@ -6311,7 +6314,7 @@ describe("current course bounds and measured execution", () => {
         ...(runtime === "exact" ? {} : { durationMax: 2 }),
       } },
       maxDosePerAdministration: { value: 100, unit: "mg", code: "mg", system: ucum },
-      maxDosePerPeriod: [{ numerator: { value: 200, unit: "mg" }, denominator: { value: 24, unit: "h" } }],
+      maxDosePerPeriod: [{ numerator: { value: dailyMaximum, unit: "mg" }, denominator: { value: 24, unit: "h" } }],
     };
     const original = structuredClone({ row, context });
     for (const dosage of forms(row)) {
@@ -6322,7 +6325,7 @@ describe("current course bounds and measured execution", () => {
       if (runtime !== "exact") expect(half.quantityKind).toBe("maximum");
       expect(calculateTotalUnits({ dosage, ...query, context, patientWeightKg: weight,
         durationValue: 24, durationUnit: FhirPeriodUnit.Hour }))
-        .toMatchObject({ totalUnits: expected * 2, unit: "mL" });
+        .toMatchObject({ totalUnits: expectedDay, unit: "mL" });
       expect(dosage).toStrictEqual(before);
     }
     expect({ row, context }).toStrictEqual(original);
