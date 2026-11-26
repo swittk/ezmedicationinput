@@ -14,6 +14,7 @@ import { appendClinicalConditionText, canFormatConditionInPrimary, type SigLocal
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { composedCodedWarningActionSources } from "./advice";
+import { EN_POSITIVE_MODALITY_PREFIX } from "./instruction-action-locale-adapter";
 import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "./instruction-action-terminology";
 import { baseLanguageTag, quantityComparatorText } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
@@ -50,7 +51,8 @@ import {
 } from "./relation-terminology";
 import {
   AdviceArgumentRole,
-  AdviceModality,
+  type AdviceFrame,
+  type CanonicalAdditionalInstructionExpr,
   AdvicePolarity,
   AdviceRelation,
   BodySiteSpatialRelation,
@@ -1460,22 +1462,246 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
   return parts.filter(Boolean).join(" ");
 }
 
-const SPREAD_THINLY_INSTRUCTION_CODE = "420162004";
+interface LongAdministrationTimingParts {
+  frequency?: string;
+  event?: string;
+  eventWindow?: string;
+  activities: string[];
+  calendarEvents?: string;
+  dayOfWeek?: string;
+  dayOfMonth?: string;
+  calendarBounds?: string;
+  count?: string;
+  administrationDuration?: string;
+  duration?: string;
+  occurrenceCap?: string;
+}
 
-const ENGLISH_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
-  [AdviceModality.May]: "May",
-  [AdviceModality.Can]: "Can",
-  [AdviceModality.Might]: "Might",
-  [AdviceModality.Could]: "Could",
-  [AdviceModality.Should]: "Should",
-  [AdviceModality.Must]: "Must"
-};
+interface RichAdministrationParts {
+  route?: string;
+  frequencyWithoutEvent?: string;
+  independentTiming?: string;
+  clock?: string;
+  asNeeded?: string;
+  site?: string;
+  coversSingleEvent: boolean;
+}
+
+/** Locale realizers supply words; their clinical timing order is shared. */
+export function appendLongAdministrationTiming(
+  parts: string[], timing: LongAdministrationTimingParts, richTiming?: RichAdministrationParts
+): void {
+  const frequency = richTiming?.coversSingleEvent ? richTiming.frequencyWithoutEvent : timing.frequency;
+  if (frequency) parts.push(frequency);
+  if (timing.event && !richTiming?.coversSingleEvent) parts.push(timing.event);
+  else if (richTiming) {
+    if (richTiming.independentTiming) parts.push(richTiming.independentTiming);
+    if (richTiming.clock) parts.push(richTiming.clock);
+  }
+  if (timing.eventWindow) parts.push(timing.eventWindow);
+  for (const activity of timing.activities) parts.push(activity);
+  if (timing.calendarEvents) parts.push(timing.calendarEvents);
+  if (timing.dayOfWeek) parts.push(timing.dayOfWeek);
+  if (timing.dayOfMonth) parts.push(timing.dayOfMonth);
+  if (timing.calendarBounds) parts.push(timing.calendarBounds);
+  if (timing.count) parts.push(timing.count);
+  if (timing.administrationDuration) parts.push(timing.administrationDuration);
+  if (timing.duration) parts.push(timing.duration);
+  if (timing.occurrenceCap) parts.push(timing.occurrenceCap);
+}
+
+export function richGraphAdministrationTail(
+  clause: CanonicalSigClause,
+  action: AdviceFrame,
+  words: CourseLanguage,
+  timing: LongAdministrationTimingParts,
+  parts: RichAdministrationParts
+): string[] {
+  const result: string[] = [];
+  if (parts.route) result.push(parts.route);
+  appendLongAdministrationTiming(result, timing, parts);
+  if (parts.asNeeded) result.push(parts.asNeeded);
+  const actionHasSite = !clause.site?.spatialRelation && !clause.site?.restrictions?.length &&
+    action.args.some((arg) => arg.role === AdviceArgumentRole.Site);
+  if (parts.site && !actionHasSite) result.push(parts.site);
+  else if (actionHasSite && clause.site?.administrationTargetCount !== undefined &&
+      clause.site.administrationTargetCount > 1)
+    result.push(words.applicationSites(clause.site.administrationTargetCount));
+  return result;
+}
+
+export function instructionGraphMatchesDose(clause: CanonicalSigClause): boolean {
+  return !clause.dose || Boolean(clause.instructionGraph?.actions.some((action) =>
+    action.args.some((arg) =>
+      arg.role === AdviceArgumentRole.Amount &&
+      arg.quantity?.value === clause.dose?.value &&
+      arg.quantity?.range?.low === clause.dose?.range?.low &&
+      arg.quantity?.range?.high === clause.dose?.range?.high &&
+      arg.quantity?.unit === clause.dose?.unit &&
+      arg.quantity?.comparator === clause.dose?.comparator
+    )
+  ));
+}
+
+export function normalizeInstructionText(value: string): string {
+  return value.toLowerCase().replace(/[\s,;:.()]+/gu, " ").trim();
+}
+
+export function collectGraphInstructionOwnership(
+  clause: CanonicalSigClause,
+  hasCanonicalAdministration: boolean,
+  preserveOpaqueSourceSuffix = false
+) {
+  const graph = clause.instructionGraph;
+  const actions = graph?.actions ?? [];
+  const graphWarnings = actions.filter((action) => action.polarity === AdvicePolarity.Negate);
+  const codedWarningSources: string[] = [];
+  const codedWarningSourcesByInstruction: string[][] = [];
+  const graphOwnedAdditional: CanonicalAdditionalInstructionExpr[] = [];
+  for (const instruction of clause.additionalInstructions ?? []) {
+    const sources = composedCodedWarningActionSources(actions, instruction.coding);
+    codedWarningSourcesByInstruction.push(sources);
+    codedWarningSources.push(...sources);
+    if (!instruction.text || !graph) continue;
+    let owned = instructionGraphFullyOwnsAdvice(graph, instruction);
+    if (!owned && instruction.coding?.code) {
+      owned = !sources.length && instructionGraphEntailsAdviceCoding(graph, instruction.coding);
+    } else if (!owned) {
+      const normalized = normalizeInstructionText(instruction.text);
+      // Source realization can retain a contiguous opaque suffix that a
+      // translated action cannot claim from its shorter typed advice label.
+      owned = preserveOpaqueSourceSuffix && !instruction.frames?.length && actions.some((action) => {
+        const actionText = normalizeInstructionText(action.sourceText);
+        return Boolean(actionText && normalized.includes(actionText) && graph.opaqueSpans?.some((opaque) =>
+          opaque.start >= action.span.end && opaque.text.trim() &&
+          !graph.sourceText.slice(action.span.end, opaque.start).trim()
+        ));
+      });
+      if (!owned) {
+        const representedByWarning = graphWarnings.some((action) => {
+          const source = normalizeInstructionText(action.sourceText);
+          return source === normalized || source.includes(normalized) || normalized.includes(source);
+        });
+        owned = instructionGraphCoversTypedWarnings(graph, instruction.frames) ||
+          instructionGraphRealizesWarningText(graph, instruction.text) ||
+          instructionGraphRepresentsText(graph, instruction.text) && (
+            representedByWarning ||
+            Boolean(graph.primaryAdministrationSpan) &&
+              instructionGraphSingleActionRepresentsText(graph, instruction.text) &&
+              instructionGraphTextParticipatesInRelation(graph, instruction.text) ||
+            !hasCanonicalAdministration && instructionGraphSingleActionRepresentsText(graph, instruction.text)
+          );
+      }
+    }
+    if (owned) graphOwnedAdditional.push(instruction);
+  }
+  return { codedWarningSources, codedWarningSourcesByInstruction, graphOwnedAdditional, graphWarnings };
+}
+
+export function instructionGraphAdviceSourceTexts(
+  clause: CanonicalSigClause,
+  instructions: CanonicalAdditionalInstructionExpr[],
+  additionalSources: string[] = []
+): string[] {
+  const sources = instructions.map((instruction) => instruction.text?.trim())
+    .filter((text): text is string => Boolean(text));
+  for (const instruction of instructions) {
+    for (const frame of instruction.frames ?? []) {
+      const source = frame.sourceText?.trim();
+      if (source && sources.indexOf(source) === -1) sources.push(source);
+    }
+  }
+  for (const source of additionalSources) {
+    if (sources.indexOf(source) === -1) sources.push(source);
+  }
+  if (clause.instructionGraph) {
+    for (const instruction of instructions) {
+      for (const source of instructionGraphSourceOwnedByAdvice(clause.instructionGraph, instruction)) {
+        if (sources.indexOf(source) === -1) sources.push(source);
+      }
+    }
+  }
+  return sources;
+}
+
+export function instructionGraphAdministrationFlow(
+  clause: CanonicalSigClause,
+  roundTrip: boolean,
+  preGraphInstruction: string | undefined,
+  postGraphInstruction: string | undefined
+) {
+  const span = clause.instructionGraph?.primaryAdministrationSpan;
+  let lastPre: AdviceFrame | undefined;
+  let firstPost: AdviceFrame | undefined;
+  if (span) {
+    for (const action of clause.instructionGraph?.actions ?? []) {
+      if (action.span.end <= span.start && (!lastPre || action.span.end > lastPre.span.end)) lastPre = action;
+      if (action.span.start >= span.end && (!firstPost || action.span.start < firstPost.span.start)) firstPost = action;
+    }
+  }
+  const source = clause.instructionGraph?.sourceText ?? clause.rawText;
+  return {
+    preFlowsIntoAdministration: Boolean(
+      !roundTrip && preGraphInstruction && span && lastPre && lastPre.polarity !== AdvicePolarity.Negate &&
+      !/[.!?;]/u.test(source.slice(lastPre.span.end, span.start))
+    ),
+    postFlowsFromAdministration: Boolean(
+      !roundTrip && postGraphInstruction && span && firstPost && firstPost.polarity !== AdvicePolarity.Negate &&
+      !/[.!?;]/u.test(source.slice(span.end, firstPost.span.start))
+    )
+  };
+}
+
+export function instructionGraphActionHasSequenceSuccessor(
+  clause: CanonicalSigClause, action: AdviceFrame | undefined
+): boolean {
+  const actionIndex = action && clause.instructionGraph ? clause.instructionGraph.actions.indexOf(action) : -1;
+  return actionIndex >= 0 && Boolean(clause.instructionGraph?.relations?.some((relation) =>
+    relationHasSemanticClass(relation.kind, "sequence") && relation.fromActionIndex === actionIndex
+  ));
+}
+
+export function hasExplicitAdministrationMethod(clause: CanonicalSigClause): boolean {
+  return Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);
+}
+
+export function instructionGraphCanStandAlone(
+  clause: CanonicalSigClause,
+  timingText: string | undefined,
+  graphRepresentsDose: boolean,
+  richPrimaryAction: AdviceFrame | undefined,
+  graphText: string | undefined,
+  primaryConditions: InstructionGraphPrimaryCondition[] | undefined
+): boolean {
+  const schedule = scheduleOf(clause);
+  const hasAdministrationTiming = Boolean(
+    timingText || schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
+    schedule.period !== undefined || schedule.periodMax !== undefined ||
+    schedule.when?.length || schedule.eventWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
+    schedule.timeOfDay?.length || schedule.calendarEvents?.length ||
+    schedule.boundsStart !== undefined || schedule.boundsEnd !== undefined ||
+    schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
+    schedule.duration !== undefined || schedule.durationMax !== undefined ||
+    schedule.durationUnit !== undefined || schedule.administrationDuration !== undefined ||
+    schedule.administrationDurationMax !== undefined || schedule.administrationDurationUnit !== undefined ||
+    schedule.administrationDurationRange !== undefined || schedule.offset !== undefined ||
+    schedule.offsetMin !== undefined || schedule.offsetMax !== undefined ||
+    Boolean(schedule.activityTiming?.length) || schedule.occurrenceCap !== undefined
+  );
+  return Boolean(
+    !richPrimaryAction && !hasExplicitAdministrationMethod(clause) && graphText &&
+    clause.instructionGraph?.actions.length && !clause.prn?.enabled && !clause.route && !clause.site &&
+    !hasAdministrationTiming && graphRepresentsDose && !primaryConditions?.length
+  );
+}
+
+const SPREAD_THINLY_INSTRUCTION_CODE = "420162004";
 
 function applyEnglishAdministrationModality(verb: string, clause: CanonicalSigClause): string {
   const modality = instructionGraphPrimaryAdministrationModality(clause);
-  const prefix = modality ? ENGLISH_MODALITY_PREFIX[modality] : undefined;
+  const prefix = modality ? EN_POSITIVE_MODALITY_PREFIX[modality] : undefined;
   if (!prefix) return verb;
-  return `${prefix} ${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
+  return `${prefix}${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
 }
 
 function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | undefined, words: CourseLanguage,
@@ -1575,6 +1801,14 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       : reason ? `as needed for ${reason}` : "as needed"
     : undefined;
 
+  const timingParts: LongAdministrationTimingParts = {
+    frequency: timing.frequency, event: timing.event, eventWindow: eventWindowPart,
+    activities: formatActivityTimingEnglish(schedule), calendarEvents: calendarEventPart,
+    dayOfWeek: dayPart, dayOfMonth: monthDayPart, calendarBounds: calendarBoundsPart,
+    count: countPart, administrationDuration: administrationDurationPart,
+    duration: durationPart, occurrenceCap: occurrenceCapPart
+  };
+
   const segments: string[] = [];
   if (dosePart) {
     segments.push(dosePart);
@@ -1585,40 +1819,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   if (routePart) {
     segments.push(routePart);
   }
-  if (timing.frequency) {
-    segments.push(timing.frequency);
-  }
-  if (timing.event) {
-    segments.push(timing.event);
-  }
-  if (eventWindowPart) segments.push(eventWindowPart);
-  for (const activityTiming of formatActivityTimingEnglish(schedule)) {
-    segments.push(activityTiming);
-  }
-  if (calendarEventPart) {
-    segments.push(calendarEventPart);
-  }
-  if (dayPart) {
-    segments.push(dayPart);
-  }
-  if (monthDayPart) {
-    segments.push(monthDayPart);
-  }
-  if (calendarBoundsPart) {
-    segments.push(calendarBoundsPart);
-  }
-  if (countPart) {
-    segments.push(countPart);
-  }
-  if (administrationDurationPart) {
-    segments.push(administrationDurationPart);
-  }
-  if (durationPart) {
-    segments.push(durationPart);
-  }
-  if (occurrenceCapPart) {
-    segments.push(occurrenceCapPart);
-  }
+  appendLongAdministrationTiming(segments, timingParts);
   if (roundTrip && sitePart && asNeededPart) {
     segments.push(sitePart);
   }
@@ -1629,16 +1830,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     segments.push(sitePart);
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-  const graphRepresentsDose = preparationSuppliesDose || !clause.dose || Boolean(clause.instructionGraph?.actions.some((action) =>
-    action.args.some((arg) =>
-      arg.role === AdviceArgumentRole.Amount &&
-      arg.quantity?.value === clause.dose?.value &&
-      arg.quantity?.range?.low === clause.dose?.range?.low &&
-      arg.quantity?.range?.high === clause.dose?.range?.high &&
-      arg.quantity?.unit === clause.dose?.unit &&
-      arg.quantity?.comparator === clause.dose?.comparator
-    )
-  ));
+  const graphRepresentsDose = preparationSuppliesDose || instructionGraphMatchesDose(clause);
   const graphSourceIsEnglish = !clause.instructionGraph?.sourceLocale ||
     baseLanguageTag(clause.instructionGraph.sourceLocale) === "en";
   const primaryGraphAction = roundTrip
@@ -1658,53 +1850,22 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const richPrimaryGraphText = richPrimaryGraphAction
     ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "en", options, richPrimaryCoverage)
     : undefined;
-  const richPrimaryHasSite = Boolean(
-    !clause.site?.spatialRelation && !clause.site?.restrictions?.length && richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
-  );
   const richPrimaryCoversSingleEvent = richPrimaryCoverage?.singleScheduledEvent === true;
-  const graphRegimenTail: string[] = [];
-  if (richPrimaryGraphText) {
-    if (routePart) graphRegimenTail.push(routePart);
-    const graphFrequency = richPrimaryCoversSingleEvent ? frequencyPart : timing.frequency;
-    if (graphFrequency) graphRegimenTail.push(graphFrequency);
-    if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
-    else {
-      if (timingText) graphRegimenTail.push(timingText);
-      if (clockPart) graphRegimenTail.push(clockPart);
-    }
-    if (eventWindowPart) graphRegimenTail.push(eventWindowPart);
-    graphRegimenTail.push(...formatActivityTimingEnglish(schedule));
-    if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
-    if (dayPart) graphRegimenTail.push(dayPart);
-    if (monthDayPart) graphRegimenTail.push(monthDayPart);
-    if (calendarBoundsPart) graphRegimenTail.push(calendarBoundsPart);
-    if (countPart) graphRegimenTail.push(countPart);
-    if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);
-    if (durationPart) graphRegimenTail.push(durationPart);
-    if (occurrenceCapPart) graphRegimenTail.push(occurrenceCapPart);
-    if (asNeededPart) graphRegimenTail.push(asNeededPart);
-    if (sitePart && !richPrimaryHasSite) graphRegimenTail.push(sitePart);
-    else if (richPrimaryHasSite && clause.site?.administrationTargetCount !== undefined &&
-        clause.site.administrationTargetCount > 1)
-      graphRegimenTail.push(words.applicationSites(clause.site.administrationTargetCount));
-  }
+  const graphRegimenTail = richPrimaryGraphText && richPrimaryGraphAction
+    ? richGraphAdministrationTail(clause, richPrimaryGraphAction, words, timingParts, {
+        route: routePart, frequencyWithoutEvent: frequencyPart,
+        independentTiming: timingText, clock: clockPart, asNeeded: asNeededPart, site: sitePart,
+        coversSingleEvent: richPrimaryCoversSingleEvent
+      })
+    : [];
   const richGraphAdministrationSentence = richPrimaryGraphText
     ? formatPatientInstructionSentence(
         [richPrimaryGraphText, ...graphRegimenTail].filter(Boolean).join(" ")
       )
     : undefined;
   const instructionPhrases: string[] = [];
-  const codedWarningSources: string[] = [];
-  // Keep one source lookup per instruction for this render. All three
-  // consumers below use the same graph and coding, not separate matches.
-  const codedWarningSourcesByInstruction: string[][] = [];
-  for (const instruction of clause.additionalInstructions ?? []) {
-    const sources = composedCodedWarningActionSources(
-      clause.instructionGraph?.actions ?? [], instruction.coding
-    );
-    codedWarningSourcesByInstruction.push(sources);
-    codedWarningSources.push(...sources);
-  }
+  const { codedWarningSources, codedWarningSourcesByInstruction, graphOwnedAdditional, graphWarnings } =
+    collectGraphInstructionOwnership(clause, hasCanonicalAdministration, true);
   const hasCodedAdditionalInstruction = Boolean(
     clause.additionalInstructions?.some((instruction, index) =>
       instruction.coding?.code && (
@@ -1713,86 +1874,19 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         !instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding)
       ))
   );
-  const normalizeInstruction = (value: string) => value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
-  const graphWarnings = clause.instructionGraph?.actions.filter((action) =>
-    action.polarity === AdvicePolarity.Negate
-  ) ?? [];
   const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
-  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction, index) => {
-    if (!instruction.text || !clause.instructionGraph) return false;
-    if (instructionGraphFullyOwnsAdvice(clause.instructionGraph, instruction)) return true;
-    if (instruction.coding?.code) {
-      return !codedWarningSourcesByInstruction[index].length &&
-        instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding);
-    }
-    const normalized = normalizeInstruction(instruction.text);
-    // An uncoded shorthand advice fragment may end before a contiguous
-    // unparsed nominal tail that the typed instruction graph still retains.
-    // Prefer the graph's complete action+opaque source span, not the shorter
-    // additionalInstruction label ("hold on fasting" vs "... fasting days").
-    // This is source ownership only; no FHIR or clinical interpretation.
-    const graphOwnsLongerSource = !instruction.coding?.code &&
-      !(instruction.frames?.length) &&
-      clause.instructionGraph.actions.some((action) => {
-        const actionText = normalizeInstruction(action.sourceText);
-        return Boolean(actionText && normalized.includes(actionText) &&
-          clause.instructionGraph?.opaqueSpans?.some((opaque) =>
-            opaque.start >= action.span.end && opaque.text.trim() &&
-            !clause.instructionGraph?.sourceText
-              .slice(action.span.end, opaque.start).trim()
-          ));
-      });
-    if (graphOwnsLongerSource) return true;
-    const representedByWarning = graphWarnings.some((action) => {
-      const source = normalizeInstruction(action.sourceText);
-      return source === normalized || source.includes(normalized) || normalized.includes(source);
-    });
-    return instructionGraphCoversTypedWarnings(clause.instructionGraph, instruction.frames) ||
-      instructionGraphRealizesWarningText(clause.instructionGraph, instruction.text) ||
-      // Raw source coverage can include unresolved relation/opaque text; it
-      // does not by itself license replacing the complete editable advice.
-      instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
-      representedByWarning ||
-      (positionedGraph &&
-        instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text) &&
-        instructionGraphTextParticipatesInRelation(clause.instructionGraph, instruction.text)) ||
-      (!hasCanonicalAdministration &&
-        instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text))
-    );
-  });
   const additionalForDirectRendering = (clause.additionalInstructions ?? []).filter((instruction) =>
     graphOwnedAdditional.indexOf(instruction) === -1 && instruction !== integratedThinLayer
   );
   const additionalTexts = additionalForDirectRendering
     .map((instruction) => instruction.text?.trim())
     .filter((text): text is string => Boolean(text));
-  const additionalSemanticSourceTexts = additionalTexts.slice();
-  for (const instruction of additionalForDirectRendering) {
-    for (const frame of instruction.frames ?? []) {
-      const source = frame.sourceText?.trim();
-      if (source && additionalSemanticSourceTexts.indexOf(source) === -1) {
-        additionalSemanticSourceTexts.push(source);
-      }
-    }
-  }
-  for (const source of codedWarningSources) {
-    if (additionalSemanticSourceTexts.indexOf(source) === -1) {
-      additionalSemanticSourceTexts.push(source);
-    }
-  }
-  if (clause.instructionGraph) {
-    for (const instruction of additionalForDirectRendering) {
-      for (const ownedSource of instructionGraphSourceOwnedByAdvice(clause.instructionGraph, instruction)) {
-        if (additionalSemanticSourceTexts.indexOf(ownedSource) === -1) {
-          additionalSemanticSourceTexts.push(ownedSource);
-        }
-      }
-    }
-  }
+  const additionalSemanticSourceTexts = instructionGraphAdviceSourceTexts(
+    clause, additionalForDirectRendering, codedWarningSources
+  );
   const allAdditionalRepresentedByGraphWarnings = Boolean(
     graphWarnings.length &&
     additionalTexts.every((text) => {
-      const normalized = normalizeInstruction(text);
       return Boolean(clause.instructionGraph &&
         instructionGraphRealizesWarningText(clause.instructionGraph, text));
     })
@@ -1830,8 +1924,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       : undefined;
     const graphWarningText = graphWarning ? formatPatientInstructionSentence(graphWarning) : undefined;
     if (graphWarningText && !instructionPhrases.some((value) =>
-      normalizeInstruction(value).includes(normalizeInstruction(graphWarningText)) ||
-      normalizeInstruction(graphWarningText).includes(normalizeInstruction(value))
+      normalizeInstructionText(value).includes(normalizeInstructionText(graphWarningText)) ||
+      normalizeInstructionText(graphWarningText).includes(normalizeInstructionText(value))
     )) {
       instructionPhrases.push(graphWarningText);
     }
@@ -1882,33 +1976,11 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         })
       : undefined
   );
-  const primarySpanForFlow = clause.instructionGraph?.primaryAdministrationSpan;
-  const graphActionsForFlow = clause.instructionGraph?.actions ?? [];
-  const lastPreActionForFlow = primarySpanForFlow
-    ? graphActionsForFlow.filter((action) => action.span.end <= primarySpanForFlow.start)
-        .sort((a, b) => b.span.end - a.span.end)[0]
-    : undefined;
-  const firstPostActionForFlow = primarySpanForFlow
-    ? graphActionsForFlow.filter((action) => action.span.start >= primarySpanForFlow.end)
-        .sort((a, b) => a.span.start - b.span.start)[0]
-    : undefined;
-  const graphFlowSource = clause.instructionGraph?.sourceText ?? clause.rawText;
-  const noStrongBoundaryForFlow = (start: number, end: number): boolean =>
-    !/[.!?;]/u.test(graphFlowSource.slice(start, end));
-  const preFlowsIntoAdministration = Boolean(
-    !roundTrip && preGraphInstruction && primarySpanForFlow && lastPreActionForFlow &&
-    lastPreActionForFlow.polarity !== AdvicePolarity.Negate &&
-    noStrongBoundaryForFlow(lastPreActionForFlow.span.end, primarySpanForFlow.start)
-  );
-  const postFlowsFromAdministration = Boolean(
-    !roundTrip && postGraphInstruction && primarySpanForFlow && firstPostActionForFlow &&
-    firstPostActionForFlow.polarity !== AdvicePolarity.Negate &&
-    // The post-action's source-backed contrast already joins it to the
-    // administration; prefixing a generic temporal THEN reverses the
-    // connector's meaning ("but hold" is not "then but hold").
-    !instructionGraphPostAdministrationDiscourseConnector(clause.instructionGraph!) &&
-    noStrongBoundaryForFlow(primarySpanForFlow.end, firstPostActionForFlow.span.start)
-  );
+  const graphFlow = instructionGraphAdministrationFlow(clause, roundTrip, preGraphInstruction, postGraphInstruction);
+  const preFlowsIntoAdministration = graphFlow.preFlowsIntoAdministration;
+  // A source-backed contrast already joins the English post-action.
+  const postFlowsFromAdministration = graphFlow.postFlowsFromAdministration &&
+    !instructionGraphPostAdministrationDiscourseConnector(clause.instructionGraph!);
 
   const graphOwnsPatientInstruction = Boolean(
     clause.patientInstruction && clause.instructionGraph && (
@@ -1927,7 +1999,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       );
   if (patientInstruction) instructionPhrases.push(patientInstruction);
   const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
-  const hasExplicitMethod = Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);
+  const hasExplicitMethod = hasExplicitAdministrationMethod(clause);
   if (
     roundTrip && (!hasExplicitMethod || primaryGraphAction && !needsCurrentPrimary) && graphSourceIsEnglish &&
     clause.instructionGraph?.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options) &&
@@ -1948,9 +2020,9 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     const parts: string[] = [];
     for (const value of [wholeGraphText, ...instructionPhrases]) {
       if (!value) continue;
-      const normalized = normalizeInstruction(value);
+      const normalized = normalizeInstructionText(value);
       if (parts.some((existing) => {
-        const candidate = normalizeInstruction(existing);
+        const candidate = normalizeInstructionText(existing);
         return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
       })) continue;
       parts.push(value);
@@ -1963,24 +2035,9 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     : preGraphInstruction
       ? formatPatientInstructionSentence(preGraphInstruction)
       : undefined;
-  const hasAdministrationTiming = Boolean(
-    timingText || schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
-    schedule.period !== undefined || schedule.periodMax !== undefined ||
-    schedule.when?.length || schedule.eventWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
-    schedule.timeOfDay?.length || schedule.calendarEvents?.length ||
-    schedule.boundsStart !== undefined || schedule.boundsEnd !== undefined ||
-    schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
-    schedule.duration !== undefined || schedule.durationMax !== undefined ||
-    schedule.durationUnit !== undefined || schedule.administrationDuration !== undefined ||
-    schedule.administrationDurationMax !== undefined || schedule.administrationDurationUnit !== undefined ||
-    schedule.administrationDurationRange !== undefined || schedule.offset !== undefined ||
-    schedule.offsetMin !== undefined || schedule.offsetMax !== undefined ||
-    Boolean(schedule.activityTiming?.length) || schedule.occurrenceCap !== undefined
-  );
-  const graphCanStandAlone = Boolean(
-    !richPrimaryGraphAction && !hasExplicitMethod && trailingInstructionText &&
-    clause.instructionGraph?.actions.length &&
-    !clause.prn?.enabled && !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose && !primaryConditions?.length
+  const graphCanStandAlone = instructionGraphCanStandAlone(
+    clause, timingText, graphRepresentsDose, richPrimaryGraphAction,
+    trailingInstructionText, primaryConditions
   );
   if (graphCanStandAlone) return condition
     ? appendClinicalConditionText(trailingInstructionText as string, condition, words)
@@ -1997,14 +2054,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         relation.fromActionIndex !== undefined
       )
     : false;
-  const richPrimaryActionIndex = richPrimaryGraphAction && clause.instructionGraph
-    ? clause.instructionGraph.actions.indexOf(richPrimaryGraphAction)
-    : -1;
-  const graphContinuesWithThen = richPrimaryActionIndex >= 0 && Boolean(
-    clause.instructionGraph?.relations?.some((relation) =>
-      relationHasSemanticClass(relation.kind, "sequence") && relation.fromActionIndex === richPrimaryActionIndex
-    )
-  );
+  const graphContinuesWithThen = instructionGraphActionHasSequenceSuccessor(clause, richPrimaryGraphAction);
   const sequenceRelation = getUniqueAdviceRelationByGrammarFeature("defaultSequenceRelation");
   if (!sequenceRelation) throw new Error("Missing declarative default sequence relation");
   const sequenceSurface = localizeAdviceRelation(sequenceRelation, "en") ?? sequenceRelation;
@@ -2045,6 +2095,14 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   return compose(`${verb} ${body}.`);
 }
 
+export function isEmptyStomachInstruction(instruction: CanonicalAdditionalInstructionExpr): boolean {
+  return instruction.coding?.code === EMPTY_STOMACH_QUALIFIER_CODE || Boolean(instruction.frames?.some((frame) =>
+    relationHasGrammarFeature(frame.relation, "mealStateComplement") && frame.args.some((arg) =>
+      arg.role === AdviceArgumentRole.MealState && arg.conceptId === "empty_stomach"
+    )
+  ));
+}
+
 function formatAdditionalInstructions(clause: CanonicalSigClause): string | undefined {
   const instructions = clause.additionalInstructions ?? [];
   if (!instructions.length) {
@@ -2059,18 +2117,7 @@ function formatAdditionalInstructions(clause: CanonicalSigClause): string | unde
       phrases.push(contextual);
       continue;
     }
-    if (
-      instruction.coding?.code === EMPTY_STOMACH_QUALIFIER_CODE ||
-      instruction.frames?.some(
-        (frame) =>
-          relationHasGrammarFeature(frame.relation, "mealStateComplement") &&
-          frame.args.some(
-            (arg) =>
-              arg.role === AdviceArgumentRole.MealState &&
-              arg.conceptId === "empty_stomach"
-          )
-      )
-    ) {
+    if (isEmptyStomachInstruction(instruction)) {
       phrases.push("On an empty stomach");
       continue;
     }
@@ -2296,7 +2343,7 @@ export function formatInternal(
   return formatCanonicalClause(firstCanonicalClause(internal), style, localization, options);
 }
 
-function stripTrailingZero(value: number): string {
+export function stripTrailingZero(value: number): string {
   const text = value.toString();
   if (text.includes(".")) {
     return text.replace(/\.0+$/, "").replace(/0+$/, "");

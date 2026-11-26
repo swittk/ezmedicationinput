@@ -8,9 +8,21 @@ import {
   hasDailyRecurrenceAcrossClocks, formatDoseEnglish, timingCodeMatchesRecurrence,
   timingEventPreviewSchedule, independentTimingText, doseUnitUsesTargetScope,
   formatDurationShort as formatDurationShortThai, alternateDayEvent, standaloneOccurrenceCount,
-  describeDuration, describeAdministrationDuration, type DurationWording
+  describeDuration, describeAdministrationDuration, type DurationWording,
+  appendLongAdministrationTiming,
+  richGraphAdministrationTail,
+  instructionGraphMatchesDose,
+  normalizeInstructionText,
+  collectGraphInstructionOwnership,
+  instructionGraphAdviceSourceTexts,
+  instructionGraphAdministrationFlow,
+  instructionGraphActionHasSequenceSuccessor,
+  instructionGraphCanStandAlone,
+  isEmptyStomachInstruction,
+  stripTrailingZero
 } from "./format";
-import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
+import { findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
+import { TH_POSITIVE_MODALITY_PREFIX } from "./instruction-action-locale-adapter";
 import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
 import {
@@ -51,21 +63,15 @@ import {
   BODY_SITE_BARE_NOMINAL_PREFIXES,
 } from "./hpsg/lexical-classes";
 import {
-  instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
   instructionGraphRichPrimaryAction,
   realizeRichPrimaryWithCanonicalDose,
   instructionGraphSourceConflictsWithDose,
   instructionGraphPreparationOwnsDose,
   instructionGraphRoundTripPrimaryAction,
-  instructionGraphEntailsAdviceCoding,
-  instructionGraphCoversTypedWarnings,
-  instructionGraphRealizesWarningText,
-  instructionGraphSourceOwnedByAdvice,
   instructionGraphFullyOwnsAdvice,
   instructionGraphRepresentsText,
   instructionGraphSingleActionRepresentsText,
-  instructionGraphTextParticipatesInRelation,
   realizeInstructionAction,
   realizeInstructionGraph,
   attachInstructionGraphPrimaryConditions,
@@ -75,7 +81,6 @@ import {
   AdviceArgumentRole,
   type AdviceFrame,
   AdviceForce,
-  AdviceModality,
   AdvicePolarity,
   AdviceRelation,
   BodySiteSpatialRelation,
@@ -422,7 +427,6 @@ const TH_TIMES_PER_DAY: Record<number, string> = {
 };
 
 const SLOWLY_QUALIFIER_CODE = "419443000";
-const EMPTY_STOMACH_QUALIFIER_CODE = "717154004";
 
 export const THAI_SITE_TRANSLATIONS: Record<string, string> = {
   eye: "ตา",
@@ -2188,18 +2192,9 @@ function makeThaiRoundTripSurface(text: string): string {
     .trim();
 }
 
-const THAI_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
-  [AdviceModality.May]: "อาจ",
-  [AdviceModality.Can]: "สามารถ",
-  [AdviceModality.Might]: "อาจ",
-  [AdviceModality.Could]: "อาจ",
-  [AdviceModality.Should]: "ควร",
-  [AdviceModality.Must]: "ต้อง"
-};
-
 function applyThaiAdministrationModality(verb: string, clause: CanonicalSigClause): string {
   const modality = instructionGraphPrimaryAdministrationModality(clause);
-  const prefix = modality ? THAI_MODALITY_PREFIX[modality] : undefined;
+  const prefix = modality ? TH_POSITIVE_MODALITY_PREFIX[modality] : undefined;
   return prefix ? `${prefix}${verb}` : verb;
 }
 
@@ -2339,6 +2334,14 @@ function formatLongThai(
   const durationPart = describeDurationThai(schedule, words);
   const occurrenceCapPart = describeOccurrenceCapThai(schedule);
 
+  const timingParts = {
+    frequency: timing.frequency, event: timing.event, eventWindow: eventWindowPart,
+    activities: formatActivityTimingThai(schedule), calendarEvents: calendarEventPart,
+    dayOfWeek: dayPart, dayOfMonth: monthDayPart, calendarBounds: calendarBoundsPart,
+    count: countPart, administrationDuration: administrationDurationPart,
+    duration: durationPart, occurrenceCap: occurrenceCapPart
+  };
+
   const segments: string[] = [];
   const routePrefersEarlySite = Boolean(
     clause.route?.code && THAI_EARLY_SITE_ROUTES.has(clause.route.code) &&
@@ -2366,40 +2369,7 @@ function formatLongThai(
   if (routePart) {
     segments.push(routePart);
   }
-  if (timing.frequency) {
-    segments.push(timing.frequency);
-  }
-  if (timing.event) {
-    segments.push(timing.event);
-  }
-  if (eventWindowPart) segments.push(eventWindowPart);
-  for (const activityTiming of formatActivityTimingThai(schedule)) {
-    segments.push(activityTiming);
-  }
-  if (calendarEventPart) {
-    segments.push(calendarEventPart);
-  }
-  if (dayPart) {
-    segments.push(dayPart);
-  }
-  if (monthDayPart) {
-    segments.push(monthDayPart);
-  }
-  if (calendarBoundsPart) {
-    segments.push(calendarBoundsPart);
-  }
-  if (countPart) {
-    segments.push(countPart);
-  }
-  if (administrationDurationPart) {
-    segments.push(administrationDurationPart);
-  }
-  if (durationPart) {
-    segments.push(durationPart);
-  }
-  if (occurrenceCapPart) {
-    segments.push(occurrenceCapPart);
-  }
+  appendLongAdministrationTiming(segments, timingParts);
   const prnCanAttachToVerb = segments.length === 0;
   const prnCanAttachToGenericObject = Boolean(
     usesGenericMedicationObject && !explicitDosePart &&
@@ -2425,9 +2395,6 @@ function formatLongThai(
   const richPrimaryGraphText = richPrimaryGraphAction
     ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "th", options, richPrimaryCoverage)
     : undefined;
-  const richPrimaryHasSite = Boolean(
-    !clause.site?.spatialRelation && !clause.site?.restrictions?.length && richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
-  );
   const richPrimaryCoversSingleEvent = richPrimaryCoverage?.singleScheduledEvent === true;
   const richPrimaryDefinition = richPrimaryGraphAction
     ? getMedicationInstructionAction(richPrimaryGraphAction.predicate.lemma, options)
@@ -2443,97 +2410,25 @@ function formatLongThai(
       ? buildRoutePhraseThai(clause, grammar, Boolean(sitePart))
       : undefined
   );
-  const graphRegimenTail: string[] = [];
-  if (richPrimaryGraphText) {
-    if (richRoutePart) graphRegimenTail.push(richRoutePart);
-    const graphFrequency = richPrimaryCoversSingleEvent ? frequencyPart : timing.frequency;
-    if (graphFrequency) graphRegimenTail.push(graphFrequency);
-    if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
-    else {
-      if (timingText) graphRegimenTail.push(timingText);
-      if (clockPart) graphRegimenTail.push(clockPart);
-    }
-    if (eventWindowPart) graphRegimenTail.push(eventWindowPart);
-    graphRegimenTail.push(...formatActivityTimingThai(schedule));
-    if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
-    if (dayPart) graphRegimenTail.push(dayPart);
-    if (monthDayPart) graphRegimenTail.push(monthDayPart);
-    if (calendarBoundsPart) graphRegimenTail.push(calendarBoundsPart);
-    if (countPart) graphRegimenTail.push(countPart);
-    if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);
-    if (durationPart) graphRegimenTail.push(durationPart);
-    if (occurrenceCapPart) graphRegimenTail.push(occurrenceCapPart);
-    if (asNeeded) graphRegimenTail.push(asNeeded);
-    if (sitePart && !richPrimaryHasSite) graphRegimenTail.push(sitePart);
-    else if (richPrimaryHasSite && clause.site?.administrationTargetCount !== undefined &&
-        clause.site.administrationTargetCount > 1)
-      graphRegimenTail.push(words.applicationSites(clause.site.administrationTargetCount));
-  }
+  const graphRegimenTail = richPrimaryGraphText && richPrimaryGraphAction
+    ? richGraphAdministrationTail(clause, richPrimaryGraphAction, words, timingParts, {
+        route: richRoutePart, frequencyWithoutEvent: frequencyPart,
+        independentTiming: timingText, clock: clockPart, asNeeded: asNeeded, site: sitePart,
+        coversSingleEvent: richPrimaryCoversSingleEvent
+      })
+    : [];
   const richGraphAdministrationText = richPrimaryGraphText
     ? [richPrimaryGraphText, ...graphRegimenTail].filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
     : undefined;
   const roundTrip = options?.realizationMode === "roundtrip";
   const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
-  const codedWarningSources: string[] = [];
-  const codedWarningSourcesByInstruction: string[][] = [];
-  for (const instruction of clause.additionalInstructions ?? []) {
-    const sources = composedCodedWarningActionSources(
-      clause.instructionGraph?.actions ?? [], instruction.coding
-    );
-    codedWarningSourcesByInstruction.push(sources);
-    codedWarningSources.push(...sources);
-  }
-  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction, index) => {
-    if (!instruction.text || !clause.instructionGraph) return false;
-    if (instructionGraphFullyOwnsAdvice(clause.instructionGraph, instruction)) return true;
-    if (instruction.coding?.code) {
-      return !codedWarningSourcesByInstruction[index].length &&
-        instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding);
-    }
-    const normalized = instruction.text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
-    const representedByWarning = clause.instructionGraph.actions
-      .filter((action) => action.polarity === AdvicePolarity.Negate)
-      .some((action) => {
-        const source = action.sourceText.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
-        return source === normalized || source.includes(normalized) || normalized.includes(source);
-      });
-    return instructionGraphCoversTypedWarnings(clause.instructionGraph, instruction.frames) ||
-      instructionGraphRealizesWarningText(clause.instructionGraph, instruction.text) ||
-      // Source coverage is not semantic ownership of unresolved advice.
-      instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
-      representedByWarning ||
-      (positionedGraph &&
-        instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text) &&
-        instructionGraphTextParticipatesInRelation(clause.instructionGraph, instruction.text)) ||
-      (!hasCanonicalAdministration &&
-        instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text))
-    );
-  });
+  const { codedWarningSources, graphOwnedAdditional } =
+    collectGraphInstructionOwnership(clause, hasCanonicalAdministration);
   const directAdditional = (clause.additionalInstructions ?? []).filter((instruction) =>
     graphOwnedAdditional.indexOf(instruction) === -1 &&
     !integratedQualifiers.has(instruction)
   );
-  const additionalSemanticSourceTexts = directAdditional
-    .map((instruction) => instruction.text?.trim())
-    .filter((text): text is string => Boolean(text));
-  for (const instruction of directAdditional) {
-    for (const frame of instruction.frames ?? []) {
-      const source = frame.sourceText?.trim();
-      if (source && additionalSemanticSourceTexts.indexOf(source) === -1) {
-        additionalSemanticSourceTexts.push(source);
-      }
-    }
-  }
-
-  if (clause.instructionGraph) {
-    for (const instruction of directAdditional) {
-      for (const ownedSource of instructionGraphSourceOwnedByAdvice(clause.instructionGraph, instruction)) {
-        if (additionalSemanticSourceTexts.indexOf(ownedSource) === -1) {
-          additionalSemanticSourceTexts.push(ownedSource);
-        }
-      }
-    }
-  }
+  const additionalSemanticSourceTexts = instructionGraphAdviceSourceTexts(clause, directAdditional);
   const graphRealizationOmissions = [...additionalSemanticSourceTexts, ...codedWarningSources];
   const primaryConditions: InstructionGraphPrimaryCondition[] | undefined =
     positionedGraph && clause.instructionGraph?.relations?.length ? [] : undefined;
@@ -2567,41 +2462,13 @@ function formatLongThai(
     ...clause,
     additionalInstructions: directAdditional
   });
-  const primarySpan = clause.instructionGraph?.primaryAdministrationSpan;
-  const graphActions = clause.instructionGraph?.actions ?? [];
-  const lastPreAction = primarySpan
-    ? graphActions.filter((action) => action.span.end <= primarySpan.start)
-        .sort((a, b) => b.span.end - a.span.end)[0]
-    : undefined;
-  const firstPostAction = primarySpan
-    ? graphActions.filter((action) => action.span.start >= primarySpan.end)
-        .sort((a, b) => a.span.start - b.span.start)[0]
-    : undefined;
-  const graphFlowSource = clause.instructionGraph?.sourceText ?? clause.rawText;
-  const noStrongBoundary = (start: number, end: number): boolean =>
-    !/[.!?;]/u.test(graphFlowSource.slice(start, end));
-  const preFlowsIntoAdministration = Boolean(
-    !roundTrip && preGraphInstruction && primarySpan && lastPreAction &&
-    lastPreAction.polarity !== AdvicePolarity.Negate &&
-    noStrongBoundary(lastPreAction.span.end, primarySpan.start)
-  );
-  const postFlowsFromAdministration = Boolean(
-    !roundTrip && postGraphInstruction && primarySpan && firstPostAction &&
-    firstPostAction.polarity !== AdvicePolarity.Negate &&
-    noStrongBoundary(primarySpan.end, firstPostAction.span.start)
-  );
+  const { preFlowsIntoAdministration, postFlowsFromAdministration } =
+    instructionGraphAdministrationFlow(clause, roundTrip, preGraphInstruction, postGraphInstruction);
   const leadingInstructionText = preFlowsIntoAdministration
     ? undefined
     : formatPatientInstructionSentence(preGraphInstruction);
   const graphInstruction = postGraphInstruction ?? wholeGraphInstruction;
-  const richPrimaryActionIndex = richPrimaryGraphAction && clause.instructionGraph
-    ? clause.instructionGraph.actions.indexOf(richPrimaryGraphAction)
-    : -1;
-  const graphContinuesWithThen = richPrimaryActionIndex >= 0 && Boolean(
-    clause.instructionGraph?.relations?.some((relation) =>
-      relationHasSemanticClass(relation.kind, "sequence") && relation.fromActionIndex === richPrimaryActionIndex
-    )
-  );
+  const graphContinuesWithThen = instructionGraphActionHasSequenceSuccessor(clause, richPrimaryGraphAction);
   const sequenceRelation = getUniqueAdviceRelationByGrammarFeature("defaultSequenceRelation");
   if (!sequenceRelation) throw new Error("Missing declarative default sequence relation");
   const sequenceSurface = localizeAdviceRelation(sequenceRelation, "th") ?? sequenceRelation;
@@ -2653,15 +2520,13 @@ function formatLongThai(
       : undefined;
     const wholeGraphText = formatPatientInstructionSentence(wholeGraph);
     const parts: string[] = [];
-    const normalizedInstruction = (value: string): string =>
-      value.toLowerCase().replace(/[\s,;:.()]+/gu, " ").trim();
     for (const value of [
       leadingInstructionText, wholeGraphText, directInstruction, graphInstructionText, fallbackPatientInstruction
     ]) {
       if (!value) continue;
-      const normalized = normalizedInstruction(value);
+      const normalized = normalizeInstructionText(value);
       if (parts.some((existing) => {
-        const candidate = normalizedInstruction(existing);
+        const candidate = normalizeInstructionText(existing);
         return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
       })) continue;
       parts.push(value);
@@ -2671,34 +2536,10 @@ function formatLongThai(
     return parts.join(" ").trim() || `${verb}.`;
   }
 
-  const hasExplicitMethod = Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);
-  const graphRepresentsDose = !clause.dose || Boolean(clause.instructionGraph?.actions.some((action) =>
-    action.args.some((arg) =>
-      arg.role === AdviceArgumentRole.Amount &&
-      arg.quantity?.value === clause.dose?.value &&
-      arg.quantity?.range?.low === clause.dose?.range?.low &&
-      arg.quantity?.range?.high === clause.dose?.range?.high &&
-      arg.quantity?.unit === clause.dose?.unit &&
-      arg.quantity?.comparator === clause.dose?.comparator
-    )
-  ));
-  const hasAdministrationTiming = Boolean(
-    timingText || schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
-    schedule.period !== undefined || schedule.periodMax !== undefined ||
-    schedule.when?.length || schedule.eventWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
-    schedule.timeOfDay?.length || schedule.calendarEvents?.length ||
-    schedule.boundsStart !== undefined || schedule.boundsEnd !== undefined ||
-    schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
-    schedule.duration !== undefined || schedule.durationMax !== undefined ||
-    schedule.durationUnit !== undefined || schedule.administrationDuration !== undefined ||
-    schedule.administrationDurationMax !== undefined || schedule.administrationDurationUnit !== undefined ||
-    schedule.administrationDurationRange !== undefined || schedule.offset !== undefined ||
-    schedule.offsetMin !== undefined || schedule.offsetMax !== undefined ||
-    Boolean(schedule.activityTiming?.length) || schedule.occurrenceCap !== undefined
-  );
-  const graphCanStandAlone = Boolean(
-    !richPrimaryGraphAction && !hasExplicitMethod && wholeGraphInstruction && clause.instructionGraph?.actions.length &&
-    !clause.prn?.enabled && !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose && !primaryConditions?.length
+  const graphRepresentsDose = instructionGraphMatchesDose(clause);
+  const graphCanStandAlone = instructionGraphCanStandAlone(
+    clause, timingText, graphRepresentsDose, richPrimaryGraphAction,
+    wholeGraphInstruction, primaryConditions
   );
   if (graphCanStandAlone) {
     const text = [directInstruction, graphInstructionText, fallbackPatientInstruction]
@@ -2798,18 +2639,7 @@ function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | 
       phrases.push(contextual);
       continue;
     }
-    if (
-      instruction.coding?.code === EMPTY_STOMACH_QUALIFIER_CODE ||
-      instruction.frames?.some(
-        (frame) =>
-          relationHasGrammarFeature(frame.relation, "mealStateComplement") &&
-          frame.args.some(
-            (arg) =>
-              arg.role === AdviceArgumentRole.MealState &&
-              arg.conceptId === "empty_stomach"
-          )
-      )
-    ) {
+    if (isEmptyStomachInstruction(instruction)) {
       phrases.push("ขณะท้องว่าง");
       continue;
     }
@@ -2848,12 +2678,4 @@ function formatPatientInstructionSentence(text: string | undefined): string | un
   }
   const sentence = /^[.!?]$/.test(trimmed.slice(-1)) ? trimmed : `${trimmed}.`;
   return sentence.charAt(0).toUpperCase() + sentence.slice(1);
-}
-
-function stripTrailingZero(value: number): string {
-  const text = value.toString();
-  if (text.includes(".")) {
-    return text.replace(/\.0+$/, "").replace(/0+$/, "");
-  }
-  return text;
 }
