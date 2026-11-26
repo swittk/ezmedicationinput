@@ -120,7 +120,8 @@ function retentionForAdministration(
     // The editable external safety and its saved edit baseline have separate
     // owners. A live Quantity edit must not rewrite the retained comparison.
     component.safety = editable ? cloneStructuredValue(safety) : safety;
-    baseline.safety = compactProjectionFingerprint(r5SafetyBaseline(row));
+    baseline.safety = compactProjectionFingerprint(
+      row.safety === undefined ? regeneratedSafety : r5SafetyBaseline(row));
     changed = true;
   }
   const regeneratedSite =
