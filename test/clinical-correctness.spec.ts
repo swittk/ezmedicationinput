@@ -3762,6 +3762,35 @@ describe("round79 current clinical preview ownership", () => {
 
 describe("independent coded timing previews", () => {
   const gts = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+  it("keeps free PM evening shorthand out of the standard afternoon coding", () => {
+    const source = "Take 1 tablet pm";
+    const parsed = parseBatch(source);
+    for (const timing of [parsed.fhir[0].timing, parsed.fhirNext.step?.[0]?.component[0].timing,
+      parsed.items[0].fhir.timing]) {
+      expect(timing?.repeat?.when).toEqual([EventTiming.Evening]);
+      expect(timing?.code).toEqual({ text: "PM" });
+    }
+    expect(parsed.longText).toBe("Take 1 tablet orally in the evening.");
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([
+    ["am", { when: [EventTiming.Morning] }, "AM", "in the morning"],
+    ["bid", { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day }, "BID", "twice daily"],
+    ["in the evening", { when: [EventTiming.Evening] }, undefined, "in the evening"],
+    ["in the afternoon", { when: [EventTiming.Afternoon] }, undefined, "in the afternoon"],
+  ] as const)("retains the parsed %s timing facts and coding identity", (wording, repeat, code, preview) => {
+    const source = `Take 1 tablet ${wording}`;
+    const parsed = parseBatch(source);
+    for (const timing of [parsed.fhir[0].timing, parsed.fhirNext.step?.[0]?.component[0].timing,
+      parsed.items[0].fhir.timing]) {
+      expect(timing?.repeat).toEqual(repeat);
+      expect(timing?.code).toEqual(code ? { coding: [{ system: gts, code }], text: code } : undefined);
+    }
+    expect(parsed.longText).toBe(`Take 1 tablet orally ${preview}.`);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
   it.each([
     ["AM", "in the morning", "ตอนเช้า"],
     ["PM", "in the afternoon", "ตอนบ่าย"],

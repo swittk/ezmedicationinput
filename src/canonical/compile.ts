@@ -23,7 +23,7 @@ import {
   DEFAULT_PRN_REASON_DEFINITIONS, findPrnReasonDefinitionByCoding, normalizePrnReasonKey
 } from "../maps";
 import { SNOMED_SYSTEM } from "../snomed";
-import { FHIR_GTS_TIMING_CODES, FHIR_GTS_TIMING_SYSTEM, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding, timingCodeMeaning } from "../timing-summary";
+import { standardTimingCodingFromSig, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding, timingCodeMeaning } from "../timing-summary";
 import type { RouteCode } from "../types";
 import { getQuantityDurationUnit } from "../unit-lexicon";
 
@@ -181,7 +181,7 @@ export function administrationFromClause(
     recurrence!.courseLength = undefined;
     recurrence!.courseLengthRange = undefined;
   }
-  const timingCode = s?.timingCode?.toUpperCase();
+  const timingCoding = standardTimingCodingFromSig(s?.timingCode);
   const target = clause.site
     ? {
         text: clause.site.text,
@@ -209,8 +209,8 @@ export function administrationFromClause(
     schedule: s
       ? {
           recurrence,
-          ...(s.timingCode ? { code: timingCode && FHIR_GTS_TIMING_CODES.has(timingCode)
-            ? { text: s.timingText ?? s.timingCode, coding: [{ system: FHIR_GTS_TIMING_SYSTEM, code: timingCode }] }
+          ...(s.timingCode ? { code: timingCoding
+            ? { text: s.timingText ?? s.timingCode, coding: [timingCoding] }
             : { text: s.timingText ?? s.timingCode } } : {}),
           ...(s.calendarEvents?.length
             ? {

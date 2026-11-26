@@ -72,6 +72,14 @@ export function timingCodeMeaning(coding: { system?: string; code?: string } | u
     ? EventTiming.Afternoon : coding?.code;
 }
 
+/** Emit a standard identity only when its meaning matches the parsed shorthand. */
+export function standardTimingCodingFromSig(code: string | undefined): { system: string; code: string } | undefined {
+  const normalized = code?.toUpperCase();
+  if (!normalized || !FHIR_GTS_TIMING_CODES.has(normalized)) return undefined;
+  const coding = { system: FHIR_GTS_TIMING_SYSTEM, code: normalized };
+  return timingCodeMeaning(coding) === normalized ? coding : undefined;
+}
+
 const AFTERNOON_TIMING_PREVIEW: typeof TIMING_ABBREVIATIONS[string] = {
   code: EventTiming.Afternoon, when: [EventTiming.Afternoon]
 };

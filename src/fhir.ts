@@ -88,7 +88,7 @@ import {
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 import { equalStructuredValues } from "./stable-structure";
-import { FHIR_GTS_TIMING_SYSTEM, FHIR_GTS_TIMING_CODES, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding, timingCodeMeaning } from "./timing-summary";
+import { standardTimingCodingFromSig, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding, timingCodeMeaning } from "./timing-summary";
 
 /** Known modifier: an independent cadence is restricted by unresolved cycle days. */
 export const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-cycle-day-eligibility";
@@ -2020,11 +2020,11 @@ export function serializeCanonicalSchedule(
 
   if (schedule?.timingCode || schedule?.timingText) {
     dosage.timing = dosage.timing ?? {};
-    const normalizedCode = schedule.timingCode?.toUpperCase();
+    const timingCoding = standardTimingCodingFromSig(schedule.timingCode);
     // A CodeableConcept.text preserves supported local wording without
     // falsely attaching an HL7 standard identity to non-standard codes.
-    dosage.timing.code = normalizedCode && FHIR_GTS_TIMING_CODES.has(normalizedCode)
-      ? { coding: [{ system: FHIR_GTS_TIMING_SYSTEM, code: normalizedCode }],
+    dosage.timing.code = timingCoding
+      ? { coding: [timingCoding],
           text: schedule.timingText ?? schedule.timingCode }
       : { text: schedule.timingText ?? schedule.timingCode };
   }
