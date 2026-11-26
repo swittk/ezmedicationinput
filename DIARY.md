@@ -16293,3 +16293,24 @@ Instruction graph composition keeps condition-owned activities in their
 antecedents while retaining commanded and independent actions. R5 projection
 reuses an already-computed safety baseline within the same conversion, preserving
 current facts, annotations and the separate explicit-safety path.
+
+
+## 2026-11-27 — Scoped conditions, elapsed cadence and active duration ranges
+
+Clinical condition composition retains predicate activities in both prefix and
+postfix order, while independent counseling keeps its own action and condition.
+Patient-history counts, quantified prohibitions, attached dose ceilings and
+qualified clock dayparts reuse their existing typed owners. Rolling occurrence
+limits remain complete authored instructions when a civil bucket cannot express
+their meaning.
+
+Execution respects strict decimal ceilings, admitted loading events, multi-day
+elapsed intervals, compatible volume-per-weight limits and successor exclusions.
+Current previews retain unresolved counts, rate ranges, owned clocks and durations,
+and distinguish current cadence from original text through the language packs.
+
+FHIR conversion preserves current scoped totals, operation annotations, complete
+spatial concepts and extension-only graph fields. Mixed duration endpoints retain
+their exact active quantities beside a conforming core range, without generating
+historical reconciliation snapshots. Fresh clinical and conversion cases retain
+authored source, annotations and elapsed-versus-calendar behavior across DST.
