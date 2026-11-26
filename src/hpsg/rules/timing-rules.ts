@@ -806,10 +806,10 @@ function exactCountCardinalValue(token: Token | undefined): number | undefined {
 
 /** One complete occurrence maximum is shared by the schedule chart and guard scope. */
 export function maximumOccurrenceAt(
-  context: Parameters<typeof maximumCountLeadAt>[0], start: number, firstLower?: string
+  context: Parameters<typeof maximumCountLeadAt>[0], start: number,
+  lead = maximumCountLeadAt(context, start)
 ): { tokens: Token[]; headStart: number; count: number;
   period?: NonNullable<ReturnType<typeof maximumDosePeriodAt>> } | undefined {
-  const lead = maximumCountLeadAt(context, start, firstLower);
   if (!lead) return undefined;
   const valueIndex = lead.headStart + lead.tokens.length;
   const valueToken = context.tokens[valueIndex], occurrenceToken = context.tokens[valueIndex + 1];
@@ -3047,8 +3047,9 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
             context, token.sourceStart, duration.tokens[duration.tokens.length - 1].sourceEnd
           )) return [duration];
     }
-    const maximum = MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(lower)
-      ? maximumOccurrenceAt(context, start, lower) : undefined;
+    const maximumHead = MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(lower)
+      ? maximumCountLeadAt(context, start, lower) : undefined;
+    const maximum = maximumHead ? maximumOccurrenceAt(context, start, maximumHead) : undefined;
     if (maximum?.headStart === start) {
       const { tokens: matched, count: countValue, period } = maximum;
       if (period && ("daypart" in period || period.rolling)) {

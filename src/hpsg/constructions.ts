@@ -10,7 +10,7 @@ import type { MedicationCondition, ParseOptions } from "../types";
 import { actionMatchAt } from "../instruction-graph";
 import { ACTION_DIRECTIVE_PREFIXES, normalizeTokenLower } from "./lexical-classes";
 import { explicitDoseLexicalEnd } from "./rules/core-rules";
-import { maximumDosePerPeriodAt } from "./rule-context";
+import { maximumDosePerPeriodAt, maximumCountLeadAt } from "./rule-context";
 import { maximumOccurrenceAt, isIndependentMaximum } from "./rules/timing-rules";
 import { lexicalSign, type HpsgGuardExpression, type HpsgSynsem, type HpsgPhraseRule } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
@@ -909,8 +909,10 @@ export function parseMedicationGuard(
       const token = tokens[index];
       if (token.sourceStart < lead.end) continue;
       if (token.sourceStart >= end) break;
-      const quantityCap = maximumDosePerPeriodAt(lexicalContext, index);
-      const occurrenceCap = quantityCap ? undefined : maximumOccurrenceAt(lexicalContext, index);
+      const maximumHead = maximumCountLeadAt(lexicalContext, index);
+      if (!maximumHead) continue;
+      const quantityCap = maximumDosePerPeriodAt(lexicalContext, index, maximumHead);
+      const occurrenceCap = quantityCap ? undefined : maximumOccurrenceAt(lexicalContext, index, maximumHead);
       if (!quantityCap && !occurrenceCap) continue;
       const capStart = token.sourceStart;
       const context: GuardConstituentContext = { source, range: { start: lead.start, end: capStart },

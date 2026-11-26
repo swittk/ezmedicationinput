@@ -15,6 +15,7 @@ import {
 export { ACTION_SEQUENCE_MARKERS } from "../relation-terminology";
 import source from "./lexical-classes.json";
 
+type MaximumPeriodPreposition = { unitDenominator?: boolean; rolling?: boolean };
 type MealRelation = "before" | "after" | "with";
 type MealTimingByRelation = Map<MealRelation, Map<EventTiming, EventTiming>>;
 type BodySiteFeatureKind = "nominal" | "partitive" | "locative";
@@ -358,7 +359,10 @@ export const MAXIMUM_COUNT_LEAD_FIRST_TOKENS = new Set(
 );
 export const OCCURRENCE_COUNT_WORDS = setOf(source.occurrenceCountWords ?? []);
 export const OCCURRENCE_COUNT_MODIFIERS = setOf(source.occurrenceCountModifiers);
-export const MAXIMUM_PERIOD_PREPOSITIONS = setOf(source.maximumPeriodPrepositions);
+export const MAXIMUM_PERIOD_PREPOSITIONS = new Map<string, MaximumPeriodPreposition>(
+  Object.keys(source.maximumPeriodPrepositions).map(key => [key,
+    (source.maximumPeriodPrepositions as Record<string, MaximumPeriodPreposition>)[key]])
+);
 export const MAXIMUM_PERIOD_MODIFIERS = setOf(source.maximumPeriodModifiers);
 export const OCCURRENCE_CAP_PERIOD_PHRASES = (source.occurrenceCapPeriodPhrases ?? [])
   .map((entry) => ({ parts: [...entry.parts], period: entry.period, periodUnit: entry.periodUnit }))

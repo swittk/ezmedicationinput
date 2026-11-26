@@ -883,14 +883,14 @@
     "further",
     "another"
   ],
-  "maximumPeriodPrepositions": [
-    "in",
-    "within",
-    "over",
-    "per",
-    "/",
-    "a"
-  ],
+  "maximumPeriodPrepositions": {
+    "in": {},
+    "within": { "rolling": true },
+    "over": {},
+    "per": { "unitDenominator": true },
+    "/": { "unitDenominator": true },
+    "a": { "unitDenominator": true }
+  },
   "maximumPeriodModifiers": [
     "rolling",
     "consecutive"

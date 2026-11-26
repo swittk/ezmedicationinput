@@ -45,6 +45,22 @@ function expectSimpleQuantityOperator(quantity: FhirQuantity | undefined, compar
 import { getTimingMonthDays, TIMING_DAY_OF_MONTH_EXTENSION_URL } from "../src/fhir";
 
 describe("HPSG clinical quantity grammar", () => {
+  it.each([".5mL/min", "0.5 mL/min"])("preserves the fractional maximum numerator in %s", maximum => {
+    const source = "Infuse 50 mL, maximum " + maximum, parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 50, unit: "mL" });
+      expect(members[0].amounts?.[0].rate).toBeUndefined();
+      expect(members[0].amounts?.[0].rateRatio).toBeUndefined();
+      expect(members[0].limits).toHaveLength(1);
+      expect(members[0].limits?.[0]).toMatchObject({ scope: "period", amount: { value: 0.5, unit: "mL" },
+        period: { value: 1, unit: "min" } });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
   it("does not impose an invented one-dose cap on a PRN fixed-duration infusion", () => {
     const input = "Infuse 25 mL IV over 1 hour as needed for pain";
     const parsed = parsePublicSig(input);

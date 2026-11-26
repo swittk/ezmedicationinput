@@ -2697,6 +2697,50 @@ describe("condition and successor timing ownership", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 
+  it("retains an elapsed occurrence ceiling without replacing it by civil buckets", () => {
+    const source = "Take 1 tablet every 4 hours as needed for pain, maximum 1 dose within 6 hours";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const civil = parsePublicSig("Take 1 tablet every 4 hours as needed for pain, maximum 1 dose daily");
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.asNeeded).toBe(true);
+      expect(member.schedule?.recurrence).toMatchObject({ period: 4, periodUnit: "h" });
+      expect(member.schedule?.recurrence?.occurrenceCap).toBeUndefined();
+      expect(member.schedule?.recurrence?.countMax).toBeUndefined();
+      expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
+      for (const locale of ["en", "th"] as const)
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase())
+          .toContain("maximum 1 dose within 6 hours");
+    }
+    for (const input of [civil.meta.canonical.course!, civil.fhir, civil.fhirNext])
+      expect(importCanonicalCourse(input).stages[0].administrations[0].schedule?.recurrence?.occurrenceCap)
+        .toEqual({ max: 1, period: 1, periodUnit: "d" });
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("keeps a supported elapsed quantity ceiling on the same period constituent", () => {
+    const source = "Take 1 tablet every 4 hours for 2 days, maximum 1 tablet within 6 hours";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 8 };
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.limits).toHaveLength(1);
+      expect(member.limits?.[0]).toMatchObject({ scope: "period", amount: { value: 1, unit: "tab" },
+        period: { value: 6, unit: "h" } });
+      expect(member.schedule?.recurrence?.occurrenceCap).toBeUndefined();
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-12-01T00:00:00+00:00", "2026-12-01T08:00:00+00:00", "2026-12-01T16:00:00+00:00",
+        "2026-12-02T00:00:00+00:00", "2026-12-02T08:00:00+00:00", "2026-12-02T16:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d" }).totalUnits).toBe(6);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
   it("keeps the civil occurrence cap executable", () => {
     const source = "Take 1 tablet every 6 hours for 2 days, maximum 2 doses per day";
     const parsed = parsePublicSig(source);

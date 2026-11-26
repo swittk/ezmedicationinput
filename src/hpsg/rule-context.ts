@@ -456,21 +456,23 @@ export function maximumDosePeriodAt(
   if (!connector || !first || context.state?.consumed.has(connector.index) ||
       context.state?.consumed.has(first.index)) return undefined;
   const connectorLower = normalizeTokenLower(connector);
-  if (!MAXIMUM_PERIOD_PREPOSITIONS.has(connectorLower)) return undefined;
+  const connectorFeatures = MAXIMUM_PERIOD_PREPOSITIONS.get(connectorLower);
+  if (!connectorFeatures) return undefined;
 
   let cursor = start + 1;
   const articleLower = normalizeTokenLower(first);
   const article = DOSE_FRACTION_ARTICLES.has(articleLower) || EVENT_ARTICLE_TOKENS.has(articleLower);
   if (article) cursor++;
   const modifier = context.tokens[cursor];
-  const rolling = modifier && !context.state?.consumed.has(modifier.index) &&
+  const rollingModifier = modifier && !context.state?.consumed.has(modifier.index) &&
     MAXIMUM_PERIOD_MODIFIERS.has(normalizeTokenLower(modifier));
-  if (rolling) cursor++;
+  if (rollingModifier) cursor++;
+  const rolling = connectorFeatures.rolling || rollingModifier;
   const value = context.tokens[cursor];
   if (!value || context.state?.consumed.has(value.index)) return undefined;
   const lower = normalizeTokenLower(value);
   const bareUnit = mapIntervalUnit(lower);
-  const unitDenominator = connectorLower === "/" || connectorLower === "per" || connectorLower === "a";
+  const unitDenominator = Boolean(connectorFeatures.unitDenominator);
   // An article supplies the same one-unit interval as PER, A or /.
   // Explicit numeric periods use the single number/unit reader below.
   if (bareUnit && (article || unitDenominator)) {
@@ -488,7 +490,9 @@ export function maximumDosePeriodAt(
 }
 
 /** Shared lexical constituent: a dose limit owns both its amount and period. */
-export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: number): {
+export function maximumDosePerPeriodAt(
+  context: QuantityLexicalContext, start: number, maximumHead = maximumCountLeadAt(context, start)
+): {
   tokens: Token[];
   amount: number;
   unit: string;
@@ -496,7 +500,6 @@ export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: n
   headStart: number;
   comparative: boolean;
 } | undefined {
-  const maximumHead = maximumCountLeadAt(context, start);
   if (!maximumHead) return undefined;
   const { tokens: lead, headStart } = maximumHead;
   const comparative = (DOSE_COMPARATOR_PREFIXES.get(normalizeTokenLower(lead[0])) ?? []).some(candidate =>
@@ -525,7 +528,7 @@ export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: n
   const initial = valueToken?.kind === LexKind.Number ? valueToken.value
     : valueToken ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)] : undefined;
   const attached = valueToken && valueToken.kind !== LexKind.Number
-    ? attachedNumberUnitAt(normalizeTokenLower(valueToken)) : undefined;
+    ? attachedNumberUnitAt(valueToken.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
   const number = attached ? undefined : plainClinicalNumberAt(context, cursor, initial);
   const amount = attached?.value ?? number?.value;
   const unitIndex = attached ? cursor : number ? doseUnitIndexAfter(context, number.numericIndex + 1) : undefined;

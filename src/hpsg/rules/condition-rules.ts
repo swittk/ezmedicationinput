@@ -15,7 +15,7 @@ import {
   resolveActionRelationSurface
 } from "../../relation-terminology";
 import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt, conditionalAdviceOwnerAt, isConditionalAdviceFrame, instructionActionsAreSequenced as explicitlySequences, proceduralInstructionProgram as prefixProgram } from "../procedural-context";
-import { hasSymptomOnsetPrnAt, prnAt, startsMaximumCountLead } from "./prn-rules";
+import { hasSymptomOnsetPrnAt, prnAt } from "./prn-rules";
 import { SUPPLEMENTAL_DOSE_MODIFIERS, CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { countAndDurationRule, countFrequencyRule, timeOfDayRule, timingLexicalRule, dayRangeLexicalRule, maximumOccurrenceAt, isIndependentMaximum } from "./timing-rules";
@@ -29,6 +29,7 @@ import {
   rangeFromTokens,
   medicationGuardForContext,
   maximumDosePerPeriodAt,
+  maximumCountLeadAt,
   normalizeTokenLower,
   startsMedicationGuard,
   isMedicationGuardMarker
@@ -797,10 +798,13 @@ function postfixConditionEnd(context: HpsgClauseContext, start: number): number 
       break;
     }
     if (current.sourceStart < comparisonEnd) continue;
-    const maximum = maximumDosePerPeriodAt(context, index) ?? maximumOccurrenceAt(context, index);
+    const maximumHead = maximumCountLeadAt(context, index);
+    if (!maximumHead) continue;
+    const maximum = maximumDosePerPeriodAt(context, index, maximumHead) ??
+      maximumOccurrenceAt(context, index, maximumHead);
     if (maximum) {
       if (!isIndependentMaximum(context, index, maximum)) continue;
-    } else if (!startsMaximumCountLead(context, index)) continue;
+    } else if (maximumHead.headStart !== index) continue;
     end = current.sourceStart;
     break;
   }

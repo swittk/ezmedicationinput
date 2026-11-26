@@ -26,7 +26,6 @@ import {
   AS_NEEDED_LEAD_PHRASES,
   DURATION_LEAD_TOKENS,
   INSTRUCTION_START_WORDS,
-  MAXIMUM_COUNT_LEAD_SEQUENCES,
   MAXIMUM_COUNT_LEAD_TOKENS,
   PRN_BREAKING_COORDINATORS,
   PRN_COMPACT_REASON_SEPARATORS,
@@ -51,6 +50,7 @@ import {
 import { isMedicationAdministrationMethod } from "../method-lexicon";
 import {
   HpsgClauseContext,
+  maximumCountLeadAt,
   hasLexicalSeparator,
   isPunctuation,
   joinTokenText,
@@ -76,12 +76,7 @@ function startsDoseComplement(context: HpsgClauseContext, start: number): boolea
 }
 
 export function startsMaximumCountLead(context: HpsgClauseContext, start: number): boolean {
-  return MAXIMUM_COUNT_LEAD_SEQUENCES.some((parts) => {
-    const tokens = tokensAvailable(context, start, parts.length);
-    return Boolean(tokens && tokens.every(
-      (token, offset) => normalizeTokenLower(token) === parts[offset]
-    ));
-  });
+  return maximumCountLeadAt(context, start)?.headStart === start;
 }
 
 function prnReasonBoundary(lower: string, context: HpsgClauseContext): boolean {

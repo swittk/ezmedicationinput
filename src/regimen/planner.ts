@@ -179,8 +179,9 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
     const token = tokens[i];
     // The existing maximum constituent owns its qualifier, amount and period.
     // Its internal numerals cannot introduce independent administrations.
-    const maximum = maximumCountLeadAt(maximumContext, i) &&
-      (maximumDosePerPeriodAt(maximumContext, i) ?? maximumOccurrenceAt(maximumContext, i));
+    const maximumHead = maximumCountLeadAt(maximumContext, i);
+    const maximum = maximumHead && (maximumDosePerPeriodAt(maximumContext, i, maximumHead) ??
+      maximumOccurrenceAt(maximumContext, i, maximumHead));
     if (maximum) { i = maximum.headStart + maximum.tokens.length - 1; continue; }
     // A typed phase-adjustment predicate supplies a candidate boundary;
     // its complete dosage daughter is still checked by the boundary grammar.
