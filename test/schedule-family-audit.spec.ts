@@ -6833,6 +6833,48 @@ describe("rolling quantity ceilings, amount qualifiers and finite windows", () =
     }
   });
 
+  it.each([
+    ["<=", "100000000052", 0.006, "L", ["08:00", "12:00", "16:00"], 6],
+    ["<", "100000000050", 0.006, "L", ["08:00", "12:00"], 4],
+    ["<", "100000000050", 0.007, "L", ["08:00", "12:00", "16:00"], 6],
+    ["<", "100000000050", 6, "mL", ["08:00", "12:00"], 4],
+  ] as const)("admits whole doses under a %s %s rolling limit of %s %s", (comparator, operatorCode, maximum, code, clocks, total) => {
+    const ucum = "http://unitsofmeasure.org";
+    const dose = { value: 2, unit: "mL", system: ucum, code: "mL", id: "dose", extension: [note] };
+    const amount = { value: maximum, system: ucum, code, id: "maximum", extension: [operator(operatorCode), note] };
+    const period = { value: 24, system: ucum, code: "h", id: "period", extension: [note] };
+    const text = `Give 2 mL at 08:00, 12:00, 16:00 and 20:00; maximum ${comparator} ${maximum} ${code} per 24 hours.`;
+    const common = { text, extension: [note], doseAndRate: [{ doseQuantity: dose }],
+      timing: { repeat: { frequency: 4, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "12:00:00", "16:00:00", "20:00:00"] } } };
+    const r5: FhirDosage = { ...common, maxDosePerPeriod: [{ numerator: amount, denominator: period }] };
+    const r6: FhirR6DosageInstruction = { renderedInstruction: text, step: [{ component: [{ ...common,
+      safety: { doseLimit: [{ scope: "period", valueQuantity: amount, period }] }
+    }] }] };
+    for (const input of [importCanonicalCourse(r6), r5, r6]) {
+      const before = JSON.stringify(input);
+      const due = nextDueDoses(input, { ...query, limit: 4 });
+      expect(due.filter(value => value.startsWith("2026-11-02T")).map(value => value.slice(11, 16))).toEqual(clocks);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: total, unit: "mL" });
+      const native = importCanonicalCourse(input);
+      const administration = native.stages[0].administrations[0];
+      expect(administration.text).toBe(text);
+      expect(administration.limits?.[0].amount).toMatchObject({ value: maximum, code, system: ucum, comparator });
+      expect(administration.limits?.[0].amount?.unit).toBeUndefined();
+      for (const projected of [courseToR5(native), courseToR6(native)]) {
+        expect(JSON.stringify(projected)).toContain(note.valueString);
+      }
+      const exported = courseToR6(native).step[0].component[0];
+      expect(exported.doseAndRate?.[0].doseQuantity).toEqual(dose);
+      expect(exported.safety?.doseLimit?.[0].period).toEqual(period);
+      expect(exported.safety?.doseLimit?.[0].valueQuantity).toEqual({ ...amount, comparator, extension: [note] });
+      expect(courseToR5(native)[0].maxDosePerPeriod?.[0].numerator).toEqual({ ...amount, comparator, extension: [note] });
+      expect(exported.safety?.doseLimit?.[0].valueQuantity?.unit).toBeUndefined();
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
   it("keeps a qualified rolling denominator unresolved", () => {
     const supplied = row();
     supplied.maxDosePerPeriod = [{ numerator: { value: 1, unit: "tab", extension: [operator("100000000052")] },

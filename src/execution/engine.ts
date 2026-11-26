@@ -2104,7 +2104,8 @@ function executableQuantityCaps(
     }
     if (!hasNumericDose || !dose?.value) continue;
     if (
-      (maximumOperator && maximumOperator !== "~" && maximumOperator !== "<=") ||
+      (maximumOperator && maximumOperator !== "~" && maximumOperator !== "<=" &&
+        (maximumOperator !== "<" || asQuantity)) ||
       (periodOperator && periodOperator !== "~") ||
       maximum === undefined ||
       !Number.isFinite(maximum) ||
@@ -2119,8 +2120,10 @@ function executableQuantityCaps(
       continue;
     }
     const equivalentDose = perTargetDose * getAdministrationTargetMultiplier(dosage, context);
-    const max = asQuantity ? maximum / equivalentDose * dose.value
-      : Math.floor(maximum / equivalentDose + 1e-9);
+    const doseCapacity = maximum / equivalentDose;
+    const max = asQuantity ? doseCapacity * dose.value
+      : maximumOperator === "<" ? Math.ceil(doseCapacity) - 1
+      : Math.floor(doseCapacity + 1e-9);
     // A stated ceiling below the authored dose is contradictory. Preserve
     // the clinician's editable schedule rather than turning a suggestion
     // conflict into a universal zero-dose veto; supply will retain the
