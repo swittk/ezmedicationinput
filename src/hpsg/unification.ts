@@ -1108,7 +1108,10 @@ function fixedClockEventAdjunctSynsem(
   const tokensFor = (sign: HpsgSign, field: "when" | "timeOfDay") => {
     const indices = new Set<number>();
     let qualifyingIndices: Set<number> | undefined;
-    if (field === "when" && qualifiedDayparts) {
+    // When the complete typed event daughter qualifies, its evidence owns
+    // the whole phrase, including registered multiword daypart expressions.
+    if (field === "when" && qualifiedDayparts &&
+        meal.when!.some(event => !qualifiedDayparts!.has(event))) {
       qualifyingIndices = new Set();
       for (const token of sign.tokens)
         if (qualifiedDayparts.has(EVENT_TIMING_TOKENS[token.canonical ?? token.lower]))
@@ -1170,10 +1173,14 @@ function fixedClockEventAdjunctSynsem(
   }
   const text = context.sourceText(mealStart, mealEnd).trim();
   if (!text) return undefined;
-  // Keep the authored daypart qualifier. Its construction evidence records
-  // that it adds no separate position when a finite NEXT count is projected.
-  if (daypartQualification) return { synsem: mealSynsem,
-    qualifiedDaypartTokens: meals.map(token => token.index) };
+  // The typed qualifier modifies the existing clock, adding no separate
+  // administration position. Retain its source evidence on this construction.
+  if (daypartQualification) {
+    const when = meal.when.filter(event => !qualifiedDayparts!.has(event));
+    return { synsem: { ...mealSynsem, head: { ...mealSynsem.head,
+      schedule: { ...meal, when: when.length ? when : undefined } } },
+      qualifiedDaypartTokens: meals.map(token => token.index) };
+  }
   const instruction: HpsgInstructionFeature =
     meal.offset === undefined && meal.offsetMin === undefined && meal.offsetMax === undefined
       ? mealInstructionWording(meal.when, text) : { text };

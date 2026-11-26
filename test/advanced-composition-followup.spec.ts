@@ -2420,6 +2420,17 @@ const options = {
 };
 
 describe("canonical course architecture", () => {
+  const importedCallNames = (source: ts.SourceFile) => {
+    const imports = new Map<string, string>(), namespaces = new Set<string>();
+    for (const statement of source.statements) {
+      if (!ts.isImportDeclaration(statement)) continue;
+      const bindings = statement.importClause?.namedBindings;
+      if (bindings && ts.isNamedImports(bindings))
+        for (const binding of bindings.elements) imports.set(binding.name.text, (binding.propertyName ?? binding.name).text);
+      else if (bindings && ts.isNamespaceImport(bindings)) namespaces.add(bindings.name.text);
+    }
+    return { imports, namespaces };
+  };
   it("the execution kernel and clinical compiler do not import FHIR adapters or inspect wire markers", () => {
     const forbiddenModuleSpecifiers = (text: string) => {
       const source = ts.createSourceFile("boundary.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -2455,6 +2466,7 @@ describe("canonical course architecture", () => {
     const wireBoundaryAccesses = (text: string) => {
       const source = ts.createSourceFile("boundary.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
       const accesses: string[] = [];
+      const { imports } = importedCallNames(source);
       const visit = (node: ts.Node) => {
         const boundProperty = ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)
           ? node.propertyName ?? node.name : undefined;
@@ -2465,8 +2477,10 @@ describe("canonical course architecture", () => {
              boundProperty.text === "modifierExtension"))
           accesses.push(node.getText(source));
         if (ts.isCallExpression(node)) {
-          const callee = ts.isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression;
-          if (ts.isIdentifier(callee) && ["toFhirR5Dosages", "fromR6Dosage", "toDosageDetails"].includes(callee.text))
+          const callee = node.expression;
+          const called = ts.isIdentifier(callee) ? imports.get(callee.text) ?? callee.text
+            : ts.isPropertyAccessExpression(callee) ? callee.name.text : undefined;
+          if (called && ["toFhirR5Dosages", "fromR6Dosage", "toDosageDetails"].includes(called))
             accesses.push(node.getText(source));
         }
         ts.forEachChild(node, visit);
@@ -2481,8 +2495,10 @@ describe("canonical course architecture", () => {
       expect(wireBoundaryAccesses("const { " + binding + " } = row;")).toEqual([binding]);
     expect(wireBoundaryAccesses('const text = "row.modifierExtension";')).toEqual([]);
     expect(wireBoundaryAccesses('const text = "{ modifierExtension: markers }";')).toEqual([]);
+    expect(wireBoundaryAccesses('import { calculateTotalUnits as total } from "../index"; total(options);')).toEqual([]);
     for (const name of ["toFhirR5Dosages", "fromR6Dosage", "toDosageDetails"]) {
       expect(wireBoundaryAccesses(name + "(rows);")).toEqual([name + "(rows)"]);
+      expect(wireBoundaryAccesses(`import { ${name} as lift } from "../index"; lift(rows);`)).toEqual(["lift(rows)"]);
       expect(wireBoundaryAccesses("// R5 clients use " + name + "(rows) at the adapter boundary.")).toEqual([]);
     }
     for (const name of [
@@ -2500,14 +2516,8 @@ describe("canonical course architecture", () => {
     const reader=readFileSync(new URL("../src/adapters/r5-import.ts",import.meta.url),"utf8");
     const calledFunctions = (text: string): string[] => {
       const source = ts.createSourceFile("adapter.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-      const imports = new Map<string, string>(), namespaces = new Set<string>(), calls: string[] = [];
-      for (const statement of source.statements) {
-        if (!ts.isImportDeclaration(statement)) continue;
-        const bindings = statement.importClause?.namedBindings;
-        if (bindings && ts.isNamedImports(bindings))
-          for (const binding of bindings.elements) imports.set(binding.name.text, (binding.propertyName ?? binding.name).text);
-        else if (bindings && ts.isNamespaceImport(bindings)) namespaces.add(bindings.name.text);
-      }
+      const { imports, namespaces } = importedCallNames(source);
+      const calls: string[] = [];
       const visit = (node: ts.Node): void => {
         if (ts.isCallExpression(node)) {
           const callee = node.expression;

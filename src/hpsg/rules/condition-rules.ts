@@ -373,6 +373,10 @@ function withholdingDoseTarget(
 ): NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]> {
   const target: NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]> = {};
   for (const argument of frame.args) {
+    if (argument.role === AdviceArgumentRole.Amount && argument.quantity) {
+      target.dose = argument.quantity;
+      continue;
+    }
     if (argument.role !== AdviceArgumentRole.Object) continue;
     // Exact source anchoring only: the grammatical tokens are reused, not
     // reparsed from a rendered phrase or interpreted by a second parser.

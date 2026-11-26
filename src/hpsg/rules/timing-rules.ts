@@ -3038,7 +3038,9 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
       ? maximumOccurrenceAt(context, start, lower) : undefined;
     if (maximum?.headStart === start) {
       const { tokens: matched, count: countValue, period } = maximum;
-      if (period && "daypart" in period) {
+      if (period && ("daypart" in period || period.rolling)) {
+        // A rolling occurrence window cannot be represented by the existing
+        // civil bucket cap. Keep the complete limit as authored instruction.
         const owned = context.clinicalCache.quantityTokenIndices ??= new Set<number>();
         for (const token of matched) owned.add(token.index);
         return [authoredMaximumConstraint(context, matched)];

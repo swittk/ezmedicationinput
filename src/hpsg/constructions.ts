@@ -866,7 +866,7 @@ export function parseMedicationGuard(
     };
     let delimitedConsequent = false;
     if (comma >= 0) {
-      let next = tokens.findIndex(token => token.sourceStart >= end) + 1;
+      let next = tokens.findIndex(token => token.sourceStart >= end + 1);
       for (const directive of ACTION_DIRECTIVE_PREFIXES) {
         if (next + directive.parts.length <= tokens.length &&
             directive.parts.every((part, offset) => normalizeTokenLower(tokens[next + offset]) === part)) {
@@ -923,9 +923,11 @@ export function parseMedicationGuard(
       if (!condition) continue;
       // A bare comparative count can be the predicate's own complement.
       // An opaque state prefix does not prove an independent treatment limit.
-      // A separator, explicit maximum head, period, or structured predicate
-      // supplies that ownership without interpreting the patient's history.
-      if (occurrenceCap && !occurrenceCap.period && occurrenceCap.headStart === index &&
+      // A denominator/registered cadence, separator, explicit maximum head,
+      // or structured predicate supplies independent ownership. An observation
+      // window alone does not separate a count from the patient's history.
+      if (occurrenceCap && occurrenceCap.headStart === index &&
+          (!occurrenceCap.period || occurrenceCap.period.unitDenominator === false) &&
           !MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(token)) &&
           !predicate?.synsem.cont.guard?.licensesBareIf && !guardHasMeasurement(condition)) continue;
       end = capStart;

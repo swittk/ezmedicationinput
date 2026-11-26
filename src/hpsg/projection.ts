@@ -1,6 +1,5 @@
 import { equalStructuredValues } from "../stable-structure";
-import { FIXED_CLOCK_DAYPART_QUALIFICATION_RULE, NEXT_DAY_SCHEDULE_RULE, NEXT_DAY_ONSET_RULE } from "./lexical-classes";
-import { EVENT_TIMING_TOKENS } from "../maps";
+import { NEXT_DAY_SCHEDULE_RULE, NEXT_DAY_ONSET_RULE } from "./lexical-classes";
 import { ParserState, Token } from "../parser-state";
 import {
   EventTiming,
@@ -607,26 +606,8 @@ export function projectHpsgSignToState(
     applySchedule(state, schedule, deps);
   }
 
-  // Existing typed constructions distinguish daypart qualifiers from
-  // independently coordinated events, with or without a recurring cadence.
-  let positions = schedule?.when;
-  if (positions?.length && schedule?.timeOfDay?.length) {
-    let qualifiedDayparts: Set<EventTiming> | undefined;
-    for (const evidence of sign.evidence) {
-      if (evidence.rule !== FIXED_CLOCK_DAYPART_QUALIFICATION_RULE) continue;
-      const indices = new Set(evidence.tokenIndices);
-      for (const token of sign.tokens) {
-        if (!indices.has(token.index)) continue;
-        const event = EVENT_TIMING_TOKENS[token.canonical ?? token.lower];
-        if (event) (qualifiedDayparts ??= new Set()).add(event);
-      }
-    }
-    if (qualifiedDayparts?.size && state.primaryClause.schedule) {
-      positions = positions.filter(event => !qualifiedDayparts!.has(event));
-      if (positions.length) state.primaryClause.schedule.when = positions;
-      else delete state.primaryClause.schedule.when;
-    }
-  }
+  // HPSG composition already distinguishes clock qualifiers from independent events.
+  const positions = schedule?.when;
 
   const dividedCount = dose?.attachmentClass !== "procedure"
     ? dose?.clinicalQuantity?.dividedDoseCount : undefined;

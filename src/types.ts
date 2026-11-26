@@ -2148,6 +2148,8 @@ export interface CanonicalClinicalAdjuncts {
   /** Typed nominal reference of a conditional administration instruction.
    * Resolved across related regimen daughters before any FHIR lowering. */
   conditionTarget?: {
+    /** Quantified prohibition binds only to the same existing administration dose. */
+    dose?: CanonicalDoseExpr;
     when?: EventTiming[];
     /** Explicit existing clock slots selected by the nominal dose object. */
     timeOfDay?: string[];

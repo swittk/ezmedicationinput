@@ -421,7 +421,7 @@ export function occurrenceCapPeriodAt(
 type MaximumDosePeriod = (
   | { tokens: Token[]; period: number; periodUnit: FhirPeriodUnit }
   | { tokens: Token[]; daypart: true }
-) & { unitDenominator?: boolean };
+) & { unitDenominator?: boolean; rolling?: true };
 
 /** The existing compact maximum denominator is shared by quantity and count nouns. */
 export function compactMaximumPeriodAt(
@@ -463,8 +463,9 @@ export function maximumDosePeriodAt(
   const article = DOSE_FRACTION_ARTICLES.has(articleLower) || EVENT_ARTICLE_TOKENS.has(articleLower);
   if (article) cursor++;
   const modifier = context.tokens[cursor];
-  if (modifier && !context.state?.consumed.has(modifier.index) &&
-      MAXIMUM_PERIOD_MODIFIERS.has(normalizeTokenLower(modifier))) cursor++;
+  const rolling = modifier && !context.state?.consumed.has(modifier.index) &&
+    MAXIMUM_PERIOD_MODIFIERS.has(normalizeTokenLower(modifier));
+  if (rolling) cursor++;
   const value = context.tokens[cursor];
   if (!value || context.state?.consumed.has(value.index)) return undefined;
   const lower = normalizeTokenLower(value);
@@ -475,14 +476,14 @@ export function maximumDosePeriodAt(
   if (bareUnit && (article || unitDenominator)) {
     const tokens = context.tokens.slice(start, cursor + 1);
     return DAYPART_INTERVAL_TOKENS.has(lower)
-      ? { tokens, daypart: true, unitDenominator } : { tokens, period: 1, periodUnit: bareUnit, unitDenominator };
+      ? { tokens, daypart: true, unitDenominator } : { tokens, period: 1, periodUnit: bareUnit, unitDenominator, ...(rolling ? { rolling: true as const } : {}) };
   }
   const duration = clinicalDurationAt(context, cursor);
   if (!duration || duration.value <= 0 || duration.comparator) return undefined;
   const tokens = context.tokens.slice(start, duration.end);
   return DAYPART_INTERVAL_TOKENS.has(duration.unitSurface!)
     ? { tokens, daypart: true, unitDenominator }
-    : { tokens, period: duration.value, periodUnit: duration.unit, unitDenominator };
+    : { tokens, period: duration.value, periodUnit: duration.unit, unitDenominator, ...(rolling ? { rolling: true as const } : {}) };
 
 }
 
@@ -523,15 +524,17 @@ export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: n
   const valueToken = context.tokens[cursor];
   const initial = valueToken?.kind === LexKind.Number ? valueToken.value
     : valueToken ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)] : undefined;
-  const number = plainClinicalNumberAt(context, cursor, initial);
-  const amount = number?.value;
-  const unitIndex = number ? doseUnitIndexAfter(context, number.numericIndex + 1) : undefined;
+  const attached = valueToken && valueToken.kind !== LexKind.Number
+    ? attachedNumberUnitAt(normalizeTokenLower(valueToken)) : undefined;
+  const number = attached ? undefined : plainClinicalNumberAt(context, cursor, initial);
+  const amount = attached?.value ?? number?.value;
+  const unitIndex = attached ? cursor : number ? doseUnitIndexAfter(context, number.numericIndex + 1) : undefined;
   const unitToken = unitIndex === undefined ? undefined : context.tokens[unitIndex];
   if (amount === undefined || !Number.isFinite(amount) || amount <= 0 ||
       unitIndex === undefined || !unitToken) return undefined;
   const quantityTokens = maximumTokensAvailable(context, cursor, unitIndex + 1 - cursor);
   if (!quantityTokens) return undefined;
-  const unitSurface = normalizeTokenLower(unitToken);
+  const unitSurface = attached?.rawUnit ?? normalizeTokenLower(unitToken);
   const compact = compactMaximumPeriodAt(context, unitIndex, unitSurface);
   // Occurrence nouns keep their own count and period constituent, including
   // daypart maxima that remain complete authored instructions.

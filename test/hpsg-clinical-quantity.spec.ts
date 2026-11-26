@@ -4863,6 +4863,8 @@ describe("postfix clinical guards beside typed dose limits", () => {
     { source: "รับประทาน 2 เม็ด ทุก 4 ชั่วโมง เฉพาะเมื่อมีไข้ ไม่เกิน 4 เม็ดต่อวัน", locale: "th", quantity: true,
       predicate: { kind: "state", name: "ไข้", expected: true } },
     { source: "Take 2 tablets q4h unless dizzy no more than 4 doses/day", locale: "en", quantity: false,
+      predicate: { kind: "not", condition: { kind: "state", name: "dizzy", expected: true } } },
+    { source: "Take 2 tablets q4h unless dizzy no more than 4 doses per day", locale: "en", quantity: false,
       predicate: { kind: "not", condition: { kind: "state", name: "dizzy", expected: true } } }
   ])("keeps an explicitly licensed state guard beside its cap: $source", ({ source, locale, quantity, predicate }) => {
     const parsed = parsePublicSig(source, { locale });

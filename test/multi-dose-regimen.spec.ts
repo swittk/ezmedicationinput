@@ -1714,7 +1714,7 @@ describe("source-shared negative instructions carry their typed guard", () => {
 describe("independent conditional counseling cannot absorb prescription timing", () => {
   it.each(["avoid driving if drowsy", "ห้ามขับรถหากง่วง", "avoid driving", "do not drive if drowsy"])(
     "preserves the finite PRN course and cap beside %s", counseling => {
-      const source = `1 tab PO q6h PRN pain max 4 doses/day x7d; ${counseling}`;
+      const source = `1 tab PO q4h PRN pain max 4 doses/day x7d; ${counseling}`;
       const p = parseSig(source);
       expect(p.fhir.timing?.repeat?.boundsDuration?.value).toBe(7);
       expect(p.meta.canonical.clauses[0]?.schedule?.occurrenceCap).toEqual({ max: 4, period: 1, periodUnit: "d" });
@@ -1723,6 +1723,8 @@ describe("independent conditional counseling cannot absorb prescription timing",
       expect(p.fhir.asNeeded).toBe(true);
       const base = { from: "2026-11-02T00:00:00+07:00", orderedAt: "2026-11-02T00:00:00+07:00", timeZone: "Asia/Bangkok" };
       for (const dosage of [p.fhirNext, toFhirR5Dosages(p.fhirNext)]) {
+        expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.recurrence?.occurrenceCap)
+          .toEqual({ max: 4, period: 1, periodUnit: "d" });
         expect(calculateTotalUnits({ dosage, ...base, durationValue: 28, durationUnit: "d" }).totalUnits).toBe(28);
         expect(nextDueDoses(dosage, { ...base, from: "2026-11-09T00:00:00+07:00", limit: 1 })).toEqual([]);
       }

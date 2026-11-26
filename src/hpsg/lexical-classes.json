@@ -2499,6 +2499,10 @@
       "startHour": 0,
       "endHour": 12
     },
+    "MORN.early": {
+      "startHour": 0,
+      "endHour": 12
+    },
     "AFT": {
       "startHour": 12,
       "endHour": 18

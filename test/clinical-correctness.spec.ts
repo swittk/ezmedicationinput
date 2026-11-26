@@ -3982,8 +3982,10 @@ describe("independent cadence display ownership", () => {
         expect(formatSig(input, "long", { locale: "th" })).toContain("once daily");
         expect(formatSig(input, "long", { locale: "th" })).not.toContain("ครั้งเดียว");
         if ("frequencyMax" in repeat) {
-          expect(formatSig(input, "long", { locale: "en" })).toContain("up to 3 times");
-          expect(formatSig(input, "long", { locale: "th" })).toContain("ไม่เกิน 3 ครั้ง");
+          expect(formatSig(input, "long", { locale: "en" }))
+            .toBe("Current: Use 1 tablet up to 3 times; original directions: once daily.");
+          expect(formatSig(input, "long", { locale: "th" }))
+            .toBe("ปัจจุบัน: ใช้ครั้งละ 1 เม็ด ไม่เกิน 3 ครั้ง; ข้อความเดิม: once daily.");
         }
       }
       const projected = toFhirR5Dosages(raw)[0].timing;

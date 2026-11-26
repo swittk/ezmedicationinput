@@ -1387,11 +1387,20 @@ export function scopeMedicationConditionTargets(
       }
       const clause = states[index].primaryClause;
       if (!clause.dose && !clause.method && !clause.schedule) continue;
+      if (target.dose && !sameDose(clause.dose, target.dose)) continue;
       if (target.when?.length || target.timeOfDay?.length || target.clockRange) {
         const anchors = selectedConditionAnchors(clause.schedule, target);
         if (!anchors.times.length && !anchors.events.length) continue;
       }
       selected.push(index);
+    }
+    if (!selected.length && target.dose) {
+      // A prohibition of a different amount stays with its own conditional
+      // action; it supplies no guard for the standing administration.
+      delete clinical.condition;
+      delete clinical.calendarDayCondition;
+      delete clinical.conditionTarget;
+      continue;
     }
     if (!selected.length || target.quantifier === 'both' && selected.length !== 2) {
       // The nominal reference has no unique binding in the available regimen.
