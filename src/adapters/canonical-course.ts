@@ -37,7 +37,7 @@ import type {
   FhirR6Extension,
   FormatOptions,
 } from "../types";
-import { administrationHasAmountFacts } from "../canonical/course";
+import { administrationHasAmountFacts, sameCodedQuantityUnit } from "../canonical/course";
 import type {
   CanonicalMeasure,
   CanonicalAmount,
@@ -1338,10 +1338,9 @@ export interface R5MaximumSelection extends SelectedR5Maximum {
   groups?: Map<string, SelectedR5Maximum>;
 }
 function sameMaximumUnit(left: CanonicalMeasure, right: CanonicalMeasure): boolean {
-  return left.system && left.code && right.system && right.code
-    ? left.system === right.system && left.code === right.code
-    : left.unit !== undefined && left.unit === right.unit &&
-      left.system === right.system && left.code === right.code;
+  return sameCodedQuantityUnit(left, right) ||
+    left.unit !== undefined && left.unit === right.unit &&
+    left.system === right.system && left.code === right.code;
 }
 function unitKeyPart(value: string | undefined): string {
   return value === undefined ? "-" : value.length + ":" + value;

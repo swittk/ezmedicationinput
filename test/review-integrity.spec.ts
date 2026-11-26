@@ -2930,4 +2930,55 @@ describe("coded presentation quantity identity", () => {
       }
     }
   });
+
+  it("applies an identically coded lifetime ceiling and recorded consumption", () => {
+    const unit = { system: "urn:clinic:dose-unit", code: "tab" };
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, ...unit } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"] } },
+      maxDosePerLifetime: { value: 2, ...unit },
+    };
+    const before = structuredClone(row);
+    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+      const query = { dosage, ...options, from: "2027-01-02T00:00:00Z", durationValue: 2, durationUnit: "d" as const };
+      expect(calculateTotalUnits(query).totalUnits).toBe(2);
+      expect(calculateTotalUnits({ ...query, priorDoseTimes: ["2027-01-01T08:00:00Z"] }).totalUnits).toBe(1);
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].limits?.[0].amount)
+        .toEqual(row.maxDosePerLifetime);
+    }
+    expect(row).toEqual(before);
+  });
+
+  it.each(["system", "code"] as const)("keeps a lifetime ceiling with another %s unevaluated", field => {
+    const unit = { system: "urn:clinic:dose-unit", code: "tab" };
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, ...unit } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"] } },
+      maxDosePerLifetime: { value: 2, ...unit, [field]: field === "system" ? "urn:other:dose-unit" : "cap" },
+    };
+    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])])
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 2, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 4, quantityKind: "maximum",
+          explanation: expect.stringContaining("an unevaluable maximum-dose constraint") });
+  });
+
+  it.each([false, true])("applies a coded administration ceiling across optional range labels (upper endpoint: %s)", upper => {
+    const unit = { system: "urn:clinic:dose-unit", code: "tab" };
+    const row: FhirDosage = {
+      doseAndRate: [{ doseRange: { low: { value: 1, ...unit },
+        ...(upper ? { high: { value: 4, unit: "tablet", ...unit } } : {}) } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"] } },
+      maxDosePerAdministration: { value: 2, ...(upper ? {} : { unit: "tablet" }), ...unit },
+    };
+    const before = structuredClone(row);
+    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(4);
+      expect(projectCanonicalCourse(importCanonicalCourse(dosage)).fhir[0].doseAndRate?.[0].doseRange)
+        .toEqual(row.doseAndRate![0].doseRange);
+    }
+    expect(row).toEqual(before);
+  });
 });

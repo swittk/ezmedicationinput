@@ -322,6 +322,11 @@ export function normalizeQuantityCapUnit(unit: string): string {
   }
 }
 
+/** Exact coding compares quantities without assigning an opaque code a dimension. */
+export function sameCodedQuantityUnit(left: CanonicalMeasure | undefined, right: CanonicalMeasure | undefined): boolean {
+  return Boolean(left?.system && left.code && left.system === right?.system && left.code === right.code);
+}
+
 /** Intersect usable scoped maxima in the administration's quantity unit.
  * Incomplete or incomparable retained constraints do not erase another
  * known maximum. `multiple` records constraints still requiring evaluation. */
@@ -339,6 +344,7 @@ export function numericAdministrationLimits(
   let administrationValue = Infinity, lifetimeValue = Infinity;
   let administrationUnit: string | undefined, lifetimeUnit: string | undefined;
   let multiple = false;
+  let dose: CanonicalMeasure | undefined;
   let doseUnit: string | undefined;
   for (const limit of a.limits ?? []) {
     if (limit.scope !== "administration" && limit.scope !== "lifetime") continue;
@@ -349,17 +355,24 @@ export function numericAdministrationLimits(
       multiple = true;
       continue;
     }
-    const source = unitOf(bound);
-    const sourceUnit = normalizeQuantityCapUnit(source);
-    if (!sourceUnit) { multiple = true; continue; }
     if (doseUnit === undefined) {
       const amount = a.amounts?.[0];
       const high = amount?.range?.high;
       // Metadata alone does not make the upper endpoint measurable. Match
       // supply's numeric endpoint while retaining both authored quantities.
-      doseUnit = unitOf(amount?.quantity ??
+      dose = amount?.quantity ??
         (high?.value !== undefined && Number.isFinite(high.value) && high.value > 0
-          ? high : amount?.range?.low));
+          ? high : amount?.range?.low);
+      doseUnit = unitOf(dose);
+    }
+    const sameCodedUnit = sameCodedQuantityUnit(bound, dose);
+    const source = unitOf(bound);
+    const sourceUnit = normalizeQuantityCapUnit(source);
+    // A local coded dose needs the same identity when no dimension is known.
+    // Another limit cannot lend its own mass/volume unit to that dose.
+    if (!sameCodedUnit && (!sourceUnit || (!doseUnit && dose?.code))) {
+      multiple = true;
+      continue;
     }
     // Keep every comparison in the same unit even when the winning original
     // bound uses a different unit. Returning that original preserves metadata.
@@ -367,7 +380,7 @@ export function numericAdministrationLimits(
       ? (administrationUnit ??= doseUnit || source)
       : (lifetimeUnit ??= doseUnit || source);
     const targetUnit = normalizeQuantityCapUnit(target);
-    const value = sourceUnit === targetUnit
+    const value = sameCodedUnit || sourceUnit === targetUnit
       ? bound.value : convertValue(bound.value, sourceUnit, targetUnit, strength);
     if (value === null || !Number.isFinite(value)) {
       multiple = true;

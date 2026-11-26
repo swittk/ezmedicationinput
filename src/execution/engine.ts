@@ -29,6 +29,7 @@ import {
   DurationUnit,
   TimingEvent,
   numericAdministrationLimits,
+  sameCodedQuantityUnit,
   administrationHasDatedStart,
   normalizeQuantityCapUnit,
   hasPeriodLimits,
@@ -2085,7 +2086,7 @@ function executableQuantityCaps(
       continue;
     }
     // Exact coded identity compares counts without interpreting a local code as a dimension.
-    const sameCodedUnit = dose.system && dose.code && dose.system === numerator?.system && dose.code === numerator.code;
+    const sameCodedUnit = sameCodedQuantityUnit(dose, numerator);
     let perTargetDose: number | null = dose.value;
     if (!sameCodedUnit) {
       const actualUnit = capQuantityUnit(dose);
@@ -2142,7 +2143,7 @@ function executableDoseRange(
   if (highOperator && highOperator !== "~" && highOperator !== "<=" && highOperator !== "<") return undefined;
   const unit = getDoseQuantityUnit(high), lowUnit = getDoseQuantityUnit(range.low);
   const low = range.low?.value === undefined ? 0
-    : normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(lowUnit)
+    : sameCodedQuantityUnit(range.low, high) || normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(lowUnit)
       ? range.low.value : convertValue(range.low.value, normalizeQuantityCapUnit(lowUnit), normalizeQuantityCapUnit(unit), measuredStrengthRatio(context));
   if (low === null || !Number.isFinite(low) || low < 0 || low > high.value) return undefined;
   const strictLow = range.low?.comparator === ">";
@@ -6768,7 +6769,8 @@ function prepareMeasuredDose(
     if (!quantity && low?.value !== undefined && Number.isFinite(low.value) && low.value > 0) {
       if (maximum?.value !== undefined && (!operator || operator === "~" || operator === "<=")) {
         const unit = capQuantityUnit(low), maxUnit = capQuantityUnit(maximum);
-        const amount = normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(maxUnit)
+        const amount = sameCodedQuantityUnit(low, maximum) ||
+          normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(maxUnit)
           ? maximum.value : convertValue(maximum.value, normalizeQuantityCapUnit(maxUnit), normalizeQuantityCapUnit(unit), measuredStrengthRatio(options.context));
         const value = amount === null ? undefined : amount / getAdministrationTargetMultiplier(dosage, options.context);
         if (value !== undefined && (low.comparator === ">" ? value > low.value : value >= low.value))
@@ -6780,12 +6782,13 @@ function prepareMeasuredDose(
     if (quantity) {
       if (maximum?.value !== undefined && (!operator || operator === "~" || operator === "<=")) {
         const unit = capQuantityUnit(quantity), maxUnit = capQuantityUnit(maximum);
-        const converted = normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(maxUnit)
+        const converted = sameCodedQuantityUnit(quantity, maximum) ||
+          normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(maxUnit)
           ? maximum.value : convertValue(maximum.value, normalizeQuantityCapUnit(maxUnit), normalizeQuantityCapUnit(unit), measuredStrengthRatio(options.context));
         const bound = converted === null ? undefined : converted / getAdministrationTargetMultiplier(dosage, options.context);
         const lowUnit = capQuantityUnit(low);
         const minimum = low?.value === undefined ? 0 :
-          normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(lowUnit) ? low.value :
+          sameCodedQuantityUnit(low, quantity) || normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(lowUnit) ? low.value :
             convertValue(low.value, normalizeQuantityCapUnit(lowUnit), normalizeQuantityCapUnit(unit), measuredStrengthRatio(options.context));
         if (bound !== undefined && minimum !== null && bound < quantity.value! &&
             (low?.comparator === ">" ? bound > minimum : bound >= minimum))
@@ -7062,7 +7065,8 @@ function remainingLifetimeSupply(
       (operator && operator !== "~" && operator !== "<=")) return undefined;
   const dose = dosage.amounts?.[0]?.quantity;
   const doseUnit = capQuantityUnit(dose), lifetimeUnit = capQuantityUnit(lifetime);
-  const converted = normalizeQuantityCapUnit(lifetimeUnit) === normalizeQuantityCapUnit(doseUnit)
+  const converted = sameCodedQuantityUnit(lifetime, dose) ||
+    normalizeQuantityCapUnit(lifetimeUnit) === normalizeQuantityCapUnit(doseUnit)
     ? lifetime.value
     : convertValue(lifetime.value, normalizeQuantityCapUnit(lifetimeUnit), normalizeQuantityCapUnit(doseUnit), strength);
   if (converted === null || !Number.isFinite(converted)) return undefined;
@@ -7173,7 +7177,7 @@ function calculateTotalUnitsSingle(
       const fromUnit = capQuantityUnit(dose);
       const limitUnit = capQuantityUnit(limit);
       const perTarget =
-        normalizeQuantityCapUnit(fromUnit) === normalizeQuantityCapUnit(limitUnit)
+        sameCodedQuantityUnit(dose, limit) || normalizeQuantityCapUnit(fromUnit) === normalizeQuantityCapUnit(limitUnit)
           ? dose.value
           : convertValue(dose.value, normalizeQuantityCapUnit(fromUnit), normalizeQuantityCapUnit(limitUnit), strength);
       if (perTarget === null || !Number.isFinite(perTarget)) {
