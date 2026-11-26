@@ -2017,6 +2017,8 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
   if (durationShort) {
     parts.push(durationShort);
   }
+  const occurrenceCap = describeOccurrenceCapThai(schedule);
+  if (occurrenceCap) parts.push(occurrenceCap);
   const asNeeded = formatAsNeededThai(clause);
   if (asNeeded) {
     parts.push(asNeeded);

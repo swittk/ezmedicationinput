@@ -1432,6 +1432,8 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
   if (durationShort) {
     parts.push(durationShort);
   }
+  const occurrenceCap = describeOccurrenceCapEnglish(schedule);
+  if (occurrenceCap) parts.push(occurrenceCap);
   if (clause.prn?.enabled) {
     const reason = getPreferredCanonicalPrnReasonText(clause.prn.reason, clause.prn.reasons);
     if (reason) {

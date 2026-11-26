@@ -1,5 +1,5 @@
-import { cycleDayConstraintExtension, TIMING_CLOCK_WINDOW_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL } from "../src/fhir";
-import { toFhirR5Dosages, toDosageDetails } from "../src/index";
+import { cycleDayConstraintExtension, TIMING_CLOCK_WINDOW_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src/fhir";
+import { fromFhir, toFhirR5Dosages, toDosageDetails } from "../src/index";
 import { describe, expect, it } from "vitest";
 import { resolveSigLocalization, registerSigLocalization } from "../src/i18n";
 import {
@@ -550,6 +550,92 @@ describe("complete native clause defaults", () => {
     } } });
     expect(actual).toBe("Clinic: " + native);
     expect(calls).toBe(1);
+  });
+
+  it.each(["en", "th"] as const)("keeps occurrence and tablet limits distinct in short %s directions", locale => {
+    const guardText = (locale === "en" ? "only if" : "เฉพาะเมื่อ") + " SBP > 160";
+    const occurrenceText = locale === "en" ? "maximum 4 doses per day" : "ไม่เกิน 4 ครั้งต่อวัน";
+    for (const kind of ["occurrence", "quantity"] as const) {
+      const source = locale === "en"
+        ? "Take 2 tablets q4h if SBP > 160, no more than " + (kind === "occurrence" ? "4 doses per day" : "4 tablets/day")
+        : "รับประทาน 2 เม็ด ทุก 4 ชั่วโมง ถ้า SBP > 160, ไม่เกิน " + (kind === "occurrence" ? "4 ครั้งต่อวัน" : "4 เม็ดต่อวัน");
+      const parsed = parseSig(source, { locale });
+      const before = JSON.stringify(parsed);
+      const administration = parsed.meta.canonical.course!.stages[0].administrations[0];
+      expect(administration.amounts?.[0].quantity?.value).toBe(2);
+      expect(administration.predicate).toMatchObject({ kind: "measurement", value: 160 });
+      if (kind === "occurrence") expect(administration.schedule?.recurrence?.occurrenceCap)
+        .toEqual({ max: 4, period: 1, periodUnit: FhirPeriodUnit.Day });
+      else expect(administration.limits?.[0]).toMatchObject({ amount: { value: 4, unit: "tab" }, period: { value: 1, unit: "d" } });
+      for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+        for (const style of ["short", "long"] as const) {
+          const text = formatSig(input, style, { locale, realizationMode: "normalized" });
+          expect(text).toMatch(locale === "en" ? /(?<!\d)2 (?:tab|tablets)(?![A-Za-z])/u : /(?<!\d)2 เม็ด/u);
+          expect(text.match(/SBP > 160/gu)).toHaveLength(1);
+          if (kind === "occurrence") {
+            expect(text).toContain(occurrenceText + " " + guardText);
+            expect(text).not.toContain("4 tab /");
+          } else {
+            expect(text).toContain(guardText);
+            expect(text).toContain("4 tab / 1 d");
+            expect(text).not.toContain(occurrenceText);
+          }
+        }
+      }
+      expect(parsed.input).toBe(source);
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(parsed)).toBe(before);
+    }
+  });
+
+  it.each(["en", "th"] as const)("preserves occurrence caps and independent advice in complete %s defaults", locale => {
+    const guardText = (locale === "en" ? "only if" : "เฉพาะเมื่อ") + " SBP > 160";
+    const occurrenceText = locale === "en" ? "maximum 4 doses per day" : "ไม่เกิน 4 ครั้งต่อวัน";
+    for (const structuredDose of [true, false]) {
+      const source = structuredDose ? "Take 2 tablets every 4 hours." : "Swallow 2 tablets whole";
+      const input: FhirR6DosageInstruction = { step: [{ component: [{ text: source,
+        ...(structuredDose ? { doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }] } : {}),
+        timing: { repeat: {
+          ...(structuredDose ? { frequency: 1, period: 4, periodUnit: FhirPeriodUnit.Hour } : {}),
+          extension: [{ url: TIMING_OCCURRENCE_CAP_EXTENSION_URL, extension: [
+            { url: "max", valueInteger: 4 },
+            { url: "period", valueQuantity: { value: 1, unit: "d", system: "http://unitsofmeasure.org", code: "d" } }
+          ] }]
+        } }, condition: [guard], additionalInstruction: [{ text: "Recheck BP only if SBP > 160" }], extension: [note]
+      }] }] };
+      const rows = toFhirR5Dosages(input), native = fromFhir(input).meta.canonical.course!;
+      expect(rows[0].text).toBe(source);
+      expect(rows[0].extension).toContainEqual(note);
+      for (const value of [native, rows, input]) {
+        const before = JSON.stringify(value), options = { locale, realizationMode: "normalized" as const };
+        const short = formatSig(value, "short", options), long = formatSig(value, "long", options);
+        for (const text of [short, long]) {
+          expect(text).toContain(occurrenceText);
+          if (structuredDose) {
+            const primary = text.split("Recheck BP")[0].split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0];
+            expect(primary).toContain(occurrenceText + " " + guardText);
+            expect(primary).toMatch(locale === "en" ? /(?<!\d)2 (?:tab|tablets)(?![A-Za-z])/u : /(?<!\d)2 เม็ด/u);
+          } else expect(text).toContain(source + " " + guardText);
+          expect(text).toContain(source);
+        }
+        expect(long).toContain("Recheck BP only if SBP > 160");
+        expect(long.match(/SBP > 160/gu)).toHaveLength(2);
+        let calls = 0;
+        const custom = formatSig(value, "long", { ...options, i18n: { formatLong: context => {
+          calls++;
+          expect(context.defaultText).toBe(long);
+          expect(context.formatDefault("long")).toBe(long);
+          expect(context.formatDefault("short")).toBe(short);
+          expect(context.clause.clinicalAdjuncts?.condition).toMatchObject({ kind: "measurement", value: 160 });
+          expect(context.clause.schedule?.occurrenceCap).toEqual({ max: 4, period: 1, periodUnit: FhirPeriodUnit.Day });
+          expect(context.clause.dose?.value).toBe(structuredDose ? 2 : undefined);
+          return "  Clinic wording, unchanged!  ";
+        } } });
+        expect(calls).toBe(1);
+        expect(custom).toBe("  Clinic wording, unchanged!  ");
+        expect(JSON.stringify(value)).toBe(before);
+      }
+    }
   });
 
   it.each(["cycle", "clock window", "offset"] as const)("composes the complete %s before the callback", kind => {
