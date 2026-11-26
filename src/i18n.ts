@@ -2386,9 +2386,10 @@ function formatLongThai(
       })) continue;
       parts.push(value);
     }
-    if (authoredPrimary || clause.clinicalAdjuncts?.condition)
+    if (authoredPrimary || clause.clinicalAdjuncts?.condition || clause.clinicalAdjuncts?.excludedDates?.length ||
+        clause.clinicalAdjuncts?.excludedWeekdays?.length)
       parts.unshift(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary,
-        clause.clinicalAdjuncts?.condition, words, deferredDirections));
+        clause.clinicalAdjuncts?.condition, words, deferredDirections, clause.clinicalAdjuncts));
     return parts.join(" ").trim() || `${verb}.`;
   }
 
@@ -2407,7 +2408,7 @@ function formatLongThai(
   let administrationText = richGraphAdministrationText ??
     joinThaiVerbAndBody(verb, body, Boolean(qualifierSuffix));
   administrationText = composeNativePrimaryDirections(administrationText, authoredPrimary,
-    clause.clinicalAdjuncts?.condition, words, deferredDirections).replace(/[.!?]+$/u, "");
+    clause.clinicalAdjuncts?.condition, words, deferredDirections, clause.clinicalAdjuncts).replace(/[.!?]+$/u, "");
   // Independent graph conditions remain alongside the structured guard.
   if (primaryConditions?.length)
     administrationText = attachInstructionGraphPrimaryConditions(administrationText, primaryConditions, "th", Boolean(clause.clinicalAdjuncts?.condition));

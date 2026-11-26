@@ -63,7 +63,8 @@ import {
   EventTiming,
   FhirPeriodUnit,
   RouteCode,
-  type MedicationCondition
+  type MedicationCondition,
+  type FhirDayOfWeek
 } from "./types";
 import {
   getMealTimingGroup,
@@ -1714,7 +1715,8 @@ export function instructionGraphCanStandAlone(
   return Boolean(
     !richPrimaryAction && !hasExplicitAdministrationMethod(clause) && graphText &&
     clause.instructionGraph?.actions.length && !clause.prn?.enabled && !clause.route && !clause.site &&
-    !hasAdministrationTiming && graphRepresentsDose && !primaryConditions?.length
+    !hasAdministrationTiming && !clause.clinicalAdjuncts?.excludedDates?.length &&
+    !clause.clinicalAdjuncts?.excludedWeekdays?.length && graphRepresentsDose && !primaryConditions?.length
   );
 }
 
@@ -1727,31 +1729,63 @@ function applyEnglishAdministrationModality(verb: string, clause: CanonicalSigCl
   return `${prefix}${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
 }
 
+/** Calendar qualifiers use locale-owned labels and stay on their medication
+ * primary before independent instructions are composed. */
+export function appendClinicalCalendarText(
+  text: string, dates: readonly string[] | undefined,
+  weekdays: readonly FhirDayOfWeek[] | undefined, words: CourseLanguage
+): string {
+  if (dates?.length) {
+    const trimmed = text.trim().replace(/[.!?]+$/u, "");
+    text = (trimmed ? trimmed + " " : "") + words.exceptDates + " " + dates.join(words.allSeparator) + ".";
+  }
+  if (weekdays?.length) {
+    const seen = new Set<FhirDayOfWeek>(), labels: string[] = [];
+    for (const day of weekdays) if (!seen.has(day)) {
+      seen.add(day);
+      labels.push(words.weekdayName(day));
+    }
+    const trimmed = text.trim().replace(/[.!?]+$/u, "");
+    text = (trimmed ? trimmed + " " : "") + words.exceptWeekdays + words.joinList(labels) + ".";
+  }
+  return text;
+}
+
+function qualifyNativePrimaryDirections(
+  text: string, condition: MedicationCondition | undefined, words: CourseLanguage,
+  calendar?: CanonicalSigClause["clinicalAdjuncts"]
+): string {
+  if (condition) text = appendClinicalConditionText(text, condition, words);
+  return appendClinicalCalendarText(text, calendar?.excludedDates, calendar?.excludedWeekdays, words);
+}
+
 /** A source-only primary and its recognized cadence describe one medication.
- * Guard that complete primary before independent advice is composed. */
+ * Qualify that complete primary before independent advice is composed. */
 export function composeNativePrimaryDirections(
   rendered: string, authored: string | undefined,
   condition: MedicationCondition | undefined, words: CourseLanguage,
-  deferredDirections?: { text?: string; current?: string }
+  deferredDirections?: { text?: string; current?: string },
+  calendar?: CanonicalSigClause["clinicalAdjuncts"]
 ): string {
+  const qualified = condition || calendar?.excludedDates?.length || calendar?.excludedWeekdays?.length;
   if (deferredDirections?.current) {
     // Rich native amounts belong to the same primary administration. Compose
-    // them before its guard and before the locale adds independent advice.
+    // them before its qualifiers and before the locale adds independent advice.
     const primary = rendered.trim().replace(/[.!?]+$/u, "");
     const current = (primary ? primary + "; " : "") + deferredDirections.current;
     if (authored) deferredDirections.text = authored;
-    return condition ? appendClinicalConditionText(current, condition, words) : current;
+    return qualified ? qualifyNativePrimaryDirections(current, condition, words, calendar) : current;
   }
-  if (!authored) return condition ? appendClinicalConditionText(rendered, condition, words) : rendered;
+  if (!authored) return qualified ? qualifyNativePrimaryDirections(rendered, condition, words, calendar) : rendered;
   const current = rendered.trim().replace(/[.!?]+$/u, "");
   const source = authored.trim().replace(/[.!?]+$/u, "");
-  if (!current) return condition ? appendClinicalConditionText(authored, condition, words)
+  if (!current) return qualified ? qualifyNativePrimaryDirections(authored, condition, words, calendar)
     : /[.!?]$/u.test(authored.trim()) ? authored.trim() : authored.trim() + ".";
-  if (condition) {
+  if (qualified) {
     // The typed caller selected the authored primary. Qualify that dose
     // before suppressing duplicate wording or composing independent advice.
-    const directions = appendClinicalConditionText(authored, condition, words);
-    const qualifiedCurrent = appendClinicalConditionText(rendered, condition, words);
+    const directions = qualifyNativePrimaryDirections(authored, condition, words, calendar);
+    const qualifiedCurrent = qualifyNativePrimaryDirections(rendered, condition, words, calendar);
     if (qualifiedCurrent.trim().replace(/[.!?]+$/u, "") === directions.trim().replace(/[.!?]+$/u, ""))
       return directions;
     if (deferredDirections) {
@@ -1768,6 +1802,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   resolvedMethod?: SigLongContext["resolvedMethod"], condition?: MedicationCondition, authoredPrimary?: string,
   deferredDirections?: { text?: string; current?: string }): string {
   const hasCanonicalAdministration = canonicalClauseHasAdministrationSemantics(clause);
+  const hasCalendarQualifiers = Boolean(clause.clinicalAdjuncts?.excludedDates?.length || clause.clinicalAdjuncts?.excludedWeekdays?.length);
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
   const baseVerb = resolveMethodVerb(clause, grammar);
@@ -2065,7 +2100,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
   const hasExplicitMethod = hasExplicitAdministrationMethod(clause);
   if (
-    !authoredPrimary && roundTrip && (!hasExplicitMethod || primaryGraphAction && !needsCurrentPrimary) && graphSourceIsEnglish &&
+    !authoredPrimary && !hasCalendarQualifiers && roundTrip && (!hasExplicitMethod || primaryGraphAction && !needsCurrentPrimary) && graphSourceIsEnglish &&
     clause.instructionGraph?.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options) &&
     (!condition || clause.sourceProjectionVerified !== false)
   ) {
@@ -2091,8 +2126,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       })) continue;
       parts.push(value);
     }
-    if (authoredPrimary || condition)
-      parts.unshift(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary, condition, words, deferredDirections));
+    if (authoredPrimary || condition || hasCalendarQualifiers)
+      parts.unshift(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary, condition, words, deferredDirections, clause.clinicalAdjuncts));
     return parts.join(" ").trim() || `${verb}.`;
   }
   const leadingInstructionText = preFlowsIntoAdministration
@@ -2125,7 +2160,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const sequenceSurface = localizeAdviceRelation(sequenceRelation, "en") ?? sequenceRelation;
   const compose = (base: string): string => {
     let effectiveBase = richGraphAdministrationSentence ?? primarySourceSentence ?? base;
-    effectiveBase = composeNativePrimaryDirections(effectiveBase, authoredPrimary, condition, words, deferredDirections);
+    effectiveBase = composeNativePrimaryDirections(effectiveBase, authoredPrimary, condition, words, deferredDirections, clause.clinicalAdjuncts);
     // Independent graph conditions remain attached to this administration
     // alongside its current structured clinical guard.
     if (primaryConditions?.length)

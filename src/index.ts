@@ -1223,10 +1223,10 @@ export function formatSig(
     if (displayCondition && style !== "long") {
       displayed = appendMedicationConditionText(displayed, displayCondition, options);
     }
-    if (displayExcludedDates.length) {
+    if (style !== "long" && displayExcludedDates.length) {
       displayed = appendMedicationExcludedDatesText(displayed, displayExcludedDates, options);
     }
-    if (displayExcludedWeekdays.length) {
+    if (style !== "long" && displayExcludedWeekdays.length) {
       displayed = appendMedicationExcludedWeekdaysText(displayed, displayExcludedWeekdays, options);
     }
     return appendSourceLessRateRanges(displayed, dosage,
@@ -1255,10 +1255,10 @@ export function formatSig(
   let displayed = displayCondition && style !== "long"
     ? appendMedicationConditionText(rendered, displayCondition, options)
     : rendered;
-  if (displayExcludedDates.length) {
+  if (style !== "long" && displayExcludedDates.length) {
     displayed = appendMedicationExcludedDatesText(displayed, displayExcludedDates, options);
   }
-  if (displayExcludedWeekdays.length) {
+  if (style !== "long" && displayExcludedWeekdays.length) {
     displayed = appendMedicationExcludedWeekdaysText(displayed, displayExcludedWeekdays, options);
   }
   return appendSourceLessRateRanges(displayed, dosage,
@@ -1539,11 +1539,9 @@ function fromFhirDosageInternal(
     }
     if (exclusions.length) {
       shortText = appendMedicationExcludedDatesText(shortText, exclusions, options);
-      computedLong = appendMedicationExcludedDatesText(computedLong, exclusions, options);
     }
     if (excludedWeekdays.length) {
       shortText = appendMedicationExcludedWeekdaysText(shortText, excludedWeekdays, options);
-      computedLong = appendMedicationExcludedWeekdaysText(computedLong, excludedWeekdays, options);
     }
     const words=resolveCourseLanguage(options?.locale,options?.i18n,localization);
     shortText = appendSourceLessRateRanges(shortText, dosage, words);
@@ -1787,12 +1785,12 @@ function buildParseResult(
     const excludedDates = clause.clinicalAdjuncts.excludedDates ?? [];
     if (excludedDates.length) {
       shortText = appendMedicationExcludedDatesText(shortText, excludedDates, options);
-      longText = appendMedicationExcludedDatesText(longText, excludedDates, options);
+      if (useOriginalText) longText = formatCanonicalClause(clause, "long", localization, options);
     }
     const excludedWeekdays = clause.clinicalAdjuncts.excludedWeekdays ?? [];
     if (excludedWeekdays.length) {
       shortText = appendMedicationExcludedWeekdaysText(shortText, excludedWeekdays, options);
-      longText = appendMedicationExcludedWeekdaysText(longText, excludedWeekdays, options);
+      if (useOriginalText && !excludedDates.length) longText = formatCanonicalClause(clause, "long", localization, options);
     }
   }
   const administration = compileStandaloneAdministration

@@ -17,7 +17,7 @@ import {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getBodySiteText, buildBodySiteAdministrationTargetCountExtension, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
   type FormatOptions, type FhirR6Extension, type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
-  EventTiming, FhirPeriodUnit, RouteCode, AdviceRelation, AdviceArgumentRole, type CanonicalInstructionGraph, parseInstructionActions, cloneBodySiteSpatialRelation
+  EventTiming, FhirPeriodUnit, RouteCode, AdviceRelation, AdviceArgumentRole, AdviceForce, AdvicePolarity, type CanonicalInstructionGraph, parseInstructionActions, cloneBodySiteSpatialRelation
 } from "../src/index";
 import {
   canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, getTimingClocks,
@@ -29,6 +29,7 @@ import { courseToR6 } from "../src/adapters/canonical-course";
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import {
   setDosageExcludedDates, getDosageExcludedDates, getDosageExcludedWeekdays, getDosageCalendarDayCondition,
+  DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
   DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageAlternativeChoice,
   setDosageAlternativeChoice, buildDosageAlternativeChoiceStructureDefinition, conditionToR6
 } from "../src/dosage-course";
@@ -8687,5 +8688,119 @@ describe("current display ownership beside independent FHIR metadata", () => {
     expect(returned.repeatCycle).toEqual(interval);
     expect(returned.step[0].component[0].timing?.repeat?.boundsDuration).toEqual(boundsDuration);
     expect(JSON.stringify(input)).toBe(before);
+  });
+});
+
+
+describe("current medication calendar exclusions precede independent advice", () => {
+  it.each(["weekday", "date", "sparse graph", "source only"] as const)("keeps the %s restriction on the current dose across native and FHIR previews", kind => {
+    const authoredDose = kind === "source only" ? "Swallow 1 tablet whole." : undefined;
+    const warning = kind !== "date" ? "On Mondays, do not take the morning dose."
+      : "On 2026-11-30, do not take the morning dose.";
+    const calendar: FhirExtension = kind !== "date"
+      ? { url: DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, extension: [{ url: "day", valueCode: "mon" }] }
+      : { url: DOSAGE_EXCLUDED_DATES_R5_URL, extension: [{ url: "date", valueDate: "2026-11-30" }] };
+    const prefix = kind === "sparse graph" ? "Take 1 tablet. " : "";
+    const graph: CanonicalInstructionGraph = {
+      sourceText: prefix + warning, sourceLocale: "en", primaryOwnership: {},
+      actions: [{ force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
+        predicate: { lemma: "take", display: "Take", semanticClass: "administration" },
+        args: [
+          { role: AdviceArgumentRole.Object, text: "the morning dose", normalized: "the morning dose", i18n: { th: "ยาเช้า" } },
+          { role: AdviceArgumentRole.Time, relation: AdviceRelation.On,
+            text: kind === "date" ? "2026-11-30" : "Mondays",
+            i18n: { th: kind === "date" ? "2026-11-30" : "วันจันทร์" } }
+        ], span: { start: prefix.length, end: prefix.length + warning.length - 1 },
+        sourceText: warning.slice(0, -1)
+      }]
+    };
+    if (kind === "sparse graph") {
+      graph.actions.unshift({ force: AdviceForce.Instruction, polarity: AdvicePolarity.Affirm,
+        predicate: { lemma: "take", display: "Take", semanticClass: "administration" },
+        args: [{ role: AdviceArgumentRole.Amount, text: "1 tablet", quantity: { value: 1, unit: "tab" } }],
+        span: { start: 0, end: 13 }, sourceText: "Take 1 tablet"
+      });
+      graph.primaryAdministrationSpan = { start: 0, end: 13 };
+      graph.primaryOwnership = { administrationActionIndex: 0, dose: { actionIndex: 0, argumentIndex: 0 } };
+    }
+    const graphExtension = buildInstructionGraphExtension(graph)!;
+    const unknown: FhirExtension = { url: "https://example.org/review-note", valueString: "Retain supplied note" };
+    const row: FhirDosage = {
+      ...(authoredDose ? { text: authoredDose } : { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }),
+      ...(kind !== "sparse graph" && !authoredDose ? { timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } } } : {}),
+      additionalInstruction: [{ text: warning }],
+      extension: kind !== "date" ? [calendar, unknown, graphExtension] : [unknown, graphExtension],
+      ...(kind === "date" ? { modifierExtension: [calendar] } : {})
+    };
+    const condition: MedicationCondition = { kind: "measurement", name: "sbp", operation: "gt", value: 160, text: "SBP > 160" };
+    if (kind === "date") setDosageCondition(row, condition);
+    const member: FhirR6Dosage = {
+      ...(authoredDose ? { text: authoredDose } : { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }),
+      ...(kind !== "sparse graph" && !authoredDose ? { timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } } } : {}),
+      additionalInstruction: [{ text: warning }],
+      extension: kind !== "date" ? [calendar, unknown, graphExtension] : [unknown, graphExtension],
+      ...(kind === "date" ? { modifierExtension: [calendar] } : {}),
+      ...(kind === "date" ? { condition: [conditionToR6(condition)] } : {})
+    };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [member] }] };
+    const before = JSON.stringify([row, r6]);
+    const native = importCanonicalCourse(r6);
+    const administration = native.stages[0].administrations[0];
+    if (authoredDose) expect(administration.amounts?.[0]?.quantity).toBeUndefined();
+    else expect(administration.amounts?.[0]?.quantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(administration.schedule?.recurrence?.clocks).toEqual(kind === "sparse graph" || authoredDose ? undefined : ["08:00:00"]);
+    expect(kind !== "date" ? administration.excludedWeekdays : administration.excludedDates)
+      .toEqual([kind !== "date" ? "mon" : "2026-11-30"]);
+    for (const locale of ["en", "th"] as const) {
+      const qualifier = kind !== "date"
+        ? locale === "en" ? "except Monday" : "ยกเว้นวันจันทร์"
+        : locale === "en" ? "except 2026-11-30" : "ยกเว้นวันที่ 2026-11-30";
+      const renderers = [
+        (options: FormatOptions) => formatCanonicalCourse(native, "long", options),
+        (options: FormatOptions) => formatSig(row, "long", options),
+        (options: FormatOptions) => formatSig(r6, "long", options)
+      ];
+      for (const render of renderers) {
+        const options: FormatOptions = { locale, realizationMode: "normalized" };
+        const text = render(options);
+        expect(text).toContain(qualifier);
+        const warningStart = locale === "en" ? warning : "ห้าม";
+        expect(text).toContain(warningStart);
+        if (locale === "th") expect(text.slice(text.indexOf(warningStart))).toContain(kind === "date" ? "2026-11-30" : "วันจันทร์");
+        expect(text.indexOf(qualifier)).toBeLessThan(text.indexOf(warningStart));
+        expect(text.slice(text.indexOf(warningStart))).not.toContain(qualifier);
+        expect(text).toContain(authoredDose ? "Swallow 1 tablet whole" : locale === "en" ? "1 tablet" : "1 เม็ด");
+        if (kind === "date") expect(text.indexOf("SBP > 160")).toBeLessThan(text.indexOf(warningStart));
+        if (kind === "sparse graph") {
+          const roundtrip = render({ ...options, realizationMode: "roundtrip" });
+          expect(roundtrip).toContain(qualifier);
+          expect(roundtrip).toContain(warningStart);
+          expect(roundtrip.indexOf(qualifier)).toBeLessThan(roundtrip.indexOf(warningStart));
+        }
+        let calls = 0;
+        expect(render({ ...options, i18n: { locale, formatLong(context) {
+          calls++;
+          expect(context.defaultText).toBe(text);
+          expect(context.formatDefault("long")).toBe(text);
+          expect(context.clause.clinicalAdjuncts?.excludedWeekdays ?? context.clause.clinicalAdjuncts?.excludedDates)
+            .toEqual([kind !== "date" ? "mon" : "2026-11-30"]);
+          return "Clinic wording remains exact.";
+        } } })).toBe("Clinic wording remains exact.");
+        expect(calls).toBe(1);
+      }
+    }
+    for (const output of [toDosageDetails([row]), fromFhir(r6).fhirNext]) {
+      const preserved = output.step[0].component[0];
+      if (authoredDose) {
+        expect(preserved.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+        expect(preserved.text).toBe(authoredDose);
+      } else expect(preserved.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(preserved.extension).toEqual(expect.arrayContaining([unknown]));
+      expect(kind !== "date" ? preserved.extension : preserved.modifierExtension)
+        .toEqual(expect.arrayContaining([calendar]));
+      expect(preserved.additionalInstruction).toEqual([{ text: warning }]);
+      expect(parseInstructionGraphExtension(preserved.extension)?.sourceText).toBe(prefix + warning);
+    }
+    expect(JSON.stringify([row, r6])).toBe(before);
   });
 });

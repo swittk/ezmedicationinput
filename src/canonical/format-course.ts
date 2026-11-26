@@ -21,7 +21,7 @@ import { preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingC
 import { canonicalClauseHasAdministrationSemantics } from "../ir";
 import { getDoseQuantityUnit } from "../maps";
 import { getQuantityDurationUnit } from "../unit-lexicon";
-import { doseUnitUsesTargetScope, formatCanonicalClause, formatNativeCanonicalClause, composeNativePrimaryDirections, formatDoseEnglish, timingCodeMatchesRecurrence, timingEventPreviewSchedule, independentTimingText } from "../format";
+import { doseUnitUsesTargetScope, formatCanonicalClause, formatNativeCanonicalClause, composeNativePrimaryDirections, appendClinicalCalendarText, formatDoseEnglish, timingCodeMatchesRecurrence, timingEventPreviewSchedule, independentTimingText } from "../format";
 import { resolveBodySitePhrase } from "../body-site-grammar";
 import {
   resolveSigLocalization,
@@ -62,8 +62,7 @@ export function appendMedicationExcludedDatesText(
 ): string {
   if (!dates.length) return text;
   const words = (environment ?? courseEnvironment(options)).words;
-  const trimmed = text.trim().replace(/[.!?]+$/u, "");
-  return (trimmed ? trimmed + " " : "") + words.exceptDates + " " + dates.join(words.allSeparator) + ".";
+  return appendClinicalCalendarText(text, dates, undefined, words);
 }
 /** The locale owns weekday vocabulary; clinical exclusion membership is
  * walked once instead of repeatedly looking through prior array members. */
@@ -75,15 +74,7 @@ export function appendMedicationExcludedWeekdaysText(
 ): string {
   if (!days.length) return text;
   const words = (environment ?? courseEnvironment(options)).words;
-  const seen = new Set<FhirDayOfWeek>(),
-    labels: string[] = [];
-  for (const day of days)
-    if (!seen.has(day)) {
-      seen.add(day);
-      labels.push(words.weekdayName(day));
-    }
-  const trimmed = text.trim().replace(/[.!?]+$/u, "");
-  return (trimmed ? trimmed + " " : "") + words.exceptWeekdays + words.joinList(labels) + ".";
+  return appendClinicalCalendarText(text, undefined, days, words);
 }
 export function appendMedicationConditionText(
   text: string,
@@ -720,8 +711,9 @@ function formatCanonicalBaseNative(
   // With no structured administration, the live guard qualifies the supplied
   // directions. Independent advice (for example, "Otherwise hold") is not
   // the administration and must not acquire that guard. Do not parse the text.
+  const hasPrimaryQualifiers = a.predicate || a.excludedDates?.length || a.excludedWeekdays?.length;
   const authoredQualifiers = !deferredDirections?.current &&
-    (a.predicate || a.excludedDates?.length || a.excludedWeekdays?.length) && a.text?.trim() &&
+    hasPrimaryQualifiers && a.text?.trim() &&
     !canonicalClauseHasAdministrationSemantics(clause) && !clause.instructionGraph?.actions.length;
   const sourceOwnsPrimary = !administrationOwnsSourceDirections(source, clause.instructionGraph, a.text);
   const graphOwnsDirections = clause.instructionGraph?.coverage?.complete &&
@@ -730,22 +722,24 @@ function formatCanonicalBaseNative(
     (sourceOwnsPrimary || source.provenance?.sourceTextVerified === false &&
       source.provenance.sourceTextAgreed !== true && !graphOwnsDirections);
   if ((authoredQualifiers || partialAuthoredDirections) && authored && authored.text === a.text) authored.rendered = true;
-  const displayClause = authoredQualifiers && a.predicate
-    ? Object.assign({}, clause, { clinicalAdjuncts: Object.assign({}, clause.clinicalAdjuncts, { condition: undefined }) })
+  const displayClause = authoredQualifiers
+    ? Object.assign({}, clause, { clinicalAdjuncts: Object.assign({}, clause.clinicalAdjuncts, {
+      condition: undefined, excludedDates: undefined, excludedWeekdays: undefined
+    }) })
     : clause;
-  const authoredPrimary = partialAuthoredDirections && sourceOwnsPrimary && (!deferredDirections || a.predicate)
+  const authoredPrimary = partialAuthoredDirections && sourceOwnsPrimary && (!deferredDirections || hasPrimaryQualifiers)
     ? a.text : undefined;
   const primaryDirections = deferredDirections?.current ? deferredDirections
-    : authoredPrimary && a.predicate ? deferredDirections ?? {} : undefined;
+    : authoredPrimary && hasPrimaryQualifiers ? deferredDirections ?? {} : undefined;
   let rendered = formatNativeCanonicalClause(displayClause, style, env.localization, options,
     style === "long" ? authoredPrimary : undefined, primaryDirections);
   if (authoredQualifiers) {
-    const directions = a.predicate ? appendMedicationConditionText(a.text!, a.predicate, options, env) : a.text!;
+    const directions = composeNativePrimaryDirections("", a.text!, a.predicate, words, undefined, clause.clinicalAdjuncts);
     rendered = a.additionalInstructions?.length || a.patientInstruction
       ? directions + " " + rendered : directions;
   }
   if (style !== "long" && !authoredQualifiers)
-    rendered = composeNativePrimaryDirections(rendered, authoredPrimary, a.predicate, words, primaryDirections);
+    rendered = composeNativePrimaryDirections(rendered, authoredPrimary, a.predicate, words, primaryDirections, clause.clinicalAdjuncts);
   // The clause's calendar view needs a complete civil date. Partial FHIR
   // dateTimes (for example YYYY-MM) remain useful authored information; show
   // their original values instead of inventing a missing month/day or hiding
@@ -758,10 +752,6 @@ function formatCanonicalBaseNative(
     for (const event of events) if (!represented.has(event)) remaining.push(event);
     if (remaining.length) rendered = joinGeneratedClauses([rendered, words.calendarEvents(remaining)]);
   }
-  if (a.excludedDates?.length)
-    rendered = appendMedicationExcludedDatesText(rendered, a.excludedDates, options, env);
-  if (a.excludedWeekdays?.length)
-    rendered = appendMedicationExcludedWeekdaysText(rendered, a.excludedWeekdays, options, env);
   if (a.limits?.length || a.safety?.ifExceeded)
     rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);
   const ranges: string[] = [];
