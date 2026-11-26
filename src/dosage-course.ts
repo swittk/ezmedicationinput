@@ -1630,7 +1630,9 @@ export function markFreshDoseSource(
     ];
     (dosage.extension ??= []).push({ url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: fields });
   } else if (sourceTextCovered && dosage.text !== undefined) {
+    // Generated wording retains fresh parser authority without an edit baseline.
     (dosage.extension ??= []).push({ url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: [
+      { url: "sourceAgreement", valueBoolean: true },
       { url: "sourceTextAgreed", valueBoolean: true },
       { url: "textFingerprint", valueString: dosageTextFingerprint(dosage) }
     ] });
