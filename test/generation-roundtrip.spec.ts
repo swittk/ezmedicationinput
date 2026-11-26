@@ -10,7 +10,7 @@ import {
 } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { DOSAGE_ALTERNATIVE_CHOICE_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
-import type { AdviceArgument, AdviceFrame, CanonicalSigClause, FhirR6DosageInstruction, FhirR6Extension } from "../src/types";
+import type { AdviceArgument, AdviceFrame, CanonicalSigClause, FhirR6DosageInstruction, FhirR6Extension, FhirR6Range } from "../src/types";
 import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount } from "../src/dosage-course";
 import { fromDosageDetails, importCanonicalCourse, projectCanonicalCourse, type EzDosage, type FhirDosage, type FhirExtension, type FhirElement, type FhirRatio, type FhirR6Dosage, FhirDayOfWeek, EventTiming, type FhirR6Quantity, type FhirR6DosageInstructionInput, type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep, registerSigLocalization, getMedicationInstructionAction, formatCanonicalCourse, formatCanonicalAdministration, buildInstructionGraphExtension, parseInstructionGraphExtension, AdviceForce, AdviceArgumentRole, type CanonicalInstructionGraph } from "../src/index";
 import { DOSAGE_CONDITION_R5_URL, DOSAGE_RECONCILIATION_SOURCE_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL, DOSAGE_RETAINED_R5_SEQUENCE_URL, setDosageCondition, getDosageCondition, getDosageCalendarDayCondition, conditionToR6, toEzDosages, isExactConditionBridge, DOSAGE_DETAILS_R5_URL, decodeR5RetainedFields, encodeR5RetainedFields, decodeR6SourceMetadata, encodeR6SourceMetadata, readRetainedField, retainField, sourceWithoutNestedHistory, withDosageEditProvenance, isRenderedInstructionMarker, setDosageAlternativeChoice, DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, setDosageExcludedDates, getDosageExcludedDates, setDosageExcludedWeekdays, R5_RATE_MODIFIERS_R6_URL, dosageMatchesSavedProjection } from "../src/dosage-course";
@@ -22,6 +22,26 @@ import { R6_DRAFT_STEPS_SOURCE_URL, R6_SINGLE_STEP_SAFETY_SOURCE_URL, R6_SCOPED_
 import { type FhirR6DosageSafety, type FormatOptions, type FhirR6DoseLimit, type ParseOptions } from "../src/types";
 
 type Result = ReturnType<typeof parseSig>;
+
+function expectActiveMixedDuration(row: FhirDosage | FhirR6Dosage, expected: FhirR6Range): void {
+  const core = row.timing?.repeat?.boundsRange;
+  expect(core?.low ?? core?.high).toBeDefined();
+  if (core?.low && core.high) {
+    expect(core.low.unit).toBe(core.high.unit);
+    expect(core.low.code).toBe(core.high.code);
+    expect(core.low.system).toBe(core.high.system);
+  }
+  const marker = row.modifierExtension?.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
+  expect(marker).toBeDefined();
+  expect(marker?.extension?.some(item => item.url === "projectedRange")).not.toBe(true);
+  for (const endpoint of ["low", "high"] as const) {
+    if (core?.[endpoint]) expect(core[endpoint]).toEqual(expected[endpoint]);
+    expect(core?.[endpoint]?.comparator).toBeUndefined();
+    expect(core?.[endpoint]?._comparator).toBeUndefined();
+    expect(marker?.extension?.find(item => item.url === endpoint)?.valueQuantity).toEqual(expected[endpoint]);
+  }
+  expect(getAnchoredCourseDuration(row)?.valueRange).toEqual(expected);
+}
 
 const text = (v: unknown) => String(v ?? "").toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
 const key = (concept: any) => {
@@ -2465,31 +2485,45 @@ describe("round35 interchange field ownership", () => {
     "keeps the prescriber's active range (%s, %s, %s, %s) in R5 and R6", (lowUnit, lowValue, highUnit, highValue) => {
       const range = { id: "authored-duration", low: { value: lowValue, unit: lowUnit, code: lowUnit, system: ucum, _unit: { id: "low-label" } },
         high: { value: highValue, unit: highUnit, code: highUnit, system: ucum } };
-      let wire = course({ timing: { repeat: { ...daily, boundsRange: persist(range) } } });
+      const input = course({ timing: { repeat: { ...daily, boundsRange: { id: range.id, low: range.low } } },
+        modifierExtension: [{ url: ANCHORED_COURSE_DURATION_EXTENSION_URL, extension: [
+          { url: "low", valueQuantity: range.low }, { url: "high", valueQuantity: range.high },
+          retainField("rangeMetadata", { id: range.id }),
+        ] }] });
+      const before = persist(input);
+      let wire = input;
       for (let save = 0; save < 3; save++) {
         const projected = projectCanonicalCourse(importCanonicalCourse(wire));
-        expect(projected.fhir[0].timing!.repeat!.boundsRange).toEqual(range);
-        expect(projected.fhirNext.step![0].component[0].timing!.repeat!.boundsRange).toEqual(range);
+        expectActiveMixedDuration(projected.fhir[0], range);
+        expectActiveMixedDuration(projected.fhirNext.step![0].component[0], range);
+        for (const current of [projected.fhir, projected.fhirNext])
+          expect(importCanonicalCourse(current).stages[0].administrations[0].schedule?.recurrence?.courseLengthRange)
+            .toEqual(range);
         wire = toDosageDetails(persist(projected.fhir));
       }
+      expect(input).toEqual(before);
     });
 
-  it("recovers authored duration endpoints and keeps the retired projection marker annotations", () => {
+  it("preserves current duration endpoints and their independently supplied modifier annotations", () => {
     const low = { value: 48, unit: "hours", code: "h", system: ucum, _unit: { id: "hour-label" } };
     const high = { value: 3, unit: "days", code: "d", system: ucum };
-    const projected = { low: { value: 2, unit: "days", code: "d", system: ucum }, high };
+    const note = { url: "urn:test:duration-note", valueString: "Duration annotation" };
     const marker: FhirExtension = { id: "duration-source-id", url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
-      extension: [{ url: "low", valueQuantity: low }, { url: "high", valueQuantity: high },
-        retainField("projectedRange", projected), { url: "urn:test:duration-note", valueString: "Duration annotation" }] };
-    let wire = course({ timing: { repeat: { boundsRange: projected } }, modifierExtension: [marker] });
+      extension: [{ url: "low", valueQuantity: low }, { url: "high", valueQuantity: high }, note] };
+    const input = course({ timing: { repeat: { boundsRange: { low } } }, modifierExtension: [marker] });
+    const before = persist(input);
+    let wire = input;
     for (let save = 0; save < 3; save++) {
       wire = r6Save(wire);
       const row = wire.step![0].component[0];
-      expect(row.timing!.repeat!.boundsRange).toEqual({ low, high });
-      expect(row.modifierExtension?.some(value => value.url === ANCHORED_COURSE_DURATION_EXTENSION_URL)).toBeFalsy();
-      expect(JSON.stringify(row.extension)).toContain("duration-source-id");
-      expect(JSON.stringify(row.extension)).toContain("Duration annotation");
+      expectActiveMixedDuration(row, { low, high });
+      const current = row.modifierExtension!.find(value => value.url === ANCHORED_COURSE_DURATION_EXTENSION_URL)!;
+      expect(current.id).toBe("duration-source-id");
+      expect(current.extension).toContainEqual(note);
+      expect(importCanonicalCourse(wire).stages[0].administrations[0].schedule?.recurrence?.courseLengthRange)
+        .toEqual({ low, high });
     }
+    expect(input).toEqual(before);
   });
 
   it("restores metadata-only comparator primitives without inventing an operator", () => {
@@ -4547,16 +4581,20 @@ describe("round43 live editable exclusions and safety metadata", () => {
     const range = { low: { value: 30, unit: "minutes", system: "http://unitsofmeasure.org", code: "min", id: "lower" },
       high: { value: 2, unit: "half-hour blocks", system: "urn:test:duration-units", code: "half-hour-block", id: "upper",
         extension: [{ url: "urn:test:duration-note", valueString: "keep authored coding" }] } };
-    const source: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: { boundsRange: range } } };
+    const source: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: { boundsRange: { low: range.low } } },
+      modifierExtension: [{ url: ANCHORED_COURSE_DURATION_EXTENSION_URL, extension: [
+        { url: "low", valueQuantity: range.low }, { url: "high", valueQuantity: range.high },
+      ] }] };
     const before = JSON.stringify(source);
     let wire = toDosageDetails([persist(source)]);
     for (let pass = 0; pass < 3; pass++) {
       const strict = persist(toFhirR5Dosages(wire));
-      expect(strict[0].timing!.repeat!.boundsRange).toEqual(range);
-      expect(fromFhir(wire).fhir[0].timing!.repeat!.boundsRange).toEqual(range);
-      expect(fromFhirDosage(strict[0]).fhir.timing!.repeat!.boundsRange).toEqual(range);
+      expectActiveMixedDuration(strict[0], range);
+      expectActiveMixedDuration(fromFhir(wire).fhir[0], range);
+      expectActiveMixedDuration(fromFhirDosage(strict[0]).fhir, range);
       wire = toDosageDetails(strict);
-      expect(wire.step![0].component[0].timing!.repeat!.boundsRange).toEqual(range);
+      expectActiveMixedDuration(wire.step![0].component[0], range);
+      expect(importCanonicalCourse(wire).stages[0].administrations[0].schedule?.recurrence?.courseLengthRange).toEqual(range);
     }
     expect(JSON.stringify(source)).toBe(before);
   });
@@ -5385,11 +5423,20 @@ describe("round47 public retained-field preservation", () => {
     { name: "local upper endpoint", bound: { boundsRange: { id: "course-range", low: known, high: local } } },
     { name: "local lower endpoint", bound: { boundsRange: { id: "course-range", low: local, high: known } } },
   ])("preserves $name through public interchange without endpoint unit borrowing", ({ bound }) => {
-    const row: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: { ...daily, ...persist(bound) } } };
+    const range = bound.boundsRange;
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: { ...daily,
+      ...(range ? { boundsRange: { id: range.id, low: range.low } } : persist(bound)),
+    } }, ...(range ? { modifierExtension: [{ url: ANCHORED_COURSE_DURATION_EXTENSION_URL, extension: [
+      { url: "low", valueQuantity: range.low }, { url: "high", valueQuantity: range.high },
+      retainField("rangeMetadata", { id: range.id }),
+    ] }] } : {}) };
     const before = persist(row);
     const expectBound = (rows: readonly FhirDosage[]) => {
       expect(rows[0].timing!.repeat!.boundsDuration).toEqual(bound.boundsDuration);
-      expect(rows[0].timing!.repeat!.boundsRange).toEqual(bound.boundsRange);
+      if (range) {
+        expectActiveMixedDuration(rows[0], range);
+        expect(importCanonicalCourse(rows).stages[0].administrations[0].schedule?.recurrence?.courseLengthRange).toEqual(range);
+      } else expect(rows[0].timing!.repeat!.boundsRange).toBeUndefined();
     };
     expectBound(toFhirR5Dosages([row]));
     let wire = toDosageDetails([row]);

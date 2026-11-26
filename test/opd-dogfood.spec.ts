@@ -533,7 +533,7 @@ describe("round25 duration Range units retain their authored meaning", () => {
     high: FhirR6Quantity = { value: 3, unit: "days", code: "d" }): CanonicalCourse => ({
     kind: "course", stages: [{ administrations: [{ kind: "administration",
       amounts: [{ quantity: q(1) }], schedule: { recurrence: {
-        frequency: 1, period: 1, periodUnit: "d", clocks: ["00:30:00"],
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: ["00:30:00"],
         courseLengthRange: {
           low: { ...low, system: "http://unitsofmeasure.org" },
           high: { ...high, system: "http://unitsofmeasure.org" },
@@ -701,7 +701,7 @@ describe("round26 independent duration edits and cleared conditions", () => {
 
   it("retains independently authored week and month bounds through current conversion", () => {
     const input: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
-      amounts: [{ quantity: q(1) }], schedule: { recurrence: { frequency: 1, period: 1, periodUnit: "d",
+      amounts: [{ quantity: q(1) }], schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
         courseLengthRange: {
           low: { value: 3, unit: "weeks", code: "wk", system: ucum },
           high: { value: 2, unit: "months", code: "mo", system: ucum },
