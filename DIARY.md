@@ -16255,3 +16255,25 @@ and strengthened.
 The public R5 and R6 Extension types accept boolean-value annotations through
 their existing primitive element types. Fresh typed conversion coverage retains
 false values, annotations, authored source, current dose and timing.
+
+
+## 2026-11-27 — Dose ownership, event schedules and annotated facts
+
+Medication guards remain with their dose before independent counseling is composed.
+Fractional range endpoints, cumulative infusion ceilings, next-day meal timing and
+successor intervals retain their stated quantities and temporal scope. Execution
+honors inclusive rolling limits, strict endpoint attainability and coded bedtime
+through the existing event owner. Sufficient-quantity targets remain unresolved
+amounts, and delayed course windows are clipped before local bounds are built.
+
+Fresh FHIR conversion preserves independent clock annotations, upper duration
+bounds, compatible coded maxima, primitive IDs and repeated graph-field metadata.
+Explicit UCUM identities retain supported volume conversions without interpreting
+codes as shorthand labels. Annotation projection uses one traversal of each
+collection; the explicit spatial copy contract is unchanged.
+
+Native previews preserve detailed sites, complete action participants, named
+medicines, owned clocks, calendar intervals and unresolved finite cycle counts.
+Fresh independent R5 advice remains visible beside current facts. Existing suites
+cover these clinical cases, supplied annotations and source preservation, including
+independent current-input replacements for obsolete export-edit assertions.
