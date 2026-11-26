@@ -800,10 +800,13 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       a.span.start - b.span.start || a.span.end - b.span.end
     );
 
+    const guard = medicationGuardForContext(context);
     let nextIndex = -1;
     for (let index = 0; index < frames.length; index++) {
       const frame = frames[index];
       if (frame.span.start < lead.sourceEnd) continue;
+      // An activity inside the admitted predicate is not its consequent.
+      if (guard && guard.start <= frame.span.start && frame.span.start < guard.end) continue;
       // A completed directive ends this conditional's target search.
       if (context.tokens.some(token => token.sourceStart >= lead.sourceEnd &&
           token.sourceEnd <= frame.span.start && /^[;.!?]$/u.test(token.original))) break;
