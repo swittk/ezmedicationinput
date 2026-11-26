@@ -291,13 +291,13 @@ export function getAnchoredCourseDuration(
   if (!marker) return undefined;
   const repeat = dosage.timing?.repeat;
   const projectedMarker = marker.extension?.find(child => child.url === "projectedRange");
-  // Without a range projection this modifier accompanies absolute bounds.
-  // Replacing that bounds choice owns the new duration, not the old source.
-  if (!projectedMarker && (repeat?.boundsRange || repeat?.boundsDuration)) return undefined;
-  if (!marker.extension) return marker;
-  const low = marker.extension.find(child => child.url === "low")?.valueQuantity;
-  const high = marker.extension.find(child => child.url === "high")?.valueQuantity;
-  if (!low || !high) return marker;
+  const low = marker.extension?.find(child => child.url === "low")?.valueQuantity;
+  const high = marker.extension?.find(child => child.url === "high")?.valueQuantity;
+  // Typed endpoint children own the current complete range, including when
+  // core Range can expose only one of its independently authored units.
+  // Scalar/legacy markers without those endpoints accompany absolute bounds.
+  if (!projectedMarker && (!low || !high) && (repeat?.boundsRange || repeat?.boundsDuration)) return undefined;
+  if (!marker.extension || !low || !high) return marker;
   if (projectedMarker) {
     const current = repeat?.boundsRange;
     if (!current) return undefined;
@@ -348,11 +348,27 @@ function reconcileDurationEndpoint(
   return result;
 }
 
-/** The prescriber owns each endpoint's amount and unit. Wire constraints do
- * not authorize changing elapsed hours to days or dropping calendar endpoints.
- * Existing projection metadata is read on import and retired by its writer. */
-export function projectCourseDurationRange<T extends FhirR6Range>(range: T): { range: T; source?: FhirExtension } {
-  return { range };
+/** Core Range endpoints share one unit identity. The known duration modifier
+ * keeps both authored endpoints as active quantities when the wire range needs
+ * a common label or cannot express mixed elapsed/calendar units. */
+export function projectCourseDurationRange(range: FhirRange): { range: FhirRange; source?: FhirExtension };
+export function projectCourseDurationRange(range: FhirR6Range): { range: FhirR6Range; source?: FhirR6Extension };
+export function projectCourseDurationRange(range: FhirR6Range): { range: FhirR6Range; source?: FhirR6Extension } {
+  const { low, high } = range;
+  if (!low || !high || low.unit === high.unit && low.code === high.code && low.system === high.system)
+    return { range };
+  const { low: _low, high: _high, ...metadata } = range;
+  const projected = low.code !== undefined && low.code === high.code && low.system === high.system
+    ? { ...range, high: { ...high, unit: low.unit } }
+    : { ...metadata, low };
+  return {
+    range: projected,
+    source: { url: ANCHORED_COURSE_DURATION_EXTENSION_URL, extension: [
+      { url: "low", valueQuantity: low },
+      { url: "high", valueQuantity: high },
+      ...(Object.keys(metadata).length ? [retainField("rangeMetadata", metadata)] : []),
+    ] },
+  };
 }
 
 export const TIMING_OFFSET_MIN_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-offset-min";

@@ -529,88 +529,162 @@ describe("round25 strict wire and retained source boundaries", () => {
 
 
 describe("round25 duration Range units retain their authored meaning", () => {
-  const source = (low = { value: 48, unit: "hours", code: "h" }, high = { value: 3, unit: "days", code: "d" }): FhirDosage => ({
-    doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: {
-      frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["00:30:00"],
-      boundsRange: { low: { ...low, system: "http://unitsofmeasure.org" }, high: { ...high, system: "http://unitsofmeasure.org" } },
-    } },
+  const source = (low: FhirR6Quantity = { value: 48, unit: "hours", code: "h" },
+    high: FhirR6Quantity = { value: 3, unit: "days", code: "d" }): CanonicalCourse => ({
+    kind: "course", stages: [{ administrations: [{ kind: "administration",
+      amounts: [{ quantity: q(1) }], schedule: { recurrence: {
+        frequency: 1, period: 1, periodUnit: "d", clocks: ["00:30:00"],
+        courseLengthRange: {
+          low: { ...low, system: "http://unitsofmeasure.org" },
+          high: { ...high, system: "http://unitsofmeasure.org" },
+        },
+      } },
+    }] }],
   });
-  const authored = (row: FhirDosage) => {
-    expect(canonicalFromFhir(row).schedule).toMatchObject({
-      duration: 48, durationUnit: FhirPeriodUnit.Hour, durationMax: 3, durationMaxUnit: FhirPeriodUnit.Day,
-    });
-    expect(importCanonicalCourse(row).stages[0].administrations[0].schedule?.recurrence?.courseLengthRange)
-      .toMatchObject({ low: { value: 48, code: "h" }, high: { value: 3, code: "d" } });
-  };
-  it("keeps authored elapsed lower and calendar upper endpoints through R5/R6 saves across DST", () => {
-    let row = persist(canonicalToFhir(canonicalFromFhir(source())));
-    const options = { from: "2026-03-07T00:00:00-05:00", orderedAt: "2026-03-07T00:00:00-05:00",
-      timeZone: "America/New_York", limit: 10 };
-    const expected = ["2026-03-07T00:30:00-05:00", "2026-03-08T00:30:00-05:00", "2026-03-09T00:30:00-04:00"];
-    for (let save = 0; save < 3; save++) {
-      const range = row.timing!.repeat!.boundsRange!;
-      expect(range.low).toMatchObject({ value: 48, unit: "hours", code: "h" });
-      expect(range.high).toMatchObject({ value: 3, unit: "days", code: "d" });
-      expect(range.low?.system).toBe(range.high?.system);
-      authored(row);
-      expect(nextDueDoses(row, options)).toEqual(expected);
-      const r6 = toDosageDetails([row]);
-      expect(r6.step![0].component[0].timing!.repeat!.boundsRange).toEqual(range);
-      expect(nextDueDoses(r6, options)).toEqual(expected);
-      row = persist(toFhirR5Dosages(r6)[0]);
+  const conforming = (row: FhirDosage | FhirR6Dosage) => {
+    const marker = row.modifierExtension?.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
+    expect(marker?.extension?.some(item => item.url === "projectedRange")).not.toBe(true);
+    for (const range of [row.timing?.repeat?.boundsRange, marker?.valueRange]) {
+      if (!range) continue;
+      if (range.low && range.high) {
+        expect(range.low.unit).toBe(range.high.unit);
+        expect(range.low.code).toBe(range.high.code);
+        expect(range.low.system).toBe(range.high.system);
+      }
+      for (const endpoint of [range.low, range.high]) {
+        expect(endpoint?.comparator).toBeUndefined();
+        expect(endpoint?._comparator).toBeUndefined();
+      }
     }
-    row.timing!.repeat!.boundsRange!.high!.value = 4;
-    expect(canonicalFromFhir(row).schedule).toMatchObject({
-      duration: 48, durationUnit: FhirPeriodUnit.Hour, durationMax: 4, durationMaxUnit: FhirPeriodUnit.Day,
-    });
-    const changed = toDosageDetails([row]);
-    expect(nextDueDoses(changed, options)).toEqual([...expected, "2026-03-10T00:30:00-04:00"]);
-    expect(changed.step![0].component[0].modifierExtension?.some(value =>
-      value.url === "urn:ezmedicationinput:StructureDefinition:medication-anchored-course-duration")).toBeFalsy();
-    expect(JSON.stringify(changed)).toContain('"value":48');
+  };
+  const options = { from: "2026-03-07T00:00:00-05:00", orderedAt: "2026-03-07T00:00:00-05:00",
+    timeZone: "America/New_York", limit: 10 };
+  const firstThree = ["2026-03-07T00:30:00-05:00", "2026-03-08T00:30:00-05:00", "2026-03-09T00:30:00-04:00"];
+  it.each([3, 4])("keeps active elapsed lower and calendar upper %s-day endpoints across DST", days => {
+    const native = source(undefined, { value: days, unit: "days", code: "d" });
+    const before = persist(native);
+    const authored = native.stages[0].administrations[0].schedule!.recurrence!.courseLengthRange!;
+    const expected = days === 3 ? firstThree : [...firstThree, "2026-03-10T00:30:00-04:00"];
+    expect(nextDueDoses(native, options)).toEqual(expected);
+    let { fhir: rows, fhirNext: wire } = projectCanonicalCourse(native);
+    for (let save = 0; save < 3; save++) {
+      for (const row of [rows[0], wire.step![0].component[0]]) {
+        conforming(row);
+        expect(row.timing!.repeat!.boundsRange!.low).toEqual(authored.low);
+        expect(row.timing!.repeat!.boundsRange!.high).toBeUndefined();
+        const marker = row.modifierExtension!.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL)!;
+        expect(marker.extension).toContainEqual({ url: "low", valueQuantity: authored.low });
+        expect(marker.extension).toContainEqual({ url: "high", valueQuantity: authored.high });
+        expect(getAnchoredCourseDuration(row)!.valueRange).toEqual(authored);
+        expect(canonicalFromFhir(row as FhirDosage).schedule).toMatchObject({
+          duration: 48, durationUnit: FhirPeriodUnit.Hour, durationMax: days, durationMaxUnit: FhirPeriodUnit.Day,
+        });
+      }
+      for (const input of [rows, wire]) {
+        expect(importCanonicalCourse(input).stages[0].administrations[0].schedule?.recurrence?.courseLengthRange)
+          .toEqual(authored);
+        expect(nextDueDoses(input, options)).toEqual(expected);
+      }
+      const clauseRow = canonicalToFhir(canonicalFromFhir(rows[0]));
+      conforming(clauseRow);
+      expect(getAnchoredCourseDuration(clauseRow)!.valueRange).toEqual(authored);
+      wire = toDosageDetails(persist(rows));
+      rows = persist(toFhirR5Dosages(wire));
+    }
+    expect(native).toEqual(before);
   });
-  it("keeps both authored units in the typed anchored-duration range", () => {
-    const clause = canonicalFromFhir(source());
-    clause.schedule!.boundsStart = "2026-03-07T00:00:00-05:00";
-    const row = persist(canonicalToFhir(clause));
-    expect(row.timing!.repeat!.boundsPeriod?.start).toBe("2026-03-07T00:00:00-05:00");
-    expect(row.timing!.repeat!.boundsRange).toBeUndefined();
-    const marker = row.modifierExtension!.find(value =>
-      value.url === "urn:ezmedicationinput:StructureDefinition:medication-anchored-course-duration")!;
-    expect(marker.valueRange).toEqual({
-      low: { value: 48, unit: "hours", system: "http://unitsofmeasure.org", code: "h" },
-      high: { value: 3, unit: "days", system: "http://unitsofmeasure.org", code: "d" },
-    });
-    const restored = canonicalFromFhir(persist(toFhirR5Dosages(toDosageDetails([row]))[0]));
-    expect(restored.schedule).toMatchObject({ duration: 48, durationUnit: FhirPeriodUnit.Hour,
-      durationMax: 3, durationMaxUnit: FhirPeriodUnit.Day });
+  it("keeps both authored units active beside absolute bounds", () => {
+    const native = source();
+    const administration = native.stages[0].administrations[0];
+    const recurrence = administration.schedule!.recurrence!;
+    const authored = recurrence.courseLengthRange!;
+    administration.anchoredLength = { range: authored };
+    delete recurrence.courseLengthRange;
+    recurrence.calendarWindow = { start: options.orderedAt };
+    const before = persist(native);
+    const projection = projectCanonicalCourse(native);
+    for (const row of [projection.fhir[0], projection.fhirNext.step![0].component[0]]) {
+      conforming(row);
+      expect(row.timing!.repeat!.boundsPeriod?.start).toBe(options.orderedAt);
+      expect(row.timing!.repeat!.boundsRange).toBeUndefined();
+      const marker = row.modifierExtension!.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL)!;
+      expect(marker.valueRange).toBeUndefined();
+      expect(marker.extension).toContainEqual({ url: "low", valueQuantity: authored.low });
+      expect(marker.extension).toContainEqual({ url: "high", valueQuantity: authored.high });
+      expect(getAnchoredCourseDuration(row)!.valueRange).toEqual(authored);
+    }
+    for (const input of [native, projection.fhir, projection.fhirNext])
+      expect(nextDueDoses(input, options)).toEqual(firstThree);
+    const restored = importCanonicalCourse(persist(toFhirR5Dosages(projection.fhirNext)));
+    expect(restored.stages[0].administrations[0].anchoredLength?.range).toEqual(authored);
+    expect(native).toEqual(before);
   });
-  it("retains month/day endpoints without an average month conversion or fabricated upper bound", () => {
-    const row = persist(canonicalToFhir(canonicalFromFhir(source(
-      { value: 1, unit: "month", code: "mo" }, { value: 40, unit: "days", code: "d" },
-    ))));
-    expect(row.timing!.repeat!.boundsRange?.low).toMatchObject({ value: 1, unit: "month", code: "mo" });
-    expect(row.timing!.repeat!.boundsRange?.high).toMatchObject({ value: 40, code: "d" });
-    const reopened = persist(toFhirR5Dosages(toDosageDetails([row]))[0]);
-    expect(canonicalFromFhir(reopened).schedule).toMatchObject({
-      duration: 1, durationUnit: FhirPeriodUnit.Month, durationMax: 40, durationMaxUnit: FhirPeriodUnit.Day,
-    });
+  it("retains active month/day endpoints without an average month conversion or fabricated upper bound", () => {
+    const native = source({ value: 1, unit: "month", code: "mo" }, { value: 40, unit: "days", code: "d" });
+    const authored = native.stages[0].administrations[0].schedule!.recurrence!.courseLengthRange!;
+    const projection = projectCanonicalCourse(native);
+    for (const row of [projection.fhir[0], projection.fhirNext.step![0].component[0]]) {
+      conforming(row);
+      expect(row.timing!.repeat!.boundsRange?.low).toMatchObject({ value: 1, unit: "month", code: "mo" });
+      expect(row.timing!.repeat!.boundsRange?.high).toBeUndefined();
+      expect(getAnchoredCourseDuration(row)!.valueRange).toEqual(authored);
+    }
+    expect(importCanonicalCourse(persist(toFhirR5Dosages(projection.fhirNext)))
+      .stages[0].administrations[0].schedule!.recurrence!.courseLengthRange).toEqual(authored);
   });
-  it("uses one display unit for same-unit endpoints while retaining both qualifiers", () => {
-    const input = source({ value: 1, unit: "day", code: "d" }, { value: 3, unit: "days", code: "d" });
-    input.timing!.repeat!.boundsRange!.low = simpleQuantityForR5({
-      ...input.timing!.repeat!.boundsRange!.low, comparator: ">=" });
-    input.timing!.repeat!.boundsRange!.high = simpleQuantityForR5({
-      ...input.timing!.repeat!.boundsRange!.high, comparator: "<=" });
-    const row = persist(canonicalToFhir(canonicalFromFhir(input)));
-    const range = row.timing!.repeat!.boundsRange!;
-    expect(range.low).toMatchObject({ value: 1, unit: "day", code: "d" });
-    expect(range.high).toMatchObject({ value: 3, unit: "days", code: "d" });
-    expect(getQuantityComparator(range.low)).toBe(">=");
-    expect(getQuantityComparator(range.high)).toBe("<=");
-    expect(canonicalFromFhir(row).schedule).toMatchObject({ duration: 1, durationMax: 3,
-      durationUnit: FhirPeriodUnit.Day, durationMaxUnit: FhirPeriodUnit.Day,
-      durationComparator: ">=", durationMaxComparator: "<=" });
+  it("retains current endpoint shells on a fresh anchored duration modifier", () => {
+    const range = {
+      low: { value: 48, unit: "hours", code: "h", system: "http://unitsofmeasure.org" },
+      high: { value: 3, unit: "days", code: "d", system: "http://unitsofmeasure.org" },
+    };
+    const low = { id: "current-low-endpoint", url: "low", valueQuantity: range.low };
+    const high = { id: "current-high-endpoint", url: "high", valueQuantity: range.high };
+    const note = { url: "urn:clinic:duration-policy-note", valueString: "current annotation" };
+    const input: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: {
+      frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["00:30:00"],
+      boundsPeriod: { start: options.orderedAt },
+    } }, modifierExtension: [{ id: "current-duration-policy", url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
+      extension: [low, high, note] }] };
+    const before = persist(input);
+    let rows = [input];
+    for (let conversion = 0; conversion < 3; conversion++) {
+      const wire = toDosageDetails(rows);
+      rows = persist(toFhirR5Dosages(wire));
+      for (const row of [rows[0], wire.step![0].component[0]]) {
+        conforming(row);
+        const marker = row.modifierExtension!.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL)!;
+        expect(marker.id).toBe("current-duration-policy");
+        expect(marker.extension).toContainEqual(low);
+        expect(marker.extension).toContainEqual(high);
+        expect(marker.extension).toContainEqual(note);
+        expect(getAnchoredCourseDuration(row)!.valueRange).toEqual(range);
+      }
+      for (const value of [rows, wire]) expect(nextDueDoses(value, options)).toEqual(firstThree);
+    }
+    expect(input).toEqual(before);
+  });
+  it("uses one wire display unit while retaining both active authored labels and qualifiers", () => {
+    const native = source({ value: 1, unit: "day", code: "d", comparator: ">=" },
+      { value: 3, unit: "days", code: "d", comparator: "<=" });
+    const before = persist(native);
+    const projection = projectCanonicalCourse(native);
+    for (const row of [projection.fhir[0], projection.fhirNext.step![0].component[0]]) {
+      conforming(row);
+      const range = row.timing!.repeat!.boundsRange!;
+      expect(range.low).toMatchObject({ value: 1, unit: "day", code: "d" });
+      expect(range.high).toMatchObject({ value: 3, unit: "day", code: "d" });
+      expect(getQuantityComparator(range.low)).toBe(">=");
+      expect(getQuantityComparator(range.high)).toBe("<=");
+      const active = getAnchoredCourseDuration(row)!.valueRange!;
+      expect(active.low).toMatchObject({ value: 1, unit: "day", code: "d" });
+      expect(active.high).toMatchObject({ value: 3, unit: "days", code: "d" });
+      expect(getQuantityComparator(active.low)).toBe(">=");
+      expect(getQuantityComparator(active.high)).toBe("<=");
+      expect(canonicalFromFhir(row as FhirDosage).schedule).toMatchObject({ duration: 1, durationMax: 3,
+        durationUnit: FhirPeriodUnit.Day, durationMaxUnit: FhirPeriodUnit.Day,
+        durationComparator: ">=", durationMaxComparator: "<=" });
+    }
+    expect(native).toEqual(before);
   });
 });
 
@@ -625,12 +699,18 @@ describe("round26 independent duration edits and cleared conditions", () => {
     } },
   });
 
-  it("retains the authored lower duration when only the upper month bound changes", () => {
-    let row = persist(canonicalToFhir(canonicalFromFhir(durationRow(
-      { value: 3, unit: "weeks", code: "wk" }, { value: 1, unit: "month", code: "mo" },
-    ))));
+  it("retains independently authored week and month bounds through current conversion", () => {
+    const input: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+      amounts: [{ quantity: q(1) }], schedule: { recurrence: { frequency: 1, period: 1, periodUnit: "d",
+        courseLengthRange: {
+          low: { value: 3, unit: "weeks", code: "wk", system: ucum },
+          high: { value: 2, unit: "months", code: "mo", system: ucum },
+        },
+      } },
+    }] }] };
+    const before = persist(input);
+    let row = persist(projectCanonicalCourse(input).fhir[0]);
     expect(row.timing!.repeat!.boundsRange!.low).toMatchObject({ value: 3, unit: "weeks", code: "wk" });
-    row.timing!.repeat!.boundsRange!.high!.value = 2;
     for (let save = 0; save < 3; save++) {
       expect(canonicalFromFhir(row).schedule).toMatchObject({ duration: 3,
         durationUnit: FhirPeriodUnit.Week, durationMax: 2, durationMaxUnit: FhirPeriodUnit.Month });
@@ -639,6 +719,7 @@ describe("round26 independent duration edits and cleared conditions", () => {
         .toMatchObject({ low: { value: 3, code: "wk" }, high: { value: 2, code: "mo" } });
       row = persist(toFhirR5Dosages(projectCanonicalCourse(native).fhirNext)[0]);
     }
+    expect(input).toEqual(before);
   });
 
   it("reads a persisted earlier valueRange projection baseline endpoint by endpoint", () => {
@@ -680,9 +761,11 @@ describe("round26 independent duration edits and cleared conditions", () => {
       durationUnit: FhirPeriodUnit.Hour, durationComparator: "<", durationMax: 3 });
   });
 
-  it("does not restore an explicitly removed projected duration endpoint", () => {
-    let row = persist(canonicalToFhir(canonicalFromFhir(durationRow())));
-    delete row.timing!.repeat!.boundsRange!.low;
+  it("keeps a freshly authored upper-only duration range without inventing its lower bound", () => {
+    let row: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: {
+      frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      boundsRange: { high: { value: 3, unit: "days", code: "d", system: ucum } },
+    } } };
     for (let save = 0; save < 3; save++) {
       const schedule = canonicalFromFhir(row).schedule!;
       expect(schedule.duration).toBeUndefined();
@@ -692,16 +775,13 @@ describe("round26 independent duration edits and cleared conditions", () => {
     }
   });
 
-  it.each(["range", "quantity"] as const)("uses a replacement %s after absolute bounds without restoring the anchored source", choice => {
-    const clause = canonicalFromFhir(durationRow());
-    clause.schedule!.boundsStart = "2026-11-20T09:00:00Z";
-    let row = persist(canonicalToFhir(clause));
-    expect(canonicalFromFhir(row).schedule).toMatchObject({ duration: 48, durationUnit: FhirPeriodUnit.Hour });
-    delete row.timing!.repeat!.boundsPeriod;
-    if (choice === "range") row.timing!.repeat!.boundsRange = {
-      low: { value: 5, unit: "days", code: "d" }, high: { value: 7, unit: "days", code: "d" },
-    };
-    else row.timing!.repeat!.boundsDuration = { value: 5, unit: "days", code: "d" };
+  it.each(["range", "quantity"] as const)("keeps independent current %s bounds without inventing anchored duration", choice => {
+    let row: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: {
+      frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      ...(choice === "range" ? { boundsRange: {
+        low: { value: 5, unit: "days", code: "d" }, high: { value: 7, unit: "days", code: "d" },
+      } } : { boundsDuration: { value: 5, unit: "days", code: "d" } }),
+    } } };
     for (let save = 0; save < 3; save++) {
       expect(canonicalFromFhir(row).schedule).toMatchObject({ duration: 5, durationUnit: FhirPeriodUnit.Day });
       expect(canonicalFromFhir(row).schedule!.durationMax).toBe(choice === "range" ? 7 : undefined);
@@ -709,7 +789,9 @@ describe("round26 independent duration edits and cleared conditions", () => {
       expect(native.stages[0].administrations[0].anchoredLength).toBeUndefined();
       row = persist(toFhirR5Dosages(projectCanonicalCourse(native).fhirNext)[0]);
       expect(row.modifierExtension?.some(e => e.url === durationUrl)).not.toBe(true);
-      expect(JSON.stringify(row)).toContain('"value":48');
+      expect(row.timing?.repeat).toMatchObject(choice === "range"
+        ? { boundsRange: { low: { value: 5, code: "d" }, high: { value: 7, code: "d" } } }
+        : { boundsDuration: { value: 5, code: "d" } });
     }
   });
 
@@ -873,16 +955,26 @@ describe("round27 current external interchange facts", () => {
       _unit: { id: "hours-translation" }, _code: { id: "hour-code" }, _system: { id: "same-ucum-system" } };
     const high = { value: 3, unit: "days", system: "http://unitsofmeasure.org", code: "d",
       _unit: { id: "days-translation" }, _code: { id: "day-code" } };
-    let row: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: { boundsRange: { low, high } } } };
+    const range = { id: "authored-duration-range", low, high,
+      extension: [{ url: "urn:clinic:duration-range-note", valueString: "retain both endpoints" }] };
+    const native: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+      amounts: [{ quantity: q(1) }], schedule: { recurrence: { courseLengthRange: range } },
+    }] }] };
+    const before = persist(native);
+    let row = projectCanonicalCourse(native).fhir[0];
     for (let save = 0; save < 3; save++) {
       row = persist(toFhirR5Dosages([row])[0]);
-      const range = row.timing!.repeat!.boundsRange!;
-      expect(range.low).toEqual(low);
-      expect(range.high).toEqual(high);
-      expect(row.modifierExtension?.some(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL)).toBeFalsy();
+      const core = row.timing!.repeat!.boundsRange!;
+      expect(core.low).toEqual(low);
+      expect(core.high).toBeUndefined();
+      expect(getAnchoredCourseDuration(row)!.valueRange).toEqual(range);
+      const marker = row.modifierExtension!.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL)!;
+      expect(marker.extension).toContainEqual({ url: "low", valueQuantity: low });
+      expect(marker.extension).toContainEqual({ url: "high", valueQuantity: high });
       expect(importCanonicalCourse(row).stages[0].administrations[0].schedule?.recurrence?.courseLengthRange)
-        .toMatchObject({ low, high });
+        .toEqual(range);
     }
+    expect(native).toEqual(before);
   });
 
   it("keeps EMA primitive code annotations with the original code after an external R6 comparator edit", () => {
@@ -1302,14 +1394,15 @@ describe("round28 live interchange authority and retained clinical identity", ()
     }
   });
 
-  it("retains the elapsed lower endpoint across a DST transition after a qualifier-only edit", () => {
-    const original: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: {
-      boundsRange: { low: { value: 48, unit: "hours", system: "http://unitsofmeasure.org", code: "h" },
-        high: { value: 3, unit: "days", system: "http://unitsofmeasure.org", code: "d" } },
-    } } };
-    let row = persist(canonicalToFhir(canonicalFromFhir(original)));
-    row.timing!.repeat!.boundsRange!.low = simpleQuantityForR5({
-      ...row.timing!.repeat!.boundsRange!.low, comparator: ">" });
+  it("retains a freshly qualified elapsed lower endpoint across a DST transition", () => {
+    const original: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+      amounts: [{ quantity: q(1) }], schedule: { recurrence: { courseLengthRange: {
+        low: { value: 48, unit: "hours", system: "http://unitsofmeasure.org", code: "h", comparator: ">" },
+        high: { value: 3, unit: "days", system: "http://unitsofmeasure.org", code: "d" },
+      } } },
+    }] }] };
+    const before = persist(original);
+    let row = persist(projectCanonicalCourse(original).fhir[0]);
     for (let save = 0; save < 3; save++) {
       const low = importCanonicalCourse(row).stages[0].administrations[0].schedule!.recurrence!.courseLengthRange!.low!;
       expect(low).toMatchObject({ value: 48, unit: "hours", code: "h", comparator: ">" });
@@ -1320,6 +1413,7 @@ describe("round28 live interchange authority and retained clinical identity", ()
       expect(elapsed.toISOString()).not.toBe("2026-03-09T16:00:00.000Z");
       row = persist(toFhirR5Dosages(toDosageDetails([row]))[0]);
     }
+    expect(original).toEqual(before);
   });
 
   it.each([false, true])("keeps sparse own-track member IDs through reorder and deletion (via R5 %s)", viaR5 => {
@@ -1532,17 +1626,22 @@ describe("round29 interchange ownership", () => {
     }
   });
 
-  it("keeps the authored mixed-duration endpoint independent of a live upper-bound edit", () => {
-    const row = canonicalToFhir(canonicalFromFhir({
-      doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: {
-        boundsRange: { low: { value: 48, unit: "h", code: "h" }, high: { value: 3, unit: "d", code: "d" } },
-      } },
-    }));
-    const sourceLow = persist(row.timing!.repeat!.boundsRange!.low);
-    row.timing!.repeat!.boundsRange!.high!.value = 4;
-    expect(row.timing!.repeat!.boundsRange!.low).toEqual(sourceLow);
-    expect(canonicalFromFhir(row).schedule).toMatchObject({ duration: 48, durationUnit: FhirPeriodUnit.Hour,
-      durationMax: 4, durationMaxUnit: FhirPeriodUnit.Day });
+  it("keeps the current mixed-duration quantities independent across fresh upper bounds", () => {
+    const low = { value: 48, unit: "h", code: "h" };
+    for (const days of [3, 4]) {
+      const native: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+        amounts: [{ quantity: q(1) }], schedule: { recurrence: {
+          courseLengthRange: { low, high: { value: days, unit: "d", code: "d" } },
+        } },
+      }] }] };
+      const before = persist(native);
+      const row = projectCanonicalCourse(native).fhir[0];
+      expect(row.timing!.repeat!.boundsRange!.low).toEqual(low);
+      expect(getAnchoredCourseDuration(row)!.valueRange!.high).toEqual({ value: days, unit: "d", code: "d" });
+      expect(canonicalFromFhir(row).schedule).toMatchObject({ duration: 48, durationUnit: FhirPeriodUnit.Hour,
+        durationMax: days, durationMaxUnit: FhirPeriodUnit.Day });
+      expect(native).toEqual(before);
+    }
   });
 
   it("restores an inactive draft beside an unchanged EMA-only condition threshold", () => {

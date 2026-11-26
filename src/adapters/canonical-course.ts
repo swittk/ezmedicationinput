@@ -1610,9 +1610,18 @@ function administrationToWire(
       const { valueRange: _oldRange, valueQuantity: _oldQuantity, extension: priorChildren, ...metadata } = oldDuration ?? {};
       const unknown = priorChildren?.filter(child => child.url !== "low" && child.url !== "high" &&
         child.url !== "projectedRange" && child.url !== "rangeMetadata");
+      let children = replacement.extension;
+      if (children && priorChildren) {
+        const retained: FhirR6Extension[] = [];
+        for (const child of children) {
+          const prior = child.url === "low" || child.url === "high"
+            ? priorChildren.find(item => item.url === child.url) : undefined;
+          retained.push(prior ? { ...prior, ...child } : child);
+        }
+        children = retained;
+      }
       next.push({ ...metadata, ...replacement,
-        ...(replacement.extension && unknown?.length
-          ? { extension: [...replacement.extension, ...unknown] } : {}) });
+        ...(children ? { extension: unknown?.length ? [...children, ...unknown] : children } : {}) });
     } else if (oldDuration) output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
       { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [oldDuration] }];
     assign(output, "modifierExtension", next.length ? next : undefined);
