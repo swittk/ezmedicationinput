@@ -16226,3 +16226,25 @@ Negated contact instructions retain the selected nominal and site across languag
 realizations. Computed weight-based infusion amounts reuse runtime selection and
 the existing administration ceiling before supply and finite-phase admission.
 Authored absolute rates, runtime uncertainty and current source facts remain intact.
+
+
+## 2026-11-26 — Quantity compatibility and complete instruction arguments
+
+Compatible dose ceilings share dimensional comparison and retain every authored
+limit. Current R5 projection chooses the tighter compatible quantity, including
+weight-normalized mass prefixes. Native R6 integer, graph and translation
+annotations survive ordinary conversion.
+
+Infusion feasibility remains with the measured-dose owner: an administration
+ceiling cannot erase a minimum runtime conflict. This corrects the earlier
+computed-infusion shortcut. Upper-only runtime bounds retain their uncertainty.
+Course totals carry their coded unit basis through aggregation, and event clocks
+retain independent configured and fallback times. Relative phase offsets use the
+existing elapsed and civil-calendar steppers.
+
+Clinical quantity and temporal constituents retain their scope across separators,
+compact denominators and fronted continuations. Next-day clock endings remain
+explicit when unresolved. Procedure companions keep their own quantities,
+relations and clocks, including complete negative instructions in both languages.
+Meaningful dose, timing, quantity and localized-preview assertions are retained
+and strengthened.
