@@ -349,11 +349,12 @@ export function scopeSequentialPhaseSemantics(
     if (edge.relation.semanticLicense === 'dose-continuation' && prior.length === 1 && next.length === 1) {
       const precedingClock = singleClockWithoutRecurrence(schedules[0]);
       const followingSchedule = states[next[0]]?.primaryClause.schedule;
-      const followingClock = followingSchedule?.timeOfDay?.length === 1 ? followingSchedule.timeOfDay[0] : undefined;
+      const followingEarlierClock = precedingClock &&
+        followingSchedule?.timeOfDay?.some(clock => precedingClock > clock);
       const followingEvent = !followingSchedule?.timeOfDay?.length &&
         followingSchedule?.when?.some(event => event !== SequenceEventTiming.Immediate);
       if (precedingClock && states[prior[0]].primaryClause.prn?.enabled !== true &&
-          (followingEvent || followingClock && precedingClock > followingClock)) {
+          (followingEvent || followingEarlierClock)) {
         // The existing clock-order construction kept these daughters sequential.
         // Complete its initial point; native phase completion owns the next
         // eligible clock or caller-resolved event without adding an event clock.

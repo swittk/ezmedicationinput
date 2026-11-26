@@ -5223,6 +5223,26 @@ describe("ordinary authored phase continuation ownership", () => {
     ]);
   });
 
+  it.each([false, true])("completes a loading clock before a two-clock daily phase (explicit once=%s)", once => {
+    const source = "Take 1 tablet " + (once ? "once " : "") +
+      "at 22:00, then 2 tablets twice daily at 06:00 and 18:00 for 5 days";
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(1);
+    expect(parsed.meta.canonical.clauses[1].schedule).toMatchObject({ frequency: 2, period: 1,
+      periodUnit: Unit.Day, timeOfDay: ["06:00:00", "18:00:00"], duration: 5, durationUnit: Unit.Day });
+    for (const dosage of forms(parsed)) {
+      expect(nextDueDoses(dosage, { ...options, limit: 12 })).toEqual([
+        "2027-01-01T22:00:00+00:00", "2027-01-02T06:00:00+00:00", "2027-01-02T18:00:00+00:00",
+        "2027-01-03T06:00:00+00:00", "2027-01-03T18:00:00+00:00",
+        "2027-01-04T06:00:00+00:00", "2027-01-04T18:00:00+00:00",
+        "2027-01-05T06:00:00+00:00", "2027-01-05T18:00:00+00:00",
+        "2027-01-06T06:00:00+00:00", "2027-01-06T18:00:00+00:00"
+      ]);
+      // One loading tablet plus five days of two two-tablet administrations.
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(21);
+    }
+  });
+
   it("inherits an activity-qualified schedule at an explicit later course day", () => {
     const parsed = parseSig("Take 1 tablet 30 minutes before exercise for 7 days, then 2 tablets from day 8");
     const first = parsed.meta.canonical.clauses[0].schedule!;
