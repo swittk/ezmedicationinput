@@ -8142,3 +8142,29 @@ describe("current structured preview qualifiers", () => {
     }
   );
 });
+
+describe("compatible anatomical refinements", () => {
+  const SNOMED = "http://snomed.info/sct";
+  it.each([
+    ["117590005", "left ear canal", "ช่องหูซ้าย"],
+    ["89644007", "left ear canal", "ช่องหูซ้าย"],
+    ["25577004", "right ear", "หูขวา"]
+  ])("preserves a current refined label beside code %s", (code, english, thai) => {
+    const site = { concept: { text: "left ear canal", coding: [{ system: SNOMED, code }] } };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{
+      site, doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
+      extension: [{ url: "https://example.org/fhir/StructureDefinition/site-note", valueString: "retain" }]
+    }] }] };
+    const before = JSON.stringify(input);
+    const r5 = toFhirR5Dosages(input);
+    const returned = toDosageDetails(r5);
+    expect(returned.step?.[0].component?.[0].site).toEqual(site);
+    expect(returned.step?.[0].component?.[0].extension).toEqual(input.step?.[0].component?.[0].extension);
+    for (const value of [input, importCanonicalCourse(input), r5, returned])
+      for (const style of ["short", "long"] as const) {
+        expect(formatSig(value, style, { locale: "en", realizationMode: "normalized" })).toContain(english);
+        expect(formatSig(value, style, { locale: "th", realizationMode: "normalized" })).toContain(thai);
+      }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+});
