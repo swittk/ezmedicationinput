@@ -5802,3 +5802,169 @@ describe("plain count maximum identity", () => {
     }
   });
 });
+
+
+describe("independent current FHIR field fidelity", () => {
+  const graphUrl = "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph";
+  const note: FhirExtension = { url: "urn:clinic:annotation", valueString: "retain" };
+  const actionFields = (): FhirExtension[] => [
+    { url: "predicateLemma", valueString: "swallow" },
+    { url: "force", valueCode: AdviceForce.Sequence },
+    { url: "spanStart", valueInteger: 0 }, { url: "spanEnd", valueInteger: 13 },
+    { url: "sourceText", valueString: "Swallow tablet" },
+  ];
+  const graphInput = (parts: FhirExtension[], extra: FhirExtension[] = []): FhirExtension => ({
+    url: graphUrl, extension: [{ url: "action", extension: parts }, ...extra]
+  });
+  const rebuiltAction = (input: FhirExtension) => buildInstructionGraphExtension(
+    parseInstructionGraphExtension([input]))!.extension!.find(field => field.url === "action")!;
+
+  it("converts a Quantity nested inside an annotated Ratio while preserving every owner", () => {
+    const annotation: FhirR6Extension = { url: "urn:clinic:concentration", valueRatio: {
+      id: "concentration", numerator: { value: 1, unit: "mg" }, denominator: { value: 1, unit: "mL" },
+      extension: [{ url: "urn:clinic:flush-volume", valueQuantity: { value: 5, unit: "mL", comparator: "~" } }]
+    } };
+    const input = course({ doseAndRate: [{ rateRatio: {
+      numerator: { value: 10, unit: "mL" }, denominator: { value: 1, unit: "h" }, extension: [annotation]
+    } }] });
+    const before = persist(input), rows = toFhirR5Dosages(input);
+    const ratio = rows[0].doseAndRate![0].rateRatio!.extension![0].valueRatio!;
+    expect(ratio).toMatchObject({ id: "concentration", numerator: { value: 1, unit: "mg" }, denominator: { value: 1, unit: "mL" } });
+    const flush = ratio.extension![0].valueQuantity!;
+    expect(flush).toMatchObject({ value: 5, unit: "mL" });
+    expect(flush.comparator).toBeUndefined();
+    expect(getQuantityComparator(flush)).toBe("~");
+    const roundtrip = toDosageDetails(rows).step![0].component[0].doseAndRate![0].rateRatio!;
+    expect(getQuantityComparator(roundtrip.extension![0].valueRatio!.extension![0].valueQuantity)).toBe("~");
+    expect(input).toEqual(before);
+  });
+
+  it.each(["181178004", "117590005"])("keeps both otic targets with unqualified anatomy %s", code => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 2, unit: "drop" } }],
+      site: { text: "both ears", coding: [{ system: "http://snomed.info/sct", code }] },
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } } };
+    const before = persist(row), r6 = toDosageDetails([row]);
+    for (const input of [row, r6, persist(toFhirR5Dosages(r6))]) {
+      expect(importCanonicalCourse(input).stages[0].administrations[0].targetCount).toBe(2);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toMatch(/both ears|each ear/u);
+      expect(calculateTotalUnits({ dosage: input, orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC",
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(8);
+    }
+    expect(row).toEqual(before);
+    expect(r6.step![0].component[0].site?.concept).toEqual(row.site);
+  });
+
+  it("keeps an explicit opposite-side code distinct from unqualified anatomy", () => {
+    const row: FhirDosage = { site: { text: "left ear", coding: [{ system: "http://snomed.info/sct", code: "368566007" }] },
+      doseAndRate: [{ doseQuantity: { value: 2, unit: "drop" } }] };
+    expect(formatSig(row, "long", { locale: "en", realizationMode: "normalized" })).toContain("right ear canal");
+    expect(row.site?.text).toBe("left ear");
+  });
+
+  it.each([false, true])("uses the readable concept before a reference, and reference before a local code (known %s)", known => {
+    const site: NonNullable<FhirR6Dosage["site"]> = { concept: { coding: [known
+      ? { system: "http://snomed.info/sct", code: "1290031003" }
+      : { system: "urn:clinic:site", code: "EYE-1" }] },
+      reference: { reference: "BodyStructure/eye", display: known ? "Local eye description" : "Left eye" } };
+    const input = course({ site }), before = persist(input);
+    expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase()).toContain("left eye");
+    expect(formatSig(input, "long", { locale: "en" })).not.toContain("EYE-1");
+    expect(projectCanonicalCourse(importCanonicalCourse(input)).fhirNext.step![0].component[0].site).toEqual(site);
+    expect(input).toEqual(before);
+  });
+
+  it("accepts and retains upper frequency primitive annotations in both wire versions", () => {
+    const metadata = { id: "upper-frequency", extension: [note] };
+    const input = course({ timing: { repeat: { frequency: 1, frequencyMax: 2, _frequencyMax: metadata,
+      period: 1, periodUnit: FhirPeriodUnit.Day } } });
+    const before = persist(input), rows: FhirDosage[] = toFhirR5Dosages(input);
+    expect(rows[0].timing?.repeat).toMatchObject({ frequency: 1, frequencyMax: 2, _frequencyMax: metadata });
+    expect(toDosageDetails(rows).step![0].component[0].timing?.repeat?._frequencyMax).toEqual(metadata);
+    expect(input).toEqual(before);
+  });
+
+  it("keeps every authored translation variant when re-encoding its selected display", () => {
+    const translation = (id: string, text: string): FhirExtension => ({ id, url: FHIR_TRANSLATION_EXTENSION_URL,
+      extension: [{ url: "lang", valueCode: "th" }, { url: "content", valueString: text }] });
+    const coding = { system: "http://snomed.info/sct", code: "311501000", display: "Take with food",
+      _display: { extension: [translation("first", "รับประทานพร้อมอาหาร"), translation("second", "ใช้ยาพร้อมอาหาร")] } };
+    const input = graphInput([...actionFields(), { url: "predicateCoding", valueCoding: coding }]);
+    const before = persist(input), graph = parseInstructionGraphExtension([input])!;
+    expect(graph.actions[0].predicate.codings![0].i18n?.th).toBe("ใช้ยาพร้อมอาหาร");
+    const output = rebuiltAction(input).extension!.find(field => field.url === "predicateCoding")!.valueCoding!;
+    expect(output._display).toEqual(coding._display);
+    expect(input).toEqual(before);
+  });
+
+  it("keeps primitive action and relation-wrapper annotations at their original fields", () => {
+    const display: FhirExtension = { id: "display-field", url: "predicateDisplay", valueString: "Swallow",
+      _valueString: { id: "display-value", extension: [note] } };
+    const relationCoding: FhirExtension = { id: "relation-coding", url: "kindCoding", valueCoding: {
+      system: "http://hl7.org/fhir/action-relationship-type", code: "before" } };
+    const input = graphInput([...actionFields(), display], [{ id: "relation", url: "graphRelation", extension: [
+      relationCoding, { url: "fromActionIndex", valueInteger: 0 }, { url: "toActionIndex", valueInteger: 1 }
+    ] }]);
+    const before = persist(input), output = buildInstructionGraphExtension(parseInstructionGraphExtension([input]))!;
+    expect(output.extension!.find(field => field.url === "action")!.extension).toContainEqual(display);
+    const relation = output.extension!.find(field => field.url === "graphRelation")!;
+    expect(relation.id).toBe("relation");
+    expect(relation.extension!.filter(field => field.url === "kindCoding")).toEqual([relationCoding]);
+    expect(parseInstructionGraphExtension([output])!.relations![0].kind).toBe(AdviceRelation.Before);
+    expect(input).toEqual(before);
+  });
+
+  it("merges legacy locale settings without losing explicit false or node annotations", () => {
+    const locale: FhirExtension = { id: "thai-profile", url: "predicateRealizerLocale", extension: [
+      { url: "locale", valueCode: "th" }, { id: "direct-dose", url: "directDose", valueBoolean: false }, note
+    ] };
+    const input = graphInput([...actionFields(), locale,
+      { url: "predicateRealizerThaiFallbackObject", valueString: "ยาเม็ด" }]);
+    const before = persist(input), output = rebuiltAction(input);
+    const saved = output.extension!.find(field => field.url === "predicateRealizerLocale")!;
+    expect(saved.id).toBe("thai-profile");
+    expect(saved.extension).toContainEqual({ id: "direct-dose", url: "directDose", valueBoolean: false });
+    expect(saved.extension).toContainEqual({ url: "fallbackObject", valueString: "ยาเม็ด" });
+    expect(saved.extension).toContainEqual(note);
+    const again = parseInstructionGraphExtension([{ url: graphUrl, extension: [output] }])!;
+    expect(again.actions[0].predicate.realizerConfig?.locales?.th).toMatchObject({ directDose: false, fallbackObject: "ยาเม็ด" });
+    expect(input).toEqual(before);
+  });
+
+  it("keeps opaque-span and coverage annotations inert at their own nodes", () => {
+    const opaque: FhirExtension = { id: "opaque-span", url: "opaque", extension: [
+      { url: "start", valueInteger: 14 }, { url: "end", valueInteger: 20 },
+      { url: "text", valueString: "clinic", _valueString: { extension: [note] } },
+      { id: "token-three", url: "tokenIndex", valueInteger: 3 },
+      { id: "token-four", url: "tokenIndex", valueInteger: 4 }, note
+    ] };
+    const coverage: FhirExtension = { id: "coverage", url: "coverage", extension: [
+      { url: "understoodCharacters", valueInteger: 13 }, { url: "opaqueCharacters", valueInteger: 6 },
+      { url: "ratio", valueDecimal: 0.65, _valueDecimal: { extension: [note] } },
+      { url: "complete", valueBoolean: false }, note
+    ] };
+    const input = graphInput(actionFields(), [opaque, coverage]), before = persist(input);
+    const graph = parseInstructionGraphExtension([input])!, output = buildInstructionGraphExtension(graph)!;
+    expect(graph.actions).toHaveLength(1);
+    expect(graph.coverage).toMatchObject({ understoodCharacters: 13, opaqueCharacters: 6, ratio: 0.65, complete: false });
+    expect(output.extension!.find(field => field.url === "opaque")).toEqual(opaque);
+    expect(output.extension!.find(field => field.url === "coverage")).toEqual(coverage);
+    expect(input).toEqual(before);
+  });
+
+  it("keeps an absent quantity value's reason on its original primitive without inventing a number", () => {
+    const missing: FhirExtension = { id: "measured-amount", url: "value", _valueDecimal: { extension: [
+      { url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown" }
+    ] } };
+    const input = graphInput([...actionFields(), { url: "argument", extension: [
+      { url: "role", valueCode: AdviceArgumentRole.Amount }, { url: "text", valueString: "measured liquid" },
+      { url: "quantity", extension: [missing, { url: "unit", valueString: "mL" }] }
+    ] }]);
+    const before = persist(input), graph = parseInstructionGraphExtension([input])!;
+    expect(graph.actions[0].args[0].quantity?.value).toBeUndefined();
+    const argument = rebuiltAction(input).extension!.find(field => field.url === "argument")!;
+    const quantity = argument.extension!.find(field => field.url === "quantity")!;
+    expect(quantity.extension).toContainEqual(missing);
+    expect(quantity.extension!.some(field => field.url === "sourceQuantityField")).toBe(false);
+    expect(input).toEqual(before);
+  });
+});

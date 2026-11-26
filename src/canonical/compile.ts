@@ -697,7 +697,8 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     const staleText = a.provenance?.sourceTextVerified === false && a.target.text &&
       bodySiteTextConflictsWithCoding(a.target.text, targetCode);
     const text=targetCode?.code && (!a.target.text || staleText)
-      ? getBodySiteText(targetCode) ?? a.target.text : a.target.text;
+      ? getBodySiteText(targetCode) ?? a.target.text ?? targetCode.display ?? a.siteReference?.display
+      : a.target.text ?? a.siteReference?.display;
     // A decoded restriction belongs to the live site, independently of
     // whether its optional text was supplied or derived from that code.
     result.site=Object.assign({},changedCode?undefined:base?.site,{text,administrationTargetCount:a.targetCount});

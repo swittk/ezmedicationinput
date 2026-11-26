@@ -36,12 +36,15 @@ export function normalizeAdministrationTargetCount(value: number | undefined): n
 }
 
 /** Declared anatomical refinements, independent of their localized labels. */
-const BROADER_BODY_SITE_CODE: Readonly<Record<string, string>> = {
-  "368588007": "89644007", // Entire left external auditory canal -> left ear.
-  "368566007": "25577004", // Entire right external auditory canal -> right ear.
-  "723608007": "1797002", // Left anterior naris -> naris.
-  "723609004": "1797002", // Right anterior naris -> naris.
-  "244506005": "1797002", // Anterior nares -> naris.
+const BODY_SITE_REFINEMENTS: Readonly<Record<string, { broader: string; lateralized?: true }>> = {
+  "181178004": { broader: "117590005" }, // External auditory canal -> ear-related structure.
+  "34338003": { broader: "117590005", lateralized: true }, // Both ears.
+  "40638003": { broader: "81745001", lateralized: true }, // Both eyes.
+  "368588007": { broader: "89644007", lateralized: true }, // Left auditory canal -> left ear.
+  "368566007": { broader: "25577004", lateralized: true }, // Right auditory canal -> right ear.
+  "723608007": { broader: "1797002", lateralized: true }, // Left anterior naris -> naris.
+  "723609004": { broader: "1797002", lateralized: true }, // Right anterior naris -> naris.
+  "244506005": { broader: "1797002" }, // Anterior nares -> naris.
 };
 
 /** Compare exact stock site labels only. A lateralized label can refine its
@@ -51,12 +54,16 @@ export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirC
   const textCode = definition?.coding;
   if (!textCode?.code || !coding?.code || textCode.code === coding.code ||
       (textCode.system ?? SNOMED_SYSTEM) !== (coding.system ?? SNOMED_SYSTEM)) return false;
-  if (BROADER_BODY_SITE_CODE[textCode.code] === coding.code) return false;
+  const textRefinement = BODY_SITE_REFINEMENTS[textCode.code];
+  const codedRefinement = BODY_SITE_REFINEMENTS[coding.code];
+  if (textRefinement?.broader === coding.code || textRefinement && codedRefinement &&
+      !codedRefinement.lateralized && textRefinement.broader === codedRefinement.broader) return false;
   const canonical = definition.text;
   const unqualified = canonical?.replace(/^(?:left|right|both) /u, "");
   if (unqualified && unqualified !== canonical) {
     const baseCode = DEFAULT_BODY_SITE_SNOMED[unqualified]?.coding;
-    if (baseCode?.code === coding.code &&
+    if (baseCode?.code && (baseCode.code === coding.code ||
+        !codedRefinement?.lateralized && baseCode.code === codedRefinement?.broader) &&
         (baseCode.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM)) return false;
   }
   return true;

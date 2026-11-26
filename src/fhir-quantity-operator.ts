@@ -142,10 +142,12 @@ export function quantityAnnotationExtensions(
     if (ratio) {
       const numerator = target === "r5" ? quantityForR5(ratio.numerator) : quantityFromWire(ratio.numerator);
       const denominator = target === "r5" ? simpleQuantityForR5(ratio.denominator) : simpleQuantityForR6(ratio.denominator);
-      if (numerator !== ratio.numerator || denominator !== ratio.denominator) ratio = {
+      const extension = ratio.extension ? quantityAnnotationExtensions(ratio.extension, target) : undefined;
+      if (numerator !== ratio.numerator || denominator !== ratio.denominator || extension !== ratio.extension) ratio = {
         ...ratio,
         ...(numerator !== ratio.numerator ? { numerator } : {}),
-        ...(denominator !== ratio.denominator ? { denominator } : {})
+        ...(denominator !== ratio.denominator ? { denominator } : {}),
+        ...(extension !== ratio.extension ? { extension } : {})
       };
     }
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;

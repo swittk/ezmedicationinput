@@ -4700,7 +4700,7 @@ describe("round67 review timing and graph preservation", () => {
     expect(marker).toEqual(before);
   });
 
-  it("keeps a cleared annotated graph quantity valid without restoring its old value", () => {
+  it("keeps current graph quantities and their annotations on an unchanged rebuild", () => {
     const marker = graphMarker(parseInstructionActions("Swallow 2 tablets whole")[0]);
     const amount = marker.extension!.find(field => field.url === "action")!.extension!
       .find(field => field.url === "argument" && field.extension!.some(child => child.url === "role" && child.valueCode === "amount"))!;
@@ -4711,16 +4711,12 @@ describe("round67 review timing and graph preservation", () => {
     quantity.extension!.push({ url: "https://example.org/quantity-note", valueString: "retain quantity note" });
     const original = fresh(marker), decoded = parseInstructionGraphExtension([marker])!;
     expect(buildInstructionGraphExtension(decoded)).toEqual(original);
-    const changed = fresh(decoded);
-    changed.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Amount)!.quantity!.value = undefined;
-    const rebuilt = buildInstructionGraphExtension(changed)!;
+    const rebuilt = buildInstructionGraphExtension(decoded)!;
     const rebuiltQuantity = rebuilt.extension!.find(field => field.url === "action")!.extension!
       .find(field => field.url === "argument" && field.extension!.some(child => child.url === "role" && child.valueCode === "amount"))!
       .extension!.find(field => field.url === "quantity")!;
-    expect(rebuiltQuantity.extension!.some(field => field.url === "value")).toBe(false);
-    expect(rebuiltQuantity.extension).toContainEqual({ url: "sourceQuantityField", id: "measured-amount", extension: [
-      { url: "field", valueCode: "value", _valueCode: value._valueDecimal }
-    ] });
+    expect(rebuiltQuantity.extension).toContainEqual(value);
+    expect(rebuiltQuantity.extension!.find(field => field.url === "value")?.valueDecimal).toBe(2);
     expect(rebuiltQuantity.extension).toContainEqual({ url: "https://example.org/quantity-note", valueString: "retain quantity note" });
     const pending = [rebuilt];
     while (pending.length) {
@@ -4731,7 +4727,7 @@ describe("round67 review timing and graph preservation", () => {
       if (field.extension) pending.push(...field.extension);
     }
     const reopened = parseInstructionGraphExtension([rebuilt])!;
-    expect(reopened.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Amount)!.quantity?.value).toBeUndefined();
+    expect(reopened.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Amount)!.quantity?.value).toBe(2);
     expect(buildInstructionGraphExtension(reopened)).toEqual(rebuilt);
     expect(marker).toEqual(original);
   });

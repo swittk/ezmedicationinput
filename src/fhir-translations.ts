@@ -147,6 +147,7 @@ export function mergeTranslationPrimitiveElement(
   translations: Record<string, string> | undefined
 ): FhirPrimitiveElement | undefined {
   const supplied = mergeI18nRecords(translations), seen = new Set<string>();
+  const selected = getPrimitiveTranslations(base);
   const nextExtensions: FhirExtension[] = [];
   for (const extension of base?.extension ?? []) {
     let current = extension;
@@ -155,7 +156,9 @@ export function mergeTranslationPrimitiveElement(
       if (locale && content) {
         seen.add(locale);
         const replacement = supplied?.[locale];
-        if (replacement && replacement !== content)
+        // Re-encoding the selected display does not replace other authored
+        // variants in that locale. A different supplied translation does.
+        if (replacement && replacement !== selected?.[locale] && replacement !== content)
           current = { ...extension, extension: extension.extension?.map(part =>
             part.url === TRANSLATION_CONTENT_EXTENSION_URL ? { ...part, valueString: replacement } : part) };
       }

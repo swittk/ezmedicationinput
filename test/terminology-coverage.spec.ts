@@ -506,13 +506,16 @@ describe("single-delimiter SNOMED postcoordination parsing", () => {
   it("roundtrips the supported finding-site, topographical and laterality attributes", async () => {
     const rules = await import("../src/snomed-postcoordination");
     const focus = rules.buildSnomedFindingSitePostcoordinationCode("12345", "67890");
-    expect(rules.parseSnomedFindingSitePostcoordinationCode(focus))
+    expect(focus).toBe("12345:363698007=67890");
+    expect(rules.parseSnomedFindingSitePostcoordinationCode("12345:363698007=67890"))
       .toEqual({ focusCode: "12345", siteCode: "67890" });
     const topographical = rules.buildSnomedBodySiteTopographicalModifierPostcoordinationCode("12345", "67890");
-    expect(rules.parseSnomedBodySiteTopographicalModifierPostcoordinationCode(topographical))
+    expect(topographical).toBe("12345:106233006=67890");
+    expect(rules.parseSnomedBodySiteTopographicalModifierPostcoordinationCode("12345:106233006=67890"))
       .toEqual({ siteCode: "12345", modifierCode: "67890" });
     const laterality = rules.buildSnomedBodySiteLateralityPostcoordinationCode("12345", "67890");
-    expect(rules.parseSnomedBodySiteLateralityPostcoordinationCode(laterality))
+    expect(laterality).toBe("12345:272741003=67890");
+    expect(rules.parseSnomedBodySiteLateralityPostcoordinationCode("12345:272741003=67890"))
       .toEqual({ siteCode: "12345", lateralityCode: "67890" });
   });
   it("does not reinterpret a nested later attribute as the first top-level relationship", async () => {

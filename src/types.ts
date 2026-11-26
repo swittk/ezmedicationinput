@@ -467,6 +467,7 @@ export interface FhirTimingRepeat extends FhirElement {
   frequency?: number;
   _frequency?: FhirPrimitiveElement;
   frequencyMax?: number;
+  _frequencyMax?: FhirPrimitiveElement;
   /** Duration of each administration occurrence. */
   duration?: number;
   /** Primitive annotation for a stated or unspecified lower duration. */
@@ -494,9 +495,10 @@ export interface FhirTimingRepeat extends FhirElement {
 /** R6 Snapshot 1 adds period-local interlacing windows to Timing.repeat.
  * These are not R5 Timing fields and must remain confined to the R6 wire type. */
 export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration" | "boundsRange" | "boundsPeriod" | "extension" |
-  "_count" | "_frequency" | "_duration" | "_period" | "_dayOfWeek" | "_timeOfDay" | "_when">, FhirR6Element {
+  "_count" | "_frequency" | "_frequencyMax" | "_duration" | "_period" | "_dayOfWeek" | "_timeOfDay" | "_when">, FhirR6Element {
   _count?: FhirR6PrimitiveElement;
   _frequency?: FhirR6PrimitiveElement;
+  _frequencyMax?: FhirR6PrimitiveElement;
   _duration?: FhirR6PrimitiveElement;
   _period?: FhirR6PrimitiveElement;
   _dayOfWeek?: Array<FhirR6PrimitiveElement | null>;
@@ -2049,6 +2051,9 @@ export interface CanonicalInstructionRelation {
 }
 
 export interface CanonicalInstructionCoverage {
+  /** Opaque FHIR annotations stay with this coverage record. */
+  sourceId?: string;
+  sourceExtensions?: FhirExtension[];
   understoodCharacters: number;
   opaqueCharacters: number;
   ratio: number;
@@ -2086,6 +2091,9 @@ export interface CanonicalInstructionGraph {
 }
 
 export interface CanonicalSourceSpan extends TextRange {
+  /** Opaque FHIR annotations stay with this source span. */
+  sourceId?: string;
+  sourceExtensions?: FhirExtension[];
   text: string;
   tokenIndices?: number[];
 }
