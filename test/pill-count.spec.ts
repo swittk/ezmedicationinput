@@ -1613,3 +1613,45 @@ describe("monthly day membership supply", () => {
     expect(toFhirR5Dosages(reopened)[0].timing?.repeat?.extension).toContainEqual(note);
   });
 });
+
+
+describe("fractional quantity limits retain administration ownership", () => {
+  it("keeps decimal and word-fraction caps equivalent without changing the dose or cadence", () => {
+    const start = "2026-11-26T08:00:00Z";
+    const sources = ["0.5 tablets", "half a tablet"].map(amount =>
+      `Take 0.25 tablet q12h max ${amount} within 12 hours`);
+    const parsed = sources.map(source => parseBatch(source));
+    const facts = (rows: FhirDosage[]) => rows.map(row => ({
+      doseAndRate: row.doseAndRate,
+      timing: row.timing,
+      maxDosePerPeriod: row.maxDosePerPeriod
+    }));
+    const expected = facts(parsed[0].fhir);
+    for (let index = 0; index < parsed.length; index++) {
+      const result = parsed[index];
+      const strict = toFhirR5Dosages(result.fhirNext);
+      expect(result.input).toBe(sources[index]);
+      expect(result.meta.leftoverText).toBeUndefined();
+      for (const rows of [result.fhir, strict]) {
+        expect(rows).toHaveLength(1);
+        expect(facts(rows)).toEqual(expected);
+        expect(rows[0].doseAndRate).toHaveLength(1);
+        expect(rows[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 0.25, unit: "tab" });
+        expect(rows[0].maxDosePerPeriod).toHaveLength(1);
+        expect(rows[0].maxDosePerPeriod?.[0]).toMatchObject({
+          numerator: { value: 0.5, unit: "tab" },
+          denominator: { value: 12, code: "h" }
+        });
+        expect(rows[0].timing?.repeat).toMatchObject({ period: 12, periodUnit: "h" });
+        expect(rows[0].timing?.repeat?.boundsDuration).toBeUndefined();
+        expect(rows[0].timing?.repeat?.timeOfDay).toBeUndefined();
+      }
+      for (const dosage of [result, result.fhirNext, strict]) {
+        expect(calculateTotalUnits({
+          dosage, from: start, orderedAt: start, timeZone: "UTC",
+          durationValue: 7, durationUnit: FhirPeriodUnit.Day
+        })).toMatchObject({ totalUnits: 3.5, unit: "tab" });
+      }
+    }
+  });
+});

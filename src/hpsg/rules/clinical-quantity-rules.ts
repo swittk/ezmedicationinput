@@ -3,16 +3,17 @@ import { LexKind } from "../../lexer/token-types";
 import { getRouteMeaning, hasTimingAbbreviationMeaning } from "../../lexer/meaning";
 import { FhirPeriodUnit, RouteCode } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
-import { HpsgClauseContext, lexicalRule, maximumDosePerPeriodAt, normalizeTokenLower } from "../rule-context";
+import {
+  HpsgClauseContext, lexicalRule, maximumDosePerPeriodAt, normalizeTokenLower,
+  quantityTokenAvailable as available, doseNumberValue, plainClinicalNumberAt, doseUnitIndexAfter
+} from "../rule-context";
 import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, mapIntervalUnit } from "../timing-lexicon";
 import {
   doseComparatorNumberAt,
   doseRangeNumberAt,
-  millionDoseNumberAt,
   compactMillionDoseNumber,
   DOSE_FRACTION_ARTICLES,
   additiveDoseNumberAt,
-  fractionalDoseNumberAt,
   attachedNumberUnitAt,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
   DOSE_NUMBER_WORDS,
@@ -48,45 +49,12 @@ interface UnitExpression {
   end: number;
 }
 
-function available(context: HpsgClauseContext, index: number): boolean {
-  const token = context.tokens[index];
-  return Boolean(token && index < context.limit && !context.state.consumed.has(token.index));
-}
-
-function doseNumberValue(
-  token: HpsgClauseContext["tokens"][number] | undefined
-): number | undefined {
-  if (!token) return undefined;
-  return token.kind === LexKind.Number && token.value !== undefined
-    ? token.value
-    : DOSE_NUMBER_WORDS.get(normalizeTokenLower(token));
-}
-
-/** One plain numeric daughter shared by active amounts and carrier volumes. */
-function plainClinicalNumberAt(context: HpsgClauseContext, start: number, initial?: number) {
-  const token = context.tokens[start];
-  if (!token || !available(context, start)) return undefined;
-  const value = initial ?? doseNumberValue(token) ?? DOSE_FRACTION_WORDS.get(normalizeTokenLower(token));
-  if (value === undefined) return undefined;
-  const mixed = additiveDoseNumberAt(context.tokens, start, context.limit, value);
-  const fraction = mixed ? undefined : fractionalDoseNumberAt(context.tokens, start, context.limit, value);
-  const complete = mixed ?? fraction ?? millionDoseNumberAt(context.tokens, start, context.limit, value);
-  const numericIndex = complete?.numericIndex ?? start;
-  for (let index = start + 1; index <= numericIndex; index++)
-    if (!available(context, index)) return undefined;
-  return { value: complete?.value ?? value, numericIndex, mixed: Boolean(mixed), fractional: Boolean(mixed || fraction) };
-}
-
 function directDoseUnitAfter(
   context: HpsgClauseContext,
   start: number
 ): { unit: string; end: number } | undefined {
-  let cursor = start;
-  while (available(context, cursor) &&
-      DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[cursor]))) {
-    cursor += 1;
-  }
-  if (!available(context, cursor)) return undefined;
+  const cursor = doseUnitIndexAfter(context, start);
+  if (cursor === undefined) return undefined;
   const unit = normalizeUnit(normalizeTokenLower(context.tokens[cursor]), context.options);
   return unit ? { unit, end: cursor + 1 } : undefined;
 }

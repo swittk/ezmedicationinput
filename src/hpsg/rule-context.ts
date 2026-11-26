@@ -15,6 +15,12 @@ import {
   POST_MERIDIEM_TOKENS,
   normalizeTokenLower,
   attachedNumberUnitAt,
+  additiveDoseNumberAt,
+  fractionalDoseNumberAt,
+  millionDoseNumberAt,
+  DOSE_NUMBER_WORDS,
+  DOSE_FRACTION_WORDS,
+  DOSE_UNIT_CONNECTORS,
   DAYPART_INTERVAL_TOKENS,
   DOSE_FRACTION_ARTICLES,
   EVENT_ARTICLE_TOKENS,
@@ -191,26 +197,63 @@ export function lexicalRule(
 }
 
 
-interface MaximumDoseLexicalContext {
+interface QuantityLexicalContext {
   tokens: Token[];
   options?: ParseOptions;
   limit?: number;
   state?: Pick<ParserState, "consumed">;
 }
 
-function maximumTokensAvailable(context: MaximumDoseLexicalContext, start: number, span: number): Token[] | undefined {
+export function quantityTokenAvailable(context: QuantityLexicalContext, index: number): boolean {
+  const token = context.tokens[index];
+  return Boolean(token && index < (context.limit ?? context.tokens.length) &&
+    !context.state?.consumed.has(token.index));
+}
+
+export function doseNumberValue(token: Token | undefined): number | undefined {
+  if (!token) return undefined;
+  return token.kind === LexKind.Number && token.value !== undefined
+    ? token.value
+    : DOSE_NUMBER_WORDS.get(normalizeTokenLower(token));
+}
+
+/** One plain numeric daughter shared by active amounts, carrier volumes and limits. */
+export function plainClinicalNumberAt(context: QuantityLexicalContext, start: number, initial?: number) {
+  const token = context.tokens[start];
+  if (!token || !quantityTokenAvailable(context, start)) return undefined;
+  const limit = context.limit ?? context.tokens.length;
+  const value = initial ?? doseNumberValue(token) ?? DOSE_FRACTION_WORDS.get(normalizeTokenLower(token));
+  if (value === undefined) return undefined;
+  const mixed = additiveDoseNumberAt(context.tokens, start, limit, value);
+  const fraction = mixed ? undefined : fractionalDoseNumberAt(context.tokens, start, limit, value);
+  const complete = mixed ?? fraction ?? millionDoseNumberAt(context.tokens, start, limit, value);
+  const numericIndex = complete?.numericIndex ?? start;
+  for (let index = start + 1; index <= numericIndex; index++)
+    if (!quantityTokenAvailable(context, index)) return undefined;
+  return { value: complete?.value ?? value, numericIndex, mixed: Boolean(mixed), fractional: Boolean(mixed || fraction) };
+}
+
+/** The optional article or partitive belongs to the following medication unit. */
+export function doseUnitIndexAfter(context: QuantityLexicalContext, start: number): number | undefined {
+  let cursor = start;
+  while (quantityTokenAvailable(context, cursor) &&
+      DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[cursor]))) cursor++;
+  return quantityTokenAvailable(context, cursor) ? cursor : undefined;
+}
+
+function maximumTokensAvailable(context: QuantityLexicalContext, start: number, span: number): Token[] | undefined {
   if (start + span > (context.limit ?? context.tokens.length)) return undefined;
   const tokens: Token[] = [];
   for (let offset = 0; offset < span; offset += 1) {
     const token = context.tokens[start + offset];
-    if (!token || context.state?.consumed.has(token.index)) return undefined;
+    if (!quantityTokenAvailable(context, start + offset)) return undefined;
     tokens.push(token);
   }
   return tokens;
 }
 
 export function maximumCountLeadAt(
-  context: MaximumDoseLexicalContext, start: number, firstLower?: string
+  context: QuantityLexicalContext, start: number, firstLower?: string
 ): Token[] | undefined {
   const first = context.tokens[start];
   const lower = firstLower ?? (first && normalizeTokenLower(first));
@@ -227,7 +270,7 @@ export function maximumCountLeadAt(
 }
 
 export function occurrenceCapPeriodAt(
-  context: MaximumDoseLexicalContext,
+  context: QuantityLexicalContext,
   start: number
 ): { tokens: Token[]; period: number; periodUnit: FhirPeriodUnit } | undefined {
   const adverb = maximumTokensAvailable(context, start, 1)?.[0];
@@ -252,7 +295,7 @@ type MaximumDosePeriod = (
 ) & { unitDenominator?: boolean };
 
 function maximumDosePeriodAt(
-  context: MaximumDoseLexicalContext,
+  context: QuantityLexicalContext,
   start: number
 ): MaximumDosePeriod | undefined {
   const defined = occurrenceCapPeriodAt(context, start);
@@ -299,7 +342,7 @@ function maximumDosePeriodAt(
 }
 
 /** Shared lexical constituent: a dose limit owns both its amount and period. */
-export function maximumDosePerPeriodAt(context: MaximumDoseLexicalContext, start: number): {
+export function maximumDosePerPeriodAt(context: QuantityLexicalContext, start: number): {
   tokens: Token[];
   amount: number;
   unit: string;
@@ -327,13 +370,16 @@ export function maximumDosePerPeriodAt(context: MaximumDoseLexicalContext, start
   }
 
   const valueToken = context.tokens[cursor];
-  const unitToken = context.tokens[cursor + 1];
-  const amount = valueToken?.kind === LexKind.Number ? valueToken.value
+  const initial = valueToken?.kind === LexKind.Number ? valueToken.value
     : valueToken ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)] : undefined;
-  if (!valueToken || amount === undefined || !Number.isFinite(amount) ||
-      amount <= 0 || !unitToken ||
-      context.state?.consumed.has(valueToken.index) ||
-      context.state?.consumed.has(unitToken.index)) return undefined;
+  const number = plainClinicalNumberAt(context, cursor, initial);
+  const amount = number?.value;
+  const unitIndex = number ? doseUnitIndexAfter(context, number.numericIndex + 1) : undefined;
+  const unitToken = unitIndex === undefined ? undefined : context.tokens[unitIndex];
+  if (amount === undefined || !Number.isFinite(amount) || amount <= 0 ||
+      unitIndex === undefined || !unitToken) return undefined;
+  const quantityTokens = maximumTokensAvailable(context, cursor, unitIndex + 1 - cursor);
+  if (!quantityTokens) return undefined;
   const unitSurface = normalizeTokenLower(unitToken);
   // `tablets/day` remains one lossless lexical token; split only this
   // explicitly bounded dimensional suffix inside the maximum construction.
@@ -341,7 +387,7 @@ export function maximumDosePerPeriodAt(context: MaximumDoseLexicalContext, start
   const compactAmount = compactUnitPeriod ? attachedNumberUnitAt(compactUnitPeriod[2]) : undefined;
   const hybridValue = compactUnitPeriod && /^(?:\d+(?:\.\d+)?|\.\d+)$/u.test(compactUnitPeriod[2])
     ? Number(compactUnitPeriod[2]) : undefined;
-  const followingUnit = hybridValue !== undefined && hybridValue > 0 ? context.tokens[cursor + 2] : undefined;
+  const followingUnit = hybridValue !== undefined && hybridValue > 0 ? context.tokens[unitIndex + 1] : undefined;
   const hybridUnit = followingUnit && !context.state?.consumed.has(followingUnit.index)
     ? mapIntervalUnit(normalizeTokenLower(followingUnit)) : undefined;
   const compactPeriodSurface = compactAmount?.rawUnit ?? (hybridUnit ? normalizeTokenLower(followingUnit!) : compactUnitPeriod?.[2]);
@@ -349,8 +395,8 @@ export function maximumDosePerPeriodAt(context: MaximumDoseLexicalContext, start
   if (OCCURRENCE_COUNT_WORDS.has(unitSurface)) return undefined;
   const unit = normalizeUnit(compactPeriodUnit ? compactUnitPeriod![1] : unitSurface, context.options);
   if (!unit) return undefined;
-  matched.push(valueToken, unitToken);
-  cursor += 2;
+  matched.push(...quantityTokens);
+  cursor = unitIndex + 1;
 
   const compactPeriod: MaximumDosePeriod | undefined = compactPeriodUnit
     ? DAYPART_INTERVAL_TOKENS.has(compactPeriodSurface!)
