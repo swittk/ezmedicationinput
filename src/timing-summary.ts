@@ -67,7 +67,7 @@ export const TIMING_CODE_HOURLY_PERIODS: Readonly<Record<string, number>> = {
 };
 
 /** Standard coding has its own clinical meaning; free SIG shorthand stays lexical. */
-export function timingCodeForPreview(coding: { system?: string; code?: string } | undefined): string | undefined {
+export function timingCodeMeaning(coding: { system?: string; code?: string } | undefined): string | undefined {
   return coding?.system === FHIR_GTS_TIMING_SYSTEM && coding.code === "PM"
     ? EventTiming.Afternoon : coding?.code;
 }

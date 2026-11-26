@@ -23,7 +23,7 @@ import {
   DEFAULT_PRN_REASON_DEFINITIONS, findPrnReasonDefinitionByCoding, normalizePrnReasonKey
 } from "../maps";
 import { SNOMED_SYSTEM } from "../snomed";
-import { FHIR_GTS_TIMING_CODES, FHIR_GTS_TIMING_SYSTEM, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding, timingCodeForPreview } from "../timing-summary";
+import { FHIR_GTS_TIMING_CODES, FHIR_GTS_TIMING_SYSTEM, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding, timingCodeMeaning } from "../timing-summary";
 import type { RouteCode } from "../types";
 import { getQuantityDurationUnit } from "../unit-lexicon";
 
@@ -604,7 +604,7 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     schedule.maxDosePerPeriod=limits;
     const coding = preferredTimingCoding(a.schedule);
     const literalTimingText = coding !== undefined && !isPreviewTimingCoding(coding);
-    schedule.timingCode = literalTimingText ? undefined : timingCodeForPreview(coding) ?? a.schedule.code?.text;
+    schedule.timingCode = literalTimingText ? undefined : timingCodeMeaning(coding) ?? a.schedule.code?.text;
     schedule.timingText = coding
       ? a.schedule.code?.text ?? (literalTimingText ? coding.display ?? coding.code : undefined)
       : undefined;

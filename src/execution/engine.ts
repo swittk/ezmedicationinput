@@ -1,4 +1,4 @@
-import { preferredTimingCoding as executionTimingCoding } from "../timing-summary";
+import { preferredTimingCoding as executionTimingCoding, timingCodeMeaning } from "../timing-summary";
 /** Version-neutral medication execution kernel. All interchange decoding
  * happens in adapters/canonical-course. Calendar, count, phase and supply
  * calculations operate on native clinical facts, never FHIR storage markers. */
@@ -1175,10 +1175,16 @@ function resolveFrequencyCadence(
       }
     }
   }
-  const codeClocks = !staleDailyCode && normalizedCode
-    ? configuredCodeClocks ??
-      (isStandardTimingCoding(coding) ? DEFAULT_FREQUENCY_DEFAULTS.byCode[normalizedCode] : undefined)
-    : undefined;
+  let codeClocks: string[] | undefined;
+  if (!staleDailyCode && normalizedCode) {
+    codeClocks = configuredCodeClocks;
+    if (codeClocks === undefined && isStandardTimingCoding(coding)) {
+      const meaning = timingCodeMeaning(coding);
+      codeClocks = meaning && meaning !== coding?.code
+        ? DEFAULT_WHEN_FALLBACK_CLOCKS[meaning]
+        : DEFAULT_FREQUENCY_DEFAULTS.byCode[normalizedCode];
+    }
+  }
   if (codeClocks) {
     if (codeClocks.length && codeClocks === configuredCodeClocks)
       configuredClocks = true;

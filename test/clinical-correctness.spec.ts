@@ -3807,6 +3807,39 @@ describe("independent coded timing previews", () => {
     expect(toFhirR5Dosages(r6)[0].timing).toEqual(timing);
   });
 
+  it("uses the standard afternoon clock while retaining free PM and configured clock ownership", () => {
+    const component = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system: gts, code: "PM" }] } } };
+    const native: FhirR6DosageInstruction = { step: [{ component: [component] }] };
+    const options = { from: "2027-01-01T00:00:00Z", orderedAt: "2027-01-01T00:00:00Z", timeZone: "UTC", limit: 2 };
+    for (const source of [component, native]) {
+      const before = JSON.stringify(source);
+      expect(nextDueDoses(source, options)).toEqual([
+        "2027-01-01T15:00:00+00:00", "2027-01-02T15:00:00+00:00"
+      ]);
+      expect(nextDueDoses(source, { ...options,
+        frequencyDefaults: { byCode: { PM: ["16:30"] } } })).toEqual([
+        "2027-01-01T16:30:00+00:00", "2027-01-02T16:30:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: source, from: "2027-01-01T14:00:00Z",
+        durationValue: 2, durationUnit: FhirPeriodUnit.Hour, orderedAt: options.orderedAt, timeZone: "UTC" }).totalUnits).toBe(1);
+      expect(JSON.stringify(source)).toBe(before);
+    }
+    const free = { doseAndRate: component.doseAndRate, timing: { code: { coding: [{ code: "PM" }] } } };
+    expect(nextDueDoses(free, options)).toEqual([
+      "2027-01-01T20:00:00+00:00", "2027-01-02T20:00:00+00:00"
+    ]);
+    for (const coding of [{ code: "AFT" }, { system: gts, code: "AFT" }]) {
+      const unrecognized = { doseAndRate: component.doseAndRate, timing: { code: { coding: [coding] } } };
+      expect(nextDueDoses(unrecognized, options)).toEqual([]);
+    }
+    const explicit = { doseAndRate: component.doseAndRate, timing: { ...component.timing,
+      repeat: { when: [EventTiming.Evening] } } };
+    expect(nextDueDoses(explicit, options)).toEqual([
+      "2027-01-01T19:00:00+00:00", "2027-01-02T19:00:00+00:00"
+    ]);
+  });
+
   it.each([
     ["bid", "twice daily"], ["tid", "three times daily"], ["qid", "four times daily"],
     ["qd", "once daily"], ["qod", "every other day"], ["wk", "once weekly"], ["mo", "once monthly"],

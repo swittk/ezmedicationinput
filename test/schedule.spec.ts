@@ -4276,7 +4276,7 @@ describe("round 30 execution clinical oracles", () => {
 
   it.each(versions)("executes bare daily Timing codes without changing authored recurrence (%s)", version => {
     const clocks = { QD: ["09:00"], BID: ["08:00", "20:00"], TID: ["08:00", "14:00", "20:00"],
-      QID: ["08:00", "12:00", "16:00", "20:00"], AM: ["08:00"], PM: ["20:00"], QOD: ["09:00"] };
+      QID: ["08:00", "12:00", "16:00", "20:00"], AM: ["08:00"], PM: ["15:00"], QOD: ["09:00"] };
     for (const [code, times] of Object.entries(clocks)) {
       const member = coded(code), input = wire(course(member), version), original = JSON.stringify(input);
       expect(nextDueDoses(input, { ...options, limit: times.length })).toEqual(
