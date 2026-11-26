@@ -1339,6 +1339,18 @@ function updateNativeTimingAnnotations(
   );
   return target;
 }
+/** Use the supplied dose unit, including one carried by either range endpoint. */
+export function r5MaximumDoseBasis(amounts: FhirDosage["doseAndRate"]): FhirQuantity | undefined {
+  for (const amount of amounts ?? []) {
+    if (amount.doseQuantity) return amount.doseQuantity;
+    const range = amount.doseRange;
+    if (range?.low?.unit || range?.low?.code) return range.low;
+    if (range?.high) return range.high;
+    if (range?.low) return range.low;
+  }
+  return undefined;
+}
+
 interface SelectedR5Maximum {
   quantity: CanonicalMeasure;
   /** A same-code label can establish a comparison scale without rewriting the winning quantity. */
@@ -2104,8 +2116,7 @@ function administrationToWire(
     let periodLimits: FhirRatio[] | undefined;
     let administrationMaximum: R5MaximumSelection | undefined, lifetimeMaximum: R5MaximumSelection | undefined;
     const limits = a.limits ?? [];
-    const amount = limits.length > 1 ? a.amounts?.find(value => value.quantity || value.range) : undefined;
-    const dose = amount?.quantity ?? amount?.range?.low ?? amount?.range?.high;
+    const dose = limits.length > 1 ? r5MaximumDoseBasis(output.doseAndRate as FhirDosage["doseAndRate"]) : undefined;
     for (let index = 0; index < limits.length; index++) {
       const limit = limits[index];
       if (!limit.amount) continue;

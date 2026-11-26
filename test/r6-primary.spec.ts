@@ -7931,4 +7931,20 @@ describe("current FHIR graph annotations and compatible dose ceilings", () => {
       expect(input).toEqual(before);
     }
   });
+
+  it.each(["low", "high"] as const)("uses the unit supplied only on the %s dose endpoint for the standard ceiling", endpoint => {
+    const volume = { value: 10, unit: "mL" }, mass = { value: 20, unit: "mg" };
+    for (const quantities of [[volume, mass], [mass, volume]]) {
+      const input: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseRange: { low: { value: 5, ...(endpoint === "low" ? { unit: "mL" } : {}) },
+          high: { value: 15, ...(endpoint === "high" ? { unit: "mL" } : {}) } } }],
+        safety: { doseLimit: quantities.map(valueQuantity => ({ scope: "administration", valueQuantity })) }
+      }] }] };
+      const before = fresh(input), rows = toFhirR5Dosages(input);
+      expect(rows[0].maxDosePerAdministration).toEqual(volume);
+      expect(toDosageDetails(fresh(rows)).step![0].component[0].safety?.doseLimit)
+        .toEqual(input.step![0].component[0].safety!.doseLimit);
+      expect(input).toEqual(before);
+    }
+  });
 });

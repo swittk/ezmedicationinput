@@ -1,7 +1,7 @@
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-fhir";
 import {courseFromR5} from "./adapters/r5-import";
 import { getTimingClocks, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL } from "./fhir";
-import {courseFromR6,courseToR6,administrationFromR6,administrationToR5,selectR5Maximum,periodMaximumToR5,type R5MaximumSelection} from "./adapters/canonical-course";
+import {courseFromR6,courseToR6,administrationFromR6,administrationToR5,selectR5Maximum,r5MaximumDoseBasis,periodMaximumToR5,type R5MaximumSelection} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
  * course, condition and edit metadata remain structured and independently editable. */
@@ -1058,9 +1058,7 @@ export function reconcileR5SafetySnapshot(
     row.maxDosePerPeriod?.some(ratio => ratio.numerator && ratio.denominator &&
       (ratio.numerator.value === undefined || ratio.denominator.value === undefined));
   const projected = partialPeriods ? toR6Safety(row, true) : r5SafetyBaseline(row);
-  const amount = (retained.doseLimit?.length ?? 0) > 1
-    ? row.doseAndRate?.find(value => value.doseQuantity || value.doseRange) : undefined;
-  const dose = amount?.doseQuantity ?? amount?.doseRange?.low ?? amount?.doseRange?.high;
+  const dose = (retained.doseLimit?.length ?? 0) > 1 ? r5MaximumDoseBasis(row.doseAndRate) : undefined;
   // Historical fingerprints omitted partial Ratios and Coding.version.
   // Compare the complete saved wire projection before restoring metadata:
   // unchanged duplicate Ratios retain their distinct authored R6 texts.
@@ -1095,9 +1093,7 @@ export function reconcileLiftedR5Safety(row: EzDosage): FhirR6DosageSafety | und
   // maxima retain ownership; a safety-only input is independently authored.
   const projected = r5SafetyBaseline(row);
   if (!projected || !row.safety) return row.safety;
-  const amount = (row.safety.doseLimit?.length ?? 0) > 1
-    ? row.doseAndRate?.find(value => value.doseQuantity || value.doseRange) : undefined;
-  const dose = amount?.doseQuantity ?? amount?.doseRange?.low ?? amount?.doseRange?.high;
+  const dose = (row.safety.doseLimit?.length ?? 0) > 1 ? r5MaximumDoseBasis(row.doseAndRate) : undefined;
   return reconcileR5SafetyEdits(row.safety, projected, undefined, dose);
 }
 
