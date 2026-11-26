@@ -56,8 +56,15 @@ export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirC
       (textCode.system ?? SNOMED_SYSTEM) !== (coding.system ?? SNOMED_SYSTEM)) return false;
   const textRefinement = BODY_SITE_REFINEMENTS[textCode.code];
   const codedRefinement = BODY_SITE_REFINEMENTS[coding.code];
-  if (textRefinement?.broader === coding.code || textRefinement && codedRefinement &&
-      !codedRefinement.lateralized && textRefinement.broader === codedRefinement.broader) return false;
+  if (textRefinement?.broader === coding.code) return false;
+  if (textRefinement && codedRefinement && textRefinement.broader === codedRefinement.broader) {
+    if (!codedRefinement.lateralized) return false;
+    // A paired refinement can agree with the registered paired broader site.
+    const count = definition.administrationTargetCount;
+    if (count !== undefined && count > 1 && count === getBodySiteAdministrationTargetCount({
+      coding: { ...coding, code: coding.code }
+    })) return false;
+  }
   const canonical = definition.text;
   const unqualified = canonical?.replace(/^(?:left|right|both) /u, "");
   if (unqualified && unqualified !== canonical) {

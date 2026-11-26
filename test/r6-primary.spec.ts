@@ -8167,4 +8167,42 @@ describe("compatible anatomical refinements", () => {
       }
     expect(JSON.stringify(input)).toBe(before);
   });
+
+  it("retains paired canal detail beside a broader paired-ear concept", () => {
+    const source = "Instill 2 drops into both ear canals twice daily.";
+    const site = { id: "ear-target", text: "both ear canals",
+      coding: [{ system: SNOMED, code: "34338003" }],
+      extension: [{ url: "https://example.org/fhir/StructureDefinition/site-note", valueBoolean: false }]
+    };
+    const input: FhirR6DosageInstruction = { renderedInstruction: source, step: [{ component: [{
+      text: source, site: { concept: site }, doseAndRate: [{ doseQuantity: { value: 2, unit: "drop" } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: "d", timeOfDay: ["08:00:00", "20:00:00"] } }
+    }] }] };
+    const before = JSON.stringify(input), rows = toFhirR5Dosages(input);
+    const returned = toDosageDetails(JSON.parse(JSON.stringify(rows)));
+    expect(rows[0].site).toEqual(site);
+    expect(returned.step?.[0].component?.[0].site).toEqual({ concept: site });
+    expect(returned.renderedInstruction).toBe(source);
+    for (const value of [input, importCanonicalCourse(input), rows, returned]) {
+      const saved = JSON.stringify(value), course = importCanonicalCourse(value);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].target).toEqual(site);
+      expect(members[0].targetCount).toBe(2);
+      expect(members[0].text).toBe(source);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 2, unit: "drop" });
+      expect(calculateTotalUnits({ dosage: value, orderedAt: "2026-12-01T00:00:00Z",
+        from: "2026-12-01T00:00:00Z", timeZone: "UTC", durationValue: 1, durationUnit: "d"
+      })).toMatchObject({ totalUnits: 8, unit: "drop" });
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        const text = formatSig(value, style, { locale, realizationMode: "normalized" });
+        const current = text.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0];
+        expect(current).toContain(locale === "en" ? "both ear canals" : "ช่องหูทั้งสองข้าง");
+        expect(current).toMatch(locale === "en" ? /\b2 drops?\b/u : /2 หยด/u);
+        expect(text).toContain(source);
+      }
+      expect(JSON.stringify(value)).toBe(saved);
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
 });
