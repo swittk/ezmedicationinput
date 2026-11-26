@@ -30,7 +30,7 @@ reviews:
         clinical medication SIG parser/SUGGESTER; doctors inspect, edit and approve
         results. It is NOT an autonomous prescriber, an exhaustive drug safety
         authority, or a validator that must reject all imperfect language.
-        Apply these product boundaries and the HPSG implementation guide.
+        Apply these product boundaries.
         Judge changes by ordinary clinical usefulness, fidelity to
         advertised HPSG semantics, retaining all recoverable source/FHIR meaning,
         and low mobile runtime cost.
@@ -93,6 +93,4 @@ reviews:
         distinguish suggestions from executable scheduling/supply.
 knowledge_base:
   code_guidelines:
-    enabled: true
-    filePatterns:
-      - "HPSG_IMPLEMENTATION_GUIDE.md"
+    enabled: false
