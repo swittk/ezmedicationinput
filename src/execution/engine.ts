@@ -5541,14 +5541,16 @@ function derivePriorCountFromHistory(
   const calendarDays = resolveCalendarDaySelection(repeat, orderedAt, timeZone);
   const seen = new Set<string>();
   let count = 0;
-  const recordCandidate = (candidate: Date | null) => {
-    if (!candidate) {
-      return false;
+  const recordCandidate = (candidate: Date | string | null) => {
+    if (!candidate) return false;
+    // Private series generators already bound and format their timestamps.
+    // Only raw date candidates need the window check and zoned rendering.
+    let iso: string;
+    if (typeof candidate === "string") iso = candidate;
+    else {
+      if (candidate < orderedAt || candidate >= from) return false;
+      iso = formatZonedIso(candidate, timeZone);
     }
-    if (candidate < orderedAt || candidate >= from) {
-      return false;
-    }
-    const iso = formatZonedIso(candidate, timeZone);
     if (seen.has(iso)) {
       return false;
     }
@@ -5681,8 +5683,7 @@ function derivePriorCountFromHistory(
       defaultClock: inferredLocalClock(orderedAt, timeZone),
       calendarDays,
     });
-    for (const candidate of generated) recordCandidate(new Date(candidate));
-    return count;
+    return generated.length;
   }
   if (repeat.frequency && repeat.period && repeat.periodUnit) {
     const { clocks, daily, configured } = resolveFrequencyCadence(timing, repeat, config);
@@ -5700,7 +5701,8 @@ function derivePriorCountFromHistory(
           configured,
           enforceDayFilter ? dayFilter : undefined
         );
-      for (const candidate of generated) recordCandidate(new Date(candidate));
+      if (count === 0) return generated.length;
+      for (const candidate of generated) recordCandidate(candidate);
       return count;
     }
     if (clocks.length === 0) {
