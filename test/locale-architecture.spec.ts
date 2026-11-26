@@ -9,7 +9,7 @@ import {
   resolveMedicationInstructionAction
 } from "../src/instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../src/instruction-concept-terminology";
-import { AdviceArgumentRole, AdviceRelation, RouteCode } from "../src/types";
+import { AdviceArgumentRole, AdviceRelation, RouteCode, FhirPeriodUnit, type FhirDosage, type FhirR6DosageInstruction, type FormatOptions } from "../src/types";
 import { suggestSig } from "../src/suggest";
 import { localizeAdviceRelation } from "../src/relation-terminology";
 import { shouldJoinAdjacentSourceTokens } from "../src/locale-detection";
@@ -20,6 +20,8 @@ import {
   getSuggestLocaleAdapter,
   inferMedicationLocale,
   parseSig,
+  formatSig,
+  fromFhirDosage,
   listMedicationLocaleLexemes,
   listMedicationSurfaceSegmenters,
   registerAdviceLocaleAdapter,
@@ -319,5 +321,63 @@ describe("shared timing article roles", () => {
     // The indefinite quantity determiner has different semantics: it supplies one.
     expect(parseSig("Take 1 tablet daily for a week").fhir[0].timing!.repeat!.boundsDuration)
       .toMatchObject({ value: 1, code: "wk" });
+  });
+});
+
+
+describe("structured preview defaults", () => {
+  it("keeps the dose guard inside wrapped long defaults and retains a whole-sentence fallback", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      condition: [{ code: { coding: [{ system: "http://loinc.org", code: "8480-6",
+        display: "Systolic blood pressure" }], text: "sbp" }, operation: "gt",
+        valueQuantity: { value: 160 }, text: "SBP > 160" }],
+      additionalInstruction: [{ text: "Otherwise hold" }]
+    }] }] };
+    const before = JSON.stringify(source);
+    const expected = "Use 1 tablet only if SBP > 160. Otherwise hold.";
+    const defaults: NonNullable<NonNullable<FormatOptions["i18n"]>["formatLong"]>[] = [
+      context => context.defaultText,
+      context => "Directions: " + context.defaultText,
+      context => "Directions: " + context.formatDefault("long"),
+    ];
+    for (const [index, formatLong] of defaults.entries()) {
+      expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized", i18n: { formatLong } }))
+        .toBe((index === 0 ? "" : "Directions: ") + expected);
+    }
+    expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized",
+      i18n: { formatLong: () => "Take this dose." } })).toBe("Take this dose only if SBP > 160.");
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it("uses a display-only administration method without inventing a coding", () => {
+    const component: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      route: { coding: [{ system: "http://snomed.info/sct", code: "26643006" }] },
+      method: { coding: [{ display: "Chew" }] }
+    };
+    const native: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: component.doseAndRate, route: component.route, method: component.method
+    }] }] };
+    for (const source of [component, native]) {
+      const before = JSON.stringify(source);
+      expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized" })).toContain("Chew 1 tablet");
+      expect(formatSig(source, "long", { locale: "th", realizationMode: "normalized" })).toContain("เคี้ยว");
+      expect(JSON.stringify(source)).toBe(before);
+    }
+    expect(fromFhirDosage(component).longText).toContain("Chew 1 tablet");
+  });
+
+  it.each([0, 2])("displays both endpoints of a %s-to-four-hour PRN interval", period => {
+    const source: FhirDosage = { asNeeded: true,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period, periodMax: 4, periodUnit: FhirPeriodUnit.Hour } }
+    };
+    const before = JSON.stringify(source);
+    expect(formatSig(source, "short", { locale: "en", realizationMode: "normalized" })).toContain(`Q${period}-4H`);
+    expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized" })).toContain(`every ${period} to 4 hours`);
+    for (const style of ["short", "long"] as const)
+      expect(formatSig(source, style, { locale: "th", realizationMode: "normalized" })).toContain(`${period} ถึง 4 ชั่วโมง`);
+    expect(JSON.stringify(source)).toBe(before);
   });
 });

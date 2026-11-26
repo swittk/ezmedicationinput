@@ -527,20 +527,25 @@ export function resolveMedicationInstructionActionByMethod(
 
 /** A translated coding can precede the known method in a CodeableConcept.
  * Select its recognized identity in one pass and retain the first code as
- * the fallback for wholly unfamiliar concepts. The source array is untouched. */
+ * the fallback for wholly unfamiliar concepts. A display-only Coding remains
+ * a text fallback when no identity is supplied. The source array is untouched. */
 export function selectMedicationInstructionMethodCoding(
   codings: readonly FhirCoding[] | undefined,
   options?: ParseOptions
 ): FhirCoding | undefined {
   if (!codings?.length) return undefined;
-  if (codings.length === 1) return codings[0].code ? codings[0] : undefined;
+  if (codings.length === 1) return codings[0].code || codings[0].display ? codings[0] : undefined;
   let fallback: FhirCoding | undefined;
+  let displayFallback: FhirCoding | undefined;
   for (const coding of codings) {
-    if (!coding.code) continue;
+    if (!coding.code) {
+      if (!displayFallback && coding.display) displayFallback = coding;
+      continue;
+    }
     if (!fallback) fallback = coding;
     if (resolveMedicationInstructionActionByMethod(coding, options)) return coding;
   }
-  return fallback;
+  return fallback ?? displayFallback;
 }
 
 /** Keep compatible authored verbs (Drink and Swallow share a method), while

@@ -474,25 +474,25 @@ export function frequencyDisplay(
   if (period === undefined && periodMax !== undefined && periodUnit) {
     mode = "period-maximum";
   } else if (frequency !== undefined && frequencyMax !== undefined &&
-      periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
+      periodUnit === FhirPeriodUnit.Day && (period === undefined || period === 1) && !rangedPeriod) {
     mode = frequency === 1 && frequencyMax === 1 ? "daily-count" : "daily-range";
   } else if (frequency === undefined && frequencyMax !== undefined &&
-      periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
+      periodUnit === FhirPeriodUnit.Day && (period === undefined || period === 1) && !rangedPeriod) {
     mode = "daily-maximum";
-  } else if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
+  } else if (frequency && periodUnit === FhirPeriodUnit.Day && (period === undefined || period === 1) && !rangedPeriod) {
     mode = "daily-count";
-  } else if (periodUnit === FhirPeriodUnit.Second && period) {
+  } else if (periodUnit === FhirPeriodUnit.Second && period !== undefined) {
     mode = "period";
     if (periodMax !== undefined && periodMax !== period) rangeEnd = periodMax;
-  } else if ((periodUnit === FhirPeriodUnit.Minute || periodUnit === FhirPeriodUnit.Hour) && period) {
+  } else if ((periodUnit === FhirPeriodUnit.Minute || periodUnit === FhirPeriodUnit.Hour) && period !== undefined) {
     mode = "period";
-    if (periodMax && periodMax !== period) rangeEnd = periodMax;
-  } else if (periodUnit === FhirPeriodUnit.Day && period && (period !== 1 || rangedPeriod)) {
+    if (periodMax !== undefined && periodMax !== period) rangeEnd = periodMax;
+  } else if (periodUnit === FhirPeriodUnit.Day && period !== undefined && (period !== 1 || rangedPeriod)) {
     mode = countPrefix === "none" && period === 2 && (!periodMax || periodMax === 2)
       ? "alternate-days" : "period";
-    if (periodMax && periodMax !== period) rangeEnd = periodMax;
+    if (periodMax !== undefined && periodMax !== period) rangeEnd = periodMax;
   } else if ((periodUnit === FhirPeriodUnit.Week || periodUnit === FhirPeriodUnit.Month ||
-      periodUnit === FhirPeriodUnit.Year) && period) {
+      periodUnit === FhirPeriodUnit.Year) && period !== undefined) {
     if (period === 1 && (!periodMax || periodMax === 1)) {
       if (frequency === undefined && frequencyMax !== undefined) mode = "calendar-maximum";
       else if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency)
@@ -504,7 +504,7 @@ export function frequencyDisplay(
       else mode = "calendar-count";
     } else {
       mode = "period";
-      if (periodMax && periodMax !== period) rangeEnd = periodMax;
+      if (periodMax !== undefined && periodMax !== period) rangeEnd = periodMax;
     }
   } else if (timingCode && timingCodeMatchesRecurrence(schedule!)) {
     switch (timingCode.toUpperCase()) {
@@ -1344,23 +1344,23 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
     schedule.frequency !== undefined &&
     schedule.frequencyMax !== undefined &&
     schedule.periodUnit === FhirPeriodUnit.Day &&
-    (!schedule.period || schedule.period === 1) &&
+    (schedule.period === undefined || schedule.period === 1) &&
     (schedule.periodMax === undefined || schedule.periodMax === 1)
   ) {
     parts.push(`${stripTrailingZero(schedule.frequency)}-${stripTrailingZero(schedule.frequencyMax)}x/d`);
   } else if (
     schedule.frequency &&
     schedule.periodUnit === FhirPeriodUnit.Day &&
-    (!schedule.period || schedule.period === 1) &&
+    (schedule.period === undefined || schedule.period === 1) &&
     (schedule.periodMax === undefined || schedule.periodMax === 1)
   ) {
     parts.push(`${stripTrailingZero(schedule.frequency)}x/d`);
-  } else if (schedule.period && schedule.periodUnit &&
+  } else if (schedule.period !== undefined && schedule.periodUnit &&
       !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.frequency === undefined && schedule.frequencyMax === undefined &&
         (schedule.dayOfMonth?.length ?? 0) > 1)) {
     const base = stripTrailingZero(schedule.period);
     const qualifier =
-      schedule.periodMax && schedule.periodMax !== schedule.period
+      schedule.periodMax !== undefined && schedule.periodMax !== schedule.period
         ? `${base}-${stripTrailingZero(schedule.periodMax)}`
         : base;
     const frequency = schedule.frequency;
@@ -2251,8 +2251,7 @@ export function formatCanonicalClause(
       case "long":
         if (longDefault === undefined) {
           longDefault = formatLong(clause, options, localization?.course ?? ENGLISH_COURSE, resolvedMethod,
-            clause.clinicalAdjuncts?.condition && canFormatConditionInPrimary(localization)
-              ? clause.clinicalAdjuncts.condition : undefined);
+            clause.clinicalAdjuncts?.condition);
         }
         return longDefault;
     }
@@ -2297,13 +2296,11 @@ export function formatCanonicalClause(
     };
     const rendered = localization.formatLong(context);
     const condition = clause.clinicalAdjuncts?.condition;
-    if (condition && !canFormatConditionInPrimary(localization)) {
-      // The cached default has known typed sentence boundaries. Put the guard
-      // on its primary dose before independent advice; a custom sentence keeps
-      // the existing whole-sentence fallback without inspecting its wording.
-      return rendered === context.defaultText
-        ? formatLong(clause, options, localization.course ?? ENGLISH_COURSE, resolvedMethod, condition)
-        : appendClinicalConditionText(rendered, condition, localization.course ?? ENGLISH_COURSE);
+    if (condition && !canFormatConditionInPrimary(localization) &&
+        (!context.defaultText || !rendered.includes(context.defaultText))) {
+      // The complete default already guards its dose, including when wrapped
+      // by a callback. A replacement sentence retains the outer guard.
+      return appendClinicalConditionText(rendered, condition, localization.course ?? ENGLISH_COURSE);
     }
     return rendered;
   }

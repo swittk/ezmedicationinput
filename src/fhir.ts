@@ -2216,7 +2216,7 @@ export function deserializeCanonicalContext(
   }
 
   const methodCoding = selectMedicationInstructionMethodCoding(dosage.method?.coding, options);
-  if (dosage.method?.text || dosage.method?._text || methodCoding?.code) {
+  if (dosage.method?.text || dosage.method?._text || methodCoding?.code || methodCoding?.display) {
     const action = resolveMedicationInstructionActionForMethod({
       text: dosage.method?.text, coding: methodCoding
     }, options);

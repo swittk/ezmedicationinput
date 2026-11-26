@@ -7034,7 +7034,7 @@ describe("round49 primary administration condition placement", () => {
     if (mode === "literal") expect(text.endsWith(guard + ".")).toBe(true);
     else expect(text).toContain("Otherwise hold");
     expect(text).toBe(expected);
-    expect(defaults).toEqual(["Take 1 tablet orally twice daily. Otherwise hold."]);
+    expect(defaults).toEqual(["Take 1 tablet orally twice daily " + guard + ". Otherwise hold."]);
     expect(formatCanonicalCourse(native, "short", options)).toBe(
       locale === "en" ? "1 tab PO BID only if BP > 160." : "1 เม็ด PO วันละ 2 ครั้ง เฉพาะเมื่อ BP > 160.");
 
