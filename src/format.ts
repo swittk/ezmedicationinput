@@ -432,173 +432,156 @@ export function hasDailyRecurrenceAcrossClocks(schedule: CanonicalScheduleExpr |
   return clocks.some(clock => (clock.length === 5 ? clock + ":00" : clock) !== first);
 }
 
-function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
-  if (hasDailyRecurrenceAcrossClocks(schedule)) return "daily";
+type FrequencyDisplayMode =
+  | "daily" | "daily-count" | "daily-range" | "daily-maximum"
+  | "period" | "period-maximum" | "alternate-days"
+  | "calendar-count" | "calendar-range" | "calendar-maximum"
+  | "code" | "code-period" | "count" | "count-bounds";
+
+interface FrequencyDisplay {
+  mode: FrequencyDisplayMode;
+  countPrefix: "none" | "count" | "range" | "maximum";
+  frequency?: number;
+  frequencyMax?: number;
+  period?: number;
+  periodMax?: number;
+  periodUnit?: FhirPeriodUnit;
+  rangeEnd?: number;
+  timingCode?: string;
+  codePeriod?: { period: number; periodUnit: FhirPeriodUnit };
+}
+
+/** Select clinical display meaning once; each locale retains its wording. */
+export function frequencyDisplay(
+  schedule: CanonicalScheduleExpr | undefined, uppercaseTimingCode = false
+): FrequencyDisplay | undefined {
+  if (hasDailyRecurrenceAcrossClocks(schedule)) return { mode: "daily", countPrefix: "none" };
   const frequency = schedule?.frequency;
   const frequencyMax = schedule?.frequencyMax;
   const period = schedule?.period;
   const periodMax = schedule?.periodMax;
   const periodUnit = schedule?.periodUnit;
-  const timingCode = schedule?.timingCode?.toUpperCase();
+  const timingCode = uppercaseTimingCode ? schedule?.timingCode?.toUpperCase() : schedule?.timingCode;
   const rangedPeriod = periodMax !== undefined && periodMax !== period;
   const countPrefix = frequency !== undefined &&
     (rangedPeriod || frequency !== 1 || frequencyMax !== undefined && frequencyMax !== frequency)
-    ? frequencyMax !== undefined && frequencyMax !== frequency
-      ? `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times `
-      : frequency === 1 ? "once " : frequency === 2 ? "twice " : `${stripTrailingZero(frequency)} times `
-    : frequencyMax !== undefined && frequency === undefined
-      ? `up to ${stripTrailingZero(frequencyMax)} times ` : "";
+    ? frequencyMax !== undefined && frequencyMax !== frequency ? "range" : "count"
+    : frequencyMax !== undefined && frequency === undefined ? "maximum" : "none";
+  let mode: FrequencyDisplayMode | undefined;
+  let rangeEnd: number | undefined;
+  let codePeriod: FrequencyDisplay["codePeriod"];
 
   if (period === undefined && periodMax !== undefined && periodUnit) {
-    const unit = words.timeUnit(periodUnit, periodMax) ?? periodUnit;
-    return `${countPrefix}every up to ${stripTrailingZero(periodMax)} ${unit}`;
-  }
-  if (
-    frequency !== undefined &&
-    frequencyMax !== undefined &&
-    periodUnit === FhirPeriodUnit.Day &&
-    (!period || period === 1) && !rangedPeriod
-  ) {
-    if (frequency === 1 && frequencyMax === 1) {
-      return "once daily";
-    }
-    if (frequency === 1 && frequencyMax === 2) {
-      return "one to two times daily";
-    }
-    return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times daily`;
-  }
-  if (frequency === undefined && frequencyMax !== undefined &&
+    mode = "period-maximum";
+  } else if (frequency !== undefined && frequencyMax !== undefined &&
       periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
-    return `up to ${stripTrailingZero(frequencyMax)} times daily`;
-  }
-  if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
-    const dailyText = EN_TIMES_PER_DAY[frequency];
-    if (dailyText) {
-      return dailyText;
-    }
-    return `${stripTrailingZero(frequency)} times daily`;
-  }
-  if (periodUnit === FhirPeriodUnit.Second && period) {
-    const unit = words.timeUnit(periodUnit, periodMax ?? period) ?? periodUnit;
-    const interval = periodMax !== undefined && periodMax !== period
-      ? `${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)}` : stripTrailingZero(period);
-    return `${countPrefix}every ${interval} ${unit}`;
-  }
-  if (periodUnit === FhirPeriodUnit.Minute && period) {
-    if (periodMax && periodMax !== period) {
-      return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} minutes`;
-    }
-    return `${countPrefix}every ${stripTrailingZero(period)} minute${period === 1 ? "" : "s"}`;
-  }
-  if (periodUnit === FhirPeriodUnit.Hour && period) {
-    if (periodMax && periodMax !== period) {
-      return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} hours`;
-    }
-    return `${countPrefix}every ${stripTrailingZero(period)} hour${period === 1 ? "" : "s"}`;
-  }
-  if (periodUnit === FhirPeriodUnit.Day && period && (period !== 1 || rangedPeriod)) {
-    if (!countPrefix && period === 2 && (!periodMax || periodMax === 2)) {
-      return "every other day";
-    }
-    if (periodMax && periodMax !== period) {
-      return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} days`;
-    }
-    return `${countPrefix}every ${stripTrailingZero(period)} days`;
-  }
-  if (periodUnit === FhirPeriodUnit.Week && period) {
-    if (frequency === undefined && frequencyMax !== undefined &&
-        period === 1 && (!periodMax || periodMax === 1)) return `up to ${stripTrailingZero(frequencyMax)} times weekly`;
-    if (
-      frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency &&
-      period === 1 && (!periodMax || periodMax === 1)
-    ) {
-      return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times weekly`;
-    }
-    if (
-      schedule?.dayOfWeek?.length && period === 1 && (!periodMax || periodMax === 1) &&
-      frequency === undefined && schedule.dayOfWeek.length > 1
-    ) {
-      return undefined;
-    }
+    mode = frequency === 1 && frequencyMax === 1 ? "daily-count" : "daily-range";
+  } else if (frequency === undefined && frequencyMax !== undefined &&
+      periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
+    mode = "daily-maximum";
+  } else if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
+    mode = "daily-count";
+  } else if (periodUnit === FhirPeriodUnit.Second && period) {
+    mode = "period";
+    if (periodMax !== undefined && periodMax !== period) rangeEnd = periodMax;
+  } else if ((periodUnit === FhirPeriodUnit.Minute || periodUnit === FhirPeriodUnit.Hour) && period) {
+    mode = "period";
+    if (periodMax && periodMax !== period) rangeEnd = periodMax;
+  } else if (periodUnit === FhirPeriodUnit.Day && period && (period !== 1 || rangedPeriod)) {
+    mode = countPrefix === "none" && period === 2 && (!periodMax || periodMax === 2)
+      ? "alternate-days" : "period";
+    if (periodMax && periodMax !== period) rangeEnd = periodMax;
+  } else if ((periodUnit === FhirPeriodUnit.Week || periodUnit === FhirPeriodUnit.Month ||
+      periodUnit === FhirPeriodUnit.Year) && period) {
     if (period === 1 && (!periodMax || periodMax === 1)) {
-      if (frequency === 2) return "twice weekly";
-      return frequency !== undefined && frequency !== 1
-        ? `${stripTrailingZero(frequency)} times weekly`
-        : "once weekly";
+      if (frequency === undefined && frequencyMax !== undefined) mode = "calendar-maximum";
+      else if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency)
+        mode = "calendar-range";
+      else if (frequency === undefined && (
+        periodUnit === FhirPeriodUnit.Week && (schedule?.dayOfWeek?.length ?? 0) > 1 ||
+        periodUnit === FhirPeriodUnit.Month && (schedule?.dayOfMonth?.length ?? 0) > 1
+      )) return undefined;
+      else mode = "calendar-count";
+    } else {
+      mode = "period";
+      if (periodMax && periodMax !== period) rangeEnd = periodMax;
     }
-    if (periodMax && periodMax !== period) {
-      return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} weeks`;
+  } else if (timingCode && timingCodeMatchesRecurrence(schedule!)) {
+    switch (timingCode.toUpperCase()) {
+      case "BID": case "TID": case "QID": case "QD": case "QOD": case "WK": case "MO":
+        mode = "code";
+        break;
+      default:
+        codePeriod = intervalTimingPreviewDescriptor(timingCode);
+        if (codePeriod) mode = "code-period";
     }
-    return `${countPrefix}every ${stripTrailingZero(period)} weeks`;
   }
-  if (periodUnit === FhirPeriodUnit.Month && period) {
-    if (frequency === undefined && frequencyMax !== undefined &&
-        period === 1 && (!periodMax || periodMax === 1)) return `up to ${stripTrailingZero(frequencyMax)} times monthly`;
-    if (period === 1 && (!periodMax || periodMax === 1)) {
-      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
-        return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times monthly`;
+  if (!mode) {
+    if (frequency === undefined && frequencyMax === undefined && period === 1 &&
+        periodUnit === FhirPeriodUnit.Day && !rangedPeriod) mode = "daily";
+    else if (frequencyMax !== undefined && frequencyMax !== frequency &&
+        periodUnit === undefined && period === undefined) mode = "count-bounds";
+    else if (frequency && periodUnit === undefined && period === undefined) mode = "count";
+    else return undefined;
+  }
+  return { mode, countPrefix, frequency, frequencyMax, period, periodMax, periodUnit, rangeEnd, timingCode, codePeriod };
+}
+
+const EN_FREQUENCY_CODE_TEXT: Readonly<Record<string, string>> = {
+  BID: "twice daily", TID: "three times daily", QID: "four times daily", QD: "once daily",
+  QOD: "every other day", WK: "once weekly", MO: "once monthly"
+};
+
+function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
+  const display = frequencyDisplay(schedule, true);
+  if (!display) return undefined;
+  const { frequency, frequencyMax, period, periodMax, periodUnit, rangeEnd } = display;
+  const countPrefix = display.countPrefix === "range"
+    ? `${stripTrailingZero(frequency!)} to ${stripTrailingZero(frequencyMax!)} times `
+    : display.countPrefix === "count"
+      ? frequency === 1 ? "once " : frequency === 2 ? "twice " : `${stripTrailingZero(frequency!)} times `
+      : display.countPrefix === "maximum" ? `up to ${stripTrailingZero(frequencyMax!)} times ` : "";
+  switch (display.mode) {
+    case "daily": return "daily";
+    case "daily-count": return EN_TIMES_PER_DAY[frequency!] ?? `${stripTrailingZero(frequency!)} times daily`;
+    case "daily-range": return frequency === 1 && frequencyMax === 2 ? "one to two times daily"
+      : `${stripTrailingZero(frequency!)} to ${stripTrailingZero(frequencyMax!)} times daily`;
+    case "daily-maximum": return `up to ${stripTrailingZero(frequencyMax!)} times daily`;
+    case "period-maximum":
+      return `${countPrefix}every up to ${stripTrailingZero(periodMax!)} ${words.timeUnit(periodUnit!, periodMax) ?? periodUnit}`;
+    case "alternate-days": return "every other day";
+    case "period": {
+      const interval = rangeEnd !== undefined
+        ? `${stripTrailingZero(period!)} to ${stripTrailingZero(rangeEnd)}` : stripTrailingZero(period!);
+      let unit: string | undefined;
+      switch (periodUnit) {
+        case FhirPeriodUnit.Second: unit = words.timeUnit(periodUnit, periodMax ?? period) ?? periodUnit; break;
+        case FhirPeriodUnit.Minute: unit = rangeEnd !== undefined || period !== 1 ? "minutes" : "minute"; break;
+        case FhirPeriodUnit.Hour: unit = rangeEnd !== undefined || period !== 1 ? "hours" : "hour"; break;
+        case FhirPeriodUnit.Day: unit = "days"; break;
+        case FhirPeriodUnit.Week: unit = "weeks"; break;
+        case FhirPeriodUnit.Month: unit = "months"; break;
+        case FhirPeriodUnit.Year: unit = "years"; break;
       }
-      if (frequency === undefined && (schedule?.dayOfMonth?.length ?? 0) > 1) return undefined;
-      if (frequency === 2) return "twice monthly";
-      return frequency !== undefined && frequency !== 1
-        ? `${stripTrailingZero(frequency)} times monthly`
-        : "once monthly";
+      return `${countPrefix}every ${interval} ${unit}`;
     }
-    if (periodMax && periodMax !== period) {
-      return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} months`;
+    case "calendar-count":
+    case "calendar-range":
+    case "calendar-maximum": {
+      const unit = periodUnit === FhirPeriodUnit.Week ? "weekly" : periodUnit === FhirPeriodUnit.Month ? "monthly" : "yearly";
+      if (display.mode === "calendar-maximum") return `up to ${stripTrailingZero(frequencyMax!)} times ${unit}`;
+      if (display.mode === "calendar-range") return `${stripTrailingZero(frequency!)} to ${stripTrailingZero(frequencyMax!)} times ${unit}`;
+      if (frequency === 2) return `twice ${unit}`;
+      return frequency !== undefined && frequency !== 1 ? `${stripTrailingZero(frequency)} times ${unit}` : `once ${unit}`;
     }
-    return `${countPrefix}every ${stripTrailingZero(period)} months`;
-  }
-  if (periodUnit === FhirPeriodUnit.Year && period) {
-    if (frequency === undefined && frequencyMax !== undefined &&
-        period === 1 && (!periodMax || periodMax === 1)) return `up to ${stripTrailingZero(frequencyMax)} times yearly`;
-    if (period === 1 && (!periodMax || periodMax === 1)) {
-      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
-        return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times yearly`;
-      }
-      if (frequency === 2) return "twice yearly";
-      return frequency !== undefined && frequency !== 1
-        ? `${stripTrailingZero(frequency)} times yearly`
-        : "once yearly";
-    }
-    if (periodMax && periodMax !== period) {
-      return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} years`;
-    }
-    return `${countPrefix}every ${stripTrailingZero(period)} years`;
-  }
-  if (timingCode && timingCodeMatchesRecurrence(schedule!)) {
-    if (timingCode === "WK") {
-      return "once weekly";
-    }
-    if (timingCode === "MO") {
-      return "once monthly";
-    }
-    const map: Record<string, string> = {
-      BID: "twice daily",
-      TID: "three times daily",
-      QID: "four times daily",
-      QD: "once daily",
-      QOD: "every other day"
-    };
-    if (map[timingCode]) {
-      return map[timingCode];
-    }
-    const interval = intervalTimingPreviewDescriptor(timingCode);
-    if (interval)
+    case "code": return EN_FREQUENCY_CODE_TEXT[display.timingCode!];
+    case "code-period": {
+      const interval = display.codePeriod!;
       return `${countPrefix}every ${stripTrailingZero(interval.period)} ${words.timeUnit(interval.periodUnit, interval.period) ?? interval.periodUnit}`;
-  }
-  if (frequency === undefined && frequencyMax === undefined && period === 1 &&
-      periodUnit === FhirPeriodUnit.Day && !rangedPeriod) return "daily";
-  if (frequencyMax !== undefined && frequencyMax !== frequency &&
-      periodUnit === undefined && period === undefined)
-    return countPrefix.trim();
-  if (frequency && periodUnit === undefined && period === undefined) {
-    if (frequency === 1) {
-      return "once";
     }
-    return `${stripTrailingZero(frequency)} times`;
+    case "count-bounds": return countPrefix.trim();
+    case "count": return frequency === 1 ? "once" : `${stripTrailingZero(frequency!)} times`;
   }
-  return undefined;
 }
 
 function describeFrequencyCount(count: number | undefined): string | undefined {
@@ -1213,12 +1196,16 @@ export function describeAdministrationDuration(
   const unit = schedule?.administrationDurationUnit;
   const max = schedule?.administrationDurationMax;
   if ((value === undefined && max === undefined) || !unit) return undefined;
-  const label = text.administrationUnit(unit, value, max, short, words);
-  if (value === undefined) return `${prefix} ${text.upper}${stripTrailingZero(max!)} ${label}`;
-  const lower = quantityComparatorText(schedule?.administrationDurationComparator, text.locale) + stripTrailingZero(value);
-  return max !== undefined && max !== value
-    ? `${prefix} ${lower}${text.range}${stripTrailingZero(max)} ${label}`
-    : `${prefix} ${lower} ${label}`;
+  const lower = value === undefined
+    ? (short ? "<=" : text.upper) + stripTrailingZero(max!)
+    : (short ? schedule?.administrationDurationComparator ?? ""
+      : quantityComparatorText(schedule?.administrationDurationComparator, text.locale)) + stripTrailingZero(value);
+  const duration = value !== undefined && max !== undefined && max !== value
+    ? lower + (short ? "-" : text.range) + stripTrailingZero(max)
+    : lower;
+  if (short) return text.administrationShortPrefix + duration + unit;
+  const label = text.administrationUnit(unit, value, max, false, words);
+  return `${prefix} ${duration} ${label}`;
 }
 
 function shouldUseGenericMedicationObject(clause: CanonicalSigClause): boolean {
@@ -1434,20 +1421,8 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
   } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
-  if (schedule.administrationDurationRange) {
-    const duration = describeAdministrationDuration(schedule, true, words);
-    if (duration) parts.push(duration);
-  } else if ((schedule.administrationDuration !== undefined || schedule.administrationDurationMax !== undefined) &&
-      schedule.administrationDurationUnit) {
-    const max = schedule.administrationDurationMax;
-    const lower = schedule.administrationDuration === undefined
-      ? "<=" + stripTrailingZero(max!)
-      : (schedule.administrationDurationComparator ?? "") + stripTrailingZero(schedule.administrationDuration);
-    const duration = schedule.administrationDuration !== undefined && max !== undefined && max !== schedule.administrationDuration
-      ? `${lower}-${stripTrailingZero(max)}`
-      : lower;
-    parts.push(`over${duration}${schedule.administrationDurationUnit}`);
-  }
+  const administrationDuration = describeAdministrationDuration(schedule, true, words);
+  if (administrationDuration) parts.push(administrationDuration);
   const durationShort = formatDurationShort(schedule);
   if (durationShort) {
     parts.push(durationShort);

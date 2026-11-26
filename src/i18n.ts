@@ -5,7 +5,7 @@ import { THAI_COURSE } from "./locales/course/th";
 export type { CourseLanguage } from "./locales/course/types";
 import { localizedValue, quantityComparatorText } from "./localization";
 import {
-  hasDailyRecurrenceAcrossClocks, formatDoseEnglish, timingCodeMatchesRecurrence,
+  formatDoseEnglish, timingCodeMatchesRecurrence,
   timingEventPreviewSchedule, independentTimingText, doseUnitUsesTargetScope,
   formatDurationShort as formatDurationShortThai, alternateDayEvent, standaloneOccurrenceCount,
   describeDuration, describeAdministrationDuration, type DurationWording,
@@ -20,7 +20,8 @@ import {
   instructionGraphCanStandAlone,
   isEmptyStomachInstruction,
   stripTrailingZero,
-  routeCodeFromDisplayText
+  routeCodeFromDisplayText,
+  frequencyDisplay
 } from "./format";
 import { findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { TH_POSITIVE_MODALITY_PREFIX } from "./instruction-action-locale-adapter";
@@ -98,7 +99,6 @@ import {
 } from "./types";
 import {
   getMealTimingGroup,
-  intervalTimingPreviewDescriptor,
   timingPreviewDescriptor,
   isCompactIntervalTimingCode,
   inferDailyOccurrenceCount,
@@ -1167,168 +1167,67 @@ function describeAlternateEventCadenceThai(schedule: CanonicalScheduleExpr | und
   return undefined;
 }
 
-function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
-  if (hasDailyRecurrenceAcrossClocks(schedule)) return "ทุกวัน";
-  const frequency = schedule?.frequency;
-  const frequencyMax = schedule?.frequencyMax;
-  const period = schedule?.period;
-  const periodMax = schedule?.periodMax;
-  const periodUnit = schedule?.periodUnit;
-  const timingCode = schedule?.timingCode;
-  const rangedPeriod = periodMax !== undefined && periodMax !== period;
-  const countPrefix = frequency !== undefined &&
-    (rangedPeriod || frequency !== 1 || frequencyMax !== undefined && frequencyMax !== frequency)
-    ? frequencyMax !== undefined && frequencyMax !== frequency
-      ? `${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง `
-      : `${stripTrailingZero(frequency)} ครั้ง `
-    : frequencyMax !== undefined && frequency === undefined
-      ? `ไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง ` : "";
+const TH_FREQUENCY_CODE_TEXT: Readonly<Record<string, string>> = {
+  BID: "วันละ 2 ครั้ง", TID: "วันละ 3 ครั้ง", QID: "วันละ 4 ครั้ง", QD: "วันละครั้ง",
+  QOD: "วันเว้นวัน", WK: "สัปดาห์ละครั้ง", MO: "เดือนละครั้ง"
+};
 
-  if (period === undefined && periodMax !== undefined && periodUnit) {
-    const unit = words.timeUnit(periodUnit, periodMax) ?? periodUnit;
-    return `${countPrefix}ทุกไม่เกิน ${stripTrailingZero(periodMax)} ${unit}`;
-  }
-  if (
-    frequency !== undefined &&
-    frequencyMax !== undefined &&
-    periodUnit === FhirPeriodUnit.Day &&
-    (!period || period === 1) && !rangedPeriod
-  ) {
-    if (frequency === 1 && frequencyMax === 1) {
-      return "วันละครั้ง";
-    }
-    if (frequency === 1 && frequencyMax === 2) {
-      return "วันละ 1 ถึง 2 ครั้ง";
-    }
-    return `วันละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
-  }
-  if (frequency === undefined && frequencyMax !== undefined &&
-      periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
-    return `วันละไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง`;
-  }
-  if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
-    return TH_TIMES_PER_DAY[frequency] ?? `วันละ ${stripTrailingZero(frequency)} ครั้ง`;
-  }
-  if (periodUnit === FhirPeriodUnit.Second && period) {
-    const unit = words.timeUnit(periodUnit, periodMax ?? period) ?? periodUnit;
-    const interval = periodMax !== undefined && periodMax !== period
-      ? `${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)}` : stripTrailingZero(period);
-    return `${countPrefix}ทุก ${interval} ${unit}`;
-  }
-  if (periodUnit === FhirPeriodUnit.Minute && period) {
-    if (periodMax && periodMax !== period) {
-      return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} นาที`;
-    }
-    return `${countPrefix}ทุก ${stripTrailingZero(period)} นาที`;
-  }
-  if (periodUnit === FhirPeriodUnit.Hour && period) {
-    if (periodMax && periodMax !== period) {
-      return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ชั่วโมง`;
-    }
-    return `${countPrefix}ทุก ${stripTrailingZero(period)} ชั่วโมง`;
-  }
-  if (periodUnit === FhirPeriodUnit.Day && period && (period !== 1 || rangedPeriod)) {
-    if (!countPrefix && period === 2 && (!periodMax || periodMax === 2)) {
-      return "วันเว้นวัน";
-    }
-    if (periodMax && periodMax !== period) {
-      return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} วัน`;
-    }
-    return `${countPrefix}ทุก ${stripTrailingZero(period)} วัน`;
-  }
-  if (periodUnit === FhirPeriodUnit.Week && period) {
-    if (frequency === undefined && frequencyMax !== undefined &&
-        period === 1 && (!periodMax || periodMax === 1)) return `สัปดาห์ละไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง`;
-    if (
-      period === 1 && (!periodMax || periodMax === 1) &&
-      frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency
-    ) {
-      return `สัปดาห์ละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
-    }
-    if (schedule?.dayOfWeek?.length && period === 1 && (!periodMax || periodMax === 1)) {
-      if (frequency !== undefined) {
-        return `สัปดาห์ละ ${stripTrailingZero(frequency)} ครั้ง`;
+function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
+  const display = frequencyDisplay(schedule);
+  if (!display) return undefined;
+  const { frequency, frequencyMax, period, periodMax, periodUnit, rangeEnd } = display;
+  const countPrefix = display.countPrefix === "range"
+    ? `${stripTrailingZero(frequency!)} ถึง ${stripTrailingZero(frequencyMax!)} ครั้ง `
+    : display.countPrefix === "count" ? `${stripTrailingZero(frequency!)} ครั้ง `
+      : display.countPrefix === "maximum" ? `ไม่เกิน ${stripTrailingZero(frequencyMax!)} ครั้ง ` : "";
+  switch (display.mode) {
+    case "daily": return "ทุกวัน";
+    case "daily-count": return TH_TIMES_PER_DAY[frequency!] ?? `วันละ ${stripTrailingZero(frequency!)} ครั้ง`;
+    case "daily-range": return `วันละ ${stripTrailingZero(frequency!)} ถึง ${stripTrailingZero(frequencyMax!)} ครั้ง`;
+    case "daily-maximum": return `วันละไม่เกิน ${stripTrailingZero(frequencyMax!)} ครั้ง`;
+    case "period-maximum":
+      return `${countPrefix}ทุกไม่เกิน ${stripTrailingZero(periodMax!)} ${words.timeUnit(periodUnit!, periodMax) ?? periodUnit}`;
+    case "alternate-days": return "วันเว้นวัน";
+    case "period": {
+      const interval = rangeEnd !== undefined
+        ? `${stripTrailingZero(period!)} ถึง ${stripTrailingZero(rangeEnd)}` : stripTrailingZero(period!);
+      let unit: string | undefined;
+      switch (periodUnit) {
+        case FhirPeriodUnit.Second: unit = words.timeUnit(periodUnit, periodMax ?? period) ?? periodUnit; break;
+        case FhirPeriodUnit.Minute: unit = "นาที"; break;
+        case FhirPeriodUnit.Hour: unit = "ชั่วโมง"; break;
+        case FhirPeriodUnit.Day: unit = "วัน"; break;
+        case FhirPeriodUnit.Week: unit = "สัปดาห์"; break;
+        case FhirPeriodUnit.Month: unit = "เดือน"; break;
+        case FhirPeriodUnit.Year: unit = "ปี"; break;
       }
-      return schedule.dayOfWeek.length === 1 ? "สัปดาห์ละครั้ง" : undefined;
+      return `${countPrefix}ทุก ${interval} ${unit}`;
     }
-    if (period === 1 && (!periodMax || periodMax === 1)) {
-      return frequency !== undefined && frequency !== 1
-        ? `สัปดาห์ละ ${stripTrailingZero(frequency)} ครั้ง`
-        : "สัปดาห์ละครั้ง";
+    case "calendar-count":
+    case "calendar-range":
+    case "calendar-maximum": {
+      const unit = periodUnit === FhirPeriodUnit.Week ? "สัปดาห์" : periodUnit === FhirPeriodUnit.Month ? "เดือน" : "ปี";
+      if (display.mode === "calendar-maximum") return `${unit}ละไม่เกิน ${stripTrailingZero(frequencyMax!)} ครั้ง`;
+      if (display.mode === "calendar-range") return `${unit}ละ ${stripTrailingZero(frequency!)} ถึง ${stripTrailingZero(frequencyMax!)} ครั้ง`;
+      // Authored weekday positions use the established explicit numeral form.
+      if (periodUnit === FhirPeriodUnit.Week && schedule?.dayOfWeek?.length && frequency !== undefined)
+        return `${unit}ละ ${stripTrailingZero(frequency)} ครั้ง`;
+      return frequency !== undefined && frequency !== 1 ? `${unit}ละ ${stripTrailingZero(frequency)} ครั้ง` : `${unit}ละครั้ง`;
     }
-    if (periodMax && periodMax !== period) {
-      return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} สัปดาห์`;
-    }
-    return `${countPrefix}ทุก ${stripTrailingZero(period)} สัปดาห์`;
-  }
-  if (periodUnit === FhirPeriodUnit.Month && period) {
-    if (frequency === undefined && frequencyMax !== undefined &&
-        period === 1 && (!periodMax || periodMax === 1)) return `เดือนละไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง`;
-    if (period === 1 && (!periodMax || periodMax === 1)) {
-      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
-        return `เดือนละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
-      }
-      if (frequency === undefined && (schedule?.dayOfMonth?.length ?? 0) > 1) return undefined;
-      return frequency !== undefined && frequency !== 1
-        ? `เดือนละ ${stripTrailingZero(frequency)} ครั้ง`
-        : "เดือนละครั้ง";
-    }
-    if (periodMax && periodMax !== period) {
-      return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} เดือน`;
-    }
-    return `${countPrefix}ทุก ${stripTrailingZero(period)} เดือน`;
-  }
-  if (periodUnit === FhirPeriodUnit.Year && period) {
-    if (frequency === undefined && frequencyMax !== undefined &&
-        period === 1 && (!periodMax || periodMax === 1)) return `ปีละไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง`;
-    if (period === 1 && (!periodMax || periodMax === 1)) {
-      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
-        return `ปีละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
-      }
-      return frequency !== undefined && frequency !== 1
-        ? `ปีละ ${stripTrailingZero(frequency)} ครั้ง`
-        : "ปีละครั้ง";
-    }
-    if (periodMax && periodMax !== period) {
-      return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ปี`;
-    }
-    return `${countPrefix}ทุก ${stripTrailingZero(period)} ปี`;
-  }
-  if (timingCode && timingCodeMatchesRecurrence(schedule!)) {
-    const map: Record<string, string> = {
-      BID: "วันละ 2 ครั้ง",
-      TID: "วันละ 3 ครั้ง",
-      QID: "วันละ 4 ครั้ง",
-      QD: "วันละครั้ง",
-      QOD: "วันเว้นวัน",
-      WK: "สัปดาห์ละครั้ง",
-      MO: "เดือนละครั้ง"
-    };
-    const value = map[timingCode.toUpperCase()];
-    if (value) {
-      return value;
-    }
-    const interval = intervalTimingPreviewDescriptor(timingCode);
-    if (interval)
+    case "code": return TH_FREQUENCY_CODE_TEXT[display.timingCode!.toUpperCase()];
+    case "code-period": {
+      const interval = display.codePeriod!;
       return `${countPrefix}ทุก ${stripTrailingZero(interval.period)} ${words.timeUnit(interval.periodUnit, interval.period) ?? interval.periodUnit}`;
-  }
-  if (frequency === undefined && frequencyMax === undefined && period === 1 &&
-      periodUnit === FhirPeriodUnit.Day && !rangedPeriod) return "ทุกวัน";
-  if (periodUnit === undefined && period === undefined && frequencyMax !== undefined) {
-    if (frequency === undefined) return `ไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง`;
-    if (frequency !== frequencyMax)
-      return `${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
-  }
-  if (frequency && periodUnit === undefined && period === undefined) {
-    if (frequency === 1) {
-      const label = schedule?.timingText ?? timingCode;
+    }
+    case "count-bounds": return countPrefix.trim();
+    case "count": {
+      if (frequency !== 1) return `${stripTrailingZero(frequency!)} ครั้ง`;
+      const label = schedule?.timingText ?? schedule?.timingCode;
       const recurringLabel = label && (isCompactIntervalTimingCode(label) ||
         timingPreviewDescriptor(label)?.periodUnit || WORD_FREQUENCIES[label.toLowerCase()]);
       return recurringLabel ? "1 ครั้ง" : "ครั้งเดียว";
     }
-    return `${stripTrailingZero(frequency)} ครั้ง`;
   }
-  return undefined;
 }
 
 function describeFrequencyCountThai(count: number | undefined): string | undefined {
@@ -2106,20 +2005,8 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
   } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
-  if (schedule.administrationDurationRange) {
-    const duration = describeAdministrationDurationThai(schedule, undefined, true, words);
-    if (duration) parts.push(duration);
-  } else if ((schedule.administrationDuration !== undefined || schedule.administrationDurationMax !== undefined) &&
-      schedule.administrationDurationUnit) {
-    const max = schedule.administrationDurationMax;
-    const lower = schedule.administrationDuration === undefined
-      ? "<=" + stripTrailingZero(max!)
-      : (schedule.administrationDurationComparator ?? "") + stripTrailingZero(schedule.administrationDuration);
-    const duration = schedule.administrationDuration !== undefined && max !== undefined && max !== schedule.administrationDuration
-      ? `${lower}-${stripTrailingZero(max)}`
-      : lower;
-    parts.push(`นาน${duration}${schedule.administrationDurationUnit}`);
-  }
+  const administrationDuration = describeAdministrationDurationThai(schedule, undefined, true, words);
+  if (administrationDuration) parts.push(administrationDuration);
   const durationShort = formatDurationShortThai(schedule);
   if (durationShort) {
     parts.push(durationShort);
