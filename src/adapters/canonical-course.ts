@@ -1509,13 +1509,13 @@ function administrationToWire(
   }
   const currentRange = wireTiming?.repeat?.boundsRange ??
     (a.anchoredLength?.range ? serializeRange(a.anchoredLength.range, target, Boolean(clause)) : undefined);
-  const modifiers = output.modifierExtension as FhirExtension[] | undefined;
+  const modifiers = output.modifierExtension as FhirR6Extension[] | undefined;
   const oldDuration = modifiers?.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
   const projection = currentRange ? projectCourseDurationRange(currentRange) : undefined;
   if (projection?.source || oldDuration && (wireTiming?.repeat?.boundsRange || wireTiming?.repeat?.boundsDuration) ||
       oldDuration?.extension?.some(child => child.url === "projectedRange") ||
       (a.anchoredLength?.range || a.anchoredLength?.quantity) && !oldDuration) {
-    const replacement: FhirExtension | undefined = projection?.source
+    const replacement: FhirR6Extension | undefined = projection?.source
       ? { ...projection.source, extension: wireTiming?.repeat?.boundsRange ? projection.source.extension :
           projection.source.extension!.filter(child => child.url !== "projectedRange") }
       : a.anchoredLength?.range && projection

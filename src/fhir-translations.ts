@@ -42,7 +42,7 @@ export function mergeI18nRecords(
   return Object.keys(merged).length ? merged : undefined;
 }
 
-export function cloneExtension(extension: FhirExtension): FhirExtension {
+export function cloneExtension(extension: FhirR6Extension): FhirExtension {
   return {
     url: extension.url,
     extension: extension.extension?.map(cloneExtension),
@@ -77,13 +77,13 @@ export function cloneExtension(extension: FhirExtension): FhirExtension {
 }
 
 export function cloneExtensions(
-  extensions: FhirExtension[] | undefined
+  extensions: FhirR6Extension[] | undefined
 ): FhirExtension[] | undefined {
   return extensions?.length ? extensions.map(cloneExtension) : undefined;
 }
 
 export function clonePrimitiveElement(
-  element: FhirPrimitiveElement | undefined
+  element: FhirR6PrimitiveElement | undefined
 ): FhirPrimitiveElement | undefined {
   if (!element?.extension?.length) {
     return undefined;

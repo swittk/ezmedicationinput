@@ -6,6 +6,7 @@ import {
   AdviceArgument,
   CanonicalMethodExpr,
   FhirCoding,
+  FhirR6Coding,
   MedicationInstructionActionDefinition,
   MedicationInstructionActionInput,
   ParseOptions
@@ -74,7 +75,7 @@ const DEFAULT_SEPARABLE_BY_LEAD = new Map<string, Map<string, MedicationInstruct
 const DEFAULT_SPAN_BY_LEAD = new Map<string, number>();
 const DEFAULT_BY_METHOD = new Map<string, Map<string, MedicationInstructionActionDefinition>>();
 
-function sameMethodCoding(left: FhirCoding | undefined, right: FhirCoding): boolean {
+function sameMethodCoding(left: FhirR6Coding | undefined, right: FhirR6Coding): boolean {
   return Boolean(left?.code && left.code === right.code &&
     (left.system ?? SNOMED_SYSTEM) === (right.system ?? SNOMED_SYSTEM));
 }
@@ -495,7 +496,7 @@ export function resolveMedicationInstructionActionWithCodeFallback(
  * codings own the verb even when an external edit leaves stale display text.
  * Unknown identities return undefined for the caller's existing text fallback. */
 export function resolveMedicationInstructionActionByMethod(
-  coding: FhirCoding | undefined,
+  coding: FhirR6Coding | undefined,
   options?: ParseOptions
 ): MedicationInstructionActionDefinition | undefined {
   if (!coding?.code) return undefined;
@@ -529,14 +530,14 @@ export function resolveMedicationInstructionActionByMethod(
  * Select its recognized identity in one pass and retain the first code as
  * the fallback for wholly unfamiliar concepts. A display-only Coding remains
  * a text fallback when no identity is supplied. The source array is untouched. */
-export function selectMedicationInstructionMethodCoding(
-  codings: readonly FhirCoding[] | undefined,
+export function selectMedicationInstructionMethodCoding<TCoding extends FhirR6Coding>(
+  codings: readonly TCoding[] | undefined,
   options?: ParseOptions
-): FhirCoding | undefined {
+): TCoding | undefined {
   if (!codings?.length) return undefined;
   if (codings.length === 1) return codings[0].code || codings[0].display ? codings[0] : undefined;
-  let fallback: FhirCoding | undefined;
-  let displayFallback: FhirCoding | undefined;
+  let fallback: TCoding | undefined;
+  let displayFallback: TCoding | undefined;
   for (const coding of codings) {
     if (!coding.code) {
       if (!displayFallback && coding.display) displayFallback = coding;
@@ -551,7 +552,7 @@ export function selectMedicationInstructionMethodCoding(
 /** Keep compatible authored verbs (Drink and Swallow share a method), while
  * a recognized edited code replaces an incompatible retained verb. */
 export function resolveMedicationInstructionActionForMethod(
-  method: CanonicalMethodExpr | undefined,
+  method: (Omit<CanonicalMethodExpr, "coding"> & { coding?: FhirR6Coding }) | undefined,
   options?: ParseOptions,
   // Identity comparison may inspect a declared head without replacing its qualified label.
   includeQualifiedHead = false

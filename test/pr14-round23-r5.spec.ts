@@ -6,7 +6,7 @@ import {
   type EzDosage, type FhirDosage, type FhirExtension, type FhirR6Extension, type FhirElement, type FhirR6PrimitiveElement, type FhirRatio, type FhirR6Ratio, type FhirR6Dosage,
   FhirPeriodUnit, FhirDayOfWeek, EventTiming, nextDueDoses, calculateTotalUnits,
   type FhirR6DosageInstruction, type FhirR6Quantity, type FhirR6SimpleQuantity, type FhirR6DosageInstructionInput,
-  type FhirR6Reference, type FhirR6DoseAndRate, type FhirDoseAndRate, type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep, type FhirR6RelativeTime, type FhirReference,
+  type FhirR6Expression, type FhirR6Range, type FhirR6CodeableConcept, type FhirR6Reference, type FhirR6DoseAndRate, type FhirDoseAndRate, type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep, type FhirR6RelativeTime, type FhirReference,
   registerMedicationLocaleDetector, inferMedicationLocale, registerMedicationSurfaceSegmenter,
   listMedicationSurfaceSegmenters, registerMedicationDateResolver, cloneBodySiteSpatialRelation,
   buildBodySiteSpatialRelationExtension, parseBodySiteSpatialRelationExtension,
@@ -767,6 +767,11 @@ describe("strict R6 projection preserves current editable facts", () => {
     expect(wire.step![0].safety).toBeUndefined();
     expect(wire.safety?.doseLimit?.map(limit => limit.valueQuantity?.value)).toEqual([8, 2]);
     expect(wire.safety?.ifExceeded).toBe("Call clinic\nHold next dose");
+    const activeScope = wire.safety?.modifierExtension?.find(item => item.url === R6_SCOPED_SAFETY_MODIFIER_URL);
+    expect(activeScope).toBeDefined();
+    expect(decodeR6SourceMetadata(activeScope!, "safety")).toEqual({
+      course: metadata.safety, step: metadata.step![0].safety,
+    });
     expect(() => fromFhir(wire)).not.toThrow();
     const reopened = fromDosageDetails(JSON.parse(JSON.stringify(wire)));
     expect(reopened.course.safety?.ifExceeded).toBe("Call clinic");
@@ -5457,5 +5462,68 @@ describe("graph argument singleton annotations", () => {
     }
     expect(input).toEqual(before);
     expect(argumentField(original, "quantity").extension!.find(child => child.url === "value")!.valueDecimal).toBe(10);
+  });
+});
+
+
+describe("independent source coding and safety scope", () => {
+  it.each([false, true])("keeps an explicitly absent target Coding system with translations %s", translated => {
+    const systemMetadata = { extension: [{ url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown" }] };
+    const target = { code: "ear-left", display: "Left ear", _system: systemMetadata,
+      ...(translated ? { i18n: { en: "Left ear", th: "หูซ้าย" } } : {}) };
+    const wire = buildBodySiteSpatialRelationExtension({ relationText: "near", targetCoding: target })!;
+    const coding = wire.extension!.find(child => child.url === "target")!.valueCodeableConcept!.coding![0];
+    expect(coding.system).toBeUndefined();
+    expect(coding._system).toEqual(systemMetadata);
+    expect(coding.code).toBe("ear-left");
+    if (translated) expect(getPrimitiveTranslation(coding._display, "th")).toBe("หูซ้าย");
+    expect(parseBodySiteSpatialRelationExtension({ extension: [wire] })!.targetCoding)
+      .toMatchObject({ code: "ear-left", _system: systemMetadata });
+  });
+
+  it("keeps a shared action unqualified when both lifted policies apply it", () => {
+    const metadata: EzCourseMetadata = {
+      safety: { ifExceeded: "Call clinic", doseLimit: [
+        { scope: "period", valueQuantity: q(8), period: { value: 1, unit: "d" } },
+      ] },
+      step: [{ sequence: 1, safety: { ifExceeded: "Call clinic", doseLimit: [
+        { scope: "administration", valueQuantity: q(2) },
+      ] } }],
+    };
+    const wire = toDosageDetails([{ sequence: 1, doseAndRate: [{ doseQuantity: q(1) }] }], undefined, metadata);
+    expect(wire.step![0].safety).toBeUndefined();
+    expect(wire.safety!.doseLimit!.map(limit => limit.valueQuantity!.value)).toEqual([8, 2]);
+    expect(wire.safety!.ifExceeded).toBe("Call clinic");
+    expect(wire.safety!.modifierExtension).toBeUndefined();
+  });
+});
+
+
+describe("native R6 nested datatype declarations", () => {
+  it("accepts native annotations in expressions, concepts and ranges while R5 remains strict", () => {
+    const annotation: FhirR6Extension = { url: "urn:clinic:estimate", valueQuantity: { value: 1, comparator: "~", unit: "mg" } };
+    const expression: FhirR6Expression = { language: "text/fhirpath", expression: "%patient.weight * 0.1", extension: [annotation] };
+    const route: FhirR6CodeableConcept = { text: "Oral route", coding: [{ system: "http://snomed.info/sct", code: "26643006", extension: [annotation] }] };
+    const range: FhirR6Range = { low: { value: 1, unit: "mg", extension: [annotation] }, high: { value: 2, unit: "mg" } };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ route,
+      doseAndRate: [{ doseExpression: expression }],
+    }] }] };
+    const output = fromFhir(input).fhirNext.step![0].component[0];
+    expect(output.doseAndRate![0].doseExpression).toEqual(expression);
+    expect(output.route).toEqual(route);
+    const rangeInput: FhirR6DosageInstruction = { step: [{ component: [{ route,
+      doseAndRate: [{ doseRange: range }],
+    }] }] };
+    expect(fromFhir(rangeInput).fhirNext.step![0].component[0].doseAndRate![0].doseRange).toEqual(range);
+    const strictR5: FhirDoseAndRate = { doseRange: { low: { extension: [{ url: "urn:clinic:estimate", valueQuantity: {
+      // @ts-expect-error R5 nested Quantity annotations do not admit the R6 approximate comparator.
+      comparator: "~",
+    } }] } } };
+    const invalidSimpleQuantity: FhirR6Range = { low: {
+      // @ts-expect-error R6 Range endpoints remain comparator-free SimpleQuantity.
+      comparator: "~",
+    } };
+    expect(strictR5.doseRange!.low!.extension![0].valueQuantity!.comparator).toBe("~");
+    expect(invalidSimpleQuantity.low!.comparator).toBe("~");
   });
 });

@@ -6,7 +6,7 @@ import {
   BodySiteCode,
   BodySiteDefinition,
   CanonicalSiteExpr,
-  FhirCodeableConcept,
+  FhirR6CodeableConcept,
   FhirCoding,
   FhirExtension
 } from "./types";
@@ -46,7 +46,7 @@ const BROADER_BODY_SITE_CODE: Readonly<Record<string, string>> = {
 
 /** Compare exact stock site labels only. A lateralized label can refine its
  * registered unqualified anatomy; a different code alone is not a conflict. */
-export function bodySiteTextConflictsWithCoding(text: string, coding: FhirCoding | undefined): boolean {
+export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirCoding, "system" | "code"> | undefined): boolean {
   const definition = DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(text)];
   const textCode = definition?.coding;
   if (!textCode?.code || !coding?.code || textCode.code === coding.code ||
@@ -63,7 +63,7 @@ export function bodySiteTextConflictsWithCoding(text: string, coding: FhirCoding
 }
 
 export function resolveBodySiteTargetText(
-  site: string | SiteLike | FhirCodeableConcept | undefined,
+  site: string | SiteLike | FhirR6CodeableConcept | undefined,
   options?: BodySiteTargetCountOptions
 ): string | undefined {
   if (!site) {
@@ -92,7 +92,7 @@ export function resolveBodySiteTargetText(
     if (cacheKey !== undefined && defaultCodedSiteTexts.has(cacheKey)) {
       resolved = defaultCodedSiteTexts.get(cacheKey);
     } else {
-      resolved = getBodySiteText(coding, { siteCodeMap: options?.siteCodeMap });
+      resolved = getBodySiteText(coding as BodySiteCode, { siteCodeMap: options?.siteCodeMap });
       if (cacheKey !== undefined) {
         if (defaultCodedSiteTexts.size >= TARGET_COUNT_CACHE_LIMIT) defaultCodedSiteTexts.clear();
         defaultCodedSiteTexts.set(cacheKey, resolved);
@@ -117,7 +117,7 @@ export function buildBodySiteAdministrationTargetCountExtension(
 }
 
 export function parseBodySiteAdministrationTargetCountExtension(
-  concept: FhirCodeableConcept | { extension?: FhirExtension[] } | undefined
+  concept: FhirR6CodeableConcept | { extension?: FhirExtension[] } | undefined
 ): number | undefined {
   const extensions = concept?.extension;
   if (!extensions?.length) return undefined;
@@ -141,7 +141,7 @@ const defaultTargetCounts=new Map<string,number>();
 const defaultCodedSiteTexts = new Map<string, string | undefined>();
 const TARGET_COUNT_CACHE_LIMIT=2048;
 export function getBodySiteAdministrationTargetCount(
-  site: string | SiteLike | FhirCodeableConcept | undefined,
+  site: string | SiteLike | FhirR6CodeableConcept | undefined,
   options?: BodySiteTargetCountOptions
 ): number | undefined {
   if (!site) {
@@ -181,7 +181,7 @@ export function getBodySiteAdministrationTargetCount(
  * cache. Keep this heavier path out of the direct typed-count reader so
  * repeated explicit-count queries do not carry its parsing/cache machinery. */
 function inferredBodySiteTargetCount(
-  site:string|SiteLike|FhirCodeableConcept,options?:BodySiteTargetCountOptions
+  site:string|SiteLike|FhirR6CodeableConcept,options?:BodySiteTargetCountOptions
 ):number|undefined {
   const text = resolveBodySiteTargetText(site, options);
   if (!text) {

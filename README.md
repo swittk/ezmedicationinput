@@ -101,6 +101,18 @@ supported interchange target. The importer checks the current structural
 contract, not a datatype name or release tag absent from the JSON. A text-only
 object containing `renderedInstruction` is structurally valid in both schemas
 and is accepted; it cannot identify which release produced it.
+TypeScript callers of the earlier R6 draft should replace `FhirR6DosageDetails`
+with `FhirR6DosageInstruction`. Its `step` property is optional, matching the
+current wire contract:
+
+```ts
+import type { FhirR6DosageInstruction } from "ezmedicationinput";
+
+function firstStepComponents(instruction: FhirR6DosageInstruction) {
+  return instruction.step?.[0]?.component ?? [];
+}
+```
+
 Empty R6 step lists are omitted on output. For a header containing only shared
 Element metadata (such as an ID and unknown extensions), use the explicit
 `fromFhir` boundary; mixed R5/R6 dispatch cannot infer a version from those fields.

@@ -12,6 +12,7 @@ import {
   FhirCoding,
   FhirDayOfWeek,
   FhirPrimitiveElement,
+  FhirR6PrimitiveElement,
   FhirPeriodUnit,
   PrnReasonLookupRequest,
   PrnReasonSuggestion,
@@ -140,7 +141,7 @@ export class ParserState {
     this.ensureMethod().text = value;
   }
 
-  get methodTextElement(): FhirPrimitiveElement | undefined {
+  get methodTextElement(): FhirR6PrimitiveElement | undefined {
     return this.clause.method?._text;
   }
 

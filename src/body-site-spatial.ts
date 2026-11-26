@@ -2,6 +2,9 @@ import {
   BodySiteCode,
   BodySiteSpatialRelation,
   FhirCodeableConcept,
+  FhirR6CodeableConcept,
+  FhirR6Coding,
+  FhirR6Extension,
   FhirCoding,
   FhirExtension
 } from "./types";
@@ -44,7 +47,9 @@ function copyAdditionalCodingField(target: FhirCoding, source: FhirCoding, key: 
 
 /** Shared immutable-by-contract Coding fields for ordinary projection and
  * import. Only the explicitly named clone API detaches nested metadata. */
-function sharedCodingFields(coding:FhirCoding|undefined):FhirCoding|undefined {
+function sharedCodingFields(
+  coding: Pick<FhirCoding, "code" | "system" | "display" | "i18n"> | undefined
+): FhirCoding | undefined {
   // Output values are immutable by caller contract. Keep existing coding
   // identity (including source annotations) rather than allocating a second
   // coding shell solely to protect a caller from mutating its result.
@@ -55,15 +60,16 @@ function bodySiteCodingToFhir(coding: BodySiteCode | undefined): FhirCoding | un
   if (!coding?.code) {
     return undefined;
   }
-  if (!coding.i18n) return coding.system !== undefined ? coding : {
-    ...coding, system: SNOMED_SYSTEM,
-  };
-  const { i18n, ...wire } = coding as FhirCoding;
-  return { ...wire, system: coding.system ?? SNOMED_SYSTEM,
-    _display: mergeTranslationPrimitiveElement(wire._display, i18n) };
+  const source: FhirCoding = coding;
+  const defaultSystem = source.system === undefined && source._system === undefined;
+  if (!coding.i18n) return defaultSystem ? { ...coding, system: SNOMED_SYSTEM } : coding;
+  const { i18n, ...wire } = source;
+  if (defaultSystem) wire.system = SNOMED_SYSTEM;
+  wire._display = mergeTranslationPrimitiveElement(wire._display, i18n);
+  return wire;
 }
 
-function firstCodingWithCode(concept: FhirCodeableConcept | undefined): FhirCoding | undefined {
+function firstCodingWithCode(concept: FhirR6CodeableConcept | undefined): FhirR6Coding | undefined {
   return concept?.coding?.find((coding) => Boolean(coding.code));
 }
 
@@ -148,7 +154,7 @@ export function buildBodySiteSpatialRelationExtensions(
 }
 
 export function parseBodySiteSpatialRelationExtension(
-  concept: FhirCodeableConcept | undefined
+  concept: FhirR6CodeableConcept | undefined
 ): BodySiteSpatialRelation | undefined {
   const extension = concept?.extension?.find(
     (candidate) => candidate.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL
@@ -158,9 +164,9 @@ export function parseBodySiteSpatialRelationExtension(
   }
   // Decode each field once. The first occurrence owns its field even if
   // that occurrence's value is absent, matching the original import contract.
-  let relationNode:FhirExtension|undefined,relationTextNode:FhirExtension|undefined,
-    targetNode:FhirExtension|undefined,targetTextNode:FhirExtension|undefined,
-    sourceNode:FhirExtension|undefined;
+  let relationNode:FhirR6Extension|undefined,relationTextNode:FhirR6Extension|undefined,
+    targetNode:FhirR6Extension|undefined,targetTextNode:FhirR6Extension|undefined,
+    sourceNode:FhirR6Extension|undefined;
   for(const node of extension.extension)switch(node.url){
     case RELATION_URL:if(!relationNode)relationNode=node;break;
     case RELATION_TEXT_URL:if(!relationTextNode)relationTextNode=node;break;

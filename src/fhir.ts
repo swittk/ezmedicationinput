@@ -64,7 +64,9 @@ import {
   BodySiteSpatialRelation,
   EventTiming,
   FhirCodeableConcept,
+  FhirR6CodeableConcept,
   FhirCoding,
+  FhirR6Coding,
   FhirDosage,
   FhirExtension,
   FhirR6Extension,
@@ -76,6 +78,7 @@ import {
   FhirR6SimpleQuantity,
   FhirR6Quantity,
   FhirRange,
+  FhirR6Range,
   FhirTiming,
   FhirTimingRepeat,
   FhirR6TimingRepeat,
@@ -279,7 +282,7 @@ export const ANCHORED_COURSE_DURATION_EXTENSION_URL = "urn:ezmedicationinput:Str
  */
 export function getAnchoredCourseDuration(
   dosage: Pick<FhirR6Dosage, "modifierExtension"> & {
-    timing?: { repeat?: { boundsRange?: FhirRange; boundsDuration?: FhirR6Quantity } }
+    timing?: { repeat?: { boundsRange?: FhirR6Range; boundsDuration?: FhirR6Quantity } }
   }
 ): Pick<FhirR6Extension, "valueQuantity" | "valueRange"> | undefined {
   const marker = dosage.modifierExtension?.find(extension =>
@@ -317,13 +320,13 @@ export function getAnchoredCourseDuration(
  * original elapsed/calendar quantity while applying current annotations and
  * qualifier; changing > alone must not turn 48 elapsed hours into two days. */
 function reconcileDurationEndpoint(
-  source: FhirR6Quantity, projected: FhirSimpleQuantity | FhirR6SimpleQuantity | undefined, current: FhirSimpleQuantity | undefined
-): FhirSimpleQuantity | undefined {
-  if (equalStructuredValues(projected, current)) return source as FhirSimpleQuantity;
+  source: FhirR6Quantity, projected: FhirR6SimpleQuantity | undefined, current: FhirR6SimpleQuantity | undefined
+): FhirR6SimpleQuantity | undefined {
+  if (equalStructuredValues(projected, current)) return source as FhirR6SimpleQuantity;
   if (!projected || !current || projected.value !== current.value || projected.unit !== current.unit ||
       projected.system !== current.system || projected.code !== current.code) return current;
   const result = { ...source, ...current, value: source.value, unit: source.unit, code: source.code, system: source.system,
-    comparator: current.comparator, _comparator: current._comparator, extension: current.extension } as FhirSimpleQuantity;
+    comparator: current.comparator, _comparator: current._comparator, extension: current.extension } as FhirR6SimpleQuantity;
   // An annotation exposed in the projection belongs to the live endpoint,
   // including deliberate removal. Unprojected authored-unit metadata stays.
   for (const key of Object.keys(projected)) {
@@ -347,7 +350,7 @@ function reconcileDurationEndpoint(
 /** The prescriber owns each endpoint's amount and unit. Wire constraints do
  * not authorize changing elapsed hours to days or dropping calendar endpoints.
  * Existing projection metadata is read on import and retired by its writer. */
-export function projectCourseDurationRange(range: FhirRange): { range: FhirRange; source?: FhirExtension } {
+export function projectCourseDurationRange<T extends FhirR6Range>(range: T): { range: T; source?: FhirExtension } {
   return { range };
 }
 
@@ -766,7 +769,7 @@ function prnTriggerPhaseExtension(phase: "onset" | undefined) {
   return phase ? { url: PRN_TRIGGER_PHASE_EXTENSION_URL, valueCode: phase } : undefined;
 }
 
-export function parsePrnTriggerPhase(concept: FhirCodeableConcept | undefined): "onset" | undefined {
+export function parsePrnTriggerPhase(concept: FhirR6CodeableConcept | undefined): "onset" | undefined {
   const value = concept?.extension?.find(
     (candidate) => candidate.url === PRN_TRIGGER_PHASE_EXTENSION_URL
   )?.valueCode;
@@ -810,14 +813,14 @@ function buildBodySiteRestrictionExtensions(
 }
 
 function restrictionExtensionChild(
-  extension: FhirExtension,
+  extension: FhirR6Extension,
   url: string
-): FhirExtension | undefined {
+): FhirR6Extension | undefined {
   return extension.extension?.find((candidate) => candidate.url === url);
 }
 
 function restrictionRangeFromExtension(
-  extension: FhirExtension,
+  extension: FhirR6Extension,
   prefix: string
 ): { start: number; end: number } | undefined {
   const start = restrictionExtensionChild(extension, `${prefix}Start`)?.valueInteger;
@@ -828,7 +831,7 @@ function restrictionRangeFromExtension(
 }
 
 function parseBodySiteRestrictionExtensions(
-  concept: FhirCodeableConcept | undefined
+  concept: FhirR6CodeableConcept | undefined
 ): BodySiteRestriction[] | undefined {
   if (!concept?.extension?.length) return undefined;
   const result: BodySiteRestriction[] = [];
@@ -1060,9 +1063,9 @@ export function createEmptyCanonicalClause(rawText: string): CanonicalSigClause 
   };
 }
 
-function selectFirstCodingWithCode(
-  concept: FhirCodeableConcept | undefined
-): CodeableConceptCoding | undefined {
+function selectFirstCodingWithCode<TCoding extends FhirR6Coding>(
+  concept: { coding?: TCoding[] } | undefined
+): TCoding | undefined {
   if (!concept?.coding?.length) {
     return undefined;
   }
@@ -1074,7 +1077,7 @@ function selectFirstCodingWithCode(
   return undefined;
 }
 
-function selectPreferredSiteCoding(site: FhirCodeableConcept | undefined): CodeableConceptCoding | undefined {
+function selectPreferredSiteCoding<TCoding extends FhirR6Coding>(site: { coding?: TCoding[] } | undefined): TCoding | undefined {
   if (!site?.coding?.length) {
     return undefined;
   }
@@ -1125,13 +1128,13 @@ function buildSiteCodingArray(
   ];
 }
 
-function getFallbackSiteText(site: FhirCodeableConcept | undefined): string | undefined {
+function getFallbackSiteText(site: FhirR6CodeableConcept | undefined): string | undefined {
   return resolveBodySiteTargetText(site);
 }
 
 function codeableConceptTranslationI18n(
-  concept: FhirCodeableConcept | undefined,
-  coding: CodeableConceptCoding | undefined,
+  concept: FhirR6CodeableConcept | undefined,
+  coding: FhirR6Coding | undefined,
   fallback?: Record<string, string>
 ): {
   text?: Record<string, string>;
@@ -1203,7 +1206,7 @@ function getSpatialPrnReasonSiteText(
 }
 
 function getFallbackPrnReasonText(
-  concept: FhirCodeableConcept, coding: CodeableConceptCoding | undefined,
+  concept: FhirR6CodeableConcept, coding: FhirR6Coding | undefined,
   spatialRelation: BodySiteSpatialRelation | undefined
 ): string | undefined {
   if (concept.text) {
@@ -1239,7 +1242,7 @@ function getFallbackPrnReasonText(
 }
 
 /** Convert one coded reason without deciding whether its caller enables PRN. */
-function canonicalPrnReasonFromConcept(concept: FhirCodeableConcept): CanonicalPrnReasonExpr {
+function canonicalPrnReasonFromConcept(concept: FhirR6CodeableConcept): CanonicalPrnReasonExpr {
   const coding = selectFirstCodingWithCode(concept);
   const defaultDef = coding?.code
     ? findPrnReasonDefinitionByCoding(coding.system ?? SNOMED_SYSTEM, coding.code)
@@ -2162,8 +2165,8 @@ function clinicalAdjunctsFromFhir(dosage: FhirDosage): CanonicalSigClause["clini
  * No dose, rate, Timing, course, or compatibility marker is interpreted here.
  * Native-course import supplies an R6 CodeableReference's concept explicitly. */
 export function deserializeCanonicalContext(
-  dosage: Pick<FhirDosage, "text" | "route" | "site" | "method" |
-    "asNeeded" | "asNeededFor" | "additionalInstruction" | "patientInstruction"> & Pick<FhirR6Dosage, "extension">,
+  dosage: Pick<FhirR6Dosage, "text" | "route" | "method" | "asNeeded" |
+    "asNeededFor" | "additionalInstruction" | "patientInstruction" | "extension"> & { site?: FhirR6CodeableConcept },
   options?: ParseOptions
 ): CanonicalSigClause {
   const rawText = dosage.text ?? "";

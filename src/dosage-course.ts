@@ -2489,7 +2489,12 @@ function encodeFields(
   value: object, shape: BridgeShape, snapshot = false, preserveQuantityWire = false
 ): FhirExtension[] {
   const children: FhirExtension[] = [];
-  for (const key of Object.keys(value)) {
+  // A safety policy's meaning is independent of source object insertion order.
+  // Use its declared field order; keep unfamiliar source fields after it.
+  const keys = shape === SAFETY ? Object.keys(SAFETY) : Object.keys(value);
+  if (shape === SAFETY) for (const key of Object.keys(value))
+    if (!Object.prototype.hasOwnProperty.call(SAFETY, key)) keys.push(key);
+  for (const key of keys) {
     const part = (value as Record<string, unknown>)[key];
     if (part === undefined) continue;
     const field = Object.prototype.hasOwnProperty.call(shape, key) ? shape[key] : undefined;

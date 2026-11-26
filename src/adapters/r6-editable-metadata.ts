@@ -621,10 +621,10 @@ export function liftSingleStepSafety(output: FhirR6DosageInstruction): void {
       projected.doseLimit = [...(course.doseLimit ?? []), ...(policy.doseLimit ?? [])];
     if (policy.ifExceeded && policy.ifExceeded !== course.ifExceeded)
       projected.ifExceeded = course.ifExceeded ? course.ifExceeded + "\n" + policy.ifExceeded : policy.ifExceeded;
-    if (course.modifierExtension?.length || policy.modifierExtension?.length) {
+    if (course.modifierExtension?.length || policy.modifierExtension?.length ||
+        course.ifExceeded !== policy.ifExceeded) {
       // R6 cannot carry sole-step safety. A must-understand wrapper keeps
-      // each policy's modifiers scoped to its own limits/actions; flattening
-      // either modifier list would qualify unrelated limits in the merge.
+      // each action and modifier tied to its own policy's limits.
       projected.modifierExtension = [encodeR6SourceMetadata(R6_SCOPED_SAFETY_MODIFIER_URL,
         { course, step: policy }, "safety")];
     }
