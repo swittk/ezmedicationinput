@@ -6,7 +6,7 @@ import { formatCanonicalCourse, formatCanonicalAdministration, prefersSourceInst
   appendMedicationExcludedWeekdaysText, unevaluatedExpressionText,
   rateRangePreview } from "./canonical/format-course";
 import { administrationFromClause, courseFromAdministrations, courseFromParallel, courseFromPartialParallel, clauseForAdministration } from "./canonical/compile";
-import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, rangeFromFhir, unchangedR6SourceDisplay, isR6DosageInstruction } from "./adapters/canonical-course";
+import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, administrationToR5, rangeFromFhir, unchangedR6SourceDisplay, isR6DosageInstruction } from "./adapters/canonical-course";
 import type { CanonicalCourse, CanonicalAdministration } from "./canonical/course";
 import { hasAmountRole } from "./canonical/course";
 import { cloneStructuredValue } from "./stable-structure";
@@ -96,7 +96,7 @@ import {
   getDosageSourceTextFingerprint, dosageTextFingerprint,
   DOSAGE_DETAILS_R5_URL, DOSAGE_CONDITION_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL, R5_EXPRESSION_SLOT_SOURCE_URL,
   DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
-  getDosageAlternativeChoice, setDosageAlternativeChoice,
+  getDosageAlternativeChoice,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
 import {
@@ -837,27 +837,14 @@ function composeParsedStates(
     outputRegimenGraph: expanded.graph, phaseSequences };
 }
 
-/**
- * Lower proven HPSG alternative edges into explicit must-understand choice
- * membership. The original segment supplies stable branch identity, so several
- * projected targets of the same branch remain one option rather than new ORs.
- * No text is reparsed and no branch is selected during interpretation.
- * @param results Source-rebased, independently editable administration results.
- * @param plan The production typed boundary/regimen relations.
- */
-function applyRegimenAlternativeMembership(
-  results: readonly ParseResult[], plan: BoundaryPlan, parallel?: CanonicalCourse
-): void {
+/** Resolve typed alternative edges once, before administration projection.
+ * Several targets of the same source branch retain one option. */
+function regimenAlternativeMembership(
+  plan: BoundaryPlan, segments: ReturnType<typeof parseSigSegments>
+): Array<CanonicalAdministration["choice"]> | undefined {
   const edges = plan.relations.filter(edge => edge.kind === "alternative");
-  if (!edges.length) return;
-  const nativeMembers = new Map<number, CanonicalAdministration[]>();
-  if (parallel) for (const stage of parallel.stages) for (const administration of stage.administrations) {
-    const index = administration.sourceMember;
-    if (index === undefined) continue;
-    let members = nativeMembers.get(index);
-    if (!members) nativeMembers.set(index, members = []);
-    members.push(administration);
-  }
+  if (!edges.length) return undefined;
+  const choices: Array<CanonicalAdministration["choice"]> = [];
   const parent = new Map<number, number>();
   const root = (index: number): number => {
     let current = index;
@@ -880,19 +867,17 @@ function applyRegimenAlternativeMembership(
     .sort((left, right) => left[0] - right[0]);
   for (let group = 0; group < ordered.length; group++) {
     for (const member of ordered[group]) {
-      const segment = plan.segments[member];
-      if (!segment) continue;
-      for (let index = 0; index < results.length; index++) {
-        const result = results[index];
-        const raw = result.meta.canonical.clauses[0]?.raw;
-        if (!raw || raw.start < segment.start || raw.start >= segment.end) continue;
-        const choice = { groupId: `choice-${group + 1}`, branchId: `branch-${member + 1}` };
-        if (result.meta.canonical.administration) result.meta.canonical.administration.choice = choice;
-        for (const administration of nativeMembers.get(index) ?? []) administration.choice = choice;
-        setDosageAlternativeChoice(result.fhir, { ...choice, selectionBehavior: "exactly-one" });
+      const source = plan.segments[member];
+      if (!source) continue;
+      const choice = { groupId: `choice-${group + 1}`, branchId: `branch-${member + 1}` };
+      for (let index = 0; index < segments.length; index++) {
+        const segment = segments[index];
+        if (segment.start >= source.start && segment.start < source.end)
+          choices[index] = choice;
       }
     }
   }
+  return choices;
 }
 
 /** Lower the common sync/async result after terminology resolution.
@@ -911,12 +896,13 @@ function finishParsedBatch(
   const canonicalParallel = prepareCanonicalParallel(outputStates, outputSegments, boundaryPlan, outputRegimenGraph);
   const hasParallel = canonicalParallel.kind === "resolved" ||
     canonicalParallel.kind === "unresolved" && Boolean(canonicalParallel.tracks);
+  const alternativeChoices = regimenAlternativeMembership(boundaryPlan, outputSegments);
   const rawResults: ParseResult[] = [];
   const projectedBatches: ParseResult[][] = [];
 
   for (let index = 0; index < outputSegments.length; index += 1) {
     const projected = buildParseResults(outputStates[index], options, phaseSequences[index],
-      !hasParallel);
+      !hasParallel, alternativeChoices?.[index]);
     projectedBatches.push(projected);
     rawResults.push(...projected);
   }
@@ -930,6 +916,14 @@ function finishParsedBatch(
     : canonicalParallel.kind === "unresolved" && canonicalParallel.tracks
       ? courseFromPartialParallel(canonicalParallel, rawResults.map(result => result.longText), input)
       : undefined;
+  if (parallel && alternativeChoices) {
+    for (const stage of parallel.stages) for (const administration of stage.administrations) {
+      const member = administration.sourceMember;
+      if (member === undefined) continue;
+      const choice = rawResults[member]?.meta.canonical.administration?.choice;
+      if (choice) administration.choice = choice;
+    }
+  }
   for (let index = 0; index < projectedBatches.length; index += 1) {
     const shiftedSpans = new WeakSet<object>();
     for (const result of projectedBatches[index]) {
@@ -938,7 +932,6 @@ function finishParsedBatch(
   }
 
   const results = rawResults;
-  applyRegimenAlternativeMembership(results, boundaryPlan, parallel);
   const primary = resolvePrimaryParseResult(results, input, options);
   return buildWholeCourseResult(input, results, primary, segments, regimenGraph, options,
     parallel ? { canonical: parallel } : undefined);
@@ -968,6 +961,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   }
   const { outputStates, outputSegments, phaseSequences } =
     composeParsedStates(input, boundaryPlan, segments, states, options);
+  const alternativeChoices = regimenAlternativeMembership(boundaryPlan, outputSegments);
   const results: LintResult[] = [];
   const resultSegments: typeof segments = [];
 
@@ -987,7 +981,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
         range: shiftedRange
       };
     });
-    const projected = buildParseResults(state, options, phaseSequences[index]);
+    const projected = buildParseResults(state, options, phaseSequences[index], true, alternativeChoices?.[index]);
     const shiftedSpans = new WeakSet<object>();
     for (const result of projected) {
       rebaseParseResult(result, input, segment.start, shiftedSpans);
@@ -1004,7 +998,6 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
   }
 
   const lintParseResults = results.map((item) => item.result);
-  applyRegimenAlternativeMembership(lintParseResults, boundaryPlan);
   for (let index = 0; index < lintParseResults.length; index++) {
     const segment = resultSegments[index];
     for (const warning of lintParseResults[index].warnings) {
@@ -1706,7 +1699,8 @@ function buildParseResult(
   options?: ParseOptions,
   projectedTarget?: CanonicalSiteExpr,
   sequence?: number,
-  compileStandaloneAdministration = true
+  compileStandaloneAdministration = true,
+  choice?: CanonicalAdministration["choice"]
 ): ParseResult {
   const canonicalClauses = projectAdministrationTargetClauses(
     state.clauses,
@@ -1794,13 +1788,17 @@ function buildParseResult(
       if (useOriginalText && !excludedDates.length) longText = formatCanonicalClause(clause, "long", localization, options);
     }
   }
-  const administration = compileStandaloneAdministration
+  const administration = compileStandaloneAdministration || choice
     ? administrationFromClause(clause, longText, sequence) : undefined;
-  const fhir = canonicalToFhir(clause, longText, {
+  if (choice) administration!.choice = choice;
+  const projectionOptions = {
     sequence,
     bodySitePostcoordination: options?.bodySitePostcoordination,
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
-  });
+  };
+  const fhir = choice
+    ? administrationToR5(administration!, sequence, projectionOptions, clause)
+    : canonicalToFhir(clause, longText, projectionOptions);
   // Mark immutable parser-origin source ownership. Defaulted amounts still
   // do not prove graph authorship; fresh submitted copies use persisted proof.
   markFreshDoseSource(fhir, clause.dose?.defaulted === true, administration
@@ -1881,10 +1879,11 @@ function buildParseResults(
   state: ReturnType<typeof parseClauseState>,
   options?: ParseOptions,
   sequence?: number,
-  compileStandaloneAdministration = true
+  compileStandaloneAdministration = true,
+  choice?: CanonicalAdministration["choice"]
 ): ParseResult[] {
   return administrationTargetProjections(state.clauses).map((target) =>
-    buildParseResult(state, options, target, sequence, compileStandaloneAdministration)
+    buildParseResult(state, options, target, sequence, compileStandaloneAdministration, choice)
   );
 }
 

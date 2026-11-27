@@ -2193,12 +2193,12 @@ export function administrationToR6(
 /** Direct native-to-R5 component writer. No R6 component is constructed. */
 export function administrationToR5(
   a: CanonicalAdministration,
-  sequence: number,
+  sequence: number | undefined,
   options?: FhirProjectionOptions,
   currentSyntax?: CanonicalSigClause
 ): FhirDosage {
   const row = administrationToWire(a, "r5", options, currentSyntax) as FhirDosage;
-  row.sequence = sequence;
+  if (sequence !== undefined) row.sequence = sequence;
   return row;
 }
 const same = equalStructuredValues;
