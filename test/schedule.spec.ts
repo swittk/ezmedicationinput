@@ -6116,3 +6116,83 @@ describe("elapsed occurrence ceilings share the rolling count ledger", () => {
     expect(JSON.stringify(dosage)).toBe(before);
   });
 });
+
+
+describe("shared accepted counts across partitioned clock members", () => {
+  const options = { orderedAt: "2026-11-29T18:00:00Z", from: "2026-11-29T18:00:00Z", timeZone: "UTC" };
+  const dates = ["2026-11-29T20:00:00+00:00", "2026-11-30T20:00:00+00:00",
+    "2026-12-01T08:00:00+00:00", "2026-12-01T20:00:00+00:00"];
+  const course = (): CanonicalCourse => ({ kind: "course", stages: [{ administrations: [
+    { kind: "administration", sourceMember: 0, text: "1 tablet at 08:00 except Mondays",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }], excludedWeekdays: [FhirDayOfWeek.Monday],
+      schedule: { recurrence: { clocks: ["08:00:00"], sharedCount: { groupId: "authored-course", count: 4 } } } },
+    { kind: "administration", sourceMember: 1, text: "1 tablet at 20:00",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { clocks: ["20:00:00"], sharedCount: { groupId: "authored-course", count: 4 } } } },
+  ] }] });
+
+  it("admits one morning and three evening doses rather than reserving two per clock", () => {
+    const native = course();
+    for (const dosage of [native, courseToR5(native), courseToR6(native)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 5 })).toEqual(dates);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 4, unit: "tab" });
+      const late = { ...options, from: "2026-12-01T00:00:00Z" };
+      expect(nextDueDoses(dosage, { ...late, limit: 5 })).toEqual(dates.slice(2));
+      expect(calculateTotalUnits({ dosage, ...late, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(2);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("spends one actual administration once across both member streams", () => {
+    const dosage = course(), before = JSON.stringify(dosage);
+    const late = { ...options, from: "2026-12-01T00:00:00Z" };
+    const remaining = [...dates.slice(2), "2026-12-02T08:00:00+00:00"];
+    for (const history of [{ priorDoseTimes: ["2026-11-30T22:00:00Z"] }, { priorCount: 1 }]) {
+      expect(nextDueDoses(dosage, { ...late, ...history, limit: 5 })).toEqual(remaining);
+      expect(calculateTotalUnits({ dosage, ...late, ...history, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(3);
+    }
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+  it("applies the shared allowance to ranged amounts and upper count allowances", () => {
+    const dosage = course();
+    for (const member of dosage.stages[0].administrations) {
+      member.amounts = [{ range: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } }];
+      member.schedule!.recurrence!.sharedCount = { groupId: "authored-course", countMax: 4 };
+    }
+    const before = JSON.stringify(dosage);
+    expect(nextDueDoses(dosage, { ...options, limit: 5 })).toEqual(dates);
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+      .toMatchObject({ totalUnits: 8, unit: "tab", quantityKind: "maximum" });
+    expect(JSON.stringify(dosage)).toBe(before);
+    for (const member of dosage.stages[0].administrations) member.amounts = [{ quantity: { value: 1, unit: "tab" } }];
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+      .toMatchObject({ totalUnits: 4, quantityKind: "maximum", explanation: expect.stringContaining("upper count bound") });
+  });
+
+  it("starts a successor after the shared exact count completes", () => {
+    const native = course();
+    native.stages.push({ administrations: [{ kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }],
+      schedule: { recurrence: { clocks: ["12:00:00"], count: 1 } } }] });
+    for (const dosage of [native, courseToR5(native), courseToR6(native)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 6 })).toEqual([...dates, "2026-12-02T12:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(6);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("renews the shared total at the next authored course cycle", () => {
+    const dosage = course();
+    dosage.cycleInterval = { value: 7, unit: "d" };
+    dosage.cycleCount = 2;
+    const before = JSON.stringify(dosage);
+    expect(nextDueDoses(dosage, { ...options, limit: 9 })).toEqual([...dates,
+      "2026-12-06T20:00:00+00:00", "2026-12-07T20:00:00+00:00",
+      "2026-12-08T08:00:00+00:00", "2026-12-08T20:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 14, durationUnit: Unit.Day }).totalUnits).toBe(8);
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+});

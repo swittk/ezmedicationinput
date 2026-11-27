@@ -716,7 +716,8 @@ function matchesCalendarDay(
   );
 }
 function repeatOccurrenceCap(repeat: CanonicalRecurrence): number | undefined {
-  const raw = repeat.countMax ?? repeat.count;
+  const count = repeat.sharedCount ?? repeat;
+  const raw = count.countMax ?? count.count;
   return raw === undefined ? undefined : Math.max(0, Math.floor(raw));
 }
 /** A declared exact count can end an implicit stage; countMax alone is only
@@ -731,13 +732,14 @@ function hasDefiniteAdministrationCount(
 /** Exact phase completion includes the implicit single immediate dose.
  * Upper count allowances alone never establish this completion point. */
 function finiteCompletionCount(repeat: CanonicalRecurrence | undefined): number | undefined {
-  const count = repeat?.count ?? (
+  const declared = repeat?.sharedCount ?? repeat;
+  const count = declared?.count ?? (
     repeat?.anchors?.length === 1 && repeat.anchors[0] === TimingEvent.Immediate &&
     !repeat.clocks?.length && repeat.frequency === undefined && repeat.frequencyMax === undefined &&
     repeat.period === undefined && repeat.periodMax === undefined && repeat.periodUnit === undefined ? 1 : undefined
   );
   return count !== undefined && Number.isInteger(count) && count > 0 &&
-    (repeat?.countMax === undefined || repeat.countMax === count) ? count : undefined;
+    (declared?.countMax === undefined || declared.countMax === count) ? count : undefined;
 }
 function isSingleAdministrationRepeat(
   repeat: CanonicalRecurrence, explicitEvents: readonly string[] | undefined
@@ -2736,7 +2738,7 @@ function resolveAdministrationWindow(
   // a later capped component selects this route. Without history or a shared
   // cap, counted loading still completes locally.
   const deferCount = deferFiniteCompletion && hasCountCompletion &&
-    Boolean(options?.priorDoseTimes?.length || getTimingOccurrenceCap(recurrence) ||
+    Boolean(recurrence?.sharedCount || options?.priorDoseTimes?.length || getTimingOccurrenceCap(recurrence) ||
       (hasPeriodLimits(administration) &&
         (executableDoseRange(administration, capContext)?.caps.length ??
           executableQuantityCaps(administration, capContext).length)));
@@ -3304,8 +3306,17 @@ interface UncommittedCycleEvent extends ChronologicalEvent {
   /** Accepted total amount, including target multiplication, for ranged supply. */
   quantity?: number;
 }
-interface CycleEventQuota {
+interface CycleCountAllowance {
   remaining: number | undefined;
+}
+interface SharedCycleCountAllowance extends CycleCountAllowance {
+  key: string;
+  members: CycleEventQuota[];
+  hasActualHistory?: true;
+  lastRecordedAt?: number;
+}
+interface CycleEventQuota extends CycleCountAllowance {
+  shared?: SharedCycleCountAllowance;
   /** Explicit-event uncertainty is checked after this phase's accepted plan. */
   explicitEventStatus?: ExplicitEventStatus;
   /** Eligible recorded use consumes this phase's finite allowance once. */
@@ -3319,6 +3330,15 @@ interface CycleEventQuota {
   lastRecordedAt?: number;
   /** Lazily advance a finite capped phase after its candidate is decided. */
   advance?: (at: number, accepted: boolean) => void;
+}
+function cycleCountAllowance(quota: CycleEventQuota): CycleCountAllowance {
+  return quota.shared ?? quota;
+}
+function hasSharedAdministrationCount(course: CanonicalCourse): boolean {
+  for (const stage of course.stages)
+    for (const member of stage.administrations)
+      if (member.schedule?.recurrence?.sharedCount) return true;
+  return false;
 }
 type EmitCycleOpportunity = (
   iso: string | undefined, key: string, member: CanonicalAdministration,
@@ -3504,6 +3524,7 @@ function scheduleTreatmentRelativeCourse(
   const from = coerceDate(options.from, "from");
   const anchor = options.orderedAt !== undefined ? coerceDate(options.orderedAt, "orderedAt") : from;
   const doses: string[] = [];
+  let sharedCounts: Map<string, SharedCycleCountAllowance> | undefined;
   const eventCycleEnd = nextAbsoluteEventCycleBoundary(course, cycleDefaultEnd, cycleIndex);
   const planner = treatmentStepWindows(course, anchor, timeZone, sourceClock, options, Boolean(collect), capContext, eventCycleEnd);
   const consume = (planned = planner.next()): void => {
@@ -3559,13 +3580,27 @@ function scheduleTreatmentRelativeCourse(
         // expansion. Resolve only this execution copy, leaving source timing intact.
         const originalRepeat = original.schedule?.recurrence ??
           (effectiveEnd && (collect || rollingUsage) ? prepareBestEffortTiming(original).schedule?.recurrence : undefined);
+        const shared = collect ? originalRepeat?.sharedCount : undefined;
         const quota: CycleEventQuota = {
-          remaining: collect && originalRepeat ? repeatOccurrenceCap(originalRepeat) ??
+          remaining: collect && originalRepeat && !shared ? repeatOccurrenceCap(originalRepeat) ??
             (deferred ? finiteCompletionCount(originalRepeat) : undefined) : undefined,
         };
+        if (shared) {
+          const group = `${shared.groupId}:${member.recurrenceOrigin.getTime()}`;
+          let allowance = sharedCounts?.get(group);
+          if (!allowance) {
+            const maximum = repeatOccurrenceCap(originalRepeat!);
+            allowance = { remaining: maximum === undefined ? undefined :
+              Math.max(0, maximum - Math.floor(options.priorCount ?? 0)),
+              key: `shared:${shared.groupId}`, members: [] };
+            (sharedCounts ??= new Map()).set(group, allowance);
+          }
+          quota.shared = allowance;
+          allowance.members.push(quota);
+        }
         // Actual use owns this resolved phase's history, including an
         // uncounted member whose opportunity repeats in each cycle.
-        if (collect && (quota.remaining !== undefined || options.priorDoseTimes?.length)) {
+        if (collect && (cycleCountAllowance(quota).remaining !== undefined || options.priorDoseTimes?.length)) {
           // Absolute calendar eligibility may predate this repeated cycle.
           // Its earlier records still constrain rolling caps, not this quota.
           quota.historyStart = memberStart.getTime();
@@ -3573,7 +3608,7 @@ function scheduleTreatmentRelativeCourse(
         }
         // Only the acceptor can spend an overlapping phase's count/caps.
         const counted = collect && originalRepeat && !isSingleAdministrationRepeat(originalRepeat, original.schedule?.explicitEvents)
-          ? { ...originalRepeat, count: undefined, countMax: undefined, occurrenceCap: undefined }
+          ? { ...originalRepeat, count: undefined, countMax: undefined, sharedCount: undefined, occurrenceCap: undefined }
           : originalRepeat;
         // Eligibility is already owned by effectiveFrom/countEligibilityStart.
         // Keep the resolved nominal grid when a separate calendar floor exists.
@@ -3618,8 +3653,9 @@ function scheduleTreatmentRelativeCourse(
             ? { priorDoseTimes: rollingPriorTimes(rollingUsage, key, options.priorDoseTimes) } : {}),
           ...(member.countEligibilityStart ? { countEligibilityStart: member.countEligibilityStart } : {}),
         } as PhaseCountOptions;
-        if (deferred && collect) {
+        if ((deferred || shared) && collect) {
           const completeMember = (completion: AcceptedStageCompletion) => {
+            if (quota.shared) quota.advance = undefined;
             if (canComplete) finishMember(completion);
             if (dependencies && original.sourceMember !== undefined) {
               const ready = completePhaseDependency(dependencies, original.sourceMember, completion);
@@ -3634,7 +3670,7 @@ function scheduleTreatmentRelativeCourse(
             else if (effectiveEnd) completeMember({ end: effectiveEnd });
           };
           quota.advance = (at, accepted) => {
-            if (accepted && quota.remaining === 0) {
+            if (accepted && cycleCountAllowance(quota).remaining === 0) {
               const completion = completionAfterAcceptedAdministration(original, new Date(at), timeZone);
               if (!completion) {
                 // The authored fence still completes this window when the
@@ -3757,7 +3793,7 @@ function upperBoundTimestamp(sorted: readonly number[], target: number): number 
 interface TimedRangeLedger {
   candidates: UncommittedCycleEvent[];
   selected: UncommittedCycleEvent[];
-  quotas: Map<CycleEventQuota, number | undefined>;
+  quotas: Map<CycleCountAllowance, number | undefined>;
 }
 interface ChronologicalAcceptor {
   (event: UncommittedCycleEvent): boolean;
@@ -3805,7 +3841,7 @@ function maximumTimedRangePlan(
     if (!values) priorBuckets.set(bucket, values = []);
     values.push(at);
   }
-  const futureCounts = new Map<CycleEventQuota, number>();
+  const futureCounts = new Map<CycleCountAllowance, number>();
   const futureBuckets = occurrence ? new Map<string, number>() : undefined;
   const capPartitions: Array<{ width: number; maximum: number; bucket: number; slots: number; last: number; total: number }> = [];
   for (const cap of range.caps) {
@@ -3824,7 +3860,7 @@ function maximumTimedRangePlan(
   for (const event of candidates) {
     const bucket = occurrence ? occurrenceCapBucketKey(new Date(event.at), occurrence, zone) : "";
     if (event.at >= from) {
-      futureCounts.set(event.quota, (futureCounts.get(event.quota) ?? 0) + 1);
+      futureCounts.set(cycleCountAllowance(event.quota), (futureCounts.get(cycleCountAllowance(event.quota)) ?? 0) + 1);
       if (futureBuckets) futureBuckets.set(bucket, (futureBuckets.get(bucket) ?? 0) + 1);
       firstFuture = Math.min(firstFuture, event.at);
       // Every partition spans less than a rolling window. Its supply is
@@ -3846,12 +3882,12 @@ function maximumTimedRangePlan(
   }
   if (!Number.isFinite(firstFuture)) return [];
   const required = new Set<UncommittedCycleEvent>();
-  let pastQuotaCounts: Map<CycleEventQuota, number> | undefined;
+  let pastQuotaCounts: Map<CycleCountAllowance, number> | undefined;
   let pastBucketCounts: Map<string, number> | undefined;
   for (const event of ledger.selected) if (event.at < from) {
     required.add(event);
     pastQuotaCounts ??= new Map();
-    pastQuotaCounts.set(event.quota, (pastQuotaCounts.get(event.quota) ?? 0) + 1);
+    pastQuotaCounts.set(cycleCountAllowance(event.quota), (pastQuotaCounts.get(cycleCountAllowance(event.quota)) ?? 0) + 1);
     if (occurrence) {
       const bucket = occurrenceCapBucketKey(new Date(event.at), occurrence, zone);
       pastBucketCounts ??= new Map();
@@ -3879,9 +3915,12 @@ function maximumTimedRangePlan(
   for (const partition of capPartitions)
     upper = Math.min(upper, partition.total + partitionSupply(partition));
   if (lifetimeUpper !== undefined) upper = Math.min(upper, lifetimeUpper);
-  const completed = new Map<CycleEventQuota, number>();
-  for (const [quota, count] of ledger.quotas)
-    if (quota.advance && quota.remaining === 0 && count !== undefined) completed.set(quota, count);
+  const completed = new Map<CycleCountAllowance, number>();
+  for (const event of candidates) {
+    const quota = cycleCountAllowance(event.quota), count = ledger.quotas.get(quota);
+    if ((event.quota.shared ? finiteCompletionCount(event.member.schedule?.recurrence) !== undefined : event.quota.advance) &&
+        quota.remaining === 0 && count !== undefined) completed.set(quota, count);
+  }
   // Long independent or completely filled ranges have a linear proof and
   // never enter the combinatorial planner or allocate a constraint graph.
   const attainableValues = [range.high, range.low];
@@ -3914,10 +3953,10 @@ function maximumTimedRangePlan(
     while (objectiveStart < times.length && times[objectiveStart] < from) objectiveStart++;
     const plan = fixedCapacityQuantities(times, range.caps, prior, range, zone, objectiveStart);
     if (!plan) return undefined;
-    const counts = new Map<CycleEventQuota, number>();
+    const counts = new Map<CycleCountAllowance, number>();
     let requiredCount = 0;
     for (const event of events) {
-      counts.set(event.quota, (counts.get(event.quota) ?? 0) + 1);
+      counts.set(cycleCountAllowance(event.quota), (counts.get(cycleCountAllowance(event.quota)) ?? 0) + 1);
       if (required.has(event)) requiredCount++;
     }
     if (requiredCount !== required.size) return plan;
@@ -3934,13 +3973,13 @@ function maximumTimedRangePlan(
   if (bestQuantity >= upper - 1e-9) return assign(best, bestValues);
   if (candidates.length > MAX_CAPACITY_SLOTS) capacityComplexity();
   const chosen: UncommittedCycleEvent[] = [];
-  const usedQuota = new Map<CycleEventQuota, number>(), usedBucket = new Map<string, number>();
+  const usedQuota = new Map<CycleCountAllowance, number>(), usedBucket = new Map<string, number>();
   let states = 0;
   const explore = (start: number): void => {
     for (let index = start; index < candidates.length; index++) {
       if (++states > MAX_CAPACITY_STATES) capacityComplexity();
-      const event = candidates[index], quotaCount = usedQuota.get(event.quota) ?? 0;
-      const quotaMax = ledger.quotas.get(event.quota), bucket = buckets[index];
+      const event = candidates[index], quota = cycleCountAllowance(event.quota), quotaCount = usedQuota.get(quota) ?? 0;
+      const quotaMax = ledger.quotas.get(quota), bucket = buckets[index];
       const bucketCount = usedBucket.get(bucket) ?? 0;
       let occurrenceUsed = bucketCount + supplied[index];
       if (rollingOccurrence) {
@@ -3950,9 +3989,9 @@ function maximumTimedRangePlan(
       }
       if ((quotaMax === undefined || quotaCount < quotaMax) &&
           (!authoredOccurrence || occurrenceUsed < authoredOccurrence.max)) {
-        chosen.push(event); usedQuota.set(event.quota, quotaCount + 1); usedBucket.set(bucket, bucketCount + 1);
+        chosen.push(event); usedQuota.set(quota, quotaCount + 1); usedBucket.set(bucket, bucketCount + 1);
         if (consider(chosen) && bestQuantity < upper - 1e-9) explore(index + 1);
-        chosen.pop(); usedQuota.set(event.quota, quotaCount); usedBucket.set(bucket, bucketCount);
+        chosen.pop(); usedQuota.set(quota, quotaCount); usedBucket.set(bucket, bucketCount);
       }
       if (bestQuantity >= upper - 1e-9 || required.has(event)) return;
     }
@@ -3973,7 +4012,9 @@ function chronologicalCapAcceptor(
   const ledgers = new Map<string, ChronologicalCapLedger>();
   let hasRanges = false;
   const accept = (event: UncommittedCycleEvent): boolean => {
-    let state = ledgers.get(event.key);
+    const key = event.quota.shared?.key ?? event.key;
+    const allowance = cycleCountAllowance(event.quota);
+    let state = ledgers.get(key);
     if (!state) {
       let maximum = remainingMaximum;
       if (optimizeRanges && maximum === undefined && event.member.amounts?.[0]?.range && hasLifetimeLimit(event.member)) {
@@ -4010,14 +4051,14 @@ function chronologicalCapAcceptor(
         occurrenceUsed: 0,
         priorByBucket,
       };
-      ledgers.set(event.key, state);
+      ledgers.set(key, state);
     }
     if (state.rangePlan) {
       state.rangePlan.candidates.push(event);
-      if (!state.rangePlan.quotas.has(event.quota))
-        state.rangePlan.quotas.set(event.quota, event.quota.remaining);
+      if (!state.rangePlan.quotas.has(allowance))
+        state.rangePlan.quotas.set(allowance, allowance.remaining);
     }
-    if (event.quota.remaining !== undefined && event.quota.remaining <= 0) return false;
+    if (allowance.remaining !== undefined && allowance.remaining <= 0) return false;
     const at = event.at;
     const quantity = state.range?.low;
     if (state.range && state.remainingQuantity !== undefined && at >= from &&
@@ -4062,7 +4103,7 @@ function chronologicalCapAcceptor(
       const past = supplied?.length ?? 0;
       if (state.occurrenceUsed + past >= occurrence.max) return false;
     }
-    if (event.quota.remaining !== undefined) event.quota.remaining--;
+    if (allowance.remaining !== undefined) allowance.remaining--;
     state.rangePlan?.selected.push(event);
     if (state.remainingQuantity !== undefined && at >= from) state.remainingQuantity -= quantity!;
     if (state.caps.length) {
@@ -4093,7 +4134,7 @@ function chronologicalCapAcceptor(
   };
   return Object.assign(accept, { finish(events: UncommittedCycleEvent[], from: number) {
     if (!hasRanges) return events;
-    const selected = events.filter(event => !ledgers.get(event.key)?.rangePlan && event.at >= from);
+    const selected = events.filter(event => !ledgers.get(event.quota.shared?.key ?? event.key)?.rangePlan && event.at >= from);
     for (const state of ledgers.values()) if (state.rangePlan)
       selected.push(...maximumTimedRangePlan(state.rangePlan, state.range!, prior, zone, from));
     selected.sort((a, b) => a.at - b.at || a.serial - b.serial);
@@ -4137,7 +4178,11 @@ function chronologicalRepeatedEvents(
   context?: MedicationContext,
   lifetimeUsage?: LifetimeCycleUsage
 ): UncommittedCycleEvent[] {
-  if (options.priorCount !== undefined && options.priorCount > 0)
+  const sharedGroup = !course.cycleInterval && course.stages.length === 1 && !hasRepeatedStep(course)
+    ? course.stages[0].administrations[0]?.schedule?.recurrence?.sharedCount?.groupId : undefined;
+  const sharedPriorCount = sharedGroup !== undefined && course.stages[0].administrations.every(
+    member => member.schedule?.recurrence?.sharedCount?.groupId === sharedGroup) ? options.priorCount : undefined;
+  if (options.priorCount !== undefined && options.priorCount > 0 && sharedPriorCount === undefined)
     throw new MedicationQuantityCalculationError("repeated-course-history-needs-timestamps",
       "A prior count cannot identify which repeated phase or cycle was administered or when its rolling cap expires. Supply priorDoseTimes without priorCount for this course; its instructions and limits remain unchanged.");
   const from = coerceDate(options.from, "from"),
@@ -4170,7 +4215,7 @@ function chronologicalRepeatedEvents(
     if (at !== undefined && !Number.isFinite(at)) return false;
     let queuedActual = false;
     if (actualReplay && quota.historyStart !== undefined) {
-      const unmatched = memberActualHistory(actualReplay, key, prior);
+      const unmatched = memberActualHistory(actualReplay, quota.shared?.key ?? key, prior);
       for (const [recorded, count] of unmatched) {
         if (recorded < quota.historyStart || recorded >= from.getTime() ||
             quota.historyEnd !== undefined && recorded >= quota.historyEnd) continue;
@@ -4181,13 +4226,14 @@ function chronologicalRepeatedEvents(
       quota.recordedIndex = 0;
     }
     if (quota.recordedTimes) {
-      let available = quota.remaining ?? Infinity;
+      let available = cycleCountAllowance(quota).remaining ?? Infinity;
       while (available > 0 && quota.recordedIndex! < quota.recordedTimes.length) {
         const recorded = quota.recordedTimes[quota.recordedIndex!++];
         // Only queued records are guaranteed to be spent. A finite phase
         // may finish after one; leave its other candidates for the next phase.
-        if (!claimActualHistory(actualReplay!.get(key)!, recorded)) continue;
+        if (!claimActualHistory(actualReplay!.get(quota.shared?.key ?? key)!, recorded)) continue;
         quota.hasActualHistory = true;
+        if (quota.shared) quota.shared.hasActualHistory = true;
         available--;
         queue.push({ at: recorded, iso: formatZonedIso(new Date(recorded), zone),
           key, member, quota, recorded: true, serial: serial++ });
@@ -4209,17 +4255,19 @@ function chronologicalRepeatedEvents(
     let next = queue.first();
     while (next && next.at < before) {
       const event = queue.pop()!;
+      const allowance = cycleCountAllowance(event.quota);
+      if (event.quota.shared && allowance.remaining === 0) { next = queue.first(); continue; }
       let actual = event.recorded === true;
       // Actual records are queued before coincident planned clocks. Stable
       // chronological order needs only the last recorded point, not a second
       // history set or another scan of the recorded administrations.
-      if (!actual && event.quota.lastRecordedAt === event.at) {
+      if (!actual && (event.quota.shared ?? event.quota).lastRecordedAt === event.at) {
         next = queue.first();
         continue;
       }
       if (!actual && actualReplay && event.at < from.getTime() &&
-          (event.quota.remaining === undefined || event.quota.remaining > 0)) {
-        actual = claimActualHistory(memberActualHistory(actualReplay, event.key, prior), event.at);
+          (allowance.remaining === undefined || allowance.remaining > 0)) {
+        actual = claimActualHistory(memberActualHistory(actualReplay, event.quota.shared?.key ?? event.key, prior), event.at);
       }
       // A recorded administration already occupies the rolling ledger. Its
       // matching replay spends its finite phase count, never another amount.
@@ -4231,10 +4279,12 @@ function chronologicalRepeatedEvents(
       // This also ensures a ranged plan first observes the quota after all
       // of this phase's actual history has drained.
       const accepted = actual || ((event.at >= from.getTime() ||
-        (!event.member.asNeeded && !event.quota.hasActualHistory)) && accept(event));
-      if (actual) event.quota.lastRecordedAt = event.at;
-      if (actual && event.quota.remaining !== undefined && event.quota.remaining > 0) event.quota.remaining--;
-      event.quota.advance?.(event.at, accepted);
+        (!event.member.asNeeded && !(event.quota.shared ?? event.quota).hasActualHistory)) && accept(event));
+      if (actual) (event.quota.shared ?? event.quota).lastRecordedAt = event.at;
+      if (actual && allowance.remaining !== undefined && allowance.remaining > 0) allowance.remaining--;
+      if (accepted && event.quota.shared && allowance.remaining === 0) {
+        for (const member of event.quota.shared.members) member.advance?.(event.at, true);
+      } else event.quota.advance?.(event.at, accepted);
       if (accepted && event.at >= from.getTime()) {
         if (explicitQuotas?.has(event.quota))
           explicitQuotas.set(event.quota, explicitQuotas.get(event.quota)! + 1);
@@ -4257,9 +4307,9 @@ function chronologicalRepeatedEvents(
       singleCycle,
       {
         ...options,
-        from: cycleLead ? new Date(cycleStart.getTime() + cycleLead) : cycleStart,
+        from: sharedPriorCount !== undefined ? from : cycleLead ? new Date(cycleStart.getTime() + cycleLead) : cycleStart,
         orderedAt: cycleStart,
-        priorCount: undefined,
+        priorCount: sharedPriorCount,
         limit: 10000,
       },
       next ?? undefined,
@@ -4286,7 +4336,7 @@ function chronologicalRepeatedEvents(
     // admissions with the final range plan before deciding if a slot remains.
     for (const [quota, difference] of explicitQuotas)
       if (quota.explicitEventStatus?.possible &&
-          (quota.remaining === undefined || quota.remaining + difference > 0)) unresolvedExplicitEventSupply();
+          (cycleCountAllowance(quota).remaining === undefined || cycleCountAllowance(quota).remaining! + difference > 0)) unresolvedExplicitEventSupply();
   }
   return selected;
 }
@@ -4325,7 +4375,7 @@ function scheduleRepeatedCourse(
   const results: string[] = [];
   const singleCycle = { ...course, cycleInterval: undefined };
   const rollingUsage = hasRollingCycleLimit(singleCycle) ? new Map<string, string[]>() : undefined;
-  if (rollingUsage && !definitelyNonOverlappingCycle(singleCycle, course.cycleInterval)) {
+  if (hasSharedAdministrationCount(singleCycle) || rollingUsage && !definitelyNonOverlappingCycle(singleCycle, course.cycleInterval)) {
     // An elapsed phase can outlast a later civil cycle after a clock change,
     // even when the first cycle fits. Only structural clipping proves that
     // every cycle is disjoint; otherwise admit events in timestamp order.
@@ -4713,7 +4763,7 @@ function unrecordedCountCandidates(candidates: string[], options: NextDueDoseOpt
 /** A relationship or relative window needs the shared course resolver. */
 function administrationRequiresCourseContext(one: CanonicalAdministration): boolean {
   return Boolean(one.phaseOrigin || one.phaseStart || one.phaseEnd || one.phaseOriginIssue ||
-    one.phasePredecessors?.length || one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset);
+    one.phasePredecessors?.length || one.schedule?.recurrence?.sharedCount || one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset);
 }
 
 /** A single administration with no course relationship has scalar semantics,
@@ -4739,7 +4789,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     if (course.cycleInterval && zone) return scheduleRepeatedCourse(course, options, zone);
     const single = scalarCourseAdministration(course);
     if (single) return nextDueDoses(single, options);
-    if (zone && hasRepeatedStep(course) && hasRollingCycleLimit(course)) {
+    if (zone && (hasSharedAdministrationCount(course) || hasRepeatedStep(course) && hasRollingCycleLimit(course))) {
       const events = chronologicalRepeatedEvents(course, options, zone, undefined, options.limit ?? 10);
       return events.map(event => event.iso);
     }
@@ -6678,8 +6728,9 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
   let frequencyMaximum = false;
   let periodMinimum = false;
   let infusionDurationMaximum = false;
-  const count = positiveInteger(repeat.count);
-  const countMax = positiveInteger(repeat.countMax);
+  const declaredCount = repeat.sharedCount ?? repeat;
+  const count = positiveInteger(declaredCount.count);
+  const countMax = positiveInteger(declaredCount.countMax);
   if (countMax && (!count || countMax >= count) && countMax !== count) {
     // An upper count limits admissions but cannot promise stage completion,
     // whether supplied alone or as a range. The acceptor already owns its quota.
@@ -8027,7 +8078,7 @@ function hasIndependentClockAlternatives(course: CanonicalCourse, zone: string, 
   if (!stage.end && stage.count !== undefined && stage.count !== 1) return false;
   const repeatedCycles = course.cycleInterval && course.cycleCount !== 1;
   for (const member of stage.administrations) {
-    if (member.phasePredecessors?.length) return false;
+    if (member.phasePredecessors?.length || member.schedule?.recurrence?.sharedCount) return false;
     // Fixed cycle starts and member-local duration caps remain independent
     // even when those windows overlap. An unbounded member may instead use
     // the shared completion horizon, so retain its joint plan.
@@ -8229,8 +8280,8 @@ function calculateCourseTotalUnits(
   const anchor = options.orderedAt === undefined ? queryStart : coerceDate(options.orderedAt, "orderedAt");
   const repeatedStep = hasRepeatedStep(course);
   if (repeatedStep) lifetimeUsage ??= lifetimeCycleUsage(course);
-  if (!capacityOnly && !course.cycleInterval && repeatedStep &&
-      (hasRollingCycleLimit(course) || hasTimedRangedCaps(course))) {
+  if (!capacityOnly && !course.cycleInterval && (hasSharedAdministrationCount(course) || repeatedStep &&
+      (hasRollingCycleLimit(course) || hasTimedRangedCaps(course)))) {
     return qualifyCourseSupply(course,
       maximumChronologicalCourseUnits(course, options, zone, queryStart, queryEnd, anchor, lifetimeUsage, unitResult));
   }
@@ -8260,7 +8311,7 @@ function calculateCourseTotalUnits(
         rangeUsage = new Map(); break;
       }
     const timedRangedCaps = hasTimedRangedCaps(singleCycle);
-    if (!capacityOnly && (timedRangedCaps || priorCycleUsage && (rangeUsage || !definitelyNonOverlappingCycle(singleCycle, course.cycleInterval)))) {
+    if (!capacityOnly && (hasSharedAdministrationCount(singleCycle) || timedRangedCaps || priorCycleUsage && (rangeUsage || !definitelyNonOverlappingCycle(singleCycle, course.cycleInterval)))) {
       return qualifyCourseSupply(course, maximumChronologicalCourseUnits(course, options, zone,
         queryStart, queryEnd, anchor, lifetimeUsage, unitResult));
     }
