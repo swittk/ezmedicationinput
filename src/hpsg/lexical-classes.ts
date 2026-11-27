@@ -436,6 +436,10 @@ export function isThaiDaypartListSeparator(
     THAI_DAYPART_LIST_SEPARATORS.has(separator.canonical ?? separator.lower) &&
     /[\u0E00-\u0E7F]/u.test(left.original) && /[\u0E00-\u0E7F]/u.test(right.original));
 }
+/** Existing rate-head surfaces retain their registered action valence. */
+export const CLINICAL_RATE_ADMINISTRATION_HEADS = new Map(
+  stringEntries(source.clinicalRateAdministrationHeads)
+);
 export const MEDICATION_OBJECT_FILLERS = setOf(source.medicationObjectFillers);
 /** Typed resultative adjustment leads; the following cadence owns the new phase. */
 export const PHASE_ADJUSTMENT_LEAD_SEQUENCES =

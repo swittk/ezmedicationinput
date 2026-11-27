@@ -1,3 +1,4 @@
+import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveActionRelationSurface } from "../../relation-terminology";
 import { routeLexicalRule } from "./core-rules";
 import { LexKind } from "../../lexer/token-types";
@@ -21,6 +22,7 @@ import {
   DOSE_UNIT_CONNECTORS,
   DAYPART_INTERVAL_TOKENS,
   MEDICATION_OBJECT_FILLERS,
+  CLINICAL_RATE_ADMINISTRATION_HEADS,
   MAXIMUM_COUNT_LEAD_TOKENS,
   MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
   SITE_TRAILING_INSTRUCTION_WORDS
@@ -181,7 +183,7 @@ function doseQuantityPeriodUnit(
     unit === FhirPeriodUnit.Week || unit === FhirPeriodUnit.Day ? unit : undefined;
 }
 
-function hasAdministrationCue(context: HpsgClauseContext, before: number, allowPrecedingDose = false): boolean {
+function administrationCue(context: HpsgClauseContext, before: number, allowPrecedingDose = false) {
   const first = Math.max(0, before - 8);
   const maximum = allowPrecedingDose &&
     MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(normalizeTokenLower(context.tokens[before]));
@@ -193,11 +195,13 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number, allowP
         hasTimingAbbreviationMeaning(token) || hasPrnMeaning(token))) precedingSchedule = true;
     // An administration head owns its nearest numeric argument. A later
     // cumulative limit cannot borrow it across the already administered dose.
-    if (/^(?:infuse|infusion|run|administer|give)$/u.test(lower)) {
-      if (!precedingAmount) return true;
+    const action = CLINICAL_RATE_ADMINISTRATION_HEADS.get(lower);
+    if (action) {
+      const definition = resolveMedicationInstructionAction(action, context.options, true);
+      if (!precedingAmount) return definition;
       // A scheduled or as-needed dose keeps its administration head. A later limit
       // cannot borrow that head as an infusion-rate instruction.
-      if (!allowPrecedingDose || precedingSchedule) return false;
+      if (!allowPrecedingDose || precedingSchedule) return undefined;
       // A borrowed administration head still belongs to its typed route.
       // Reuse the route constituent so multiword and configured routes retain
       // the same ownership as a single annotated route token.
@@ -205,12 +209,12 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number, allowP
       for (let routeStart = index + 1; routeStart < before; routeStart++)
         for (const sign of route.match(context, routeStart))
           if (sign.tokens[sign.tokens.length - 1].index < context.tokens[before].index &&
-              sign.synsem.head.route?.code === RouteCode["Oral route"]) return false;
-      return true;
+              sign.synsem.head.route?.code === RouteCode["Oral route"]) return undefined;
+      return definition;
     }
     if (medicationAmountAt(context, index)) precedingAmount = true;
   }
-  return false;
+  return undefined;
 }
 
 function durationAfter(
@@ -247,7 +251,7 @@ function clinicalSign(
   context: HpsgClauseContext,
   rule: string,
   indices: number[],
-  clinicalQuantity: HpsgClinicalQuantityFeature,
+  clinicalQuantity: HpsgClinicalQuantityFeature | undefined,
   dose?: HpsgDoseFeature,
   schedule?: HpsgScheduleFeature,
   warning?: string,
@@ -261,7 +265,7 @@ function clinicalSign(
     consumedTokenIndices: tokens.map((token) => token.index),
     synsem: {
       head: {
-        dose: { ...dose, clinicalQuantity },
+        dose: clinicalQuantity ? { ...dose, clinicalQuantity } : dose,
         schedule,
         ...(explicitRoute !== undefined ? { route: { code: explicitRoute, text: "intravenous" } } : {})
       },
@@ -317,7 +321,7 @@ function activeDoseInCarrierOverTime(
   const activeDose = massTerm(value, normalizeUnit(activeUnit, context.options) ?? activeUnit);
   const carrier = volumeOrMassTerm(carrierNumber, normalizeUnit(carrierUnit, context.options) ?? carrierUnit);
   if (!activeDose || !carrier || carrier.dimension !== "volume" ||
-      !hasAdministrationCue(context, phraseStart)) return undefined;
+      !administrationCue(context, phraseStart)) return undefined;
   if (qualifiedCarrier) carrier.comparator = qualifiedCarrier.comparator;
 
   // The carrier-volume constituent may have a nominal daughter between its
@@ -432,7 +436,7 @@ function fixedVolumeOverTime(
   // `volume over elapsed-time` is itself a bounded dimensional constituent.
   // Other duration relations require the selected local administration head;
   // its registered valence keeps runtime distinct from a later course length.
-  if (durationLead !== "over" && !methodOwned && !hasAdministrationCue(context, phraseStart)) return undefined;
+  if (durationLead !== "over" && !methodOwned && !administrationCue(context, phraseStart)) return undefined;
   const durationQualifier = duration.comparator ? { comparator: duration.comparator } : {};
   const clinicalQuantity: HpsgClinicalQuantityFeature = {
     representation: "dose-with-rate-ratio",
@@ -549,7 +553,7 @@ function weightQuantity(
 /** Shared lexical rate-head ownership, including a local route or AT marker. */
 export function clinicalRateHeadAt(
   context: HpsgClauseContext, phraseStart: number, end: number, allowPrecedingDose = false, period = 1
-): { licensed: boolean; marker: number | undefined } {
+): { licensed: boolean; rateSpecific: boolean; marker: number | undefined } {
   const cue = context.tokens[phraseStart - 1]?.original === ","
     ? context.tokens[phraseStart - 2] : context.tokens[phraseStart - 1];
   const marker = separateRateMarker(context, phraseStart);
@@ -558,11 +562,14 @@ export function clinicalRateHeadAt(
   // A route cannot turn the maximum head or its numeric daughter into a rate.
   const maximum = MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[phraseStart])) ||
     cue && MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(cue));
-  return { marker, licensed: marker !== undefined || context.tokens[phraseStart].lower.startsWith("@") ||
+  const markedRate = marker !== undefined || context.tokens[phraseStart].lower.startsWith("@") ||
     !maximum && (getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] &&
       (period <= 1 || allowPrecedingDose || !hasPrecedingMedicationAmount(context, phraseStart)) ||
-      getRouteMeaning(after)?.code === RouteCode["Intravenous route"]) ||
-    hasAdministrationCue(context, phraseStart, allowPrecedingDose && !maximum) };
+      getRouteMeaning(after)?.code === RouteCode["Intravenous route"]);
+  const administration = markedRate ? undefined :
+    administrationCue(context, phraseStart, allowPrecedingDose && !maximum);
+  return { marker, licensed: Boolean(markedRate || administration),
+    rateSpecific: Boolean(markedRate || administration?.administrationDurationIntroducers?.length) };
 }
 
 function fixedTimeQuantity(
@@ -572,7 +579,8 @@ function fixedTimeQuantity(
   expression: UnitExpression,
   phraseStart = start,
   comparator?: HpsgClinicalQuantityFeature["numerator"]["comparator"],
-  maximum?: ReturnType<typeof maximumDosePerPeriodAt>
+  maximum?: ReturnType<typeof maximumDosePerPeriodAt>,
+  range?: HpsgDoseFeature["range"]
 ) {
   const parts = expression.compact.split("/");
   if (parts.length !== 2) return undefined;
@@ -588,15 +596,16 @@ function fixedTimeQuantity(
     ...(head.marker !== undefined ? [head.marker] : []),
     ...Array.from({ length: expression.end - start }, (_, offset) => start + offset)
   ];
-  // A civil daily amount without a rate head belongs to the ordinary dose
-  // and recurrence. A separately admitted maximum keeps its existing owner.
-  if (!maximum && !head.licensed && denominator.value === 1 && denominator.unit === FhirPeriodUnit.Day) {
-    const dose = { value, unit: numerator.unit };
-    return clinicalSign(context, "hpsg.lex.clinicalQuantity.dailyDose", indices, {
-      representation: "dose", status: "resolved", numerator, denominators: [], projectedDose: dose
+  // A civil daily amount belongs to the dose unless an explicit rate marker
+  // or the selected method's runtime valence owns it as an infusion rate.
+  // Generic administration and a separately admitted maximum keep their owners.
+  if (!maximum && !head.rateSpecific && denominator.value === 1 && denominator.unit === FhirPeriodUnit.Day) {
+    const dose = { ...(range ? { range } : { value }), unit: numerator.unit };
+    return clinicalSign(context, "hpsg.lex.clinicalQuantity.dailyDose", indices, range ? undefined : {
+      representation: "dose", status: "resolved", numerator, denominators: [], projectedDose: { value, unit: numerator.unit }
     }, dose, { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day });
   }
-  if (!clinicalRatePeriodUnit(denominator.unit)) return undefined;
+  if (range || !clinicalRatePeriodUnit(denominator.unit)) return undefined;
   const duration = durationAfter(context, expression.end);
   // A clause-initial rate with its own elapsed duration is a complete typed
   // complement. The selected sequential construction owns its omitted method.
@@ -795,26 +804,15 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   const expression = compactUnitExpression(
     context, quantityEnd + 1, accepts, unit ?? ""
   );
-  if (rangedNumber) {
-    // An unsupported fixed-rate range still owns both numeric endpoints.
-    // Neither endpoint may become an exact rate or an independent scalar dose.
-    const weight = expression && weightQuantity(context, quantityEnd, value, expression, phraseStart);
-    if (expression && (clinicalTimeDenominator(expression.compact.split("/")[1]) ||
-        weight?.synsem.head.dose?.clinicalQuantity?.representation === "rate-quantity")) {
-      const owned = context.clinicalCache.unlicensedRateTokenIndices ??= new Set<number>();
-      for (let index = phraseStart; index < expression.end; index++) owned.add(context.tokens[index].index);
-    }
-    return [];
-  }
   if (!expression) {
     // Only a scalar unit can finish the additive dose construction. A per-time
     // continuation belongs to the complete mixed numeric daughter above.
-    const additive = plainNumber?.mixed ? additiveFractionDose(context, phraseStart) : undefined;
+    const additive = !rangedNumber && plainNumber?.mixed ? additiveFractionDose(context, phraseStart) : undefined;
     return additive ? [additive] : [];
   }
   const weight = qualifyClinicalSign(context, phraseStart, quantityEnd,
     weightQuantity(context, quantityEnd, value, expression, phraseStart), comparator);
-  if (weight) {
+  if (!rangedNumber && weight) {
     // Weight rates own the same external AT/@ marker as fixed rates.
     // Publish ownership before the site fallback examines that marker.
     const owned = context.clinicalCache.quantityTokenIndices ??= new Set<number>();
@@ -824,14 +822,16 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     return signs;
   }
   const fixed = qualifyClinicalSign(context, phraseStart, quantityEnd,
-    fixedTimeQuantity(context, quantityEnd, value, expression, phraseStart, comparator, maximum), comparator);
+    fixedTimeQuantity(context, quantityEnd, value, expression, phraseStart, comparator, maximum, rangedNumber?.range), comparator);
   if (fixed) {
     const owned = context.clinicalCache.quantityTokenIndices ??= new Set<number>();
     for (const token of fixed.tokens) owned.add(token.index);
     const signs = [fixed];
     (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
     return signs;
-  } else {
+  } else if (!rangedNumber || clinicalTimeDenominator(expression.compact.split("/")[1]) ||
+      weight?.synsem.head.dose?.clinicalQuantity?.representation === "rate-quantity") {
+    // An unsupported rate range still owns both numeric endpoints.
     // Unit morphology already established a per-time quantity. Without a
     // licensed rate head it remains source text; its numeric daughter must
     // not become a separate, unitless administration dose.

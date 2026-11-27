@@ -1,4 +1,5 @@
 import { lexInput } from "../src/lexer/lex";
+import { getMedicationLexerLocalePack, registerMedicationLexerLocalePack } from "../src/lexer/locale";
 import { scanSurfaceTokens } from "../src/lexer/surface";
 import { SurfaceTokenKind } from "../src/lexer/token-types";
 import { unifySynsem } from "../src/hpsg/unification";
@@ -5215,7 +5216,7 @@ describe("elapsed ceiling and decimal range ownership", () => {
 
 
 describe("fixed amount and rate denominator ownership", () => {
-  it.each(["Take 5 mg per day", "Take 5 mg/day", "Take 5 mg daily"])(
+  it.each(["Take 5 mg per day", "Take 5 mg/day", "Take 5 mg daily", "Give 5 mg per day by mouth"])(
     "keeps an unmarked daily mass amount as the scalar dose: %s", source => {
       const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
       for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
@@ -5235,7 +5236,7 @@ describe("fixed amount and rate denominator ownership", () => {
     }
   );
 
-  it.each(["Infuse 5 mg per hour", "Infuse 5 mg per day"])(
+  it.each(["Infuse 5 mg per hour", "Infuse 5 mg per day", "Give 5 mg per hour"])(
     "does not turn a rate-owned phrase into a daily dose: %s", source => {
       const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
       for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
@@ -5250,6 +5251,58 @@ describe("fixed amount and rate denominator ownership", () => {
       expect(JSON.stringify(parsed)).toBe(before);
     }
   );
+
+  it.each(["Take 0.25–0.5 mg per day", "Give 0.25–0.5 mg/day by mouth"])(
+    "preserves the full daily dose range before rate ownership: %s", source => {
+      const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+      const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 2 };
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+        expect(members).toHaveLength(1);
+        expect(members[0].amounts?.[0].range).toMatchObject({
+          low: { value: 0.25, unit: "mg" }, high: { value: 0.5, unit: "mg" }
+        });
+        expect(members[0].amounts?.[0].quantity).toBeUndefined();
+        expect(members[0].amounts?.[0].rate).toBeUndefined();
+        expect(members[0].schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+        expect(nextDueDoses(input, query)).toEqual(["2026-12-01T09:00:00+00:00", "2026-12-02T09:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: 1, unit: "mg", quantityKind: "maximum" });
+      }
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(parsed)).toBe(before);
+    }
+  );
+
+  it("uses registered canonical action valence at the daily quantity boundary", () => {
+    const original = getMedicationLexerLocalePack("en");
+    registerMedicationLexerLocalePack({ locale: "en", apply: (tokens, input) =>
+      (original?.apply(tokens, input) ?? tokens).map((token, index) => token.lower === "clinicgive"
+        ? { ...token, index, canonical: "give" } : token.lower === "clinicinfuse"
+          ? { ...token, index, canonical: "infuse" } : { ...token, index })
+    });
+    try {
+      for (const [lead, rateOwned] of [["clinicgive", false], ["clinicinfuse", true]] as const) {
+        const source = `${lead} 5 mg per day`, parsed = parsePublicSig(source);
+        for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+          JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+          const member = importCanonicalCourse(input).stages[0].administrations[0];
+          if (rateOwned) {
+            expect(member.amounts).toBeUndefined();
+            expect(member.schedule?.recurrence?.frequency).toBeUndefined();
+          } else {
+            expect(member.amounts?.[0].quantity).toMatchObject({ value: 5, unit: "mg" });
+            expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+          }
+        }
+        expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      }
+    } finally {
+      registerMedicationLexerLocalePack(original ?? { locale: "en", apply: tokens =>
+        tokens.map((token, index) => ({ ...token, index })) });
+    }
+  });
 
   it("keeps the independently admitted daily maximum beside its daily dose", () => {
     const source = "Take 5 mg per day, maximum 10 mg per day", parsed = parsePublicSig(source);

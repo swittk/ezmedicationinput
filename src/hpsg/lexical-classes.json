@@ -1354,6 +1354,13 @@
       "เหลือ"
     ]
   ],
+  "clinicalRateAdministrationHeads": {
+    "infuse": "infuse",
+    "infusion": "infuse",
+    "run": "infuse",
+    "administer": "give",
+    "give": "give"
+  },
   "medicationObjectFillers": [
     "medication",
     "medicine",
