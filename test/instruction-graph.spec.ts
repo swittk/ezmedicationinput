@@ -6447,3 +6447,25 @@ describe("selected primary and procedural complement ownership", () => {
     expect(row).toEqual(before);
   });
 });
+
+
+it("retains the typed bilateral Site count and its current argument annotations", () => {
+  const source = "Do not instill 1 drop in both eyes";
+  const frame = parseInstructionActions(source)[0];
+  const site = frame.args.find(argument => argument.role === AdviceArgumentRole.Site)!;
+  expect(site.administrationTargetCount).toBe(2);
+  const countAnnotation: FhirExtension = { url: "administrationTargetCount", id: "paired-site-count", valueInteger: 2,
+    _valueInteger: { extension: [{ url: "urn:test:count-note", valueString: "paired anatomy" }] } };
+  const unknown: FhirExtension = { url: "urn:test:site-note", valueString: "retain current site annotation" };
+  site.sourceExtensions = [countAnnotation, unknown];
+  const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en", actions: [frame] };
+  const before = structuredClone(graph), wire = buildInstructionGraphExtension(graph)!;
+  const restored = parseInstructionGraphExtension([wire])!;
+  const reopened = restored.actions[0].args.find(argument => argument.role === AdviceArgumentRole.Site)!;
+  expect(reopened.administrationTargetCount).toBe(2);
+  expect(reopened.coding?.code).toBe("40638003");
+  expect(reopened.sourceExtensions).toContainEqual(countAnnotation);
+  expect(reopened.sourceExtensions).toContainEqual(unknown);
+  expect(buildInstructionGraphExtension(restored)).toEqual(wire);
+  expect(graph).toEqual(before);
+});

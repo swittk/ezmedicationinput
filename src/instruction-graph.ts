@@ -344,6 +344,8 @@ function codingFromSite(text: string, options?: ParseOptions): AdviceArgument | 
     conceptId: resolved.canonical,
     coding: resolved.coding,
     codings: resolved.coding ? [resolved.coding] : undefined,
+    ...(resolved.definition?.administrationTargetCount !== undefined
+      ? { administrationTargetCount: resolved.definition.administrationTargetCount } : {}),
     i18n: withMedicationSourceI18n(text, {
       en: resolved.englishObjectText,
       ...(resolved.definition?.i18n ?? {}),

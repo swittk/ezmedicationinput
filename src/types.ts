@@ -1145,6 +1145,8 @@ export interface AdviceArgument {
   conceptId?: string;
   coding?: FhirCoding;
   codings?: FhirCoding[];
+  /** Resolved anatomical multiplicity of this Site argument. */
+  administrationTargetCount?: number;
   components?: InstructionConceptComponent[];
   i18n?: Record<string, string>;
   /** Original FHIR Element identity of the argument wrapper. */

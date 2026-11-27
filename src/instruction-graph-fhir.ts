@@ -168,6 +168,7 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   add(nested, valueString("text", argument.text));
   add(nested, valueString("normalized", argument.normalized));
   add(nested, valueString("conceptId", argument.conceptId));
+  add(nested, valueInteger("administrationTargetCount", argument.administrationTargetCount));
   add(nested, valueCoding("coding", argument.coding));
   for (const coding of argument.codings ?? []) {
     nested.push({ url: "argumentCoding", valueCoding: wireCoding(coding) });
@@ -507,7 +508,8 @@ function quantityFieldMetadata(field: FhirExtension | undefined, valueKey: "valu
 function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefined {
   let role:FhirExtension|undefined,text:FhirExtension|undefined,relation:FhirExtension|undefined,
     relationCoding:FhirExtension|undefined,normalized:FhirExtension|undefined,concept:FhirExtension|undefined,
-    coding:FhirExtension|undefined,spanStart:FhirExtension|undefined,spanEnd:FhirExtension|undefined,
+    coding:FhirExtension|undefined,administrationTargetCount:FhirExtension|undefined,
+    spanStart:FhirExtension|undefined,spanEnd:FhirExtension|undefined,
     quantity:FhirExtension|undefined;
   const codings:FhirCoding[]=[],components:NonNullable<AdviceArgument["components"]>=[];
   let i18n:Record<string,string>|undefined,sourceExtensions:FhirExtension[]|undefined;
@@ -540,6 +542,10 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     case "coding":
       if(!coding)coding=entry;
       if(hasFieldMetadata(entry,"valueCoding")||hasCodingMetadata(entry.valueCoding))(sourceExtensions??=[]).push(entry);
+      break;
+    case "administrationTargetCount":
+      if(!administrationTargetCount)administrationTargetCount=entry;
+      if(hasFieldMetadata(entry,"valueInteger"))(sourceExtensions??=[]).push(entry);
       break;
     case "spanStart":
       if(!spanStart)spanStart=entry;
@@ -606,6 +612,8 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     relation:firstRelation(relationCoding?.valueCoding,relation?.valueCode),
     normalized:normalized?.valueString,conceptId:concept?.valueString,
     coding:readCoding(coding?.valueCoding),codings};
+  if(administrationTargetCount?.valueInteger!==undefined)
+    result.administrationTargetCount=administrationTargetCount.valueInteger;
   if(extension.id!==undefined)result.sourceId=extension.id;
   if(relationCoding?.valueCoding)result.sourceRelationCoding=readCoding(relationCoding.valueCoding);
   if(components.length)result.components=components;

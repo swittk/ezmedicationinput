@@ -1,3 +1,4 @@
+import { CALENDAR_WEEKDAY_LEXEMES } from "../src/hpsg/lexical-classes";
 import { siteLexicalRule } from "../src/hpsg/rules/site-rules";
 import { RouteCode } from "../src/types";
 import { parseSigSegments as parseHpsgSegments } from "../src/hpsg/segmenter";
@@ -3220,7 +3221,12 @@ describe("withholding target identity", () => {
 });
 
 describe("registered weekday and hard-delimiter vocabulary", () => {
-  it.each(["Thurs", "Thursday"])("keeps the Thursday exclusion for %s", weekday => {
+  it("keeps the word thus outside registered weekday vocabulary", () => {
+    const thursday = CALENDAR_WEEKDAY_LEXEMES.find(entry => entry.day === "thu")!;
+    expect(thursday.patterns.some(pattern => new RegExp(pattern.source, "iu").test("thus"))).toBe(false);
+  });
+
+  it.each(["Thu", "Thur", "Thurs", "Thursday", "Thursdays"])("keeps the Thursday exclusion for %s", weekday => {
     const source = "Take 1 tablet daily except " + weekday, parsed = parsePublicSig(source);
     const query = { orderedAt: "2026-11-02T00:00:00Z", from: "2026-11-02T00:00:00Z", timeZone: "UTC" };
     expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.excludedWeekdays).toEqual(["thu"]);
@@ -3327,6 +3333,10 @@ describe("bilateral withholding target multiplicity", () => {
       const before = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
       expect(member.target?.coding?.[0]?.code).toBe("40638003");
       expect(member.targetCount).toBe(2);
+      const namedSites = member.syntax?.instructionGraph?.actions.filter(action => action.polarity === "negate")
+        .flatMap(action => action.args.filter(argument => argument.role === "site")) ?? [];
+      for (const argument of namedSites) expect(argument.administrationTargetCount).toBe(2);
+      if (target === "in both eyes") expect(namedSites).toHaveLength(1);
       expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "drop" });
       expect(nextDueDoses(input, { ...options, evaluateCondition: () => false })).toEqual([]);
       expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 2, durationUnit: "d", evaluateCondition: () => false }))

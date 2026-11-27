@@ -1033,7 +1033,7 @@
     {
       "day": "thu",
       "patterns": [
-        "\\bthu(?:rsdays?|rs|s)?\\b",
+        "\\b(?:thu|thur|thurs|thursday|thursdays)\\b",
         "(?:วัน)?พฤหัส(?:บดี)?"
       ]
     },
