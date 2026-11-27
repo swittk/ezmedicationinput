@@ -493,14 +493,15 @@ function mergeDose(
   if (clinicalQuantity && divisionCount !== undefined && clinicalQuantity.dividedDoseCount !== divisionCount &&
       clinicalQuantity.status !== "unsupported" &&
       clinicalQuantity.denominators.some(term => term.dimension === "time")) {
-    // An explicit division turns a standalone weight/time total into doses
-    // over its authored period. A separately authored amount keeps an
-    // independent infusion rate unchanged, whichever daughter arrives first.
-    const dividedWeightTotal = clinicalQuantity.representation === "rate-quantity" &&
-      clinicalQuantity.requiresPatientWeight && !clinicalQuantity.projectedDose && value === undefined &&
-      range === undefined &&
+    // An explicit division turns a standalone period total into doses over
+    // its authored denominator. The quantity owner distinguishes this from
+    // an explicit infusion/AT rate; a separate amount or duration keeps its
+    // independent rate unchanged, whichever daughter arrives first.
+    const dividedPeriodTotal = clinicalQuantity.representation === "rate-quantity" &&
+      (clinicalQuantity.requiresPatientWeight || clinicalQuantity.dailyTotal) &&
+      !clinicalQuantity.projectedDose && value === undefined && range === undefined &&
       !clinicalQuantity.administrationDuration;
-    const independentRate = clinicalQuantity.representation === "rate-quantity" && !dividedWeightTotal;
+    const independentRate = clinicalQuantity.representation === "rate-quantity" && !dividedPeriodTotal;
     const rangedActiveDose = range !== undefined && (independentRate ||
       clinicalQuantity.representation === "dose-with-rate-ratio");
     const activeDose = clinicalQuantity.projectedDose ??
@@ -521,7 +522,7 @@ function mergeDose(
       unit = doseUnit;
       clinicalQuantity = {
         ...clinicalQuantity, status: "resolved", reviewReason: undefined,
-        ...(dividedWeightTotal ? { representation: "dose" as const } : {}),
+        ...(dividedPeriodTotal ? { representation: "dose" as const } : {}),
         // A carrier preparation also divides its separate administered volume.
         // Its original total stays in numerator; an independent fixed flow-rate
         // numerator stays unchanged.
@@ -886,23 +887,20 @@ export function unifySynsem(
   }
   let schedule = mergeSchedule(left.head.schedule, right.head.schedule);
   if (schedule === undefined && left.head.schedule && right.head.schedule) return undefined;
-  // A stated daily total divided into N doses is not N repetitions of the
+  // A stated period total divided into N doses is not N repetitions of the
   // undivided scalar. The division complement licenses a typed period total,
   // and the resulting schedule represents the individual administrations.
   // Ordinary "30 mg daily" has no division complement and stays untouched.
-  // A resolved weight-based dose (mg/kg) also needs this explicit daily-total
-  // projection when "daily" is separate from the unit, not written as "/day".
-  // Preserve its patient-mass denominator and weight requirement; only append
-  // the source-backed daily period. Rates with an existing time denominator
-  // must never be divided here a second time.
+  // A resolved weight-based dose (mg/kg) needs the same projection when its
+  // period is separate from the unit. Preserve its patient-mass denominator
+  // and weight requirement; append only the already-selected schedule period.
+  // Rates with a time denominator must never be divided here a second time.
   const quantity = dose?.clinicalQuantity;
   if (dose?.divisionCount !== undefined &&
       (!quantity || (quantity.representation === "dose" && quantity.status === "resolved" &&
         !quantity.denominators.some(term => term.dimension === "time"))) &&
       dose.value !== undefined && dose.unit &&
-      schedule?.frequency === 1 &&
-      (schedule.period === 1 && schedule.periodUnit === "d" ||
-       schedule.period === 24 && schedule.periodUnit === "h")) {
+      schedule?.frequency === 1 && schedule.period !== undefined && schedule.periodUnit) {
     const category = getUnitCategory(dose.unit);
     const dimension: HpsgClinicalQuantityDimension = category === "other"
       ? (dose.unit === "[iU]" ? "biologic-activity" : "administration-unit")
@@ -922,9 +920,8 @@ export function unifySynsem(
   }
   // A divided total supplies its authored period. An independent rate
   // denominator belongs to the infusion and cannot create a recurrence.
-  if (dose?.clinicalQuantity && dose.clinicalQuantity.dividedDoseCount !== undefined &&
-      (dose.clinicalQuantity.dailyTotal || dose.clinicalQuantity.representation === "dose" &&
-        dose.clinicalQuantity.requiresPatientWeight)) {
+  if (dose?.clinicalQuantity?.representation === "dose" &&
+      dose.clinicalQuantity.dividedDoseCount !== undefined) {
     const period = dose.clinicalQuantity.denominators.find(term => term.dimension === "time");
     if (period) {
       const dividedSchedule = {

@@ -5670,3 +5670,117 @@ describe("reviewed partial denominator and elapsed divided-dose ownership", () =
     expect(JSON.stringify(parsed)).toBe(saved);
   });
 });
+
+
+describe("unweighted divided period totals", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  const periods = [
+    { period: 12, unit: FhirPeriodUnit.Hour, words: "12 hours", due: [
+      "2026-01-01T00:00:00+00:00", "2026-01-01T04:00:00+00:00", "2026-01-01T08:00:00+00:00"] },
+    { period: 24, unit: FhirPeriodUnit.Hour, words: "24 hours", due: [
+      "2026-01-01T00:00:00+00:00", "2026-01-01T08:00:00+00:00", "2026-01-01T16:00:00+00:00"] },
+    { period: 48, unit: FhirPeriodUnit.Hour, words: "48 hours", due: [
+      "2026-01-01T00:00:00+00:00", "2026-01-01T16:00:00+00:00", "2026-01-02T08:00:00+00:00"] },
+    { period: 30, unit: FhirPeriodUnit.Minute, words: "30 minutes", due: [
+      "2026-01-01T00:00:00+00:00", "2026-01-01T00:10:00+00:00", "2026-01-01T00:20:00+00:00"] },
+    // A calendar week keeps the existing whole-day frequency distribution.
+    { period: 1, unit: FhirPeriodUnit.Week, words: "1 week", due: [
+      "2026-01-01T00:00:00+00:00", "2026-01-03T00:00:00+00:00", "2026-01-05T00:00:00+00:00"] },
+  ];
+  for (const compact of [false, true]) it.each(periods)(
+    `divides the selected $words total into three doses (compact=${compact})`, ({ period, unit, words, due }) => {
+      const source = `Give ${compact ? `30mg/${period}${unit}` : `30 mg per ${words}`} by mouth in 3 divided doses`;
+      const parsed = parsePublicSig(source), parsedBefore = JSON.stringify(parsed);
+      expect(parsed.meta.canonical.clauses).toHaveLength(1);
+      expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+        representation: "dose", status: "resolved", numerator: { value: 30, unit: "mg" },
+        denominators: [{ value: period, unit, dimension: "time" }], dividedDoseCount: 3,
+        projectedDose: { value: 10, unit: "mg" },
+      });
+      for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+        const before = JSON.stringify(input), course = importCanonicalCourse(input);
+        expect(course.stages).toHaveLength(1);
+        expect(course.stages[0].administrations).toHaveLength(1);
+        const administration = course.stages[0].administrations[0];
+        expect(administration.amounts).toHaveLength(1);
+        expect(administration.amounts![0].quantity).toMatchObject({ value: 10, unit: "mg" });
+        expect(administration.amounts![0].rate).toBeUndefined();
+        expect(administration.amounts![0].rateRatio).toBeUndefined();
+        expect(administration.schedule?.recurrence).toMatchObject({ frequency: 3, period, periodUnit: unit });
+        expect(administration.schedule?.recurrence?.courseLength).toBeUndefined();
+        expect(administration.schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+        expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual(due);
+        expect(calculateTotalUnits({ dosage: input, ...query, durationValue: period, durationUnit: unit }))
+          .toMatchObject({ totalUnits: 30, unit: "mg" });
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("10 mg");
+        expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("10 มิลลิกรัม");
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(parsed.fhir[0].text).toBe(source);
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(parsed)).toBe(parsedBefore);
+    });
+
+  it.each(["30 mg per 48 hours", "30mg/48h"])("retains an independent nonbinding cap after %s divided into doses", total => {
+    const source = `Give ${total} by mouth in 3 divided doses, no more than 60mg/48h`;
+    const parsed = parsePublicSig(source), parsedBefore = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), administration = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(administration.amounts).toHaveLength(1);
+      expect(administration.amounts![0].quantity).toMatchObject({ value: 10, unit: "mg" });
+      expect(administration.amounts![0].rate).toBeUndefined();
+      expect(administration.amounts![0].rateRatio).toBeUndefined();
+      expect(administration.schedule?.recurrence).toMatchObject({ frequency: 3, period: 48, periodUnit: "h" });
+      expect(administration.limits).toHaveLength(1);
+      expect(administration.limits![0]).toMatchObject({ scope: "period", amount: { value: 60, unit: "mg" },
+        period: { value: 48, unit: "h" } });
+      expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual(periods[2].due);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 48, durationUnit: FhirPeriodUnit.Hour }))
+        .toMatchObject({ totalUnits: 30, unit: "mg" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhir[0].text).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+
+  it.each(["at 30 mL/hr", "@30mL/h"])("keeps an independent infusion rate %s beside a divided volume", rate => {
+    const source = `Infuse 100 mL ${rate} in 2 divided doses`;
+    const parsed = parsePublicSig(source), parsedBefore = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), administration = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(administration.amounts).toHaveLength(1);
+      expect(administration.amounts![0]).toMatchObject({ quantity: { value: 50, unit: "mL" },
+        rate: { value: 30, unit: "mL/h" } });
+      expect(administration.schedule?.recurrence?.count).toBe(2);
+      expect(administration.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(administration.schedule?.recurrence?.period).toBeUndefined();
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+
+  it("keeps an explicit infusion duration on its independently selected rate", () => {
+    const source = "Infuse 30 mg per 48 hours over 48 hours";
+    const parsed = parsePublicSig(source), parsedBefore = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), administration = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(administration.amounts).toHaveLength(1);
+      expect(administration.amounts![0].quantity).toBeUndefined();
+      expect(administration.amounts![0].rateRatio).toMatchObject({ numerator: { value: 30, unit: "mg" },
+        denominator: { value: 48, unit: "h" } });
+      expect(administration.schedule?.recurrence).toMatchObject({ count: 1,
+        occurrenceDuration: 48, occurrenceDurationUnit: "h" });
+      expect(administration.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(administration.schedule?.recurrence?.period).toBeUndefined();
+      expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual(["2026-01-01T00:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 48, durationUnit: FhirPeriodUnit.Hour }))
+        .toMatchObject({ totalUnits: 30, unit: "mg" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+});

@@ -617,7 +617,7 @@ function fixedTimeQuantity(
       representation: "dose", status: "resolved", numerator, denominators: [], projectedDose: { value, unit: numerator.unit }
     }, dose, { frequency: 1, period: denominator.value, periodUnit: denominator.unit });
   }
-  if (range || !clinicalRatePeriodUnit(denominator.unit)) return undefined;
+  if (range || !clinicalRatePeriodUnit(denominator.unit) && head.rateSpecific) return undefined;
   const duration = durationAfter(context, expression.end);
   // A clause-initial rate with its own elapsed duration is a complete typed
   // complement. The selected sequential construction owns its omitted method.
@@ -629,6 +629,9 @@ function fixedTimeQuantity(
     status: "resolved",
     numerator,
     denominators: [denominator],
+    // The existing total marker licenses explicit division over this typed
+    // period. An infusion/AT head retains independent rate ownership.
+    ...(!head.rateSpecific && !maximum ? { dailyTotal: true } : {}),
     administrationDuration: duration ? { value: duration.value, unit: duration.unit,
         ...(duration.comparator ? { comparator: duration.comparator } : {}) } : undefined
   });
