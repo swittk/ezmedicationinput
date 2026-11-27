@@ -2037,11 +2037,18 @@ function buildActionFrame(
     ...medicationInstructionActionCodings(definition),
     ...medicationInstructionActionContextualCodings(definition, args)
   ];
-  let span = trimActionRange(input, rangeFor(parts, segmentStart, semanticEnd, offset), offset);
+  const lexicalSpan = rangeFor(parts, segmentStart, semanticEnd, offset);
+  let span = trimActionRange(input, lexicalSpan, offset);
   const earliestArgumentStart = args.reduce((minimum, arg) =>
     arg.span ? Math.min(minimum, arg.span.start) : minimum, span.start);
   if (earliestArgumentStart < span.start) {
     span = trimActionRange(input, { start: earliestArgumentStart, end: span.end }, offset);
+  }
+  // A selected quantity owns its whole terminal unit lexeme, including a
+  // declared abbreviation period. Do not trim the frame inside that token.
+  if (span.end < lexicalSpan.end &&
+      args.some(arg => arg.quantity && arg.span?.end === lexicalSpan.end)) {
+    span.end = lexicalSpan.end;
   }
   const frame: AdviceFrame = {
     force: prefixed?.force ?? (polarity === AdvicePolarity.Negate

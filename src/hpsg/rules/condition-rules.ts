@@ -504,7 +504,7 @@ export function medicationGuardLexicalRule(): HpsgLexicalRule<HpsgClauseContext>
     if (clinical) return [clinical];
     const scoped = discovery.features.find(feature => feature.sourceStart === guard.start);
     const withheld = scoped && withholdingAdjunct(context, scoped, guard.markerEnd, guard);
-    const sign = medicationGuardSign(context, guard, withheld);
+    const sign = medicationGuardSign(context, guard, withheld, withheld ? scoped : undefined);
     return sign ? [sign] : [];
   });
 }
