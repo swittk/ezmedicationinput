@@ -40,7 +40,11 @@ const parallel = "1 drop OD q2h x1wk then qid; 1 drop OS qid x1mo then bid";
 
 describe("external review: FHIR R5/R6 and medication correctness", () => {
   it("checks the public R5 and current R6 contracts with strict TypeScript", () => {
-    const program = ts.createProgram(["./pr14-round23-r5.spec.ts", "./generation-roundtrip.spec.ts", "./opd-dogfood.spec.ts"]
+    const program = ts.createProgram([
+      "./generation-roundtrip.spec.ts", "./opd-dogfood.spec.ts", "./parser.spec.ts",
+      "./terminology-coverage.spec.ts", "./thai-review-followup.spec.ts",
+      "./pill-count.spec.ts", "./date-interpretation.spec.ts",
+    ]
       .map(name => fileURLToPath(new URL(name, import.meta.url))), {
       noEmit: true, strict: true, skipLibCheck: true, target: ts.ScriptTarget.ES2015,
       module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.NodeJs,

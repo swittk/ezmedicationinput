@@ -1,3 +1,8 @@
+import { importCanonicalCourse, projectCanonicalCourse, type FhirR6Extension, type FhirR6Dosage, EventTiming, type FhirR6DosageInstruction, type FhirR6Quantity } from "../src/index";
+import { DOSAGE_RECONCILIATION_SOURCE_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
+import { EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM } from "../src/fhir-quantity-operator";
+import { TIMING_ADDITIONAL_CLOCK_EXTENSION_URL, getTimingClocks } from "../src/fhir";
+import { courseToR6 } from "../src/adapters/canonical-course";
 import { describe, expect, it, vi } from "vitest";
 import { calculateTotalUnits, findMedicationDateListSpans, formatSig, listMedicationDateResolvers, fromFhirDosage, nextDueDoses, parseSig as parseBatch, registerMedicationDateResolver } from "../src/index";
 import { canonicalToFhir, canonicalFromFhir } from "../src/fhir";
@@ -688,7 +693,7 @@ describe("calendar date interpretation", () => {
         from: "2026-10-22T08:00:00+07:00",
         timeZone: "Asia/Bangkok",
         durationValue: 30,
-        durationUnit: "d"
+        durationUnit: FhirPeriodUnit.Day
       }).totalUnits).toBe(8);
     }
   });
@@ -773,8 +778,10 @@ describe("calendar date interpretation", () => {
 
     for (const item of cases) {
       const tokens = lexInput(item.input);
-      const dateMatches = [...item.input.matchAll(/\d{4}-\d{2}-\d{2}/gu)];
-      for (const match of dateMatches) {
+      const datePattern = /\d{4}-\d{2}-\d{2}/gu;
+      let nextMatch: RegExpExecArray | null;
+      while ((nextMatch = datePattern.exec(item.input)) !== null) {
+        const match = nextMatch;
         expect(tokens.some((token) => token.sourceStart === match.index)).toBe(true);
         expect(tokens.some((token) => token.sourceEnd === match.index! + match[0].length)).toBe(true);
       }
@@ -1018,7 +1025,7 @@ describe("calendar date interpretation", () => {
       }]);
       const evidence = sign.evidence.find((value) => value.rule === "hpsg.lex.schedule.openEndedDate");
       expect(evidence).toBeDefined();
-      const ownedTokens = tokens.filter((token) => evidence?.tokenIndices.includes(token.index));
+      const ownedTokens = tokens.filter((token) => evidence?.tokenIndices.some(index => index === token.index));
       const ownedStart = Math.min(...ownedTokens.map((token) => token.sourceStart));
       const ownedEnd = Math.max(...ownedTokens.map((token) => token.sourceEnd));
       expect(item.input.slice(ownedStart, ownedEnd)).toBe(item.ownedSpan);
@@ -1421,8 +1428,10 @@ describe("calendar date interpretation", () => {
     expect(firstDosage.timing?.repeat?.frequency).toBe(2);
     expect(firstDosage.timing?.repeat?.when).toBeUndefined();
     expect(firstDosage.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
-    expect(result.fhirNext.step[0].component[0].timing?.repeat?.when).toBeUndefined();
-    expect(result.fhirNext.step[0].component[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
+    expect(result.fhirNext.step?.[0]).toBeDefined();
+    const currentStep = result.fhirNext.step![0];
+    expect(currentStep.component[0].timing?.repeat?.when).toBeUndefined();
+    expect(currentStep.component[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
     expect(nextDueDoses(firstDosage, {
       from: "2026-11-02T00:00:00+07:00",
       orderedAt: "2026-11-02T00:00:00+07:00",
@@ -1537,7 +1546,7 @@ describe("Thai clock suffixes belong to the time constituent", () => {
     expect(parsed.fhir[0].timing?.repeat?.boundsDuration?.value).toBe(7);
     for (const dosage of [parsed.fhirNext, parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
       expect(calculateTotalUnits({ dosage, orderedAt, from: orderedAt,
-        timeZone: "Asia/Bangkok", durationValue: 28, durationUnit: "d"
+        timeZone: "Asia/Bangkok", durationValue: 28, durationUnit: FhirPeriodUnit.Day
       }).totalUnits).toBe(14);
       expect(nextDueDoses(dosage, { orderedAt, from: "2026-11-09T00:00:00+07:00",
         timeZone: "Asia/Bangkok", limit: 2 })).toEqual([]);
@@ -1670,3 +1679,209 @@ describe("monthly inferred clocks across a daylight-saving gap", () => {
       .toEqual(["2026-03-08T09:15:00-04:00", "2026-03-23T09:15:00-04:00"]);
   });
 });
+
+// Preserved public-contract regressions in their subject suite.
+{
+
+
+const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+const q = (value: number) => ({ value, unit: "tab" });
+
+
+// Retained boundary and strict-type suite from test/pr14-round21-boundaries.spec.ts.
+{
+// BEGIN PRESERVED round39_boundaries
+const tablet = () => ({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] });
+const persist = <T>(input: T): T => JSON.parse(JSON.stringify(input));
+
+describe("round34 positional clock primitive annotations", () => {
+  const clocks = [null, "09:00:00", null, "17:00:00", null];
+  const notes = ["leading", "nine", "middle", "seventeen", "trailing"].map(id => ({ id }));
+  it.each(["R5", "R6"] as const)("keeps metadata-only slots out of clinical clocks through %s", boundary => {
+    for (const mixed of [false, true]) {
+      const timing = { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        ...(mixed ? { when: [EventTiming.Morning] } : {}),
+        timeOfDay: clocks, _timeOfDay: notes,
+      } };
+      // JSON is the public wire boundary, including legal primitive null slots.
+      const source = persist(boundary === "R5"
+        ? [{ ...tablet(), timing }]
+        : { step: [{ component: [{ ...tablet(), timing }] }] });
+      const before = JSON.stringify(source);
+      expect(getTimingClocks(timing.repeat)).toEqual(["09:00:00", "17:00:00"]);
+      let wire = courseToR6(importCanonicalCourse(source));
+      for (let save = 0; save < 3; save++) {
+        const rows = persist(toFhirR5Dosages(wire));
+        for (const candidate of [wire, rows]) {
+          const native = importCanonicalCourse(candidate);
+          expect(native.stages[0].administrations[0].schedule?.recurrence?.clocks)
+            .toEqual(["09:00:00", "17:00:00"]);
+          expect(formatSig(candidate, "long", { locale: "en", realizationMode: "normalized" })).toMatch(/0?9:00/u);
+          const repeat = Array.isArray(candidate) ? candidate[0].timing!.repeat! : candidate.step![0].component[0].timing!.repeat!;
+          if (mixed) {
+            const active = repeat.extension!.filter(marker => marker.url === TIMING_ADDITIONAL_CLOCK_EXTENSION_URL);
+            expect(active.map(marker => marker.valueTime ?? null)).toEqual(clocks);
+            expect(active.map(marker => marker._valueTime)).toEqual(notes);
+          } else {
+            expect(repeat.timeOfDay).toEqual(clocks);
+            expect(repeat._timeOfDay).toEqual(notes);
+          }
+          expect(nextDueDoses(candidate, {
+            orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+            timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3,
+          })).toEqual(mixed
+            ? ["2026-12-01T08:00:00+00:00", "2026-12-01T09:00:00+00:00", "2026-12-01T17:00:00+00:00"]
+            : ["2026-12-01T09:00:00+00:00", "2026-12-01T17:00:00+00:00", "2026-12-02T09:00:00+00:00"]);
+        }
+        wire = persist(toDosageDetails(rows));
+      }
+      expect(JSON.stringify(source)).toBe(before);
+    }
+  });
+});
+
+// END PRESERVED round39_boundaries
+}
+
+
+describe("round58 retained range source retirement", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const sourceRanges = (wire: FhirR6DosageInstruction) => {
+    const ranges: NonNullable<FhirR6Extension["valueRange"]>[] = [];
+    for (const history of wire.extension ?? []) {
+      if (history.url !== DOSAGE_RECONCILIATION_SOURCE_URL) continue;
+      for (const marker of history.extension ?? [])
+        for (const component of marker.extension ?? []) {
+          if (component.url !== "component") continue;
+          for (const entry of component.extension ?? []) {
+            if (entry.url !== "doseAndRate") continue;
+            for (const field of entry.extension ?? [])
+              if (field.url === "doseRange" && field.valueRange) ranges.push(field.valueRange);
+          }
+        }
+    }
+    return ranges;
+  };
+  const rangeInput = (variant: string) => {
+    const low = { id: "r58-s2-authored-low", extension: [
+      { url: "urn:clinic:low-note", valueString: "Keep the original endpoint annotation" },
+    ], ...(variant === "valued low removed" ? { value: 1, unit: "drop" } : {}) };
+    const input: FhirR6DosageInstruction = { id: "r58-s2-source", extension: [
+      { url: "urn:clinic:course-note", valueString: "Keep the independent course annotation" },
+    ], step: [{ component: [{ site: { concept: { text: "both eyes" } },
+      doseAndRate: [{ type: { text: "ordered" }, doseRange: { low, high: {
+        value: 2, unit: "drop", extension: [{ url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+          valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000050" } }],
+      } } }],
+    }] }] };
+    const original = fresh(input);
+    const saved = toFhirR5Dosages(input);
+    // This is a new persisted caller object, prepared before its first API submission.
+    const rows = fresh(saved);
+    const originalRange = fresh(saved[0].doseAndRate![0].doseRange!);
+    if (variant === "low removed" || variant === "valued low removed")
+      delete rows[0].doseAndRate![0].doseRange!.low;
+    else if (variant === "low replaced")
+      rows[0].doseAndRate![0].doseRange!.low = { id: "r58-s2-current-low",
+        extension: [{ url: "urn:clinic:current-low-note", valueString: "Current endpoint annotation" }] };
+    else if (variant === "entry removed") delete rows[0].doseAndRate;
+    return { input, original, rows, originalRange };
+  };
+  it.each(["unchanged", "low removed", "low replaced", "valued low removed", "entry removed"] as const)(
+    "keeps the current range separate from complete retired endpoint source (%s)", variant => {
+      const { input, original, rows, originalRange } = rangeInput(variant), before = fresh(rows);
+      const expected = fresh(rows[0].doseAndRate ?? []);
+      let wire = toDosageDetails(rows);
+      for (let save = 0; save < 2; save++) {
+        const component = wire.step![0].component[0];
+        expect(component.doseAndRate ?? []).toEqual(expected);
+        expect(component.site).toEqual({ concept: { text: "both eyes" } });
+        expect(wire.id).toBe("r58-s2-source");
+        expect(wire.extension).toContainEqual(original.extension![0]);
+        const retained = sourceRanges(wire);
+        if (variant === "unchanged") expect(retained).toEqual([]);
+        else expect(retained).toContainEqual(originalRange);
+        if (variant === "low removed" || variant === "valued low removed")
+          expect(component.doseAndRate![0].doseRange!.low).toBeUndefined();
+        const savedR6 = fresh(wire), savedBefore = fresh(savedR6);
+        const returnedR5 = toFhirR5Dosages(savedR6);
+        expect(returnedR5[0].doseAndRate ?? []).toEqual(expected);
+        expect(savedR6).toEqual(savedBefore);
+        wire = toDosageDetails(fresh(returnedR5));
+      }
+      expect(rows).toEqual(before);
+      expect(input).toEqual(original);
+    });
+});
+
+
+describe("round75 opaque temporal unit ownership", () => {
+  const local = { id: "authored-interval", value: 7, unit: "treatment blocks",
+    system: "urn:clinic:interval-units", code: "d", _value: { id: "interval-value" },
+    extension: [{ url: "urn:clinic:interval-note", valueString: "keep the local definition" }] } satisfies FhirR6Quantity;
+  const event = { contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] } };
+  const member: FhirR6Dosage = { doseAndRate: [{ doseQuantity: q(1) }] };
+  const locations = ["repeat-cycle", "start-offset", "stage-start", "stage-range"] as const;
+  type Location = typeof locations[number];
+  const source = (location: Location): FhirR6DosageInstruction => {
+    if (location === "repeat-cycle") return { repeatCycle: local, step: [{ component: [member] }] };
+    if (location === "start-offset") return { step: [{ component: [{ ...member, timing: { repeat: {
+      frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, startOffset: local,
+    } } }] }] };
+    return { step: [{ start: { ...event, ...(location === "stage-start" ? { offsetDuration: local }
+      : { offsetRange: { low: local, high: { ...local, value: 9 } } }) }, component: [member] }] };
+  };
+  const retained = (wire: FhirR6DosageInstruction, location: Location) => location === "repeat-cycle" ? wire.repeatCycle
+    : location === "start-offset" ? wire.step![0].component[0].timing!.repeat!.startOffset
+    : location === "stage-start" ? wire.step![0].start!.offsetDuration : wire.step![0].start!.offsetRange;
+
+  it.each(locations)("keeps a local-coded %s uninterpreted in both languages and interchange forms", location => {
+    const raw = source(location), snapshot = persist(raw);
+    for (const input of [persist(raw), persist(toFhirR5Dosages(persist(raw)))]) {
+      const before = persist(input);
+      const native = importCanonicalCourse(input);
+      for (const value of [input, native]) for (const locale of ["en", "th"] as const) {
+        const text = formatSig(value, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain("7 treatment blocks");
+        expect(text).not.toMatch(/7 days|7 วัน/u);
+        if (location === "stage-range") expect(text).toContain("9 treatment blocks");
+        if (location === "stage-start") expect(text).not.toMatch(/No doses|งดยา/u);
+        if (location === "repeat-cycle") expect(text).toContain(locale === "en"
+          ? "Repeat-cycle interval: 7 treatment blocks." : "ระยะรอบการใช้ยา: 7 treatment blocks.");
+      }
+      let saved = projectCanonicalCourse(native).fhirNext;
+      for (let pass = 0; pass < 2; pass++) {
+        expect(retained(saved, location)).toEqual(retained(raw, location));
+        saved = toDosageDetails(persist(toFhirR5Dosages(persist(saved))));
+      }
+      expect(input).toEqual(before);
+    }
+    expect(raw).toEqual(snapshot);
+  });
+
+  it("retains independently coded member offsets when their labels share a familiar local code", () => {
+    const outer = { ...local, unit: "outer blocks", code: "mo", system: "urn:clinic:outer-intervals" };
+    const inner = { ...local, value: 3, unit: "inner blocks", code: "mo", system: "urn:clinic:inner-intervals" };
+    const raw: FhirR6DosageInstruction = { step: [{ start: { ...event, offsetDuration: outer }, component: [{ ...member,
+      modifierExtension: [{ url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: inner }],
+    }] }] };
+    for (const input of [persist(raw), persist(toFhirR5Dosages(persist(raw)))]) for (const locale of ["en", "th"] as const) {
+      const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain("7 outer blocks");
+      expect(text).toContain("3 inner blocks");
+      expect(text).not.toMatch(/7 months|3 months|7 เดือน|3 เดือน/u);
+    }
+  });
+
+  it.each(["ucum", "uncoded"] as const)("keeps an understood %s repeat interval localized", kind => {
+    const interval = { value: 7, unit: "days", ...(kind === "ucum" ? { system: "http://unitsofmeasure.org", code: "d" } : {}) };
+    const raw: FhirR6DosageInstruction = { repeatCycle: interval, step: [{ component: [member] }] };
+    for (const input of [persist(raw), persist(toFhirR5Dosages(persist(raw)))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("Repeat this schedule every 7 days");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("ทุก 7 วัน");
+      expect(projectCanonicalCourse(importCanonicalCourse(input)).fhirNext.repeatCycle).toEqual(interval);
+    }
+  });
+});
+}

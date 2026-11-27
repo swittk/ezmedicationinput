@@ -1,3 +1,4 @@
+import { toFhirR5Dosages, parseSig as parsePublicSig, buildBodySiteSpatialRelationExtension, parseBodySiteSpatialRelationExtension } from "../src/index";
 import { describe, expect, it } from "vitest";
 import { formatSig, resolveMedicationInstructionAction, listMedicationInstructionActions, getMedicationInstructionAction, getMedicationInstructionConcept, parseInstructionActions, buildMedicationInstructionConceptCodeSystem, buildMedicationInstructionActionCodeSystem } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
@@ -435,7 +436,8 @@ describe("Open English WordNet 2025 exact action sense codings", () => {
   it("round-trips WordNet's version in a real parsed FHIR dosage", () => {
     const parsed = parseSig("pour 5 mL into a cup");
     const restored = parseInstructionGraphExtension(parsed.fhir.extension)!;
-    const codes = restored.actions.flatMap(action => action.predicate.codings ?? []);
+    const codes = restored.actions.map(action => action.predicate.codings ?? [])
+      .reduce((all, codings) => all.concat(codings), []);
     expect(codes).toContainEqual(expect.objectContaining({
       system: WORDNET, version: "2025", code: "oewn-02073479-v"
     }));
@@ -557,3 +559,47 @@ describe("registered action generated code lookup", () => {
     expect(parseInstructionActions("clean applicator", 0, options)[0].predicate.lemma).toBe(definition.code);
   });
 });
+
+// Preserved public-contract regressions in their subject suite.
+{
+
+
+const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+
+describe("round77 selected procedural definition", () => {
+  it("keeps the selected Rinse procedure when another configured action shares its code", () => {
+    const parsed = parsePublicSig("Rinse the left eye daily", { instructionActionMap: { inspect: {
+      code: "rinse", display: "Inspect", aliases: ["inspect"], procedural: false
+    } } });
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.instructionGraph!.actions[0].predicate).toMatchObject({ lemma: "rinse", display: "Rinse" });
+    expect(clause.method?.text).toBe("Rinse");
+    expect(clause.site?.coding?.code).toBe("1290031003");
+    expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(clause.patientInstruction).toBeUndefined();
+    for (const input of [persist(parsed.fhir), persist(parsed.fhirNext), persist(toFhirR5Dosages(parsed.fhirNext))]) {
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? "left eye" : "ตาซ้าย");
+        expect(text).not.toContain("Inspect");
+      }
+    }
+  });
+});
+
+describe("round78 configured spatial Coding", () => {
+  it("keeps declared target identity with a default system", () => {
+    const note = { url: "urn:clinic:target-note", valueString: "retain" };
+    const targetCoding = { id: "spatial-target", extension: [note], code: "181299001", display: "Entire nose" };
+    const marker = buildBodySiteSpatialRelationExtension({ relationText: "below", targetCoding })!;
+    const target = marker.extension!.find(item => item.url === "target")!.valueCodeableConcept!;
+    expect(target.coding).toEqual([{ id: "spatial-target", extension: [note],
+      system: "http://snomed.info/sct", code: "181299001", display: "Entire nose" }]);
+    expect(parseBodySiteSpatialRelationExtension({ extension: [persist(marker)] })!.targetCoding)
+      .toEqual(target.coding![0]);
+    expect(targetCoding.code).toBe("181299001");
+    expect(targetCoding.extension).toEqual([note]);
+  });
+});
+}

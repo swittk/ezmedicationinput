@@ -1,3 +1,5 @@
+import { toDosageDetails, parseSig as reviewParseSig, parseSig as parsePublicSig, parseInstructionActions, importCanonicalCourse, type FhirExtension, registerMedicationLocaleDetector, inferMedicationLocale, registerMedicationSurfaceSegmenter, listMedicationSurfaceSegmenters, registerMedicationDateResolver, cloneBodySiteSpatialRelation, buildInstructionGraphExtension, parseInstructionGraphExtension, AdviceArgumentRole } from "../src/index";
+import { getPrimitiveTranslation, FHIR_TRANSLATION_EXTENSION_URL as reviewFHIR_TRANSLATION_EXTENSION_URL } from "../src/fhir-translations";
 import { getTimingClocks } from "../src/fhir";
 import { describe, expect, it } from "vitest";
 import { parseSig as parseProductionSig, fromFhirDosage, toFhirR5Dosages, formatSig, getDoseUnitSemantics, getBodySiteCode, getBodySiteCodeAsync, getBodySiteText, getBodySiteTextAsync, listSupportedBodySiteGrammar, listSupportedBodySiteText, lookupBodySite, listDoseUnitTerminology, suggestBodySiteText, suggestBodySites } from "../src/index";
@@ -4376,7 +4378,8 @@ describe("internationalization", () => {
 
 describe("unit normalization", () => {
   it("normalizes every default unit synonym", () => {
-    for (const [input, canonical] of Object.entries(DEFAULT_UNIT_SYNONYMS)) {
+    for (const input of Object.keys(DEFAULT_UNIT_SYNONYMS)) {
+      const canonical = DEFAULT_UNIT_SYNONYMS[input];
       const result = parseSig(`1 ${input}`);
       const dose = result.fhir.doseAndRate?.[0]?.doseQuantity;
       if (!dose) {
@@ -4828,7 +4831,8 @@ describe("when ordering", () => {
 });
 
 describe("event timing token coverage", () => {
-  for (const [token, expected] of Object.entries(EVENT_TIMING_TOKENS)) {
+  for (const token of Object.keys(EVENT_TIMING_TOKENS)) {
+    const expected = EVENT_TIMING_TOKENS[token];
     it(`maps ${token} to ${expected}`, () => {
       const result = parseSig(token);
       expect(result.fhir.timing?.repeat?.when).toEqual([expected]);
@@ -5718,3 +5722,587 @@ describe("issue regression tests", () => {
     }
   });
 });
+
+// Preserved public-contract regressions in their subject suite.
+{
+const parseSig = reviewParseSig;
+const FHIR_TRANSLATION_EXTENSION_URL = reviewFHIR_TRANSLATION_EXTENSION_URL;
+
+
+const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+
+// Retained boundary and strict-type suite from test/pr14-round21-boundaries.spec.ts.
+{
+
+
+// Earlier external-boundary regressions share this maintained suite.
+// Keep their fixture helpers local while retaining every original oracle.
+{
+
+describe("provider registration and explicit cloning preserve owned data", () => {
+  it("keeps detector configuration used through this on the registered snapshot", () => {
+    const detector = { locale: "configuration-test", priority: 300,
+      marker: /^__configuration_works__$/, test(text: string) { return this.marker.test(text); } };
+    registerMedicationLocaleDetector(detector);
+    detector.marker = /^__configuration_changed__$/;
+    expect(inferMedicationLocale("__configuration_works__")).toBe("configuration");
+    expect(inferMedicationLocale("__configuration_changed__", "en")).toBe("en");
+  });
+
+  it("keeps distinct registered segmenter slots when a descriptor is reused", () => {
+    const provider = { locale: "test-first", script: /[\uE100]/u, segment: (input: string) => [{ segment: input, index: 0 }] };
+    registerMedicationSurfaceSegmenter(provider);
+    provider.locale = "test-second";
+    provider.script = /[\uE101]/u;
+    registerMedicationSurfaceSegmenter(provider);
+    const entries = listMedicationSurfaceSegmenters();
+    expect(entries.find(e => e.locale === "test-first")?.script.source).toBe("[\\uE100]");
+    expect(entries.find(e => e.locale === "test-second")?.script.source).toBe("[\\uE101]");
+  });
+
+  it("keeps a date resolver's registered year interpretation", () => {
+    const resolver = { id: "test-owned-calendar", calendarYearFromIsoYear: (year: number) => year + 1000,
+      resolveYear: (year: number, digits: number) => digits === 4 && year >= 3000
+        ? { isoYear: year - 1000, calendarYear: year, inferredYear: false } : undefined };
+    registerMedicationDateResolver(resolver);
+    resolver.resolveYear = (year, digits) => digits === 4 && year >= 3000
+      ? { isoYear: year - 2000, calendarYear: year, inferredYear: false } : undefined;
+    const parsed = parseSig("take 1 tab on 28/9/3026", {
+      datePolicy: { calendars: ["test-owned-calendar"], referenceDate: "2026-11-18" },
+    });
+    expect(parsed.fhirNext.step![0].component[0].timing?.event).toEqual(["2026-09-28"]);
+  });
+
+  it("keeps the terminology version in the explicitly requested spatial clone", () => {
+    const source = { relationText: "around", relationCoding: {
+      system: "http://snomed.info/sct", version: "20261101", code: "66459002" },
+      targetText: "eye" };
+    const cloned = cloneBodySiteSpatialRelation(source)!;
+    expect(cloned.relationCoding?.version).toBe("20261101");
+    expect(cloned.relationCoding).not.toBe(source.relationCoding);
+  });
+});
+}
+
+// END PRESERVED round39_boundaries
+}
+
+describe("round71 recognized graph component annotations", () => {
+  it.each([false, true])("retains field annotations and unknown Coding data (coding child ID %s)", codingChildId => {
+    const parsed = parseSig("Apply ointment then cover with occlusive dressing");
+    const marker = buildInstructionGraphExtension(parsed.meta.canonical.clauses[0].instructionGraph!)!;
+    const component = (wire: FhirExtension) => {
+      const action = wire.extension!.find(item => item.url === "action" &&
+        item.extension?.some(field => field.url === "predicateLemma" && field.valueString === "cover"))!;
+      const argument = action.extension!.find(item => item.url === "argument" &&
+        item.extension?.some(field => field.url === "conceptId" && field.valueString === "occlusive_dressing"))!;
+      return argument.extension!.find(item => item.url === "component" &&
+        item.extension?.some(field => field.url === "role" && field.valueCode === "head"))!;
+    };
+    const note: FhirExtension = { url: "urn:clinic:component-note", valueString: "retain authored annotations" };
+    const head = component(marker), role = head.extension!.find(item => item.url === "role")!,
+      text = head.extension!.find(item => item.url === "text")!, coding = head.extension!.find(item => item.url === "coding")!;
+    role.id = "role-element";
+    role._valueCode = { id: "role-value", extension: [note] };
+    text.id = "text-element";
+    text._valueString = { id: "text-value", extension: [note] };
+    if (codingChildId) coding.id = "coding-element";
+    Object.assign(coding.valueCoding!, { id: "coding-value", extension: [note], clinicSource: { revision: "authored" } });
+    const before = persist(marker), expected = persist(head);
+    let current = marker;
+    for (let save = 0; save < 2; save++) {
+      const supplied = persist(current), suppliedBefore = persist(supplied);
+      const decoded = parseInstructionGraphExtension([supplied])!;
+      const decodedBefore = persist(decoded);
+      current = buildInstructionGraphExtension(decoded)!;
+      expect(component(current)).toEqual(expected);
+      expect(supplied).toEqual(suppliedBefore);
+      expect(decoded).toEqual(decodedBefore);
+    }
+    const row = persist(parsed.fhir[0]);
+    row.extension = [...(row.extension ?? []).filter(item => item.url !== marker.url), marker];
+    const rowBefore = persist(row), wire = toDosageDetails([row]);
+    const saved = toFhirR5Dosages(persist(wire));
+    const savedMarker = saved[0].extension!.find(item => item.url === marker.url)!;
+    expect(component(savedMarker)).toEqual(expected);
+    expect(row).toEqual(rowBefore);
+
+    const decoded = parseInstructionGraphExtension([persist(marker)])!, edited = persist(decoded);
+    const editedComponent = edited.actions.find(action => action.predicate.lemma === "cover")!.args
+      .find(argument => argument.conceptId === "occlusive_dressing")!.components!.find(item => item.role === "head")!;
+    delete editedComponent.coding;
+    const editedBefore = persist(edited);
+    current = buildInstructionGraphExtension(edited)!;
+    for (let save = 0; save < 2; save++) {
+      const fields = component(current).extension!;
+      expect(fields.find(item => item.url === "coding")).toBeUndefined();
+      expect(fields.find(item => item.url === "sourceCoding")).toEqual({ ...coding, url: "sourceCoding" });
+      const fresh = parseInstructionGraphExtension([persist(current)])!;
+      expect(fresh.actions.find(action => action.predicate.lemma === "cover")!.args
+        .find(argument => argument.conceptId === "occlusive_dressing")!.components!.find(item => item.role === "head")!.coding).toBeUndefined();
+      current = buildInstructionGraphExtension(fresh)!;
+    }
+    expect(edited).toEqual(editedBefore);
+    expect(decoded.actions.find(action => action.predicate.lemma === "cover")!.args
+      .find(argument => argument.conceptId === "occlusive_dressing")!.components!.find(item => item.role === "head")!.coding).toEqual(coding.valueCoding);
+    expect(marker).toEqual(before);
+  });
+});
+
+describe("round71 predicate component annotations", () => {
+  it.each(["code", "display", "clear display"])("retains source annotations while a fresh typed Coding %s edit stays active", edit => {
+    const parsed = parseSig("Rub cream gently");
+    const marker = buildInstructionGraphExtension(parsed.meta.canonical.clauses[0].instructionGraph!)!;
+    const component = (wire: FhirExtension) => wire.extension!.find(item => item.url === "action")!
+      .extension!.find(item => item.url === "predicateComponent")!;
+    const part = component(marker), role = part.extension!.find(item => item.url === "role")!,
+      coding = part.extension!.find(item => item.url === "coding")!;
+    const note: FhirExtension = { url: "urn:clinic:mechanism-note", valueString: "retain the authored annotation" };
+    part.id = "friction-component";
+    role.id = "mechanism-role";
+    role._valueCode = { id: "mechanism-value", extension: [note] };
+    coding.id = "friction-coding";
+    Object.assign(coding.valueCoding!, { id: "friction-source", extension: [note], clinicSource: { revision: "authored" } });
+    part.extension!.push(note);
+    const before = persist(marker), expected = persist(part);
+    let current = marker;
+    for (let save = 0; save < 2; save++) {
+      current = buildInstructionGraphExtension(parseInstructionGraphExtension([persist(current)])!)!;
+      expect(component(current)).toEqual(expected);
+    }
+    const row = persist(parsed.fhir[0]);
+    row.extension = [...(row.extension ?? []).filter(item => item.url !== marker.url), marker];
+    const rowBefore = persist(row), wire = toDosageDetails([row]);
+    const saved = toFhirR5Dosages(persist(wire));
+    expect(component(saved[0].extension!.find(item => item.url === marker.url)!)).toEqual(expected);
+    expect(row).toEqual(rowBefore);
+
+    const decoded = parseInstructionGraphExtension([persist(marker)])!, edited = persist(decoded);
+    const previous = coding.valueCoding!;
+    const replacement = edit === "code"
+      ? { system: "https://example.org/clinic/mechanisms", code: "gentle-rubbing", display: "Gentle rubbing" }
+      : { system: previous.system, code: previous.code,
+          ...(previous.version === undefined ? {} : { version: previous.version }),
+          ...(edit === "display" ? { display: "Current friction label" } : {}) };
+    edited.actions[0].predicate.semanticComponents![0].coding = replacement;
+    const editedBefore = persist(edited);
+    current = buildInstructionGraphExtension(edited)!;
+    for (let save = 0; save < 2; save++) {
+      const fields = component(current).extension!;
+      expect(fields.filter(item => item.url === "sourceCoding")).toEqual([{ ...coding, url: "sourceCoding" }]);
+      expect(fields.filter(item => item.url === "coding")).toEqual([{ url: "coding", valueCoding: replacement }]);
+      expect(fields).toContainEqual(role);
+      expect(fields).toContainEqual(note);
+      const fresh = parseInstructionGraphExtension([persist(current)])!;
+      expect(fresh.actions[0].predicate.semanticComponents![0].coding).toEqual(replacement);
+      current = buildInstructionGraphExtension(fresh)!;
+    }
+    expect(edited).toEqual(editedBefore);
+    expect(decoded.actions[0].predicate.semanticComponents![0].coding).toEqual(coding.valueCoding);
+    expect(marker).toEqual(before);
+  });
+});
+
+describe("round76 action source-text metadata", () => {
+  it.each(["Apply one patch", "Apply the replacement patch", ""])(
+    "retains annotated action source text with its current value: %s", text => {
+    const graph = { sourceText: "Apply one patch", actions: parseInstructionActions("Apply one patch") };
+    const wire = JSON.parse(JSON.stringify(buildInstructionGraphExtension(graph)!)) as FhirExtension;
+    const field = wire.extension!.find(child => child.url === "action")!.extension!.find(child => child.url === "sourceText")!;
+    const primitive = { id: "source-string", extension: [{ url: "urn:clinic:patch-source", valueString: "retain" }] };
+    field.id = "source-field";
+    field._valueString = primitive;
+    const before = JSON.parse(JSON.stringify(wire));
+    const decoded = parseInstructionGraphExtension([wire])!;
+    const edited = { ...decoded, actions: decoded.actions.map(action => ({ ...action, sourceText: text })) };
+    let encoded = buildInstructionGraphExtension(edited)!;
+    for (let save = 0; save < 2; save++) {
+      const fields = encoded.extension!.find(child => child.url === "action")!.extension!.filter(child => child.url === "sourceText");
+      expect(fields).toEqual([{ url: "sourceText", ...(text ? { valueString: text } : {}), id: "source-field", _valueString: primitive }]);
+      expect(parseInstructionGraphExtension([encoded])!.actions[0].sourceText).toBe(text);
+      encoded = buildInstructionGraphExtension(parseInstructionGraphExtension([JSON.parse(JSON.stringify(encoded))])!)!;
+    }
+    expect(wire).toEqual(before);
+  });
+});
+
+
+describe("round76 typed action complements in normalized previews", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const current = (value: string, locale: string) => value
+    .split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0]
+    .replace(locale === "en" ? /^Current: /u : /^ปัจจุบัน: /u, "");
+
+  it.each([
+    { source: "Remove patch at bedtime.", action: "remove", role: AdviceArgumentRole.Time,
+      relation: AdviceRelation.On, en: ["Remove patch at bedtime"], th: ["เอาแผ่นแปะออกก่อนนอน"] },
+    { source: "Close eye and press inner corner for 1 minute.", action: "close", role: AdviceArgumentRole.Site,
+      relation: undefined, en: ["Close the eye", "press inner corner for 1 minute"], th: ["หลับตา", "press inner corner for 1 minute"] },
+    { source: "Repeat in the other eye.", action: "repeat", role: AdviceArgumentRole.Object,
+      relation: AdviceRelation.In, en: ["Repeat in the other eye"], th: ["Repeat in the other eye"] },
+    { source: "Shake suspension well before each dose; discard after 14 days.", action: "shake", role: AdviceArgumentRole.Time,
+      relation: AdviceRelation.Before, en: ["Shake suspension well before each dose", "discard after 14 days"],
+      th: ["เขย่าsuspension wellก่อนการให้ยาแต่ละครั้ง", "ทิ้งหลัง 14 วัน"] },
+  ])("retains the owned complements of $action across native and saved wire views", fixture => {
+    const parsed = parsePublicSig(fixture.source);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    const frame = graph.actions.find(value => value.predicate.lemma === fixture.action)!;
+    expect(frame.relation).toBe(fixture.relation);
+    expect(frame.args.some(arg => arg.role === fixture.role)).toBe(true);
+    if (fixture.action === "remove") expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Time, normalized: "HS" }));
+    if (fixture.action === "close") {
+      expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Site, coding: expect.objectContaining({ code: "81745001" }) }));
+      expect(graph.actions[1].args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Duration, quantity: { value: 1, unit: "min" } }));
+    }
+    if (fixture.action === "repeat") expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Object, text: "the other eye" }));
+    if (fixture.action === "shake") expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Time, conceptId: "each-dose" }));
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"] as const) {
+        const displayed = current(formatSig(input, "long", { locale, realizationMode: "normalized" }), locale);
+        for (const phrase of fixture[locale]) expect(displayed).toContain(phrase);
+        if (fixture.action === "close" && locale === "th") expect(displayed).not.toContain("หลับตาตา");
+        if (fixture.action === "shake" && locale === "en") expect(displayed).not.toContain("at each dose");
+      }
+      const restored = importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!;
+      expect(restored.sourceText).toBe(fixture.source);
+      expect(restored.actions.find(value => value.predicate.lemma === fixture.action)!.args.some(arg => arg.role === fixture.role)).toBe(true);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each(["Remove patch for 12 hours", "เอาแผ่นแปะออกนาน 12 ชั่วโมง"])(
+    "retains the typed removal duration and its licensed relation: %s", source => {
+      const parsed = parsePublicSig(source);
+      const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+      expect(frame.relation).toBe(AdviceRelation.For);
+      expect(frame.args).toContainEqual(expect.objectContaining({
+        role: AdviceArgumentRole.Duration, quantity: { value: 12, unit: "h" }
+      }));
+      for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+        expect(current(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }), "en").replace(/\.$/u, ""))
+          .toBe("Remove patch for 12 hours");
+        expect(current(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }), "th").replace(/\.$/u, ""))
+          .toBe("เอาแผ่นแปะออกเป็นเวลา 12 ชั่วโมง");
+        expect(importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!.sourceText).toBe(source);
+      }
+    });
+
+  it.each([["right", "1290032005", "ตาขวา"], ["left", "1290031003", "ตาซ้าย"]] as const)(
+    "keeps the %s eye explicit when the Thai head entails only generic eye", (side, code, thai) => {
+      const parsed = parsePublicSig("Close " + side + " eye");
+      const site = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Site)!;
+      expect(site.conceptId).toBe(side + " eye");
+      expect(site.coding).toMatchObject({ code });
+      for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+        expect(current(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }), "en").replace(/\.$/u, ""))
+          .toBe("Close the " + side + " eye");
+        expect(current(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }), "th").replace(/\.$/u, ""))
+          .toBe("หลับตา (" + thai + ")");
+      }
+    });
+
+  it("keeps a configured closing head's explicit site when that label does not entail it", () => {
+    const parsed = parsePublicSig("Shut eye", { instructionActionMap: { shut: {
+      code: "close", display: "Shut", semanticClass: "manipulate", i18n: { th: "ปิด" }, aliases: ["shut"],
+      procedural: true, argumentParser: "bare-duration", realizer: "duration"
+    } } });
+    const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    expect(frame.predicate.display).toBe("Shut");
+    expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Site, conceptId: "eye" }));
+    for (const input of [fresh(parsed.fhir), fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+      expect(current(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }), "en")).toContain("Shut the eye");
+      expect(current(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }), "th")).toContain("ปิดตา");
+    }
+  });
+});
+
+
+describe("round77 procedure target beside duration and time", () => {
+  const current = (value: string, locale: "en" | "th") => value
+    .split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0]
+    .replace(locale === "en" ? /^Current: /u : /^ปัจจุบัน: /u, "")
+    .replace(/\.$/u, "");
+  it.each([
+    { source: "Close right eye for 1 minute after each dose", side: "right", code: "1290032005", duration: 1,
+      event: "each dose", relation: AdviceRelation.After,
+      en: "Close the right eye for 1 minute after each dose", th: "หลับตา (ตาขวา) 1 นาทีหลังการให้ยาแต่ละครั้ง" },
+    { source: "Close left eye 1 minute", side: "left", code: "1290031003", duration: 1,
+      event: undefined, relation: undefined,
+      en: "Close the left eye for 1 minute", th: "หลับตา (ตาซ้าย) 1 นาที" },
+    { source: "Close right eye at bedtime", side: "right", code: "1290032005", duration: undefined,
+      event: "bedtime", relation: AdviceRelation.On,
+      en: "Close the right eye at bedtime", th: "หลับตา (ตาขวา)ก่อนนอน" },
+  ])("retains the selected eye with independent complements: $source", fixture => {
+    const parsed = parsePublicSig(fixture.source);
+    const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    expect(frame.predicate.lemma).toBe("close");
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Site)).toMatchObject({
+      conceptId: fixture.side + " eye", coding: { code: fixture.code }
+    });
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Duration)?.quantity)
+      .toEqual(fixture.duration === undefined ? undefined : { value: fixture.duration, unit: "min" });
+    const time = frame.args.find(arg => arg.role === AdviceArgumentRole.Time);
+    expect(time?.normalized).toBe(fixture.event);
+    expect(time?.relation ?? frame.relation).toBe(fixture.relation);
+    for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext),
+      persist(toFhirR5Dosages(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"] as const)
+        expect(current(formatSig(input, "long", { locale, realizationMode: "normalized" }), locale)).toBe(fixture[locale]);
+      const administration = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(administration.amounts).toBeUndefined();
+      expect(administration.syntax!.instructionGraph!.sourceText).toBe(fixture.source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+});
+
+
+describe("round77 independent advice and selected Time ownership", () => {
+  const current = (value: string, locale: "en" | "th") => value
+    .split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0]
+    .replace(locale === "en" ? /^Current: /u : /^ปัจจุบัน: /u, "")
+    .replace(/\.$/u, "");
+
+  it.each([false, true])("keeps an independent warning outside the administration guard (dose=%s)", withDose => {
+    const source = persist(parsePublicSig("1 tab only if SBP > 160").fhirNext);
+    const component = source.step![0].component[0];
+    delete source.renderedInstruction;
+    delete component.text;
+    if (!withDose) delete component.doseAndRate;
+    component.additionalInstruction = [{ text: "Do not crush", _text: { extension: [{
+      url: FHIR_TRANSLATION_EXTENSION_URL, extension: [
+        { url: "lang", valueCode: "th" }, { url: "content", valueString: "ห้ามบด" }
+      ]
+    }] } }];
+    for (const input of [source, importCanonicalCourse(source), persist(toFhirR5Dosages(source)),
+      persist(toDosageDetails(toFhirR5Dosages(source)))]) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"] as const) {
+        const text = current(formatSig(input, "long", { locale, realizationMode: "normalized" }), locale);
+        const guard = locale === "en" ? "Use" + (withDose ? " 1 tablet" : "") + " only if SBP > 160"
+          : "ใช้" + (withDose ? "ครั้งละ 1 เม็ด" : "") + " เฉพาะเมื่อ SBP > 160";
+        const warning = locale === "en" ? "Do not crush" : "ห้ามบด";
+        expect(text).toBe(guard + ". " + warning);
+      }
+      expect(importCanonicalCourse(input).stages[0].administrations[0].predicate).toMatchObject({ kind: "measurement", value: 160 });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("preserves a disjunctive meal complement without promoting breakfast to the sole event", () => {
+    const source = "Rinse mouth 15 mL after breakfast or dinner";
+    const parsed = parsePublicSig(source);
+    const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Time)).toHaveLength(0);
+    expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Activity, text: "breakfast or dinner" }));
+    expect(frame.relation).toBe(AdviceRelation.After);
+    expect(parsed.meta.canonical.clauses[0].schedule?.when ?? []).not.toContain(EventTiming["After Breakfast"]);
+    for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext), persist(toFhirR5Dosages(parsed.fhirNext))]) {
+      for (const locale of ["en", "th"] as const) {
+        const text = current(formatSig(input, "long", { locale, realizationMode: "normalized" }), locale);
+        expect(text).toContain((locale === "en" ? "after " : "หลัง") + "breakfast or dinner");
+        expect(text).toContain(locale === "en" ? "15 mL" : "15 มิลลิลิตร");
+      }
+      expect(importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!.sourceText).toBe(source);
+    }
+  });
+
+  it.each(["breakfast", "breakfast and dinner"])("retains supported conjunctive Time daughters for %s", event => {
+    const parsed = parsePublicSig("Rinse mouth 15 mL after " + event);
+    const times = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0].args.filter(arg => arg.role === AdviceArgumentRole.Time);
+    expect(times.map(arg => arg.normalized)).toEqual(event === "breakfast" ? ["CM"] : ["CM", "CV"]);
+    for (const locale of ["en", "th"] as const) {
+      const text = formatSig(persist(parsed.fhirNext), "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain(locale === "en" ? "after breakfast" : "หลังอาหารเช้า");
+      if (times.length === 2) expect(text).toContain(locale === "en" ? "after dinner" : "หลังอาหารเย็น");
+    }
+  });
+
+  it.each([
+    { suffix: "at bedtime", events: ["HS"], en: "Rub to form foam at bedtime", th: "ถูให้เกิดฟองก่อนนอน" },
+    { suffix: "before breakfast and before dinner", events: ["CM", "CV"],
+      en: "Rub to form foam before breakfast before dinner", th: "ถูให้เกิดฟองก่อนอาหารเช้าก่อนอาหารเย็น" }
+  ])("realizes a result action's typed Time: $suffix", fixture => {
+    const source = "Rub to form foam " + fixture.suffix;
+    const parsed = parsePublicSig(source);
+    const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Result)?.conceptId).toBe("foam");
+    expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Time).map(arg => arg.normalized)).toEqual(fixture.events);
+    for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext), persist(toFhirR5Dosages(parsed.fhirNext))]) {
+      for (const locale of ["en", "th"] as const)
+        expect(current(formatSig(input, "long", { locale, realizationMode: "normalized" }), locale)).toBe(fixture[locale]);
+      const administration = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(administration.amounts).toBeUndefined();
+      expect(administration.syntax!.instructionGraph!.sourceText).toBe(source);
+    }
+  });
+
+  it("exports requested uncoded advice translations from the existing typed realization", () => {
+    const source = "Take 1 tablet daily, do not lie down immediately";
+    const parsed = parsePublicSig(source, { locale: "th" });
+    for (const instruction of [parsed.fhir[0].additionalInstruction![0], parsed.fhirNext.step![0].component[0].additionalInstruction![0],
+      toFhirR5Dosages(persist(parsed.fhirNext))[0].additionalInstruction![0]]) {
+      expect(instruction.text).toBe("do not lie down immediately");
+      expect(instruction.coding).toBeUndefined();
+      expect(getPrimitiveTranslation(instruction._text, "th")).toBe("ห้ามนอนราบทันที");
+    }
+    expect(parsePublicSig(source).fhir[0].additionalInstruction![0]._text).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+  });
+});
+
+describe("round78 graph argument field metadata", () => {
+  it.each([false, true])("preserves recognized field annotations while the current role wins (edited=%s)", edited => {
+    const source = "Take 1 tablet with 100 mL water";
+    const marker = persist(buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source),
+    })!);
+    const action = marker.extension!.find(item => item.url === "action")!;
+    const argument = action.extension!.filter(item => item.url === "argument").find(item =>
+      item.extension!.some(field => field.url === "quantity" && field.extension!.some(child =>
+        child.url === "unit" && child.valueString === "mL")))!;
+    argument.id = "water-argument";
+    argument.extension!.push({ url: "urn:clinic:argument-note", valueString: "retain" });
+    const role = argument.extension!.find(item => item.url === "role")!;
+    role.id = "role-owner";
+    role._valueCode = { id: "role-value", extension: [{ url: "urn:clinic:role-note", valueString: "retain" }] };
+    const text = argument.extension!.find(item => item.url === "text")!;
+    text.id = "text-owner";
+    text._valueString = { id: "text-value", extension: [{ url: "urn:clinic:text-note", valueString: "retain" }] };
+    const original = persist(marker);
+    let graph = persist(parseInstructionGraphExtension([marker])!);
+    const current = graph.actions[0].args.find(item => item.quantity?.unit === "mL")!;
+    if (edited) current.role = AdviceArgumentRole.Destination;
+    const expected = persist(argument);
+    if (edited) expected.extension!.find(item => item.url === "role")!.valueCode = AdviceArgumentRole.Destination;
+    for (let save = 0; save < 2; save++) {
+      const before = persist(graph), output = buildInstructionGraphExtension(graph)!;
+      const saved = output.extension!.find(item => item.url === "action")!.extension!
+        .find(item => item.url === "argument" && item.id === "water-argument")!;
+      expect(saved).toEqual(expected);
+      expect(saved.extension!.filter(item => item.url === "role")).toHaveLength(1);
+      expect(graph).toEqual(before);
+      graph = persist(parseInstructionGraphExtension([persist(output)])!);
+    }
+    expect(marker).toEqual(original);
+  });
+});
+
+describe("round79 graph wrapper identity", () => {
+  it.each([false, true])("preserves graph and action Element IDs through the public codec (annotated=%s)", annotated => {
+    const source = "Take 1 tablet with 100 mL water";
+    const marker = persist(buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source),
+    })!);
+    const action = marker.extension!.find(item => item.url === "action")!;
+    const argument = action.extension!.find(item => item.url === "argument")!;
+    if (annotated) {
+      marker.id = "instruction-graph";
+      action.id = "take-action";
+      argument.id = "water-argument";
+      marker.extension!.push({ url: "urn:clinic:graph-note", valueString: "retain graph" });
+      action.extension!.push({ url: "urn:clinic:action-note", valueString: "retain action" });
+    }
+    const original = persist(marker);
+    let current = marker;
+    for (let save = 0; save < 2; save++) {
+      const graph = parseInstructionGraphExtension([persist(current)])!, before = persist(graph);
+      current = buildInstructionGraphExtension(graph)!;
+      expect(current).toStrictEqual(original);
+      expect(graph).toEqual(before);
+    }
+    const rows = toFhirR5Dosages(toDosageDetails(persist([{ extension: [marker] }])));
+    expect(rows[0].extension!.find(item => item.url === marker.url)).toEqual(original);
+    expect(marker).toEqual(original);
+  });
+});
+
+
+describe("graph argument singleton annotations", () => {
+  const saved = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const argumentField = (marker: FhirExtension, name: string): FhirExtension => {
+    const action = marker.extension!.find(item => item.url === "action")!;
+    for (const argument of action.extension!.filter(item => item.url === "argument")) {
+      const field = argument.extension!.find(item => item.url === name);
+      if (field) return field;
+    }
+    throw new Error("Expected graph argument field " + name);
+  };
+
+  it("retains concept field annotations beside current identity", () => {
+    const source = "Cover with an occlusive dressing";
+    const original = saved(buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source),
+    })!);
+    const field = argumentField(original, "conceptId");
+    field.id = "material-identity";
+    field._valueString = { id: "material-value", extension: [
+      { url: "urn:clinic:material-note", valueString: "retain material annotation" },
+    ] };
+    const input = saved(original);
+    const before = saved(input), expected = saved(argumentField(input, "conceptId"));
+    let graph = parseInstructionGraphExtension([input])!;
+    for (let save = 0; save < 2; save++) {
+      expect(graph.actions[0].args.find(argument => argument.conceptId)?.conceptId)
+        .toBe("occlusive_dressing");
+      const rebuilt = buildInstructionGraphExtension(graph)!;
+      expect(argumentField(rebuilt, "conceptId")).toEqual(expected);
+      graph = parseInstructionGraphExtension([saved(rebuilt)])!;
+    }
+    expect(input).toEqual(before);
+    expect(argumentField(original, "conceptId").valueString).toBe("occlusive_dressing");
+  });
+
+  it("retains coding wrapper annotations beside current identity", () => {
+    const source = "Cover with an occlusive dressing";
+    const original = saved(buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source),
+    })!);
+    const field = argumentField(original, "coding");
+    field.id = "material-coding";
+    field.valueCoding!._code = { id: "material-code", extension: [
+      { url: "urn:clinic:coding-note", valueString: "retain coding annotation" },
+    ] };
+    const input = saved(original);
+    const before = saved(input), expected = saved(argumentField(input, "coding"));
+    let graph = parseInstructionGraphExtension([input])!;
+    for (let save = 0; save < 2; save++) {
+      const coding = graph.actions[0].args.find(argument => argument.coding)?.coding;
+      expect(coding?.code).toBe("occlusive_dressing");
+      expect(coding?.display).toBe("an occlusive dressing");
+      const rebuilt = buildInstructionGraphExtension(graph)!;
+      expect(argumentField(rebuilt, "coding")).toEqual(expected);
+      graph = parseInstructionGraphExtension([saved(rebuilt)])!;
+    }
+    expect(input).toEqual(before);
+    expect(argumentField(original, "coding").valueCoding!.code).toBe("occlusive_dressing");
+  });
+
+  it("retains quantity wrapper identity beside current amount", () => {
+    const source = "Rinse mouth with 10 mL water";
+    const original = saved(buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source),
+    })!);
+    const field = argumentField(original, "quantity");
+    field.id = "rinse-volume";
+    field.extension!.push({ url: "urn:clinic:volume-note", valueString: "retain volume annotation" });
+    const input = saved(original);
+    const before = saved(input), expected = saved(argumentField(input, "quantity"));
+    let graph = parseInstructionGraphExtension([input])!;
+    for (let save = 0; save < 2; save++) {
+      const quantity = graph.actions[0].args.find(argument => argument.quantity)?.quantity;
+      expect(quantity?.value).toBe(10);
+      expect(quantity?.unit).toBe("mL");
+      const rebuilt = buildInstructionGraphExtension(graph)!;
+      expect(argumentField(rebuilt, "quantity")).toEqual(expected);
+      graph = parseInstructionGraphExtension([saved(rebuilt)])!;
+    }
+    expect(input).toEqual(before);
+    expect(argumentField(original, "quantity").extension!.find(child => child.url === "value")!.valueDecimal).toBe(10);
+  });
+});
+}
