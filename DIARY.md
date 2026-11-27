@@ -16529,3 +16529,10 @@ Supplied conflicting facts and independently authored advice remain distinct.
 - Retain complete authored modal wording while realizing inherited facts and shorter generated rows.
 - License dotted-unit continuations through the existing duration vocabulary; keep independent advice after a unit separate.
 - Extend native and fresh R5/R6 checks for duration ownership, opaque advice, and one typed warning quantity.
+
+## 2026-11-27 — Preserve instruction duration and clock ownership
+
+- Keep selected rinse duration beside its material argument, including bare duration wording. Native and fresh R5/R6 instructions retain both facts without repeating the duration as an object.
+- Compute complete advice-representation evidence only for the existing FHIR consumer that needs it; shared action association and coding proof remain unchanged for parsing and preview.
+- Share explicit-clock enumeration between due-dose generation and finite successor origins. Keep the nominal cadence origin separate from signed eligibility, retain ranged cadence preparation, and reuse the query date for unshifted clock walks.
+- Retain the alternate-day successor regression across native and fresh R5/R6 scheduling and maximum supply.
