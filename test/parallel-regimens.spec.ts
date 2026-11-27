@@ -5651,6 +5651,37 @@ describe("current calendar openings and finite clock continuations", () => {
     }
   });
 
+  it("prepares a coded QOD range before selecting a finite successor origin", () => {
+    const loading = tablet(1);
+    loading.schedule = { recurrence: { count: 1, frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["09:00:00"] } };
+    const successor = tablet(1);
+    successor.schedule = { recurrence: { frequency: 1, period: 1, periodMax: 2,
+      periodUnit: Unit.Day, clocks: ["09:00:00"], courseLength: { value: 2, unit: "d" } } };
+    successor.schedule.code = { coding: [{
+      system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "QOD"
+    }] };
+    const query = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC" };
+    for (const dosage of forms({ kind: "course", stages: [
+      { administrations: [loading] }, { administrations: [successor] }
+    ] })) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...query, limit: 4 })).toEqual([
+        "2027-01-01T09:00:00+00:00", "2027-01-03T09:00:00+00:00"
+      ]);
+      expect(nextDueDoses(dosage, { ...query, from: "2027-01-02T00:00:00Z", limit: 4 }))
+        .toEqual(["2027-01-03T09:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 5, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "tab", quantityKind: "maximum" });
+      const current = importCanonicalCourse(dosage).stages[1].administrations[0];
+      expect(current.schedule?.recurrence).toMatchObject({ periodMax: 2, periodUnit: Unit.Day,
+        clocks: ["09:00:00"], courseLength: { value: 2, unit: "d" } });
+      expect(current.schedule?.recurrence?.period).toBe(1);
+      expect(current.schedule?.code?.coding?.[0]?.code).toBe("QOD");
+      expect(current.amounts?.[0].quantity?.extension).toContainEqual(note);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
   it("completes a bare loading clock before five full days at that same clock", () => {
     const source = "Take 1 tablet at 22:00, then 2 tablets daily at 22:00 for 5 days";
     const parsed = parseSig(source);
