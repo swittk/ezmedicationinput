@@ -543,12 +543,13 @@ function mergeDottedDoseUnitContinuations(tokens: LexToken[], input: string): Le
       const canonical = DOTTED_DOSE_UNIT_ABBREVIATIONS[token.canonical ?? token.lower];
       const quantity = tokens[cursor - 1];
       const lead = tokens[cursor + 2];
-      const duration = tokens[cursor + 3];
-      const durationUnit = tokens[cursor + 4];
+      const durationIndex = lead && DURATION_LEAD_TOKENS.has(lead.canonical ?? lead.lower)
+        ? cursor + 3 : cursor + 2;
+      const duration = tokens[durationIndex];
+      const durationUnit = tokens[durationIndex + 1];
       if (canonical && quantity &&
           (quantity.kind === LexKind.Number || quantity.kind === LexKind.NumberRange) &&
-          lead && DURATION_LEAD_TOKENS.has(lead.canonical ?? lead.lower) && duration &&
-          (duration.kind === LexKind.Number || duration.kind === LexKind.NumberRange) &&
+          duration && (duration.kind === LexKind.Number || duration.kind === LexKind.NumberRange) &&
           durationUnit && INSTRUCTION_DURATION_UNITS.has(durationUnit.canonical ?? durationUnit.lower)) {
         const original = input.slice(token.sourceStart, dot.sourceEnd);
         token = { ...token, original, lower: original.toLowerCase(), canonical,

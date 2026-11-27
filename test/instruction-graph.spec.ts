@@ -7657,11 +7657,15 @@ describe("independent instruction sentence boundaries", () => {
 
 describe("dotted quantity unit continuation", () => {
   it.each([
-    ["15 mL", 15], ["15 mL.", 15], ["15ml.", 15], ["1.5 mL.", 1.5],
-    ["15 มล.", 15], ["15มล.", 15], ["15 มิลลิลิตร", 15]
-  ] as const)("keeps the rinse amount and duration together: %s", (amount, value) => {
-    const source = `Rinse mouth with ${amount} for 30 seconds then spit.`;
+    ["15 mL", 15, "for 30 seconds"], ["15 mL.", 15, "for 30 seconds"],
+    ["15ml.", 15, "for 30 seconds"], ["1.5 mL.", 1.5, "for 30 seconds"],
+    ["15 มล.", 15, "for 30 seconds"], ["15มล.", 15, "for 30 seconds"],
+    ["15 มิลลิลิตร", 15, "for 30 seconds"],
+    ["15 mL.", 15, "30 seconds"], ["15 มล.", 15, "30 วินาที"]
+  ] as const)("keeps the rinse amount and duration together: %s (%s, %s)", (amount, value, duration) => {
+    const source = `Rinse mouth with ${amount} ${duration} then spit.`;
     const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].schedule?.duration).toBeUndefined();
     const before = JSON.stringify(parsed);
     for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
       JSON.parse(JSON.stringify(parsed.fhirNext))]) {
