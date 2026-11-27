@@ -1,4 +1,3 @@
-
 import { describe,expect,it } from "vitest";
 import { courseToR6,R5_SOURCE_ONLY_MAXIMUM_URL } from "../src/adapters/canonical-course";
 import { courseFromR5 } from "../src/adapters/r5-import";
@@ -7,13 +6,14 @@ import { conditionToR6,COURSE_CYCLE_COUNT_EXTENSION_URL,decodeR5RetainedFields,d
 import { ADMINISTRATION_OFFSET_EXTENSION_URL,ANCHORED_COURSE_DURATION_EXTENSION_URL,canonicalFromFhir,canonicalToFhir,CYCLE_DAY_ELIGIBILITY_EXTENSION_URL,getAnchoredCourseDuration,getTimingClocks,PRN_TRIGGER_PHASE_EXTENSION_URL,TIMING_ADDITIONAL_CLOCK_EXTENSION_URL,TIMING_ADMINISTRATION_DURATION_EXTENSION_URL,TIMING_DAY_OF_MONTH_EXTENSION_URL,TIMING_FREQUENCY_MIN_EXTENSION_URL,TIMING_OFFSET_EXACT_EXTENSION_URL,TIMING_OFFSET_MAX_EXTENSION_URL,TIMING_OFFSET_MIN_EXTENSION_URL } from "../src/fhir";
 import { EMA_QUANTITY_COMPARATOR_EXTENSION_URL,EMA_QUANTITY_OPERATOR_SYSTEM,getQuantityComparator,QUANTITY_OPERATOR_SOURCE_URL,quantityForR5,quantityFromR5,simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 import { AdviceArgumentRole,AdviceForce,AdvicePolarity,buildInstructionGraphExtension,calculateTotalUnits,EventTiming,FhirDayOfWeek,FhirPeriodUnit,formatCanonicalAdministration,formatCanonicalCourse,formatParseBatch,formatSig,formatSigBatch,fromDosageDetails,fromFhir,fromFhirDosage,getMedicationInstructionAction,importCanonicalCourse,nextDueDoses,parseInstructionGraphExtension,parseSig as parsePublicSig,projectCanonicalCourse,toDosageDetails,toFhirR5Dosages,type CanonicalInstructionGraph,type EzDosage,type FhirDosage,type FhirElement,type FhirExtension,type FhirR6Dosage,type FhirR6DosageCondition,type FhirR6DosageInstructionInput,type FhirR6DosageStep,type FhirR6Quantity,type FhirR6Timing,type FhirRatio } from "../src/index";
+import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../src/instruction-graph-fhir";
 import type { AdviceArgument,AdviceFrame,CanonicalSigClause,FhirR6DosageInstruction,FhirR6Extension,FhirR6Range } from "../src/types";
 import { type FhirR6DosageSafety,type FhirR6DoseLimit,type FormatOptions,type ParseOptions } from "../src/types";
+import { convertQuantityValue } from "../src/utils/units";
 import crossLanguageCases from "./generation-cross-language-cases.json";
 import cases from "./generation-roundtrip-cases.json";
 import thaiCases from "./generation-roundtrip-thai-cases.json";
 import { parseSig } from "./helpers/r5-parser";
-
 type Result = ReturnType<typeof parseSig>;
 
 function expectActiveMixedDuration(row: FhirDosage | FhirR6Dosage, expected: FhirR6Range): void {
@@ -5601,4 +5601,391 @@ describe("alcohol advice action and polarity in current projections", () => {
     }
     expect(JSON.stringify(parsed)).toBe(parsedBefore);
   });
+});
+
+
+
+
+describe("fresh structured quantity and annotation ownership", () => {
+  const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day };
+  const ucum = "http://unitsofmeasure.org";
+
+  it("uses a coded group's established unit to select the tighter compatible maximum", () => {
+    const coded = { system: "urn:clinic:dose-unit", code: "tablet" };
+    const amounts = [{ ...coded, value: 2, id: "coded-minimum" },
+      { ...coded, value: 4, unit: "tablet", id: "unit-owner" },
+      { value: 1, unit: "tablet", id: "tightest", _value: { id: "limit-note" } }];
+    for (const order of [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]) {
+      const limits = order.map(index => ({ scope: "administration" as const, valueQuantity: amounts[index] }));
+      const input: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { ...coded, value: 1 } }],
+        timing: { repeat: daily }, safety: { doseLimit: limits },
+      }] }] };
+      const before = copy(input), rows = toFhirR5Dosages(input);
+      expect(rows[0].maxDosePerAdministration).toEqual(amounts[2]);
+      expect(toDosageDetails(copy(rows)).step![0].component[0].safety!.doseLimit).toEqual(limits);
+      expect(input).toEqual(before);
+    }
+    expect(convertQuantityValue(2, { ...coded }, { ...coded })).toBe(2);
+    expect(convertQuantityValue(2, { ...coded }, { system: coded.system, code: "other" })).toBeNull();
+  });
+
+  it("keeps explicit UCUM identities separate from authored shorthand aliases", () => {
+    const enzyme = { system: ucum, code: "U", unit: "enzyme unit" };
+    const international = { system: ucum, code: "[iU]", unit: "international unit" };
+    expect(convertQuantityValue(2, enzyme, international)).toBeNull();
+    expect(convertQuantityValue(2, enzyme, { ...enzyme, unit: "U" })).toBe(2);
+    expect(convertQuantityValue(2, { unit: "U" }, international)).toBe(2);
+    expect(convertQuantityValue(1, { system: ucum, code: "g" }, { system: ucum, code: "mg" })).toBe(1000);
+    expect(convertQuantityValue(1, { system: ucum, code: "l" }, { system: ucum, code: "mL" })).toBe(1000);
+    expect(convertQuantityValue(1, { system: ucum, code: "ml" }, { system: ucum, code: "mL" })).toBe(1);
+    expect(convertQuantityValue(1, { system: ucum, code: "ML" }, { system: ucum, code: "mL" })).toBeNull();
+    expect(convertQuantityValue(1, { system: ucum, code: "5.mL" }, { system: ucum, code: "mL" })).toBe(5);
+    const limits = [{ scope: "administration" as const, valueQuantity: { ...enzyme, value: 20 } },
+      { scope: "administration" as const, valueQuantity: { ...international, value: 1 } }];
+    const input: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { ...enzyme, value: 10 } }], safety: { doseLimit: limits },
+    }] }] };
+    const before = copy(input), rows = toFhirR5Dosages(input);
+    expect(rows[0].maxDosePerAdministration).toEqual(limits[0].valueQuantity);
+    expect(toDosageDetails(copy(rows)).step![0].component[0].safety!.doseLimit).toEqual(limits);
+    expect(input).toEqual(before);
+  });
+
+  it.each([
+    { code: "ml", value: 100, tighterCode: "L", tighterValue: 0.05 },
+    { code: "l", value: 0.1, tighterCode: "mL", tighterValue: 50 },
+  ])("compares the UCUM litre symbol $code without folding prefix case", ({ code, value, tighterCode, tighterValue }) => {
+    const first = { system: ucum, code, value, id: "larger-volume", _value: { id: "authored-volume" } };
+    const tight = { system: ucum, code: tighterCode, value: tighterValue, id: "smaller-volume" };
+    for (const quantities of [[first, tight], [tight, first]]) {
+      const limits = quantities.map(valueQuantity => ({ scope: "administration" as const, valueQuantity }));
+      const input: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { system: ucum, code, value: value / 10 } }], safety: { doseLimit: limits },
+      }] }] };
+      const before = copy(input), rows = toFhirR5Dosages(input);
+      expect(rows[0].maxDosePerAdministration).toEqual(tight);
+      expect(toDosageDetails(copy(rows)).step![0].component[0].safety!.doseLimit).toEqual(limits);
+      expect(input).toEqual(before);
+    }
+  });
+
+  it.each([undefined, 1])("preserves a two-hour upper administration duration with lower %s", lower => {
+    const missing = { id: "lower-duration", extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+    }] };
+    const row: FhirDosage = { text: "Infuse up to two hours", doseAndRate: [{ doseQuantity: { value: 100, unit: "mL" } }],
+      timing: { repeat: { ...daily, ...(lower === undefined ? { _duration: missing } : { duration: lower }),
+        durationMax: 2, durationUnit: FhirPeriodUnit.Hour } } };
+    const before = copy(row), canonical = canonicalFromFhir(row);
+    expect(canonical.schedule?.administrationDuration).toBe(lower);
+    expect(canonical.schedule?.administrationDurationMax).toBe(2);
+    const written = canonicalToFhir(canonical);
+    expect(written.timing!.repeat).toMatchObject({ durationMax: 2, durationUnit: FhirPeriodUnit.Hour });
+    expect(written.timing!.repeat!.duration).toBe(lower);
+    const wire = toDosageDetails([row]);
+    for (const current of [toFhirR5Dosages(wire)[0], wire.step![0].component[0]]) {
+      expect(current.timing!.repeat).toMatchObject({ durationMax: 2, durationUnit: FhirPeriodUnit.Hour });
+      expect(current.timing!.repeat!.duration).toBe(lower);
+      if (lower === undefined) expect(current.timing!.repeat!._duration).toEqual(missing);
+    }
+    expect(row).toEqual(before);
+  });
+
+  it("projects quantities nested in an extension primitive companion", () => {
+    const quantity: FhirR6Quantity = { value: 1, unit: "tablet", _unit: { id: "unit-note", extension: [{
+      id: "annotation", url: "urn:clinic:annotation", valueString: "Authored label",
+      _valueString: { id: "label-note", extension: [{ url: "urn:clinic:estimate",
+        valueQuantity: { value: 2, unit: "mg", comparator: "~" } }] },
+    }] } };
+    const before = copy(quantity), projected = quantityForR5(quantity)!;
+    const annotation = projected._unit!.extension![0];
+    expect(annotation).toMatchObject({ id: "annotation", url: "urn:clinic:annotation", valueString: "Authored label",
+      _valueString: { id: "label-note" } });
+    const estimate = annotation._valueString!.extension![0].valueQuantity!;
+    expect(estimate.comparator).toBeUndefined();
+    expect(getQuantityComparator(estimate)).toBe("~");
+    expect(quantityFromR5(copy(projected))).toEqual(quantity);
+    expect(quantity).toEqual(before);
+  });
+
+  it.each([true, false])("preserves method primitive IDs and boolean annotation %s", reviewed => {
+    const annotation = { id: "review-marker", url: "urn:clinic:reviewed", valueBoolean: reviewed };
+    const method = { text: "Infuse", _text: { id: "method-note", extension: [annotation] } };
+    const row: FhirDosage = { text: "Infuse 100 mL daily", method,
+      doseAndRate: [{ doseQuantity: { value: 100, unit: "mL" } }], timing: { repeat: daily } };
+    const before = copy(row), native = fromFhirDosage(row), r6 = toDosageDetails([row]);
+    for (const current of [native.fhir, r6.step![0].component[0], toFhirR5Dosages(r6)[0]])
+      expect(current.method?._text).toEqual(method._text);
+    expect(row).toEqual(before);
+  });
+
+  it("accepts and retains current repeat and condition primitive annotations without casts", () => {
+    const note = { id: "typed-note", extension: [{ url: "urn:clinic:estimate",
+      valueQuantity: { value: 2, unit: "mg", comparator: "~" as const } }] };
+    const repeat: NonNullable<FhirR6Timing["repeat"]> = { ...daily, count: 2, countMax: 3,
+      _countMax: note, duration: 1, durationMax: 2, durationUnit: FhirPeriodUnit.Hour,
+      _durationMax: note, _durationUnit: note, periodMax: 2, _periodMax: note, _periodUnit: note };
+    const condition: FhirR6DosageCondition = { code: { text: "if needed" }, text: "If needed",
+      _text: { id: "condition-text", extension: [{ url: "urn:clinic:reviewed", valueBoolean: false }] } };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ timing: { repeat }, condition: [condition],
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }] }] };
+    const before = copy(input), rows = toFhirR5Dosages(input), restored = toDosageDetails(copy(rows));
+    const current = restored.step![0].component[0];
+    for (const key of ["_countMax", "_durationMax", "_durationUnit", "_periodMax", "_periodUnit"] as const)
+      expect(current.timing!.repeat![key]).toEqual(note);
+    expect(current.condition![0]._text).toEqual(condition._text);
+    expect(input).toEqual(before);
+  });
+
+  it("retains relation, repeated Coding, and argument span wrapper annotations by occurrence", () => {
+    const relation = { system: "http://snomed.info/sct", code: "421463005", display: "With - dosing instruction fragment" };
+    const coding = { system: "urn:clinic:actions", code: "rinse" };
+    const argument: FhirExtension = { url: "argument", extension: [
+      { url: "role", valueCode: "object" }, { url: "text", valueString: "mouth" },
+      { id: "argument-relation", url: "relationCoding", valueCoding: relation },
+      { url: "argumentCoding", valueCoding: coding }, { id: "second-argument-code", url: "argumentCoding", valueCoding: coding },
+      { id: "argument-start", url: "spanStart", valueInteger: 6, _valueInteger: { id: "start-note" } },
+      { id: "argument-end", url: "spanEnd", valueInteger: 11 },
+    ] };
+    const action: FhirExtension = { url: "action", extension: [
+      { url: "force", valueCode: AdviceForce.Instruction }, { url: "predicateLemma", valueString: "rinse" },
+      { url: "sourceText", valueString: "Rinse mouth" },
+      { url: "spanStart", valueInteger: 0 }, { url: "spanEnd", valueInteger: 11 },
+      { id: "action-relation", url: "relationCoding", valueCoding: relation },
+      { url: "predicateCoding", valueCoding: coding }, { id: "second-predicate-code", url: "predicateCoding", valueCoding: coding }, argument,
+    ] };
+    const marker: FhirExtension = { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL,
+      extension: [{ url: "sourceText", valueString: "Rinse mouth" }, action] };
+    const before = copy(marker), graph = parseInstructionGraphExtension([marker])!;
+    expect(graph.actions).toHaveLength(1);
+    expect(graph.actions[0].args[0].span).toEqual({ start: 6, end: 11 });
+    const output = buildInstructionGraphExtension(graph)!;
+    const current = output.extension!.find(field => field.url === "action")!.extension!;
+    const currentArgument = current.find(field => field.url === "argument")!.extension!;
+    for (const [fields, relationId, codingName, codingId] of [
+      [current, "action-relation", "predicateCoding", "second-predicate-code"],
+      [currentArgument, "argument-relation", "argumentCoding", "second-argument-code"],
+    ] as const) {
+      const relations = fields.filter(field => field.url === "relationCoding");
+      expect(relations).toHaveLength(1);
+      expect(relations[0]).toEqual({ id: relationId, url: "relationCoding", valueCoding: relation });
+      const codes = fields.filter(field => field.url === codingName);
+      expect(codes).toHaveLength(2);
+      expect(codes[0]).toEqual({ url: codingName, valueCoding: coding });
+      expect(codes[1]).toEqual({ id: codingId, url: codingName, valueCoding: coding });
+    }
+    for (const field of argument.extension!.filter(field => field.url === "spanStart" || field.url === "spanEnd"))
+      expect(currentArgument).toContainEqual(field);
+    expect(marker).toEqual(before);
+  });
+});
+
+
+
+describe("current instruction occurrence projection stability", () => {
+  const prefix = "Instill 1 drop in the right eye at 08:00 and 1 drop in the left eye at 20:00 daily for 7 days. ";
+  const leftHold = "Skip the drops in the left eye on Mondays";
+  const rightHold = "Skip the drops in the right eye on Fridays";
+  const drive = "Do not drive";
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  type CurrentWire = FhirDosage[] | FhirR6DosageInstruction;
+
+  function leftR5(rows: FhirDosage[]): FhirDosage {
+    const row = rows.find(item => item.site?.coding?.some(coding => coding.code === "1290031003"));
+    expect(row).toBeDefined();
+    return row!;
+  }
+
+  function leftR6(details: FhirR6DosageInstruction): FhirR6Dosage {
+    for (const step of details.step ?? []) for (const row of step.component) {
+      if (row.site?.concept?.coding?.some(coding => coding.code === "1290031003")) return row;
+    }
+    throw new Error("Expected the independently dosed left-eye component");
+  }
+
+  it.each([
+    { warning: "May cause drowsiness", thaiWarning: "อาจทำให้ง่วงซึม" },
+    { warning: "Do not drive", thaiWarning: "ห้ามDrive" },
+  ])("keeps $warning between independent holds without inventing a temporal sequence", ({ warning, thaiWarning }) => {
+    const parsed = parsePublicSig(`${prefix}${leftHold}. ${warning}. ${rightHold}.`);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = fresh(input);
+      for (const locale of ["en", "th"] as const) {
+        const output = formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase();
+        const left = "the drops in the left eye on monday";
+        const middle = (locale === "en" ? warning : thaiWarning).toLowerCase();
+        const right = "the drops in the right eye on friday";
+        for (const phrase of [left, middle, right]) expect(output.split(phrase)).toHaveLength(2);
+        expect(output.indexOf(left)).toBeLessThan(output.indexOf(middle));
+        expect(output.indexOf(middle)).toBeLessThan(output.indexOf(right));
+        expect(output).not.toMatch(/\bthen\b|จากนั้น/u);
+      }
+      expect(input).toEqual(before);
+    }
+  });
+
+  for (const form of ["r5", "r6"] as const) {
+    it.each(["element", "display", "userSelected", "i18n"] as const)(`keeps Coding %s annotations separate from clinical instruction identity in fresh ${form}`, variant => {
+      const parsed = parsePublicSig("Take 1 tablet daily. Do not drive.");
+      let wire: CurrentWire = fresh(form === "r5" ? parsed.fhir : parsed.fhirNext);
+      const row = Array.isArray(wire) ? wire[0] : wire.step![0].component[0];
+      const baseline = ["en", "th"].map(locale => formatSig(wire, "long", { locale, realizationMode: "normalized" }));
+      const baselineProjection = projectCanonicalCourse(importCanonicalCourse(wire));
+      const originalRows = [baselineProjection.fhir[0], baselineProjection.fhirNext.step![0].component[0]];
+      expect(baseline[0]).toBe("Take 1 tablet orally once daily. Do not drive.");
+      expect(row.additionalInstruction).toHaveLength(1);
+      const marker = row.additionalInstruction![0].extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!;
+      const action = marker.extension!.find(item => item.url === "action")!;
+      const coding = action.extension!.find(item => item.url === "predicateCoding")!.valueCoding!;
+      expect(coding.code).toBeDefined();
+      const note = { url: "urn:clinic:instruction-code-note", valueString: "retain without changing the instruction" };
+      if (variant === "element") {
+        coding.id = "authored-driving-code";
+        coding._code = { ...coding._code, id: "authored-driving-code-value", extension: [...(coding._code?.extension ?? []), note] };
+        coding.extension = [...(coding.extension ?? []), note];
+      } else if (variant === "display") coding.display = "Driving warning selected by clinician";
+      else if (variant === "userSelected") coding.userSelected = !coding.userSelected;
+      else coding.i18n = { ...coding.i18n, en: "Driving warning", th: "คำเตือนเรื่องการขับรถ" };
+      const annotatedCoding = fresh(coding);
+
+      for (let cycle = 0; cycle < 3; cycle++) {
+        const before = fresh(wire);
+        for (const [index, locale] of ["en", "th"].entries())
+          expect(formatSig(wire, "long", { locale, realizationMode: "normalized" })).toBe(baseline[index]);
+        const projected = projectCanonicalCourse(importCanonicalCourse(wire));
+        for (const [index, output] of [projected.fhir[0], projected.fhirNext.step![0].component[0]].entries()) {
+          const original = originalRows[index];
+          expect(output.additionalInstruction).toHaveLength(1);
+          const retained = output.additionalInstruction![0].extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!;
+          const current = retained.extension!.find(item => item.url === "action")!;
+          expect(current.extension!.find(item => item.url === "predicateCoding")!.valueCoding).toEqual(annotatedCoding);
+          expect(parseInstructionGraphExtension(output.extension)!.sourceText)
+            .toBe("Take 1 tablet daily. Do not drive.");
+          expect(output.patientInstruction).toBe(original.patientInstruction);
+          expect(output.doseAndRate).toEqual(original.doseAndRate);
+          expect(output.timing?.repeat).toEqual(original.timing?.repeat);
+        }
+        expect(wire).toEqual(before);
+        wire = fresh(form === "r5" ? projected.fhir : projected.fhirNext);
+      }
+    });
+
+
+    it.each(["code", "system", "version"] as const)(`keeps distinct selected Coding %s facts in fresh ${form}`, field => {
+      const parsed = parsePublicSig("Take 1 tablet daily. Do not drive.");
+      const wire: CurrentWire = fresh(form === "r5" ? parsed.fhir : parsed.fhirNext);
+      const row = Array.isArray(wire) ? wire[0] : wire.step![0].component[0];
+      const marker = row.additionalInstruction![0].extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!;
+      const selected = marker.extension!.find(item => item.url === "action")!.extension!
+        .find(item => item.url === "predicateCoding")!.valueCoding!;
+      const graphMarker = row.extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!;
+      const graphCoding = graphMarker.extension!.find(item => item.url === "action")!.extension!
+        .find(item => item.url === "predicateCoding")!.valueCoding!;
+      if (field === "version") graphCoding.version = "20260101";
+      const originalCoding = fresh(graphCoding);
+      selected[field] = field === "code" ? "clinic-driving-prohibition"
+        : field === "system" ? "urn:clinic:instruction-codes" : "20261101";
+      const selectedCoding = fresh(selected), before = fresh(wire);
+      expect(formatSig(wire, "long", { locale: "en", realizationMode: "normalized" }).match(/do not drive/giu)).toHaveLength(2);
+      const projected = projectCanonicalCourse(importCanonicalCourse(wire));
+      for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
+        expect(output.additionalInstruction).toHaveLength(2);
+        const codings = output.additionalInstruction!.flatMap(instruction =>
+          parseInstructionGraphExtension(instruction.extension)?.actions[0].predicate.codings ?? []);
+        expect(codings).toContainEqual(selectedCoding);
+        expect(codings).toContainEqual(originalCoding);
+        expect(output.doseAndRate).toEqual(row.doseAndRate);
+        expect(output.timing?.repeat).toEqual(row.timing?.repeat);
+        expect(parseInstructionGraphExtension(output.extension)!.sourceText)
+          .toBe("Take 1 tablet daily. Do not drive.");
+      }
+      expect(wire).toEqual(before);
+    });
+  }
+
+  for (const form of ["r5", "r6"] as const) {
+    it.each([
+      { name: "ordinary negative warning", instructions: [leftHold, rightHold, drive] },
+      { name: "negative warning and independent opaque advice", instructions: [leftHold, rightHold, drive, "Arrange a ride home"] },
+    ])(`keeps $name rows stable through repeated current ${form} projections`, ({ instructions }) => {
+      const patientInstruction = instructions.join(". ");
+      const source = `${prefix}${patientInstruction}.`;
+      const parsed = parsePublicSig(source);
+      const parsedBefore = fresh(parsed);
+      let wire: CurrentWire = fresh(form === "r5" ? parsed.fhir : parsed.fhirNext);
+      const original = form === "r5" ? leftR5(parsed.fhir) : leftR6(parsed.fhirNext);
+      expect(original.additionalInstruction?.map(row => row.text)).toEqual(instructions);
+      expect(original.patientInstruction).toBe(patientInstruction);
+
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        const before = fresh(wire);
+        const output = projectCanonicalCourse(importCanonicalCourse(wire));
+        expect(wire).toEqual(before);
+        for (const row of [leftR5(output.fhir), leftR6(output.fhirNext)]) {
+          expect.soft(row.additionalInstruction?.map(instruction => instruction.text)).toEqual(instructions);
+          expect.soft(row.additionalInstruction?.filter(instruction => instruction.text === drive)).toHaveLength(1);
+          expect(row.patientInstruction).toBe(patientInstruction);
+          expect(row._patientInstruction).toEqual(original._patientInstruction);
+          expect(row.text).toBe(original.text);
+        }
+        wire = fresh(form === "r5" ? output.fhir : output.fhirNext);
+      }
+      expect(parsed).toEqual(parsedBefore);
+    });
+
+    it(`keeps identical authored holds and their own annotations separate through current ${form} projections`, () => {
+      const instructions = [leftHold, leftHold, drive];
+      const patientInstruction = instructions.join(". ");
+      const parsed = parsePublicSig(`${prefix}${patientInstruction}.`);
+      const parsedBefore = fresh(parsed);
+      let wire: CurrentWire = fresh(form === "r5" ? parsed.fhir : parsed.fhirNext);
+      const left = Array.isArray(wire) ? leftR5(wire) : leftR6(wire);
+      expect(left.additionalInstruction?.map(row => row.text)).toEqual(instructions);
+      const occurrences = left.additionalInstruction!.slice(0, 2).map(row => {
+        const frame = parseInstructionGraphExtension(row.extension)?.actions[0];
+        expect(frame).toBeDefined();
+        return { sequenceIndex: frame!.sequenceIndex, span: frame!.span };
+      });
+      expect(occurrences.map(frame => frame.sequenceIndex)).toEqual([0, 1]);
+      expect(occurrences[0].span).not.toEqual(occurrences[1].span);
+
+      // This is fresh current wire input: only the first occurrence owns these
+      // annotations. Equal wording must not copy them onto the second hold.
+      const rowNote = { url: "urn:clinic:first-hold-note", valueString: "first authored occurrence" };
+      const textElement = { id: "first-hold-text", extension: [rowNote] };
+      const patientElement = { id: "current-patient-instruction", extension: [
+        { url: "urn:clinic:patient-note", valueString: "retain the complete current passage" },
+      ] };
+      left.additionalInstruction![0].id = "first-authored-hold";
+      left.additionalInstruction![0]._text = textElement;
+      left.additionalInstruction![0].extension = [...(left.additionalInstruction![0].extension ?? []), rowNote];
+      left._patientInstruction = patientElement;
+
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        const before = fresh(wire);
+        const output = projectCanonicalCourse(importCanonicalCourse(wire));
+        expect(wire).toEqual(before);
+        for (const row of [leftR5(output.fhir), leftR6(output.fhirNext)]) {
+          expect.soft(row.additionalInstruction?.map(instruction => instruction.text)).toEqual(instructions);
+          expect(row.patientInstruction).toBe(patientInstruction);
+          expect(row._patientInstruction).toEqual(patientElement);
+          expect(row.additionalInstruction!.slice(0, 2).map(instruction => {
+            const frame = parseInstructionGraphExtension(instruction.extension)?.actions[0];
+            return { sequenceIndex: frame?.sequenceIndex, span: frame?.span };
+          })).toEqual(occurrences);
+          const [first, second] = row.additionalInstruction!;
+          expect(first.id).toBe("first-authored-hold");
+          expect(first._text).toEqual(textElement);
+          expect(first.extension).toContainEqual(rowNote);
+          expect(second.id).toBeUndefined();
+          expect(second._text).toBeUndefined();
+          expect(second.extension).not.toContainEqual(rowNote);
+        }
+        wire = fresh(form === "r5" ? output.fhir : output.fhirNext);
+      }
+      expect(parsed).toEqual(parsedBefore);
+    });
+  }
 });
