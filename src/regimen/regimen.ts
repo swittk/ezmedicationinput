@@ -587,11 +587,14 @@ export function scopeSequentialPhaseSemantics(
             const clause = states[member]?.primaryClause;
             const schedule = clause?.schedule;
             if (!clause || !schedule || schedule.treatmentStartOffsetDays !== undefined ||
-                schedule.boundsStart || schedule.boundsEnd) continue;
+                schedule.phaseStartReference || schedule.boundsStart || schedule.boundsEnd) continue;
             schedule.treatmentStartOffsetDays = phaseStart;
+            if (firstSchedule?.phaseStartReference === "treatment-day-start")
+              schedule.phaseStartReference = firstSchedule.phaseStartReference;
             clause.evidence.push({
               rule: "hpsg.regimen.terminal-treatment-pause",
-              spans: [], scheduleFields: ["treatmentStartOffsetDays"],
+              spans: [], scheduleFields: schedule.phaseStartReference
+                ? ["treatmentStartOffsetDays", "phaseStartReference"] : ["treatmentStartOffsetDays"],
               note: "The next administration starts after an explicit finite no-medication interval."
             });
           }
@@ -691,22 +694,22 @@ export function scopeSequentialPhaseSemantics(
           delete schedule.boundsEnd;
         fields.push('method');
       }
-      // A local cadence owns which inherited clock lists remain compatible.
-      // Both the timing anaphor and ordinary anchor ellipsis use this decision
-      // before copying clocks or consuming the source timing reference.
-      const donorClockCount = shared?.timeOfDay?.length ?? 0;
+      // A local cadence owns compatibility of the complete recurring anchor set.
+      // Both the timing anaphor and ordinary ellipsis use the same decision
+      // before copying clocks or events and their offsets.
+      const donorAnchorCount = (shared?.timeOfDay?.length ?? 0) + (recurringAnchors?.length ?? 0);
       const calendarPeriod = schedule?.period ?? 1;
-      const singleCalendarClock = donorClockCount === 1 &&
+      const singleCalendarAnchor = donorAnchorCount === 1 &&
         Number.isInteger(calendarPeriod) && calendarPeriod > 0 &&
         (schedule?.periodUnit === "d" || schedule?.periodUnit === "wk" ||
          schedule?.periodUnit === "mo" || schedule?.periodUnit === "a");
       const successorFrequency = schedule?.frequency ??
         (schedule?.period !== undefined || schedule?.periodUnit !== undefined ? 1 : undefined);
       const matchesSuccessorCadence = successorFrequency === undefined || (
-        successorFrequency === donorClockCount &&
-        (singleCalendarClock || (schedule?.period === undefined || schedule.period === 1) &&
+        successorFrequency === donorAnchorCount &&
+        (singleCalendarAnchor || (schedule?.period === undefined || schedule.period === 1) &&
           (schedule?.periodUnit === undefined || schedule.periodUnit === 'd')) &&
-        (schedule?.frequencyMax === undefined || schedule.frequencyMax === donorClockCount)
+        (schedule?.frequencyMax === undefined || schedule.frequencyMax === donorAnchorCount)
       );
       const onsetOnlyContinuation = edge.relation.semanticLicense === "dose-continuation" &&
         (schedule?.treatmentStartOffsetDays !== undefined || Boolean(schedule?.phaseStartReference)) &&
@@ -723,7 +726,7 @@ export function scopeSequentialPhaseSemantics(
         const hasLocalCadence = cadenceKeys.some(key => schedule[key] !== undefined);
         const recurrence = {
           ...(hasLocalCadence ? undefined : cadence),
-          ...(hasLocalAnchor ? undefined : eventTiming),
+          ...(hasLocalAnchor || !matchesSuccessorCadence ? undefined : eventTiming),
           timeOfDay: hasLocalAnchor || !matchesSuccessorCadence ? undefined : shared.timeOfDay,
           clockWindow: hasLocalAnchor ? undefined : shared.clockWindow,
           eventWindow: hasLocalAnchor ? undefined : shared.eventWindow,
@@ -779,7 +782,7 @@ export function scopeSequentialPhaseSemantics(
       // anchor group, so inherited anchors cannot create a mixed local/donor pair.
       if (!schedule.when?.length && !schedule.timeOfDay?.length && !schedule.clockWindow &&
           !schedule.eventWindow && !schedule.activityTiming?.length && sharedAnchors) {
-        if (eventTiming) for (const key of Object.keys(eventTiming) as (keyof typeof eventTiming)[]) {
+        if (eventTiming && matchesSuccessorCadence) for (const key of Object.keys(eventTiming) as (keyof typeof eventTiming)[]) {
           const inherited = eventTiming[key];
           if (schedule[key] === undefined && inherited !== undefined) {
             (schedule as Record<string, unknown>)[key] = cloneStructuredValue(inherited);

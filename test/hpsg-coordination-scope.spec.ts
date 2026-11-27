@@ -3256,3 +3256,56 @@ describe("registered weekday and hard-delimiter vocabulary", () => {
       schedule: { frequency: 1, period: 1, periodUnit: "d" } });
   });
 });
+
+describe("HPSG inherited phase origins and complete anchor groups", () => {
+  it("retains the civil treatment-day origin through a finite hold and resume", () => {
+    const source = "From day 3, take 1 tablet at 08:00 daily for 5 days, then hold for 2 days, then resume 1 tablet at 08:00 daily";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const query = { from: "2026-12-01T12:00:00Z", orderedAt: "2026-12-01T12:00:00Z", timeZone: "UTC", limit: 8 };
+    const expected = [3, 4, 5, 6, 7, 10, 11, 12].map(day => `2026-12-${String(day).padStart(2, "0")}T08:00:00+00:00`);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const course = importCanonicalCourse(input);
+      expect(course.stages).toHaveLength(2);
+      expect(course.stages.map(stage => stage.start)).toEqual([
+        expect.objectContaining({ anchor: "treatment-day-start", displacement: expect.objectContaining({ value: 2, unit: "d" }) }),
+        expect.objectContaining({ anchor: "treatment-day-start", displacement: expect.objectContaining({ value: 9, unit: "d" }) })
+      ]);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 11, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 8, unit: "tab" });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([["BID", 2, 10], ["daily", 1, 6]] as const)(
+    "inherits a complete event and offset only when compatible with the successor cadence: %s",
+    (cadence, frequency, total) => {
+      const source = `Take 1 tablet daily 30 minutes before dinner for 2 days, then take 2 tablets ${cadence} at the same time`;
+      const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+      const expected = ["2026-12-01T18:00:00+00:00", "2026-12-02T18:00:00+00:00",
+        ...(frequency === 2
+          ? ["2026-12-03T08:00:00+00:00", "2026-12-03T20:00:00+00:00",
+            "2026-12-04T08:00:00+00:00", "2026-12-04T20:00:00+00:00"]
+          : ["2026-12-03T18:00:00+00:00", "2026-12-04T18:00:00+00:00"])];
+      const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z",
+        timeZone: "UTC", eventClock: { CV: "18:30" }, limit: expected.length };
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+        expect(members).toHaveLength(2);
+        expect(members.map(member => member.amounts?.[0].quantity?.value)).toEqual([1, 2]);
+        expect(members[0].schedule?.recurrence).toMatchObject({ anchors: ["ACV"], offset: 30 });
+        const next = members[1].schedule?.recurrence;
+        expect(next).toMatchObject({ frequency, period: 1, periodUnit: "d" });
+        expect(next?.anchors).toEqual(frequency === 1 ? ["ACV"] : undefined);
+        expect(next?.offset).toBe(frequency === 1 ? 30 : undefined);
+        expect(nextDueDoses(input, query)).toEqual(expected);
+        expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 4, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: total, unit: "tab" });
+      }
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(parsed)).toBe(before);
+    });
+});
