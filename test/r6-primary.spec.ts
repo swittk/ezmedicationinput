@@ -8804,3 +8804,26 @@ describe("current medication calendar exclusions precede independent advice", ()
     expect(JSON.stringify([row, r6])).toBe(before);
   });
 });
+
+it("retains a calendar restriction beside a method-only current prescription", () => {
+  const row: FhirDosage = { method: { text: "Use shampoo" },
+    extension: [{ url: DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, extension: [{ url: "day", valueCode: "mon" }] }] };
+  const r6: FhirR6DosageInstruction = { step: [{ component: [{ method: { text: "Use shampoo" },
+    extension: [{ url: DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, extension: [{ url: "day", valueCode: "mon" }] }] }] }] };
+  const before = JSON.stringify([row, r6]);
+  const native = importCanonicalCourse(r6);
+  const administration = native.stages[0].administrations[0];
+  expect(administration.amounts).toBeUndefined();
+  expect(administration.schedule).toBeUndefined();
+  expect(administration.excludedWeekdays).toEqual(["mon"]);
+  for (const locale of ["en", "th"] as const) {
+    const options: FormatOptions = { locale, realizationMode: "normalized" };
+    const qualifier = locale === "en" ? "except Monday" : "ยกเว้นวันจันทร์";
+    for (const text of [formatCanonicalCourse(native, "long", options),
+      formatSig(row, "long", options), formatSig(r6, "long", options)]) {
+      expect(text).toContain(qualifier);
+      if (locale === "en") expect(text).toContain("Use shampoo");
+    }
+  }
+  expect(JSON.stringify([row, r6])).toBe(before);
+});
