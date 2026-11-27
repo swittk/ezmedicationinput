@@ -3,6 +3,7 @@ import { courseContinuationDurationAt, doseComparatorNumberAt, DOSE_COMPARATOR_P
 import { composeCoordinatedActionDirective, composePreposedContactTheme, licensesPreposedContactTheme } from "./hpsg/constructions";
 import {
   resolveAdviceMannerModifier,
+  resolveAdviceNominalArgument,
   matchComposedAdviceCodings,
   adviceCodingNeedsComposedScope
 } from "./advice";
@@ -577,6 +578,8 @@ function argumentFromParts(
     // constructional fallback. The fallback is only for opaque/free text.
     return direct;
   }
+  const adviceNominal = resolveAdviceNominalArgument(canonical, text);
+  if (adviceNominal) return adviceNominal;
   const resolvedSite = codingFromSite(text, options);
   if (resolvedSite) {
     if (preferredRole === AdviceArgumentRole.Destination) resolvedSite.role = AdviceArgumentRole.Destination;
@@ -3898,7 +3901,7 @@ function defaultActionArguments(frame: AdviceFrame) {
     if (arg.role === AdviceArgumentRole.Substance && !arg.relation) unmarkedSubstances++;
     if ((arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
         arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance ||
-        arg.role === AdviceArgumentRole.Material) &&
+        arg.role === AdviceArgumentRole.Material || arg.role === AdviceArgumentRole.MealState) &&
         relationHasSemanticClass(arg.relation, "accompaniment")) {
       if (explicitAccompaniment) (additionalAccompaniments ??= []).push(arg);
       else explicitAccompaniment = arg;
@@ -3911,10 +3914,14 @@ function defaultActionArguments(frame: AdviceFrame) {
     if (arg.role === AdviceArgumentRole.Amount) amountArg ??= arg;
     else if (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
         arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance ||
+        arg.role === AdviceArgumentRole.MealState ||
         arg.role === AdviceArgumentRole.Material && relationHasSemanticClass(arg.relation, "accompaniment")) {
       // A WITH daughter remains an accompaniment when the medication object
       // is implicit. A bare substance without that relation can be the object.
-      if (arg.relation && relationHasSemanticClass(arg.relation, "accompaniment") ||
+      if (arg.role === AdviceArgumentRole.MealState &&
+            (relationHasGrammarFeature(arg.relation ?? frame.relation, "mealStateComplement") ||
+              relationHasSemanticClass(arg.relation ?? frame.relation, "accompaniment")) ||
+          arg.relation && relationHasSemanticClass(arg.relation, "accompaniment") ||
           !explicitAccompaniment && arg.role === AdviceArgumentRole.Substance &&
             relationHasSemanticClass(frame.relation, "accompaniment") &&
             (unmarkedSubstances < 2 || objectArg !== undefined))
@@ -3932,7 +3939,7 @@ function defaultActionAccompaniment(c: ActionRealizationContext, arg: AdviceArgu
   if (!arg) return undefined;
   const relation = arg.relation ?? c.frame.relation;
   const materialArgument = arg.role === AdviceArgumentRole.Substance ||
-    arg.role === AdviceArgumentRole.Material ||
+    arg.role === AdviceArgumentRole.Material || arg.role === AdviceArgumentRole.MealState ||
     // The explicit relation owns a nominal accompaniment independently of
     // the medication object, including typed Object and Theme arguments.
     ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme ||
@@ -4222,7 +4229,8 @@ function realizeAction(
   const genericText = genericRealizer && (!negated ||
       realizerKey === "amount-material-destination" ||
       realizerKey === "default" && defaultArguments?.relationTargetArg &&
-        relationHasSemanticClass(defaultArguments.relationTargetArg.relation ?? frame.relation, "accompaniment") ||
+        (relationHasSemanticClass(defaultArguments.relationTargetArg.relation ?? frame.relation, "accompaniment") ||
+          defaultArguments.relationTargetArg.role === AdviceArgumentRole.MealState) ||
       (realizerKey === "default" || realizerKey === "result") && firstArguments[AdviceArgumentRole.Amount]?.quantity)
     ? genericRealizer === DEFAULT_ACTION_REALIZER
       ? DEFAULT_ACTION_REALIZER(input, input.frame === frame ? defaultArguments : undefined)

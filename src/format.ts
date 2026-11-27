@@ -2168,6 +2168,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
 
 export function isEmptyStomachInstruction(instruction: CanonicalAdditionalInstructionExpr): boolean {
   return instruction.coding?.code === EMPTY_STOMACH_QUALIFIER_CODE || Boolean(instruction.frames?.some((frame) =>
+    frame.polarity !== AdvicePolarity.Negate &&
     relationHasGrammarFeature(frame.relation, "mealStateComplement") && frame.args.some((arg) =>
       arg.role === AdviceArgumentRole.MealState && arg.conceptId === "empty_stomach"
     )

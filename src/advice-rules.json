@@ -458,11 +458,14 @@
         }
       ],
       "matcher": {
-        "argConcept": {
-          "conceptIds": [
-            "empty_stomach"
-          ],
-          "role": "meal_state"
+        "frame": {
+          "polarity": "affirm",
+          "argConcepts": [
+            {
+              "role": "meal_state",
+              "conceptIds": ["empty_stomach"]
+            }
+          ]
         }
       }
     },

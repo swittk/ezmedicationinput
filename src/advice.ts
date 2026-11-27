@@ -1174,6 +1174,15 @@ function withoutNominalArticle(text: string): string {
     ? text.slice(end + 1).trim() : text;
 }
 
+/** Exact advice nominals share their existing lexical identity with action arguments. */
+export function resolveAdviceNominalArgument(surface: string, sourceText = surface): AdviceArgument | undefined {
+  const normalized = normalizeAdditionalInstructionKey(surface);
+  const concept = findExactConcept(withoutNominalArticle(normalized));
+  if (!concept || STYLE_SEMANTIC_CLASSES.has(concept.semanticClass ?? "")) return undefined;
+  return createArgument(mapSemanticClassToRole(concept.semanticClass),
+    sourceText, normalized, concept.conceptId);
+}
+
 function bodySiteAdviceArgument(text: string): AdviceArgument | undefined {
   const cleaned = cleanFreeText(text);
   const withoutArticle = withoutNominalArticle(cleaned);

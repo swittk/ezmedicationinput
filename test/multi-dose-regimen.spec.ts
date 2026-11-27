@@ -1,3 +1,4 @@
+import { parseAdditionalInstructions } from "../src/advice";
 import { getTimingClocks } from "../src/fhir";
 import { describe, expect, it } from "vitest";
 import conditionBridgeDefinition from "../fhir/r5/medication-conditional-dose.json";
@@ -306,6 +307,79 @@ describe("heterogeneous multi-dose regimens", () => {
         instruction.coding?.some((coding) => coding.code === "311504000")
       )).toBe(false);
     }
+  });
+
+  it("keeps a negated fasting nominal out of the affirmative fasting code", () => {
+    const source = "do not take on an empty stomach";
+    const instructions = parseAdditionalInstructions(source, { start: 0, end: source.length });
+    expect(instructions).toHaveLength(1);
+    expect(instructions[0].frames).toEqual([expect.objectContaining({
+      polarity: AdvicePolarity.Negate,
+      args: [expect.objectContaining({ role: AdviceArgumentRole.MealState, conceptId: "empty_stomach" })]
+    })]);
+    expect(instructions[0].coding?.code).not.toBe("717154004");
+    expect(instructions[0].text).toBe("Do not take on an empty stomach");
+  });
+
+  it.each([
+    "Take 1 tablet daily; do not take with food",
+    "รับประทาน 1 เม็ด วันละครั้ง; ห้ามรับประทานพร้อมอาหาร"
+  ])("projects the selected negative food action once: %s", (source) => {
+    const parsed = parseProductionSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(parsed.count).toBe(1);
+    expect(clause.dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(clause.additionalInstructions).toHaveLength(1);
+    const directive = clause.additionalInstructions![0].frames![0];
+    const action = clause.instructionGraph!.actions[0];
+    expect(directive.polarity).toBe(AdvicePolarity.Negate);
+    expect(directive.args).toEqual(action.args);
+    expect(directive.span).toEqual(action.span);
+    expect(directive.args).toEqual([expect.objectContaining({ role: AdviceArgumentRole.Time, normalized: "C" })]);
+    const warnings = [parsed.fhir[0].additionalInstruction,
+      parsed.fhirNext.step![0].component![0].additionalInstruction];
+    for (const rows of warnings) {
+      expect(rows).toHaveLength(1);
+      expect(rows![0].coding?.some(coding => coding.code === "311504000")).not.toBe(true);
+    }
+    expect(formatCanonicalClause(clause, "long", { locale: "th" })).toContain("ห้ามรับประทานพร้อมอาหาร");
+    for (const view of [parsed.fhir, parsed.fhirNext]) {
+      expect(formatSig(view, "long", { locale: "en" })).toContain("Do not take with food.");
+      expect(formatSig(view, "long", { locale: "th" })).toContain("ห้ามรับประทานพร้อมอาหาร.");
+    }
+    expect(parsed.input).toBe(source);
+  });
+
+  it("retains the selected fasting nominal and prohibition across current projections", () => {
+    const source = "Take 1 tablet daily; do not take on an empty stomach";
+    const parsed = parseProductionSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(clause.additionalInstructions).toHaveLength(1);
+    const directive = clause.additionalInstructions![0].frames![0];
+    expect(directive.polarity).toBe(AdvicePolarity.Negate);
+    expect(directive.args).toEqual(clause.instructionGraph!.actions[0].args);
+    expect(directive.args).toEqual([expect.objectContaining({
+      role: AdviceArgumentRole.MealState, conceptId: "empty_stomach", text: "an empty stomach"
+    })]);
+    for (const rows of [parsed.fhir[0].additionalInstruction,
+      parsed.fhirNext.step![0].component![0].additionalInstruction]) {
+      expect(rows).toHaveLength(1);
+      expect(rows![0].coding?.some(coding => coding.code === "717154004")).not.toBe(true);
+      expect(rows![0].text).toBe("Do not take on an empty stomach");
+    }
+    expect(formatCanonicalClause(clause, "long", { locale: "en" })).toContain("Do not take on an empty stomach.");
+    for (const view of [parsed.fhir, parsed.fhirNext])
+      expect(formatSig(view, "long", { locale: "en" })).toContain("Do not take on an empty stomach.");
+    expect(parsed.input).toBe(source);
+
+    const affirmative = parseProductionSig("Take 1 tablet daily on an empty stomach");
+    expect(affirmative.fhir[0].additionalInstruction?.[0].coding?.[0].code).toBe("717154004");
+    expect(affirmative.fhirNext.step![0].component![0].additionalInstruction?.[0].coding?.[0].code).toBe("717154004");
+    expect(formatSig(affirmative.fhir, "long", { locale: "en" })).toContain("On an empty stomach.");
+    expect(formatSig(affirmative.fhirNext, "long", { locale: "th" })).toContain("ขณะท้องว่าง.");
   });
 
   it("retains independent same-text warning occurrences when the trailing instruction is shared", () => {

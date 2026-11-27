@@ -1,3 +1,4 @@
+import { parseInstructionActions, realizeInstructionAction } from "../src/instruction-graph";
 import { cycleDayConstraintExtension, TIMING_CLOCK_WINDOW_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src/fhir";
 import { fromFhir, importCanonicalCourse, toFhirR5Dosages, toDosageDetails, type CourseLanguage } from "../src/index";
 import { describe, expect, it } from "vitest";
@@ -171,6 +172,32 @@ describe("locale-extensible language architecture", () => {
       finalize: (text) => `ZX:${text}`
     });
     expect(getAdviceLocaleAdapter("zx-ZX").finalize("warning")).toBe("ZX:warning");
+  });
+
+  it("keeps selected action labels and the locale adapter for a typed meal nominal", () => {
+    const selected = parseInstructionActions("do not take on an empty stomach")[0];
+    const config = { locales: { "meal-selected": { implicitMedicationObject: true } } };
+    const frame = { ...selected, predicate: { ...selected.predicate,
+      display: "Selected take", i18n: { en: "Selected take", "meal-selected": "Configured take" },
+      realizerConfig: config
+    } };
+    expect(frame.args).toEqual([expect.objectContaining({
+      role: AdviceArgumentRole.MealState, conceptId: "empty_stomach", text: "an empty stomach"
+    })]);
+    expect(realizeInstructionAction(frame, "en")).toBe("Do not selected take on an empty stomach");
+    const calls: string[] = [];
+    registerInstructionActionLocaleAdapter({
+      ...getInstructionActionLocaleAdapter("en"), locale: "meal-selected",
+      renderNegated(input, completeAction) {
+        expect(input.frame).toBe(frame);
+        expect(input.realizerConfig).toBe(config);
+        expect(input.label).toBe("Configured take");
+        calls.push(completeAction!);
+        return `custom: ${completeAction}`;
+      }
+    });
+    expect(realizeInstructionAction(frame, "meal-selected")).toBe("custom: Configured take on an empty stomach");
+    expect(calls).toEqual(["Configured take on an empty stomach"]);
   });
 
   it("exposes lexer, surface segmentation, and suggester locale packs", () => {

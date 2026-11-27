@@ -2447,6 +2447,9 @@ function translateCoordinatedActivityWindowThai(text: string): string | undefine
 }
 
 function realizeAdviceFramesThai(frames: AdviceFrame[]): string | undefined {
+  const selected = frames.length === 1 ? frames[0] : undefined;
+  if (selected && (selected.predicate.realizer || selected.predicate.realizerConfig))
+    return realizeInstructionAction(selected, "th");
   let localizedFrames: AdviceFrame[] | undefined;
   for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
     const frame = frames[frameIndex];
