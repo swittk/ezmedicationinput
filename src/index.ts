@@ -1712,6 +1712,9 @@ function buildParseResult(
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const graphUnderstoodSpans: TextRange[] = [];
   for (const candidate of canonicalClauses) {
+    for (const instruction of candidate.additionalInstructions ?? []) {
+      for (const evidence of instruction.evidence ?? []) graphUnderstoodSpans.push(...evidence.spans);
+    }
     const graph = candidate.instructionGraph;
     if (!graph) continue;
     for (const action of graph.actions) graphUnderstoodSpans.push(action.span);

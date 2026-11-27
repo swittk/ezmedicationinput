@@ -1944,6 +1944,38 @@ describe("ordinary clinical vocabulary uses the same typed constructions", () =>
       expect(parsed.meta.leftoverText).toBeUndefined();
       if (source.endsWith("daily")) {
         expect(parsed.fhir.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      } else {
+        const clause = parsed.meta.canonical.clauses[0];
+        const graph = clause.instructionGraph!;
+        expect(clause.dose).toMatchObject({ value: 1, unit: "g" });
+        expect(clause.schedule).toBeUndefined();
+        expect(graph.sourceText).toBe(source);
+        expect(graph.actions.map(action => action.predicate.lemma)).toEqual(["clean", "cover"]);
+        expect(graph.primaryAdministrationSpan).toEqual({ start: 13, end: 18 });
+        // The omitted Apply head separates the two procedural actions.
+        expect(graph.relations).toBeUndefined();
+        expect(graph.opaqueSpans).toBeUndefined();
+        expect(graph.coverage).toMatchObject({ complete: true, opaqueCharacters: 0 });
+        const manner = clause.additionalInstructions?.find(instruction =>
+          instruction.coding?.code === "420162004");
+        expect(manner?.evidence?.flatMap(evidence => evidence.spans)).toEqual([
+          { start: 23, end: 29, text: "thinly" }
+        ]);
+        const selected = parseInstructionActions(source).find(action => action.predicate.lemma === "apply");
+        expect(selected?.args.find(arg => arg.role === AdviceArgumentRole.Manner)?.span)
+          .toEqual({ start: 23, end: 29 });
+        for (const input of [parsed.meta.canonical.course!,
+          JSON.parse(JSON.stringify([parsed.fhir])), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+          const before = JSON.stringify(input);
+          expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+            .toBe("Clean the wound; then apply 1 g to the wound; then cover with sterile gauze. Apply thinly.");
+          expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+            .toBe("ทำความสะอาดแผล จากนั้นทาบางๆ ครั้งละ 1 g บริเวณแผล จากนั้นปิดคลุมด้วยsterile gauze.");
+          const administration = importCanonicalCourse(input).stages[0].administrations[0];
+          expect(administration.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "g" });
+          expect(administration.syntax?.instructionGraph?.sourceText).toBe(source);
+          expect(JSON.stringify(input)).toBe(before);
+        }
       }
     });
   it("keeps a route adjective inside a quantified dosage-form phrase", () => {

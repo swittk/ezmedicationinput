@@ -1139,7 +1139,10 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     const declared = internalArgument(surface, surface, options) ??
       internalArgument(canonical, surface, options);
     if (declared?.role === AdviceArgumentRole.Manner) {
-      finalManner = declared;
+      finalManner = { ...declared, span: {
+        start: offset + parts[start].sourceStart,
+        end: offset + parts[objectEnd - 1].sourceEnd
+      } };
       objectEnd = start;
       break;
     }
@@ -1151,7 +1154,11 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       text: surface,
       normalized: modifier.lemma,
       conceptId: modifier.lemma,
-      i18n: { en: modifier.lemma, ...(modifier.i18n ?? {}) }
+      i18n: { en: modifier.lemma, ...(modifier.i18n ?? {}) },
+      span: {
+        start: offset + parts[start].sourceStart,
+        end: offset + parts[objectEnd - 1].sourceEnd
+      }
     };
     objectEnd = start;
     break;
@@ -2714,12 +2721,12 @@ function frameIsSecondaryAdministration(
  * graphical administration merely because its local manner is rich.
  * Compare typed argument roles and source ownership, never rendered text.
  */
-function mannerAlreadyOwnedByCodedAdvice(
+function codedAdviceOwningManner(
   frame: AdviceFrame,
   clause: CanonicalSigClause
-): boolean {
-  if (!frame.args.some((arg) => arg.role === AdviceArgumentRole.Manner)) return false;
-  const locallyCoded = clause.additionalInstructions?.some((instruction) =>
+): CanonicalAdditionalInstructionExpr | undefined {
+  if (!frame.args.some((arg) => arg.role === AdviceArgumentRole.Manner)) return undefined;
+  const locallyCoded = clause.additionalInstructions?.find((instruction) =>
     instruction.coding?.code && instruction.frames?.some((coded) =>
       coded.span.start >= frame.span.start &&
       coded.span.end <= frame.span.end &&
@@ -2730,16 +2737,17 @@ function mannerAlreadyOwnedByCodedAdvice(
       )
     )
   );
-  if (locallyCoded) return true;
+  if (locallyCoded) return locallyCoded;
   // A FHIR round-trip may reconstruct its standardized CodeableConcept
   // WITHOUT source spans or advice frames. The single existing structural
   // advice matcher proves whether the typed Manner itself entails that code.
   const matched = matchComposedAdviceCodings([frame]);
-  return matched.some((definition) =>
-    clause.additionalInstructions?.some((instruction) =>
-      codingEquivalent(instruction.coding, definition.coding)
-    )
-  );
+  for (const definition of matched) {
+    const owner = clause.additionalInstructions?.find((instruction) =>
+      codingEquivalent(instruction.coding, definition.coding));
+    if (owner) return owner;
+  }
+  return undefined;
 }
 
 function frameIsPrimaryAdministrationWithExtraMeaning(
@@ -2749,16 +2757,30 @@ function frameIsPrimaryAdministrationWithExtraMeaning(
 ): boolean {
   if (frame.polarity === AdvicePolarity.Negate || !clause.method) return false;
   const definition = frameActionDefinition(frame, options);
-  return Boolean(
-    definitionCanRepresentPrimaryAdministration(definition) &&
-    frameOverlapsPrimaryMethod(frame, clause) &&
-    (frame.modality !== undefined ||
-      actionAddsPrimaryObjectMeaning(frame, options) ||
-      // A clinical manner belongs to the SAME medication administration
-      // whose dose the HPSG chart already projected.
-      (frame.args.some((arg) => arg.role === AdviceArgumentRole.Manner) &&
-       !mannerAlreadyOwnedByCodedAdvice(frame, clause)))
-  );
+  if (!definitionCanRepresentPrimaryAdministration(definition) ||
+      !frameOverlapsPrimaryMethod(frame, clause)) return false;
+  if (frame.modality !== undefined || actionAddsPrimaryObjectMeaning(frame, options)) return true;
+  if (!frame.args.some((arg) => arg.role === AdviceArgumentRole.Manner)) return false;
+  const owner = codedAdviceOwningManner(frame, clause);
+  if (!owner) return true;
+  // The coded adjunct owns this selected Manner even when its redundant
+  // primary action is omitted. Carry only the argument's exact source,
+  // never the surrounding administration or an inter-action gap.
+  const spans: CanonicalSourceSpan[] = [];
+  for (const arg of frame.args) {
+    if (arg.role !== AdviceArgumentRole.Manner || !arg.span ||
+        owner.evidence?.some(evidence => evidence.spans.some(span =>
+          span.start <= arg.span!.start && arg.span!.end <= span.end))) continue;
+    spans.push({ ...arg.span, text: arg.text });
+  }
+  if (spans.length) {
+    const index = clause.additionalInstructions!.indexOf(owner);
+    clause.additionalInstructions![index] = { ...owner, evidence: [
+      ...(owner.evidence ?? []),
+      { rule: "instruction-graph.coded-manner", lexicalCategory: "instruction", spans }
+    ] };
+  }
+  return false;
 }
 
 
@@ -3313,23 +3335,29 @@ function proceduralFramesFromSpan(
 function reconcileOpaqueWithActionCoverage(
   input: string,
   opaqueSpans: CanonicalSourceSpan[],
-  actions: AdviceFrame[]
+  actions: AdviceFrame[],
+  instructions: readonly CanonicalAdditionalInstructionExpr[] | undefined
 ): CanonicalSourceSpan[] {
   const result: CanonicalSourceSpan[] = [];
+  if (!opaqueSpans.length) return result;
+  const understood = actions.map(action => action.span);
+  for (const instruction of instructions ?? []) {
+    for (const evidence of instruction.evidence ?? []) understood.push(...evidence.spans);
+  }
   for (const opaque of opaqueSpans) {
     let fragments: TextRange[] = [{ start: opaque.start, end: opaque.end }];
-    for (const action of actions) {
+    for (const span of understood) {
       const next: TextRange[] = [];
       for (const fragment of fragments) {
-        if (action.span.end <= fragment.start || action.span.start >= fragment.end) {
+        if (span.end <= fragment.start || span.start >= fragment.end) {
           next.push(fragment);
           continue;
         }
-        if (action.span.start > fragment.start) {
-          next.push({ start: fragment.start, end: action.span.start });
+        if (span.start > fragment.start) {
+          next.push({ start: fragment.start, end: span.start });
         }
-        if (action.span.end < fragment.end) {
-          next.push({ start: action.span.end, end: fragment.end });
+        if (span.end < fragment.end) {
+          next.push({ start: span.end, end: fragment.end });
         }
       }
       fragments = next;
@@ -3809,7 +3837,7 @@ export function buildInstructionGraph(
       floor = Math.max(floor, action.span.end);
     }
   }
-  const reconciledOpaque = reconcileOpaqueWithActionCoverage(input, opaqueSpans, actions);
+  const reconciledOpaque = reconcileOpaqueWithActionCoverage(input, opaqueSpans, actions, clause.additionalInstructions);
   if (!clause.method && actions.some(action => !isInstructionGraphDisplayWarning(action))) {
     const firstStart = Math.min(...actions.map((action) => action.span.start));
     const lastEnd = Math.max(...actions.map((action) => action.span.end));
