@@ -5616,7 +5616,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
           )
           .slice(0, effectiveLimit);
       }
-      visitClockOccurrences(repeat, expanded, cadenceAnchor, from, effectiveOrderedAt, courseEnd,
+      visitClockOccurrences(repeat, expanded, cadenceAnchor, from, orderedAt, courseEnd,
         timeZone, effectiveLimit, dayFilter, enforceDayFilter, calendarDays, zoned => {
           const iso = formatZonedIso(zoned, timeZone);
           if (!seen.has(iso)) {
@@ -5653,9 +5653,10 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
       timeZone,
       dayFilter,
       anchorDay: startOfLocalDay(baseTime, timeZone),
+      startDay: from,
       from,
       to: courseEnd ?? undefined,
-      orderedAt: effectiveOrderedAt,
+      orderedAt,
       limit: effectiveLimit,
       defaultClock: inferredLocalClock(baseTime, timeZone),
       calendarDays,
@@ -5834,11 +5835,34 @@ function derivePriorCountFromHistory(
           ).length
         );
       }
-      visitClockOccurrences(repeat, expanded, cadenceAnchor, orderedAt, orderedAt, from,
-        timeZone, normalizedCount ?? 1, dayFilter, enforceDayFilter, calendarDays, zoned => {
-          recordCandidate(zoned);
-          return normalizedCount !== undefined && seen.size >= normalizedCount;
-        });
+      let currentDay = firstClockAnchorDay(orderedAt, expanded, timeZone, orderedAt);
+      const firstShift = expanded[0].dayShift;
+      let iterations = 0;
+      const maxIterations = calendarScanLimit(currentDay, from, normalizedCount ?? 1) + Math.max(0, -firstShift);
+      while ((firstShift < 0 ? addLocalDays(currentDay, firstShift, timeZone) : currentDay) < from &&
+          iterations < maxIterations) {
+        if (
+          matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
+          clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)
+        ) {
+          for (const entry of expanded) {
+            const targetDay =
+              entry.dayShift === 0 ? currentDay : addLocalDays(currentDay, entry.dayShift, timeZone);
+            const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
+            if (!zoned) {
+              continue;
+            }
+            if (zoned < orderedAt || zoned >= from) {
+              continue;
+            }
+            if (recordCandidate(zoned) && normalizedCount !== undefined && seen.size >= normalizedCount) {
+              return count;
+            }
+          }
+        }
+        currentDay = addLocalDays(currentDay, 1, timeZone);
+        iterations += 1;
+      }
       return count;
     }
   }
@@ -5873,6 +5897,7 @@ function derivePriorCountFromHistory(
       timeZone,
       dayFilter,
       anchorDay: startOfLocalDay(orderedAt, timeZone),
+      startDay: orderedAt,
       from: orderedAt,
       to: from,
       orderedAt,
@@ -6370,6 +6395,7 @@ type DayFilteredPeriodSeriesOptions = {
   timeZone: string;
   dayFilter: Set<string>;
   anchorDay: Date;
+  startDay: Date;
   from: Date;
   to?: Date;
   orderedAt?: Date | null;
@@ -6385,6 +6411,7 @@ type DayFilteredPeriodSeriesOptions = {
  * @param options.timeZone IANA timezone used for local weekday and clock resolution.
  * @param options.dayFilter Set of lowercased weekdays that are allowed (e.g. `mon`, `tue`).
  * @param options.anchorDay Cycle anchor day used to determine period alignment.
+ * @param options.startDay First local day to begin scanning.
  * @param options.from Inclusive lower bound for candidate timestamps.
  * @param options.to Optional exclusive upper bound for candidate timestamps.
  * @param options.orderedAt Optional lower bound representing the order start.
@@ -6393,20 +6420,72 @@ type DayFilteredPeriodSeriesOptions = {
  * @returns Sorted zoned ISO timestamps matching the requested cadence and bounds.
  */
 function generateDayFilteredPeriodSeries(options: DayFilteredPeriodSeriesOptions): string[] {
-  const { recurrence: repeat, timeZone, dayFilter, anchorDay, from, to,
-    orderedAt, limit, defaultClock, calendarDays } = options;
-  if (limit <= 0) return [];
+  const {
+    recurrence: repeat,
+    timeZone,
+    dayFilter,
+    anchorDay,
+    startDay,
+    from,
+    to,
+    orderedAt,
+    limit,
+    defaultClock,
+    calendarDays,
+  } = options;
+  if (limit <= 0) {
+    return [];
+  }
   const results: string[] = [];
   const seen = new Set<string>();
-  visitClockOccurrences(repeat, [{ time: defaultClock ?? "08:00:00", dayShift: 0 }],
-    anchorDay, from, orderedAt ?? null, to, timeZone, limit, dayFilter, dayFilter.size > 0, calendarDays, zoned => {
-      const iso = formatZonedIso(zoned, timeZone);
-      if (!seen.has(iso)) {
-        seen.add(iso);
-        results.push(iso);
+  const clocks = [defaultClock ?? "08:00:00"];
+  let currentDay = startOfLocalDay(startDay, timeZone);
+  const weeklyFrequency = repeat.periodUnit === DurationUnit.Week ? positiveInteger(repeat.frequency) : undefined;
+  const anchorNumber = weeklyFrequency === undefined ? 0 : getLocalDayNumber(anchorDay, timeZone);
+  if (weeklyFrequency !== undefined) {
+    // Earlier selected days in this same treatment week still spend its
+    // frequency when a later query begins. The existing cycle stays anchored.
+    const week = Math.max(0, Math.floor((getLocalDayNumber(currentDay, timeZone) - anchorNumber) / 7));
+    currentDay = addLocalDays(anchorDay, week * 7, timeZone);
+  }
+  let selectedWeek = -1, selectedInWeek = 0;
+  let iterations = 0;
+  const maxIterations = calendarScanLimit(currentDay, to, limit, repeat);
+  while (results.length < limit && iterations < maxIterations && (!to || currentDay < to)) {
+    if (weeklyFrequency !== undefined) {
+      const week = Math.floor((getLocalDayNumber(currentDay, timeZone) - anchorNumber) / 7);
+      if (week !== selectedWeek) { selectedWeek = week; selectedInWeek = 0; }
+    }
+    const inPeriodCycle = clockCadenceEligible(currentDay, anchorDay, repeat, timeZone, dayFilter.size > 0);
+    if (inPeriodCycle && matchesCalendarDay(currentDay, dayFilter, dayFilter.size > 0, calendarDays, timeZone)) {
+      for (const clock of clocks) {
+        const zoned = makeZonedDateFromDay(currentDay, timeZone, clock);
+        if (!zoned) {
+          continue;
+        }
+        if (to && zoned >= to) {
+          continue;
+        }
+        if (orderedAt && zoned < orderedAt) {
+          continue;
+        }
+        if (weeklyFrequency !== undefined && selectedInWeek++ >= weeklyFrequency) continue;
+        if (zoned < from) {
+          continue;
+        }
+        const iso = formatZonedIso(zoned, timeZone);
+        if (!seen.has(iso)) {
+          seen.add(iso);
+          results.push(iso);
+          if (results.length === limit) {
+            break;
+          }
+        }
       }
-      return results.length >= limit;
-    });
+    }
+    currentDay = addLocalDays(currentDay, 1, timeZone);
+    iterations += 1;
+  }
   return results;
 }
 /** Resolved clock entries are sorted by dayShift. The last entry determines
@@ -6436,17 +6515,6 @@ function visitClockOccurrences(
   const orderedTime = orderedAt?.getTime();
   const endTime = courseEnd?.getTime();
   let currentDay = firstClockAnchorDay(from, expanded, timeZone, orderedAt);
-  const weeklyFrequency = (enforceDayFilter || calendarDays !== undefined) && repeat.periodUnit === DurationUnit.Week
-    ? positiveInteger(repeat.frequency) : undefined;
-  const anchorNumber = weeklyFrequency === undefined ? 0 : getLocalDayNumber(cadenceAnchor, timeZone);
-  if (weeklyFrequency !== undefined) {
-    // Earlier selected opportunities in this treatment week still spend its
-    // frequency when a later query starts. Clocks only select their time.
-    const week = Math.max(0, Math.floor((getLocalDayNumber(currentDay, timeZone) - anchorNumber) / 7));
-    currentDay = addLocalDays(cadenceAnchor, week * 7, timeZone);
-  }
-  let selectedWeek = -1;
-  const selectedTimes = weeklyFrequency === undefined ? undefined : new Set<number>();
   const firstShift = expanded[0].dayShift;
   // Shifted anchors can interlace adjacent source days. Keep their existing
   // chronological merge before the consumer spends an accepted-result limit.
@@ -6459,13 +6527,6 @@ function visitClockOccurrences(
     iterations < maxIterations &&
     (endTime === undefined || (firstShift < 0 ? addLocalDays(currentDay, firstShift, timeZone) : currentDay).getTime() < endTime)
   ) {
-    if (weeklyFrequency !== undefined) {
-      const week = Math.floor((getLocalDayNumber(currentDay, timeZone) - anchorNumber) / 7);
-      if (week !== selectedWeek) {
-        selectedWeek = week;
-        selectedTimes!.clear();
-      }
-    }
     if (
       matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
       clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)
@@ -6475,12 +6536,7 @@ function visitClockOccurrences(
         const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
         if (!zoned) continue;
         const at = zoned.getTime();
-        if (orderedTime !== undefined && at < orderedTime || endTime !== undefined && at >= endTime) continue;
-        if (weeklyFrequency !== undefined) {
-          if (selectedTimes!.has(at) || selectedTimes!.size >= weeklyFrequency) continue;
-          selectedTimes!.add(at);
-        }
-        if (at < fromTime) continue;
+        if (at < fromTime || orderedTime !== undefined && at < orderedTime || endTime !== undefined && at >= endTime) continue;
         if (pending) pending.push({ at, date: zoned, serial: serial++ });
         else if (emit(zoned)) return;
       }
@@ -6616,11 +6672,28 @@ function countScheduleEvents(
           ).length
         );
       }
-      visitClockOccurrences(repeat, expanded, cadenceAnchor, from, orderedAt, to,
-        timeZone, hardLimit, dayFilter, enforceDayFilter, calendarDays, zoned => {
-          recordCandidate(zoned);
-          return count >= countLimit;
-        });
+      let currentDay = firstClockAnchorDay(from, expanded, timeZone, orderedAt);
+      const firstShift = expanded[0].dayShift;
+      let iterations = 0;
+      const maxIterations = calendarScanLimit(currentDay, to, hardLimit) + Math.max(0, -firstShift);
+      while (count < countLimit &&
+          (firstShift < 0 ? addLocalDays(currentDay, firstShift, timeZone) : currentDay) < to &&
+          iterations < maxIterations) {
+        if (
+          matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
+          clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)
+        ) {
+          for (const entry of expanded) {
+            if (count >= countLimit) break;
+            const targetDay =
+              entry.dayShift === 0 ? currentDay : addLocalDays(currentDay, entry.dayShift, timeZone);
+            const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
+            if (zoned) recordCandidate(zoned);
+          }
+        }
+        currentDay = addLocalDays(currentDay, 1, timeZone);
+        iterations += 1;
+      }
       return count;
     }
   }
@@ -6659,6 +6732,7 @@ function countScheduleEvents(
       timeZone,
       dayFilter,
       anchorDay: startOfLocalDay(baseTime, timeZone),
+      startDay: from,
       from,
       to,
       orderedAt,

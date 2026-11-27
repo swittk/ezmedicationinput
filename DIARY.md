@@ -16568,13 +16568,13 @@ arguments without display text survive current R5/R6 conversion. Regression chec
 retain original annotations, independent clinical oracles and fresh R6 coverage.
 
 
-## 2026-11-27 — Share weekly occurrence selection
+## 2026-11-27 — Retain explicit clock precedence
 
-Weekly weekday schedules now use the existing clock-occurrence walker for due
-dates, prior-dose counts and supply. Explicit clocks retain the weekly frequency,
-and later queries retain the same selected opportunities. The resolved order and
-calendar opening are applied before an opportunity spends that allowance.
+Unclocked weekday schedules retain the stated weekly frequency across later
+queries. Explicit weekday clocks keep their established execution precedence,
+while the supplied frequency and source remain available for clinician review.
+The existing parsed and external-input clinical controls retain this distinction.
 
-The unclocked weekday path delegates its existing default clock to the same walker.
-Regression cases retain exact anchored dates, omitted-frequency behavior, finite
-counts, timestamp openings, successor timing and current R5/R6 annotations.
+The execution documentation now reflects the current unresolved-boundary behavior:
+required whole-course boundaries must resolve; separately selected resolvable
+tracks remain schedulable.
