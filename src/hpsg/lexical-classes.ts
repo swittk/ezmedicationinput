@@ -1,5 +1,5 @@
 import { LexKind, type LexToken } from "../lexer/token-types";
-import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirPeriodUnit, RouteCode, type FhirPrimitiveElement } from "../types";
+import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirDayOfWeek, FhirPeriodUnit, RouteCode, type FhirPrimitiveElement } from "../types";
 import { baseLanguageTag } from "../localization";
 import { buildTranslationPrimitiveElement } from "../fhir-translations";
 import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
@@ -391,6 +391,16 @@ export const DOSE_TARGET_EVENT_MEMBERS = new Map<EventTiming, readonly EventTimi
   Object.keys(source.doseTargetEventMembers).map(key => [key as EventTiming,
     (source.doseTargetEventMembers as Record<string, EventTiming[]>)[key]])
 );
+export const CALENDAR_WEEKDAY_LEXEMES = source.calendarWeekdayLexemes.map(entry => ({
+  day: entry.day as FhirDayOfWeek,
+  patterns: entry.patterns.map(pattern => new RegExp(pattern, "giu"))
+}));
+export const CALENDAR_WEEKDAY_GROUPS = source.calendarWeekdayGroups.map(entry => ({
+  pattern: new RegExp(entry.pattern, "iu"), days: entry.days as FhirDayOfWeek[]
+}));
+export const CALENDAR_DAY_LIST_CONNECTORS = new RegExp(source.calendarDayListConnectors, "giu");
+export const CALENDAR_EXCLUSION_CUE = new RegExp(source.calendarExclusionCue, "iu");
+export const CALENDAR_EXCLUSION_DAY_HEADS = setOf(source.calendarExclusionDayHeads);
 export const CALENDAR_UNIVERSAL_DAY_QUANTIFIERS = setOf(source.calendarUniversalDayQuantifiers);
 export const CALENDAR_COMPLEMENT_DAY_MODIFIERS = setOf(source.calendarComplementDayModifiers);
 export const CALENDAR_COMPLEMENT_DETERMINERS = setOf(source.calendarComplementDeterminers);
@@ -521,6 +531,8 @@ export const ACTION_DIRECTIVE_PREFIXES = source.actionDirectivePrefixes.map((pre
   modality: prefix.modality as AdviceModality | undefined,
   complement: prefix.complement as "contact-clause" | undefined
 }));
+export const NEGATIVE_ACTION_DIRECTIVE_LEADS = new Set(ACTION_DIRECTIVE_PREFIXES
+  .filter(prefix => prefix.polarity === AdvicePolarity.Negate).map(prefix => prefix.parts[0]));
 export const ACTION_COORDINATION_CONNECTORS = setOf(source.actionCoordinationConnectors);
 /** Closed-class contrast that connects two instructions, not a new action. */
 export const ACTION_DISCOURSE_CONNECTORS = setOf(source.actionDiscourseConnectors);

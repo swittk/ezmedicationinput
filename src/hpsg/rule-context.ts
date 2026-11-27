@@ -528,7 +528,7 @@ export function maximumDosePerPeriodAt(
   const initial = valueToken?.kind === LexKind.Number ? valueToken.value
     : valueToken ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)] : undefined;
   const attached = valueToken && valueToken.kind !== LexKind.Number
-    ? attachedNumberUnitAt(valueToken.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
+    ? attachedNumberUnitAt((valueToken.canonical ?? valueToken.lower).replace(/[{};]+|\.+$/gu, "")) : undefined;
   const number = attached ? undefined : plainClinicalNumberAt(context, cursor, initial);
   const amount = attached?.value ?? number?.value;
   const unitIndex = attached ? cursor : number ? doseUnitIndexAfter(context, number.numericIndex + 1) : undefined;

@@ -19,6 +19,7 @@ import type { BoundaryPlan } from '../src/hpsg/signature';
 import { parseMedicationGuard, selectHpsgCoordinationScopeConstruction } from '../src/hpsg/constructions';
 import type { CoordinationScopeFacts } from '../src/hpsg/signature';
 import { parseSig, parseSigAsync } from './helpers/r5-parser';
+import { getMedicationLexerLocalePack, registerMedicationLexerLocalePack } from "../src/lexer/locale";
 
 const source = 'instill 1 drop in left eye and 2 drops in right eye twice daily';
 
@@ -2880,5 +2881,180 @@ describe("sequential temporal ownership", () => {
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(before);
+  });
+});
+
+
+describe("quantified withholding target ownership", () => {
+  const query = { from: "2026-12-07T00:00:00Z", orderedAt: "2026-12-07T00:00:00Z", timeZone: "UTC", limit: 10 };
+  const standing = "Take 5 mL at 08:00 and 10 mL at 20:00 daily for 2 days";
+  const allTimes = ["2026-12-07T08:00:00+00:00", "2026-12-07T20:00:00+00:00",
+    "2026-12-08T08:00:00+00:00", "2026-12-08T20:00:00+00:00"];
+
+  it.each([
+    [". If dizzy, do not take 5 mL, and do not take 10 mL.", [true, true], false],
+    [". If dizzy, do not take 5 mL.", [true, false], false],
+    ["; if dizzy, do not take 5 mL.", [true, false], false],
+    [". If dizzy, do not take 5 mL, and do not take 15 mL.", [true, false], false],
+    [". If dizzy, do not take 5 mL at 20:00, and do not take 10 mL at 08:00.", [false, false], false],
+    [". If dizzy, do not take the 5-mL evening dose, and do not take the 10-mL morning dose.", [false, false], false],
+    [". If it is a dialysis day, do not take 5 mL.", [true, false], true]
+  ] as const)("keeps each prohibited amount paired with its own timing: %s", (tail, guarded, calendar) => {
+    const source = standing + tail, parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(2);
+      for (let index = 0; index < members.length; index++) {
+        const member = members[index];
+        expect(member.amounts?.[0].quantity).toMatchObject({ value: index ? 10 : 5, unit: "mL" });
+        expect(member.schedule?.recurrence?.clocks).toEqual([index ? "20:00:00" : "08:00:00"]);
+        const courseLength = member.schedule?.recurrence?.courseLength;
+        expect(courseLength?.value).toBe(2);
+        expect(courseLength?.code ?? courseLength?.unit).toBe("d");
+        expect(member.predicate?.kind).toBe(guarded[index] ? "not" : undefined);
+        expect(member.calendarPredicate).toEqual(calendar && guarded[index] ? member.predicate : undefined);
+      }
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => true })).toEqual(allTimes);
+      const remaining = allTimes.filter((_, index) => !guarded[index % 2]);
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => false })).toEqual(remaining);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d",
+        evaluateCondition: () => false })).toMatchObject({ totalUnits: (guarded[0] ? 0 : 10) + (guarded[1] ? 0 : 20), unit: "mL" });
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d",
+        evaluateCondition: () => true })).toMatchObject({ totalUnits: 30, unit: "mL" });
+      // Crossed targets must not erase a standing course bound after day two.
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d",
+        evaluateCondition: () => true })).toMatchObject({ totalUnits: 30, unit: "mL" });
+      const graph = members.flatMap(member => member.syntax?.instructionGraph ? [member.syntax.instructionGraph] : []).pop();
+      expect(graph).toBeDefined();
+      for (let action = 0; action < (graph?.actions.length ?? 0); action++) {
+        if (graph!.actions[action].polarity !== "negate") continue;
+        expect(graph!.relations?.some(relation => relation.kind === "if" && relation.toActionIndex === action)).toBe(true);
+      }
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      if (tail.includes(", and")) {
+        expect(english).toMatch(/If dizzy, do not take[^;]+; If dizzy, do not take/u);
+        expect(english).not.toContain("then do not take");
+      }
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
+    [2, false, false, [7, 8, 9, 10, 11, 12, 13]],
+    [1, false, false, [8, 9, 10, 11, 12, 13]],
+    [2, true, false, [7, 8, 9, 10, 11, 12]],
+    [2, false, true, [7, 8, 9, 10, 11, 12, 13]]
+  ] as const)("retains the calendar on its quantified warning (%s, independent exclusion %s, guard %s)",
+    (amount, excludedSunday, guarded, days) => {
+      const source = "Take 1 tablet every morning for 7 days" +
+        (excludedSunday ? " except Sunday" : guarded ? " if SBP > 160" : "") +
+        ". On Mondays, do not take the " + amount + "-tablet morning dose.";
+      const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+        expect(members).toHaveLength(1);
+        const member = members[0];
+        expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(member.predicate?.kind).toBe(guarded ? "measurement" : undefined);
+        const expected = days.map(day => `2026-12-${String(day).padStart(2, "0")}T08:00:00+00:00`);
+        expect(nextDueDoses(input, { ...query, evaluateCondition: () => true })).toEqual(expected);
+        expect(nextDueDoses(input, { ...query, evaluateCondition: () => false })).toEqual(guarded ? [] : expected);
+        expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d",
+          evaluateCondition: () => true })).toMatchObject({ totalUnits: days.length, unit: "tab" });
+        const warning = member.syntax?.instructionGraph?.actions.find(action => action.polarity === "negate");
+        expect(warning?.args.some(argument => argument.role === "amount" && argument.quantity?.value === amount &&
+          argument.quantity.unit === "tab")).toBe(true);
+        expect(warning?.args.some(argument => argument.role === "time" && argument.relation === "on" &&
+          argument.text === "Mondays")).toBe(true);
+        const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        expect(english).toContain("On Mondays, do not take the " + amount + "-tablet morning dose");
+        if (amount === 2 && !excludedSunday) expect(english).not.toContain("except Monday");
+      }
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(parsed)).toBe(before);
+    });
+});
+
+
+describe("registered withholding calendar and maximum constituents", () => {
+  it("uses canonical weekday and attached-amount lexemes without rewriting source", () => {
+    const original = getMedicationLexerLocalePack("en");
+    let weekdayHits = 0, amountHits = 0;
+    registerMedicationLexerLocalePack({
+      locale: "en",
+      apply: (tokens, input) => (original?.apply(tokens, input) ?? tokens).map((token, index) => {
+        if (token.lower === "zonaday") {
+          weekdayHits++;
+          return { ...token, index, canonical: "monday" };
+        }
+        if (token.lower === "cliniccap") {
+          amountHits++;
+          return { ...token, index, canonical: ".5ml" };
+        }
+        return { ...token, index };
+      })
+    });
+    try {
+      const query = { from: "2026-12-07T00:00:00Z", orderedAt: "2026-12-07T00:00:00Z", timeZone: "UTC", limit: 10 };
+      const sources = [
+        "Take 1 tablet daily on zonaday for 7 days",
+        "Take 1 tablet every morning for 7 days. On zonaday, do not take the 1-tablet morning dose.",
+        "Take 1 tablet every morning for 7 days. Do not take the 1-tablet morning dose on zonaday.",
+        "Take 1 tablet every morning for 7 days. Do not take the 2-tablet morning dose on zonaday."
+      ];
+      for (let index = 0; index < sources.length; index++) {
+        const source = sources[index], parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+        const expected = index === 0 ? ["2026-12-07T09:00:00+00:00"] :
+          (index === 3 ? [7, 8, 9, 10, 11, 12, 13] : [8, 9, 10, 11, 12, 13])
+            .map(day => `2026-12-${String(day).padStart(2, "0")}T08:00:00+00:00`);
+        for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+          JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+          const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+          expect(members).toHaveLength(1);
+          expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+          expect(nextDueDoses(input, query)).toEqual(expected);
+          expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))
+            .toMatchObject({ totalUnits: expected.length, unit: "tab" });
+          if (index) {
+            const warning = members[0].syntax?.instructionGraph?.actions.find(action => action.polarity === "negate");
+            expect(warning?.args).toEqual(expect.arrayContaining([
+              expect.objectContaining({ role: "time", relation: "on", text: "zonaday" })
+            ]));
+            const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+            expect(english).toContain("zonaday");
+            if (index === 3) {
+              expect(english).toContain("Do not take the 2-tablet morning dose on zonaday");
+              expect(english).not.toContain("dose in the morning");
+            }
+          }
+        }
+        expect(parsed.fhirNext.renderedInstruction).toBe(source);
+        expect(JSON.stringify(parsed)).toBe(before);
+      }
+      const source = "Take 0.25 mL every 6 hours, max cliniccap per day";
+      const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const member = importCanonicalCourse(input).stages[0].administrations[0];
+        expect(member.amounts?.[0].quantity).toMatchObject({ value: 0.25, unit: "mL" });
+        expect(member.limits).toEqual(expect.arrayContaining([expect.objectContaining({
+          scope: "period", amount: expect.objectContaining({ value: 0.5, unit: "mL" }),
+          period: expect.objectContaining({ value: 1 })
+        })]));
+        expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: 0.5, unit: "mL" });
+      }
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(parsed)).toBe(before);
+      expect(weekdayHits).toBeGreaterThan(0);
+      expect(amountHits).toBeGreaterThan(0);
+    } finally {
+      registerMedicationLexerLocalePack(original ?? {
+        locale: "en", apply: tokens => tokens.map((token, index) => ({ ...token, index }))
+      });
+    }
   });
 });

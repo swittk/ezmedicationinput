@@ -26,7 +26,7 @@ import { ACTION_DISCOURSE_CONNECTORS, ACTION_COORDINATION_CONNECTORS, ACTION_SEQ
   TREATMENT_PERIOD_START_LEADS,
   LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
   coordinationConnectorKind } from '../hpsg/lexical-classes';
-import { AdviceForce, EventTiming, type ParseOptions, type AdviceFrame } from '../types';
+import { AdviceForce, AdvicePolarity, EventTiming, type ParseOptions, type AdviceFrame } from '../types';
 import type { ParserState, Token } from '../parser-state';
 import { buildCustomSiteHints, parseClauseState, findUnparsedTokenGroups } from '../parser';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
@@ -629,7 +629,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       policy: 'no-external-split'
     });
   }
-  // A complete registered NON-administration procedure owns its own nominal
+  // A complete registered procedure or prohibited action owns its nominal
   // arguments. A numeric object inside "repeat 1 tablet after 2 hours" is
   // not an independent medication-order boundary, even when that object has
   // an explicit unit and the procedure has a typed temporal complement.
@@ -641,7 +641,8 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       if (site.kind !== 'adjacent-dose') continue;
       const owner = frames.find(frame => {
         const definition = frameActionDefinition(frame, options);
-        return definition?.procedural === true && definition.definesDose !== true &&
+        return (frame.polarity === AdvicePolarity.Negate ||
+          definition?.procedural === true && definition.definesDose !== true) &&
           frame.span.start < site.start && site.start < frame.span.end &&
           // An action frame may have an opaque tail past an explicit
           // punctuation boundary. Its valence must never claim a completely

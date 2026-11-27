@@ -990,6 +990,82 @@
     "the",
     "all"
   ],
+  "calendarWeekdayLexemes": [
+    {
+      "day": "mon",
+      "patterns": [
+        "\\bmon(?:day)?s?\\b",
+        "(?:วัน)?จันทร์"
+      ]
+    },
+    {
+      "day": "tue",
+      "patterns": [
+        "\\btue(?:sday)?s?\\b",
+        "(?:วัน)?อังคาร"
+      ]
+    },
+    {
+      "day": "wed",
+      "patterns": [
+        "\\bwed(?:nesday)?s?\\b",
+        "(?:วัน)?พุธ"
+      ]
+    },
+    {
+      "day": "thu",
+      "patterns": [
+        "\\bthu(?:rsday)?s?\\b",
+        "(?:วัน)?พฤหัส(?:บดี)?"
+      ]
+    },
+    {
+      "day": "fri",
+      "patterns": [
+        "\\bfri(?:day)?s?\\b",
+        "(?:วัน)?ศุกร์"
+      ]
+    },
+    {
+      "day": "sat",
+      "patterns": [
+        "\\bsat(?:urday)?s?\\b",
+        "(?:วัน)?เสาร์"
+      ]
+    },
+    {
+      "day": "sun",
+      "patterns": [
+        "\\bsun(?:day)?s?\\b",
+        "(?:วัน)?อาทิตย์"
+      ]
+    }
+  ],
+  "calendarWeekdayGroups": [
+    {
+      "pattern": "\\bweekends?\\b",
+      "days": [
+        "sat",
+        "sun"
+      ]
+    },
+    {
+      "pattern": "\\bweekdays?\\b",
+      "days": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri"
+      ]
+    }
+  ],
+  "calendarDayListConnectors": "\\b(?:weekends?|weekdays?|and|or|on|the|every|each)\\b|(?:และ|หรือ|วัน|ทุก)|[\\s,\\/&+]+",
+  "calendarExclusionCue": "\\b(?:except|excluding)\\b|ยกเว้น(?!\\s*กรณี)|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))",
+  "calendarExclusionDayHeads": [
+    "day",
+    "days"
+  ],
   "calendarUniversalDayQuantifiers": [
     "all",
     "every",

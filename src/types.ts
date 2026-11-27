@@ -2159,6 +2159,11 @@ export interface CanonicalClinicalAdjuncts {
     /** Lexical daypart membership over already stated clocks; creates no times. */
     clockRange?: { startHour: number; endHour: number };
     quantifier?: "all" | "both";
+    /** Coordinated targets retain each independently qualified dose and slot. */
+    members?: NonNullable<CanonicalClinicalAdjuncts["conditionTarget"]>[];
+    /** Calendar restrictions owned by this target, pending regimen binding. */
+    excludedDates?: string[];
+    excludedWeekdays?: FhirDayOfWeek[];
   };
   excludedDates?: string[];
   excludedWeekdays?: FhirDayOfWeek[];

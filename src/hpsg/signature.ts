@@ -187,6 +187,8 @@ export interface HpsgConditionFeature {
   sourceEnd: number;
   targetStart: number;
   targetEnd: number;
+  /** Independently selected targets of one coordinated withholding program. */
+  targetRanges?: TextRange[];
   safety: boolean;
   frames: AdviceFrame[];
 }

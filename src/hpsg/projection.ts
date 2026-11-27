@@ -316,12 +316,16 @@ function applyClinicalAdjunct(
     clause.dose || clause.method || clause.route || clause.site ||
     hasRecurringSchedule(clause.schedule)
   );
-  if (hasAdministration && adjunct.conditionTarget) clinical.conditionTarget = {
-    ...adjunct.conditionTarget,
-    when: adjunct.conditionTarget.when ? [...adjunct.conditionTarget.when] : undefined,
-    timeOfDay: adjunct.conditionTarget.timeOfDay ? [...adjunct.conditionTarget.timeOfDay] : undefined,
-    clockRange: adjunct.conditionTarget.clockRange ? { ...adjunct.conditionTarget.clockRange } : undefined
-  };
+  if (hasAdministration && adjunct.conditionTarget) {
+    clinical.conditionTarget = {
+      ...adjunct.conditionTarget,
+      when: adjunct.conditionTarget.when ? [...adjunct.conditionTarget.when] : undefined,
+      timeOfDay: adjunct.conditionTarget.timeOfDay ? [...adjunct.conditionTarget.timeOfDay] : undefined,
+      clockRange: adjunct.conditionTarget.clockRange ? { ...adjunct.conditionTarget.clockRange } : undefined
+    };
+    if (adjunct.conditionTarget.excludedWeekdays?.length || adjunct.conditionTarget.excludedDates?.length)
+      acceptedKinds.add("calendar-exclusion");
+  }
   if (adjunct.treatmentPause && hasAdministration) {
     clinical.treatmentPause = { ...adjunct.treatmentPause, range: { ...adjunct.treatmentPause.range } };
     acceptedKinds.add("treatment-pause");
@@ -354,8 +358,9 @@ function applyClinicalAdjunct(
       // permission to drop the exclusion and schedule the medication daily.
       // Retain the full FHIR exclusion extension for review and editing.
       clinical.excludedWeekdays = [...adjunct.excludedWeekdays];
-      // Selected-dose exclusions are scoped after partitioning source anchors.
-      if (allowed.length && !adjunct.conditionTarget) schedule.dayOfWeek = allowed;
+      // Target-owned exclusions remain on their nominal until binding;
+      // these unscoped exclusions already belong to the administration.
+      if (allowed.length) schedule.dayOfWeek = allowed;
     }
     if (adjunct.excludedDates?.length) {
       clinical.excludedDates = [...adjunct.excludedDates];
@@ -552,14 +557,17 @@ export function projectHpsgSignToState(
   for (const scoped of sign.synsem.cont.scopedAdministrations ?? []) {
     const condition = scoped.condition;
     const scopes = state.primaryClause.instructionScopes ?? (state.primaryClause.instructionScopes = []);
-    if (!scopes.some(scope => scope.kind === condition.relation &&
-        scope.span.start === condition.sourceStart && scope.span.end === condition.sourceEnd &&
-        scope.target.start === condition.targetStart && scope.target.end === condition.targetEnd)) {
-      scopes.push({
-        kind: condition.relation,
-        span: { start: condition.sourceStart, end: condition.sourceEnd },
-        target: { start: condition.targetStart, end: condition.targetEnd }
-      });
+    const targets = condition.targetRanges ?? [{ start: condition.targetStart, end: condition.targetEnd }];
+    for (const target of targets) {
+      if (!scopes.some(scope => scope.kind === condition.relation &&
+          scope.span.start === condition.sourceStart && scope.span.end === condition.sourceEnd &&
+          scope.target.start === target.start && scope.target.end === target.end)) {
+        scopes.push({
+          kind: condition.relation,
+          span: { start: condition.sourceStart, end: condition.sourceEnd },
+          target
+        });
+      }
     }
   }
 

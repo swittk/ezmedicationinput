@@ -167,6 +167,9 @@ function frameDose(
   context: HpsgClauseContext,
   frame: AdviceFrame
 ): AdviceArgument["quantity"] {
+  // A prohibited amount selects the negative action's target; it is not a
+  // positive administration head competing with coordinated prohibitions.
+  if (frame.polarity === AdvicePolarity.Negate) return undefined;
   const definition = frameActionDefinition(frame, context.options);
   if (!definition?.definesDose) return undefined;
   const amount = frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount && arg.quantity);

@@ -16,7 +16,7 @@ import {
 } from "../../relation-terminology";
 import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt, conditionalAdviceOwnerAt, isConditionalAdviceFrame, instructionActionsAreSequenced as explicitlySequences, proceduralInstructionProgram as prefixProgram } from "../procedural-context";
 import { hasSymptomOnsetPrnAt, prnAt } from "./prn-rules";
-import { SUPPLEMENTAL_DOSE_MODIFIERS, CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
+import { CALENDAR_WEEKDAY_LEXEMES, CALENDAR_WEEKDAY_GROUPS, CALENDAR_DAY_LIST_CONNECTORS, CALENDAR_EXCLUSION_CUE, CALENDAR_EXCLUSION_DAY_HEADS, NEGATIVE_ACTION_DIRECTIVE_LEADS, SUPPLEMENTAL_DOSE_MODIFIERS, CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { countAndDurationRule, countFrequencyRule, timeOfDayRule, timingLexicalRule, dayRangeLexicalRule, maximumOccurrenceAt, isIndependentMaximum } from "./timing-rules";
 import { LexKind } from "../../lexer/token-types";
@@ -48,18 +48,6 @@ const DAYS = [
   FhirDayOfWeek.Sunday
 ] as const;
 
-const WEEKDAYS: Array<{ day: FhirDayOfWeek; en: RegExp; th: RegExp }> = [
-  { day: FhirDayOfWeek.Monday, en: /\bmon(?:day)?s?\b/giu, th: /(?:วัน)?จันทร์/gu },
-  { day: FhirDayOfWeek.Tuesday, en: /\btue(?:sday)?s?\b/giu, th: /(?:วัน)?อังคาร/gu },
-  { day: FhirDayOfWeek.Wednesday, en: /\bwed(?:nesday)?s?\b/giu, th: /(?:วัน)?พุธ/gu },
-  { day: FhirDayOfWeek.Thursday, en: /\bthu(?:rsday)?s?\b/giu, th: /(?:วัน)?พฤหัส(?:บดี)?/gu },
-  { day: FhirDayOfWeek.Friday, en: /\bfri(?:day)?s?\b/giu, th: /(?:วัน)?ศุกร์/gu },
-  { day: FhirDayOfWeek.Saturday, en: /\bsat(?:urday)?s?\b/giu, th: /(?:วัน)?เสาร์/gu },
-  { day: FhirDayOfWeek.Sunday, en: /\bsun(?:day)?s?\b/giu, th: /(?:วัน)?อาทิตย์/gu }
-];
-
-// ยกเว้นกรณี is a Boolean guard (unless), not a calendar exclusion.
-const EXCLUSION_CUE = /\b(?:except|excluding)\b|ยกเว้น(?!\s*กรณี)|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/iu;
 
 export interface CalendarExclusion {
   start: number;
@@ -69,7 +57,7 @@ export interface CalendarExclusion {
 }
 
 export function containsCalendarExclusionCue(source: string): boolean {
-  return EXCLUSION_CUE.test(source);
+  return CALENDAR_EXCLUSION_CUE.test(source);
 }
 
 /** A universal weekday quantifier denotes the existing complete weekday
@@ -80,7 +68,7 @@ function universalDayScope(source: string): boolean {
   const words = source.trim().toLowerCase().split(/\s+/u);
   return words.length === 2 &&
     CALENDAR_UNIVERSAL_DAY_QUANTIFIERS.has(words[0]) &&
-    (words[1] === "day" || words[1] === "days");
+    CALENDAR_EXCLUSION_DAY_HEADS.has(words[1]);
 }
 
 function uniqueDays(source: string): FhirDayOfWeek[] {
@@ -88,17 +76,14 @@ function uniqueDays(source: string): FhirDayOfWeek[] {
   if (universalDayScope(source)) {
     for (const day of DAYS) values.add(day);
   }
-  for (const definition of WEEKDAYS) {
-    definition.en.lastIndex = 0;
-    definition.th.lastIndex = 0;
-    if (definition.en.test(source) || definition.th.test(source)) values.add(definition.day);
+  for (const definition of CALENDAR_WEEKDAY_LEXEMES) {
+    if (definition.patterns.some(pattern => {
+      pattern.lastIndex = 0;
+      return pattern.test(source);
+    })) values.add(definition.day);
   }
-  if (/\bweekends?\b/iu.test(source)) {
-    values.add(FhirDayOfWeek.Saturday);
-    values.add(FhirDayOfWeek.Sunday);
-  }
-  if (/\bweekdays?\b/iu.test(source)) {
-    for (const day of DAYS.slice(0, 5)) values.add(day);
+  for (const group of CALENDAR_WEEKDAY_GROUPS) {
+    if (group.pattern.test(source)) for (const day of group.days) values.add(day);
   }
   return DAYS.filter((day) => values.has(day));
 }
@@ -107,12 +92,13 @@ function isOnlyWeekdays(source: string): boolean {
   const phrase = source.trim().replace(/[.!?]+$/u, "").trim();
   if (universalDayScope(phrase)) return true;
   let remainder = phrase;
-  for (const definition of WEEKDAYS) {
-    definition.en.lastIndex = 0;
-    definition.th.lastIndex = 0;
-    remainder = remainder.replace(definition.en, " ").replace(definition.th, " ");
+  for (const definition of CALENDAR_WEEKDAY_LEXEMES) {
+    for (const pattern of definition.patterns) {
+      pattern.lastIndex = 0;
+      remainder = remainder.replace(pattern, " ");
+    }
   }
-  remainder = remainder.replace(/\b(?:weekends?|weekdays?|and|or|on|the|every|each)\b|(?:และ|หรือ|วัน|ทุก)|[\s,\/&+]+/giu, "");
+  remainder = remainder.replace(CALENDAR_DAY_LIST_CONNECTORS, "");
   return remainder.length === 0;
 }
 
@@ -126,7 +112,7 @@ export function matchCalendarExclusion(
 ): CalendarExclusion | undefined {
   // Match from the lexical sign's own source offset. Another earlier
   // exclusion is a separate constituent, never this sign's payload.
-  const cue = EXCLUSION_CUE.exec(source.slice(from));
+  const cue = CALENDAR_EXCLUSION_CUE.exec(source.slice(from));
   if (!cue) return undefined;
   const cueStart = cue.index + from;
   const clauseEnd = source.indexOf(";", cueStart) >= 0
@@ -259,7 +245,8 @@ function clinicalAdjunctSign(
   tokens: ReturnType<typeof overlappingAvailableTokens>,
   feature: HpsgClinicalAdjunctFeature,
   consumedTokens = tokens,
-  scopedCondition?: HpsgConditionFeature
+  scopedCondition?: HpsgConditionFeature,
+  instructions?: HpsgSign["synsem"]["valence"]["instructions"]
 ) {
   return lexicalSign({
     type: "clinical-adjunct-sign",
@@ -268,7 +255,7 @@ function clinicalAdjunctSign(
     consumedTokenIndices: consumedTokens.map((token) => token.index),
     synsem: {
       head: {},
-      valence: {},
+      valence: instructions ? { instructions } : {},
       cont: { clauseKind: "administration", clinicalAdjunct: feature,
         ...(scopedCondition ? { scopedAdministrations: [{ condition: scopedCondition, head: {} }] } : {}) }
     },
@@ -382,7 +369,7 @@ function withholdingDoseTarget(
       target.dose = argument.quantity;
       continue;
     }
-    if (argument.role !== AdviceArgumentRole.Object) continue;
+    if (argument.role !== AdviceArgumentRole.Object && argument.role !== AdviceArgumentRole.Time) continue;
     // Exact source anchoring only: the grammatical tokens are reused, not
     // reparsed from a rendered phrase or interpreted by a second parser.
     for (const token of context.tokens) {
@@ -418,34 +405,43 @@ function withholdingAdjunct(
   selectedGuard?: ParsedMedicationGuard
 ): HpsgClinicalAdjunctFeature | undefined {
   const range = { start: scope.sourceStart, end: scope.sourceEnd };
+  let applicable: ParsedMedicationGuard | undefined;
+  let guardSelected = false;
+  const targets: NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]>[] = [];
+  const targetRanges: Array<AdviceFrame["span"]> = [];
   for (const frame of scope.frames) {
     if (!withholdsMedicationAdministration(context, frame)) continue;
-    const cached = selectedGuard ?? medicationGuardForContext(context);
-    const applicable = cached?.start === range.start ? cached : undefined;
+    if (!guardSelected) {
+      const cached = selectedGuard ?? medicationGuardForContext(context);
+      applicable = cached?.start === range.start ? cached : undefined;
+      guardSelected = true;
+    }
     // An explicit ELSE branch does not invert the earlier permission guard.
     if (applicable?.alternative && applicable.alternative.end <= frame.span.start) continue;
-    // The closed conditional owns its relation and predicate span. Reuse them
-    // in the same guard construction instead of selecting another action head.
-    const guard = applicable && range.end >= applicable.end ? applicable
-      : parseMedicationGuard(context.state.input, context.tokens, true, context.options,
-        { relation: scope.relation, start: range.start, markerEnd, end: range.end });
-    if (!guard) continue;
-    const condition = guard.condition.kind === "not" ? guard.condition.condition
-      : { kind: "not" as const, condition: guard.condition };
-    const dayInvariant = guard.sign.synsem.cont.clinicalAdjunct?.calendarDayCondition;
-    return {
-      condition,
-      ...(dayInvariant ? { calendarDayCondition: condition } : {}),
-      conditionTarget: withholdingDoseTarget(context, frame),
-      localRanges: [range],
-      evidence: [{
-        rule: "hpsg.cx.medication-withholding-conditional",
-        kind: "condition",
-        ranges: [range]
-      }]
-    };
+    targets.push(withholdingDoseTarget(context, frame));
+    targetRanges.push(frame.span);
   }
-  return undefined;
+  if (!targets.length) return undefined;
+  // All selected targets share this already closed conditional daughter.
+  const guard = applicable && range.end >= applicable.end ? applicable
+    : parseMedicationGuard(context.state.input, context.tokens, true, context.options,
+      { relation: scope.relation, start: range.start, markerEnd, end: range.end });
+  if (!guard) return undefined;
+  if (targetRanges.length > 1) scope.targetRanges = targetRanges;
+  const condition = guard.condition.kind === "not" ? guard.condition.condition
+    : { kind: "not" as const, condition: guard.condition };
+  const dayInvariant = guard.sign.synsem.cont.clinicalAdjunct?.calendarDayCondition;
+  return {
+    condition,
+    ...(dayInvariant ? { calendarDayCondition: condition } : {}),
+    conditionTarget: targets.length === 1 ? targets[0] : { members: targets },
+    localRanges: [range],
+    evidence: [{
+      rule: "hpsg.cx.medication-withholding-conditional",
+      kind: "condition",
+      ranges: [range]
+    }]
+  };
 }
 
 /** Preserve the selected guard derivation and its independently typed scope. */
@@ -560,8 +556,8 @@ function targetedWithholdingCalendarAt(context: HpsgClauseContext, start: number
   const word = normalizeTokenLower(lead);
   const action = resolveMedicationInstructionAction(word, context.options);
   const relation = resolveActionRelationSurface(word);
-  const isExclusion = EXCLUSION_CUE.test(lead.original);
-  const negativeLead = /^(?:do|not|never|ห้าม|อย่า)$/iu.test(word);
+  const isExclusion = CALENDAR_EXCLUSION_CUE.test(lead.original);
+  const negativeLead = NEGATIVE_ACTION_DIRECTIVE_LEADS.has(word);
   if (!isExclusion && !action?.argumentParserConfig?.medicationConditionEffect &&
       !action?.primaryAdministrationHead && relation !== AdviceRelation.On && !negativeLead) return undefined;
   const weekdayAt = (index: number) => {
@@ -593,11 +589,26 @@ function targetedWithholdingCalendarAt(context: HpsgClauseContext, start: number
         });
       }
     }
-    if (!target.when?.length && !target.timeOfDay?.length && !target.clockRange && !target.quantifier) continue;
+    if (!target.dose && !target.when?.length && !target.timeOfDay?.length && !target.clockRange && !target.quantifier) continue;
     let rangeStart = frame.span.start, rangeEnd = frame.span.end;
-    let excluded = frame.args.filter(argument => argument.role === AdviceArgumentRole.Time ||
-        frame.relation === AdviceRelation.On && argument.role === AdviceArgumentRole.Object)
-      .reduce<FhirDayOfWeek[]>((days, argument) => [...new Set([...days, ...uniqueDays(argument.text)])], []);
+    let calendarDaughter: HpsgSign | undefined;
+    let calendarArgument: AdviceFrame["args"][number] | undefined;
+    let excluded: FhirDayOfWeek[] = [];
+    for (const argument of frame.args) {
+      if (argument.role !== AdviceArgumentRole.Time &&
+          !(frame.relation === AdviceRelation.On && argument.role === AdviceArgumentRole.Object)) continue;
+      const first = context.tokens.find(token => tokenInActionArgument(
+        context, token.sourceStart, token.sourceEnd, frame, argument));
+      if (!first) continue;
+      const days = weekdayAt(first.index);
+      if (!days || !days.tokens.every(token => tokenInActionArgument(
+        context, token.sourceStart, token.sourceEnd, frame, argument))) continue;
+      for (const day of days.synsem.head.schedule!.dayOfWeek!) {
+        if (excluded.indexOf(day) < 0) excluded.push(day);
+      }
+      calendarDaughter = days;
+      calendarArgument = argument;
+    }
     if (isExclusion && frame.span.start >= lead.sourceEnd &&
         !context.state.input.slice(lead.sourceEnd, frame.span.start).trim()) rangeStart = lead.sourceStart;
     else if (relation === AdviceRelation.On && frame.span.start > lead.sourceStart) {
@@ -606,6 +617,7 @@ function targetedWithholdingCalendarAt(context: HpsgClauseContext, start: number
       if (!days || end === undefined || end > frame.span.start ||
           context.state.input.slice(end, frame.span.start).replace(/[,]/gu, '').trim()) continue;
       excluded = days.synsem.head.schedule!.dayOfWeek!;
+      calendarDaughter = days;
       // This lexical constituent starts at its ON head. The preceding
       // sentence delimiter remains a separate connector daughter, not an
       // overlapping token silently consumed by a later lexical rule.
@@ -617,14 +629,28 @@ function targetedWithholdingCalendarAt(context: HpsgClauseContext, start: number
       const days = weekdayAt(next);
       if (!days) continue;
       excluded = days.synsem.head.schedule!.dayOfWeek!;
+      calendarDaughter = days;
       rangeEnd = days.tokens[days.tokens.length - 1].sourceEnd;
     }
     const range = { start: rangeStart, end: rangeEnd };
     const members = overlappingAvailableTokens(context, range.start, range.end);
+    const calendarSpan = calendarDaughter && rangeFromTokens(calendarDaughter.tokens);
+    const selectedFrame = calendarSpan ? {
+      ...frame,
+      args: [...frame.args.filter(argument => argument !== calendarArgument), {
+        ...calendarArgument,
+        role: AdviceArgumentRole.Time,
+        relation: AdviceRelation.On,
+        text: context.state.input.slice(calendarSpan.start, calendarSpan.end),
+        span: calendarSpan
+      }],
+      span: range,
+      sourceText: context.state.input.slice(range.start, range.end)
+    } : frame;
     return clinicalAdjunctSign("hpsg.cx.medication-withholding-calendar-target", context, members, {
-      conditionTarget: target, excludedWeekdays: excluded, localRanges: [range],
+      conditionTarget: { ...target, excludedWeekdays: excluded }, localRanges: [range],
       evidence: [{ rule: "hpsg.cx.medication-withholding-calendar-target", kind: "calendar-exclusion", ranges: [range] }]
-    });
+    }, members, undefined, calendarSpan ? [{ text: selectedFrame.sourceText!, frames: [selectedFrame] }] : undefined);
   }
   return undefined;
 }
@@ -633,12 +659,13 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
   return lexicalRule("hpsg.lex.clinical.calendar-exclusion", (context, start) => {
     const lead = context.tokens[start];
     if (!lead || context.state.consumed.has(lead.index) ||
-        !EXCLUSION_CUE.test(lead.sourceText ?? lead.original)) {
+        !CALENDAR_EXCLUSION_CUE.test(lead.sourceText ?? lead.original)) {
       return [];
     }
-    const clauseEnd = context.state.input.indexOf(";", lead.sourceStart) >= 0
-      ? context.state.input.indexOf(";", lead.sourceStart)
-      : context.state.input.length;
+    const clauseBoundary = context.tokens.find(token => token.index < context.limit &&
+      token.sourceStart > lead.sourceStart &&
+      (token.kind === LexKind.Punctuation || token.kind === LexKind.Separator) && hasStrongBoundary(token.original));
+    const clauseEnd = clauseBoundary?.sourceStart ?? context.state.input.length;
     const durationBoundary = trailingCourseDurationBoundary(
       context, lead.sourceStart, clauseEnd
     );

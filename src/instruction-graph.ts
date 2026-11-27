@@ -845,9 +845,11 @@ function instructionQuantityUnitAt(
   options?: ParseOptions
 ): InstructionQuantityUnitMatch | undefined {
   const maxSpan = Math.min(3, endExclusive - start);
+  const attachedHyphen = parts[start - 1]?.kind === "NUMBER" &&
+    parts[start - 1].sourceEnd === parts[start]?.sourceStart && key(parts[start]).startsWith("-");
   for (let span = maxSpan; span >= 1; span -= 1) {
-    const candidate = parts.slice(start, start + span).map((part) => key(part)).join(" ");
-    const unit = normalizeUnit(candidate, options);
+    const surface = parts.slice(start, start + span).map((part) => key(part)).join(" ");
+    const unit = normalizeUnit(attachedHyphen ? surface.slice(1) : surface, options);
     if (unit) return { unit, endExclusive: start + span };
   }
   const head = key(parts[start]);
@@ -3213,7 +3215,8 @@ function actionDominatedByCanonicalMethod(
 
 function pushActionIfUnique(
   target: AdviceFrame[],
-  frame: AdviceFrame
+  frame: AdviceFrame,
+  appendIfNew = true
 ): boolean {
   const existingIndex = target.findIndex((candidate) =>
     candidate.predicate.lemma === frame.predicate.lemma &&
@@ -3222,6 +3225,12 @@ function pushActionIfUnique(
   );
   if (existingIndex >= 0) {
     const existing = target[existingIndex];
+    // A selected temporal daughter can extend or refine the recovered
+    // action. Other preliminary instruction frames keep their existing owner.
+    if (!appendIfNew && !frame.args.some(argument => argument.role === AdviceArgumentRole.Time &&
+        argument.span && !existing.args.some(prior => prior.role === AdviceArgumentRole.Time &&
+          prior.span?.start === argument.span!.start && prior.span?.end === argument.span!.end &&
+          prior.relation === argument.relation))) return false;
     // Source-local fragments can omit an earlier coordinated negator.
     // When a complete composed action owns the very same source range,
     // its explicit or inherited polarity wins over an unscoped fragment.
@@ -3241,6 +3250,7 @@ function pushActionIfUnique(
     ) target[existingIndex] = frame;
     return false;
   }
+  if (!appendIfNew) return false;
   target.push(frame);
   return true;
 }
@@ -3295,8 +3305,8 @@ function conditionRelationsFromHpsgScopes(
 ): CanonicalInstructionRelation[] {
   const result: CanonicalInstructionRelation[] = [];
   for (const scope of clause.instructionScopes ?? []) {
-    const target = actions.findIndex(action => scope.target.start <= action.span.start &&
-      action.span.end <= scope.target.end);
+    const target = actions.findIndex(action =>
+      action.span.start >= scope.target.start && action.span.end <= scope.target.end);
     if (target < 0) continue;
     result.push({
       kind: scope.kind,
@@ -3562,6 +3572,11 @@ export function buildInstructionGraph(
   const fullInputFrames = proceduralFrames
     ? proceduralFrames.map(frame => ({ ...frame, args: frame.args.slice(), span: { ...frame.span } }))
     : parseInstructionActions(input, 0, options);
+  for (const instruction of clause.additionalInstructions ?? []) {
+    for (const frame of instruction.frames ?? []) {
+      pushActionIfUnique(fullInputFrames, { ...frame, args: frame.args.slice(), span: { ...frame.span } }, false);
+    }
+  }
   const actions: AdviceFrame[] = [];
   const opaqueSpans: CanonicalSourceSpan[] = [];
   reconcileComposedAdviceCoding(clause, fullInputFrames);
@@ -5546,7 +5561,16 @@ export function realizeInstructionGraph(
     }
   }
   if (!nodes.length) return undefined;
-  nodes.sort((left, right) => left.start - right.start);
+  // A shared antecedent has one source span but a separate owned relation
+  // to each consequent. Keep each emitted condition beside its target.
+  nodes.sort((left, right) => {
+    const leftOwner = left.conditionTargetActionIndex === undefined ? undefined
+      : graph.actions[left.conditionTargetActionIndex];
+    const rightOwner = right.conditionTargetActionIndex === undefined ? undefined
+      : graph.actions[right.conditionTargetActionIndex];
+    return (leftOwner?.span.start ?? left.start) - (rightOwner?.span.start ?? right.start) ||
+      left.start - right.start;
+  });
   if (temporalOrderDiffersFromSource && nodes.length > 1) {
     // Include omitted actions in the edge walk so their predecessors still
     // precede their successors. Emit each condition with its owning action.
