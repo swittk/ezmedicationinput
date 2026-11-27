@@ -97,6 +97,7 @@ export function medicationGuardLeadLexeme(source: string, licensedConsequent = f
 /** Lexical boundary spellings shared with the typed guard phrase. No result
  * from these recognizers is itself a medication condition or administration. */
 export const MEDICATION_GUARD_BOUNDARIES = {
+  frontedLead: new RegExp("^\\s*(?:" + GUARD_LEAD.source + ")", GUARD_LEAD.flags),
   alternative: ALTERNATE_CUE,
   noDoseConsequent: OTHERWISE_HOLD
 };

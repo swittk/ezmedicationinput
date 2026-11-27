@@ -3222,6 +3222,37 @@ describe("withholding target identity", () => {
 });
 
 describe("registered weekday and hard-delimiter vocabulary", () => {
+  it.each([
+    ["Mond", ["mon"], ["03", "04", "05", "06", "07", "08"]],
+    ["weekdays", ["mon", "tue", "wed", "thu", "fri"], ["07", "08"]],
+    ["weekends", ["sat", "sun"], ["02", "03", "04", "05", "06"]]
+  ] as const)("keeps registered %s calendar vocabulary consistent with execution", (weekday, excluded, days) => {
+    const source = "Take 1 tablet daily for 7 days except " + weekday, parsed = parsePublicSig(source);
+    const query = { orderedAt: "2026-11-02T00:00:00Z", from: "2026-11-02T00:00:00Z", timeZone: "UTC" };
+    expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.excludedWeekdays).toEqual(excluded);
+    for (const dosage of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...query, limit: 8 })
+        .map(at => at.slice(0, 10))).toEqual(days.map(day => "2026-11-" + day));
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 7, durationUnit: "d" }).totalUnits).toBe(days.length);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("keeps short Thai weekday aliases contextual while complete calendar nouns remain licensed", () => {
+    const clause = parseClauseState("กิน 1 เม็ด ทุกวันจ").primaryClause;
+    expect(clause.dose).toEqual({ value: 1, unit: "tab" });
+    expect(clause.schedule?.dayOfWeek).toEqual(["mon"]);
+    expect(matchCalendarExclusion("except จ")).toBeUndefined();
+    expect(matchCalendarExclusion("except อ")).toBeUndefined();
+    expect(matchCalendarExclusion("except workdays")).toBeUndefined();
+    expect(matchCalendarExclusion("ยกเว้นวันหยุด")).toBeUndefined();
+    expect(matchCalendarExclusion("except วันจันทร์")?.excluded).toEqual(["mon"]);
+    expect(matchCalendarExclusion("เว้นวันอังคาร")?.excluded).toEqual(["tue"]);
+  });
+
   it("keeps the word thus outside registered weekday vocabulary", () => {
     const thursday = CALENDAR_WEEKDAY_LEXEMES.find(entry => entry.day === "thu")!;
     expect(thursday.patterns.some(pattern => new RegExp(pattern.source, "iu").test("thus"))).toBe(false);

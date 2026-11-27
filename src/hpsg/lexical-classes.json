@@ -1011,75 +1011,128 @@
   "calendarWeekdayLexemes": [
     {
       "day": "mon",
-      "patterns": [
-        "\\bmon(?:day)?s?\\b",
-        "(?:วัน)?จันทร์"
+      "en": [
+        "monday",
+        "mondays",
+        "mon",
+        "mons",
+        "mond"
+      ],
+      "th": [
+        "จันทร์"
+      ],
+      "thContextual": [
+        "จ",
+        "จัน"
       ]
     },
     {
       "day": "tue",
-      "patterns": [
-        "\\btue(?:sday)?s?\\b",
-        "(?:วัน)?อังคาร"
+      "en": [
+        "tuesday",
+        "tuesdays",
+        "tue",
+        "tues"
+      ],
+      "th": [
+        "อังคาร"
+      ],
+      "thContextual": [
+        "อ",
+        "อัง"
       ]
     },
     {
       "day": "wed",
-      "patterns": [
-        "\\bwed(?:nesday)?s?\\b",
-        "(?:วัน)?พุธ"
+      "en": [
+        "wednesday",
+        "wednesdays",
+        "wed",
+        "weds"
+      ],
+      "th": [
+        "พุธ"
+      ],
+      "thContextual": [
+        "พ"
       ]
     },
     {
       "day": "thu",
-      "patterns": [
-        "\\b(?:thu|thur|thurs|thursday|thursdays)\\b",
-        "(?:วัน)?พฤหัส(?:บดี)?"
+      "en": [
+        "thursday",
+        "thursdays",
+        "thu",
+        "thur",
+        "thurs"
+      ],
+      "th": [
+        "พฤหัสบดี",
+        "พฤหัส"
+      ],
+      "thContextual": [
+        "พฤ"
       ]
     },
     {
       "day": "fri",
-      "patterns": [
-        "\\bfri(?:day)?s?\\b",
-        "(?:วัน)?ศุกร์"
+      "en": [
+        "friday",
+        "fridays",
+        "fri",
+        "fris"
+      ],
+      "th": [
+        "ศุกร์"
+      ],
+      "thContextual": [
+        "ศ",
+        "ศุก"
       ]
     },
     {
       "day": "sat",
-      "patterns": [
-        "\\bsat(?:urday)?s?\\b",
-        "(?:วัน)?เสาร์"
+      "en": [
+        "saturday",
+        "saturdays",
+        "sat",
+        "sats"
+      ],
+      "th": [
+        "เสาร์"
+      ],
+      "thContextual": [
+        "ส",
+        "เสา"
       ]
     },
     {
       "day": "sun",
-      "patterns": [
-        "\\bsun(?:day)?s?\\b",
-        "(?:วัน)?อาทิตย์"
+      "en": [
+        "sunday",
+        "sundays",
+        "sun",
+        "suns"
+      ],
+      "th": [
+        "อาทิตย์"
+      ],
+      "thContextual": [
+        "อา",
+        "อาท"
       ]
     }
   ],
+  "calendarWeekdayPrefix": "วัน",
   "calendarWeekdayGroups": [
-    {
-      "pattern": "\\bweekends?\\b",
-      "days": [
-        "sat",
-        "sun"
-      ]
-    },
-    {
-      "pattern": "\\bweekdays?\\b",
-      "days": [
-        "mon",
-        "tue",
-        "wed",
-        "thu",
-        "fri"
-      ]
-    }
+    "weekend",
+    "weekends",
+    "weekday",
+    "weekdays"
   ],
-  "calendarDayListConnectors": "\\b(?:weekends?|weekdays?|and|or|on|the|every|each)\\b|(?:และ|หรือ|วัน|ทุก)|[\\s,\\/&+]+",
-  "calendarExclusionCue": "\\b(?:except|excluding)\\b|ยกเว้น(?!\\s*กรณี)|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))",
+  "calendarDayListConnectors": "\\b(?:and|or|on|the|every|each)\\b|(?:และ|หรือ|วัน|ทุก)|[\\s,\\/&+]+",
+  "calendarExclusionCue": "\\b(?:except|excluding)\\b|ยกเว้น(?!\\s*กรณี)",
+  "calendarExclusionWeekdayCue": "เว้น",
   "calendarExclusionDayHeads": [
     "day",
     "days"

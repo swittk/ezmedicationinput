@@ -84,6 +84,7 @@ function uniqueDays(source: string): FhirDayOfWeek[] {
     })) values.add(definition.day);
   }
   for (const group of CALENDAR_WEEKDAY_GROUPS) {
+    group.pattern.lastIndex = 0;
     if (group.pattern.test(source)) for (const day of group.days) values.add(day);
   }
   return DAYS.filter((day) => values.has(day));
@@ -93,6 +94,10 @@ function isOnlyWeekdays(source: string): boolean {
   const phrase = source.trim().replace(/[.!?]+$/u, "").trim();
   if (universalDayScope(phrase)) return true;
   let remainder = phrase;
+  for (const group of CALENDAR_WEEKDAY_GROUPS) {
+    group.pattern.lastIndex = 0;
+    remainder = remainder.replace(group.pattern, " ");
+  }
   for (const definition of CALENDAR_WEEKDAY_LEXEMES) {
     for (const pattern of definition.patterns) {
       pattern.lastIndex = 0;

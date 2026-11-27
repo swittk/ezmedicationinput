@@ -1,5 +1,6 @@
 import { lexInput } from '../lexer/lex';
-import { matchCalendarExclusion } from '../hpsg/rules/condition-rules';
+import { containsCalendarExclusionCue, matchCalendarExclusion } from '../hpsg/rules/condition-rules';
+import { MEDICATION_GUARD_BOUNDARIES } from '../medication-condition';
 import { parseMedicationGuard } from '../hpsg/constructions';
 import { findMedicationDateListSpans } from '../date-interpretation';
 import {
@@ -867,7 +868,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   // or fronted conditional scope BEFORE HPSG boundary arbitration. Unlike the
   // former candidate-adapter rewrite, this never merges already-decided
   // segments or discards their relation provenance.
-  if (/\b(?:except|excluding)\b|ยกเว้น|เว้น(?=วัน)/iu.test(input)) {
+  if (containsCalendarExclusionCue(input)) {
     const exclusion = matchCalendarExclusion(input, options);
     if (exclusion) claims.push({
       id: `clinical-calendar-exclusion:${exclusion.start}:${exclusion.end}`,
@@ -879,7 +880,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   }
   let frontedConditionalHeader: { start: number; tokenEnd: number } | undefined;
   const frontedGuard = clinicalGuard ??
-    (/^\s*(?:only\s+if|unless|เฉพาะ(?:เมื่อ|หาก)|เว้นแต่|ยกเว้นกรณี)/iu.test(input)
+    (MEDICATION_GUARD_BOUNDARIES.frontedLead.test(input)
       ? guardForInput() : undefined);
   if (frontedGuard && frontedGuard.end < input.length) {
     let clauseStart = 0;

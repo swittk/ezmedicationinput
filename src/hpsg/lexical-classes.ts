@@ -14,6 +14,7 @@ import {
 } from "../relation-terminology";
 export { ACTION_SEQUENCE_MARKERS } from "../relation-terminology";
 import source from "./lexical-classes.json";
+import meaningVocabulary from "../lexer/meaning-terminology.json";
 
 type MaximumPeriodPreposition = { unitDenominator?: boolean; rolling?: boolean };
 type MealRelation = "before" | "after" | "with";
@@ -391,15 +392,32 @@ export const DOSE_TARGET_EVENT_MEMBERS = new Map<EventTiming, readonly EventTimi
   Object.keys(source.doseTargetEventMembers).map(key => [key as EventTiming,
     (source.doseTargetEventMembers as Record<string, EventTiming[]>)[key]])
 );
+function calendarAlternatives(forms: readonly string[]): string {
+  return forms.map(form => form.replace(/[.*+?^$(){}|[\]\\]/gu, "\\$&")).join("|");
+}
+const fullThaiWeekdayForms: string[] = [];
+for (const entry of source.calendarWeekdayLexemes) {
+  for (const form of entry.th) fullThaiWeekdayForms.push(form);
+}
+const calendarWeekdayPrefix = calendarAlternatives([source.calendarWeekdayPrefix]);
 export const CALENDAR_WEEKDAY_LEXEMES = source.calendarWeekdayLexemes.map(entry => ({
   day: entry.day as FhirDayOfWeek,
-  patterns: entry.patterns.map(pattern => new RegExp(pattern, "giu"))
+  patterns: [
+    new RegExp("\\b(?:" + calendarAlternatives(entry.en) + ")\\b", "giu"),
+    new RegExp("(?:" + calendarWeekdayPrefix + ")?(?:" + calendarAlternatives(entry.th) + ")", "gu")
+  ]
 }));
-export const CALENDAR_WEEKDAY_GROUPS = source.calendarWeekdayGroups.map(entry => ({
-  pattern: new RegExp(entry.pattern, "iu"), days: entry.days as FhirDayOfWeek[]
+// These references license the established exclusion context; spelling and
+// fixed weekday membership remain owned by the registered day-group vocabulary.
+export const CALENDAR_WEEKDAY_GROUPS = source.calendarWeekdayGroups.map(form => ({
+  pattern: new RegExp("\\b" + calendarAlternatives([form]) + "\\b", "giu"),
+  days: meaningVocabulary.dayGroups[form as keyof typeof meaningVocabulary.dayGroups] as FhirDayOfWeek[]
 }));
 export const CALENDAR_DAY_LIST_CONNECTORS = new RegExp(source.calendarDayListConnectors, "giu");
-export const CALENDAR_EXCLUSION_CUE = new RegExp(source.calendarExclusionCue, "iu");
+export const CALENDAR_EXCLUSION_CUE = new RegExp(
+  source.calendarExclusionCue + "|" + calendarAlternatives([source.calendarExclusionWeekdayCue]) +
+    "(?=" + calendarWeekdayPrefix + "(?:" + calendarAlternatives(fullThaiWeekdayForms) + "))", "iu"
+);
 export const CALENDAR_EXCLUSION_DAY_HEADS = setOf(source.calendarExclusionDayHeads);
 export const CALENDAR_UNIVERSAL_DAY_QUANTIFIERS = setOf(source.calendarUniversalDayQuantifiers);
 export const CALENDAR_COMPLEMENT_DAY_MODIFIERS = setOf(source.calendarComplementDayModifiers);

@@ -1,3 +1,4 @@
+import lexicalVocabulary from "./hpsg/lexical-classes.json";
 import {
   BodySiteDefinition,
   EventTiming,
@@ -2421,54 +2422,14 @@ export const DISCOURAGED_TOKENS: Record<string, string> = {
   ad: "AD"
 };
 
-export const DAY_OF_WEEK_TOKENS: Record<string, FhirDayOfWeek> = {
-  monday: FhirDayOfWeek.Monday,
-  mondays: FhirDayOfWeek.Monday,
-  mon: FhirDayOfWeek.Monday,
-  mond: FhirDayOfWeek.Monday,
-  tuesday: FhirDayOfWeek.Tuesday,
-  tuesdays: FhirDayOfWeek.Tuesday,
-  tue: FhirDayOfWeek.Tuesday,
-  tues: FhirDayOfWeek.Tuesday,
-  wednesday: FhirDayOfWeek.Wednesday,
-  wednesdays: FhirDayOfWeek.Wednesday,
-  wed: FhirDayOfWeek.Wednesday,
-  weds: FhirDayOfWeek.Wednesday,
-  thursday: FhirDayOfWeek.Thursday,
-  thursdays: FhirDayOfWeek.Thursday,
-  thu: FhirDayOfWeek.Thursday,
-  thur: FhirDayOfWeek.Thursday,
-  thurs: FhirDayOfWeek.Thursday,
-  friday: FhirDayOfWeek.Friday,
-  fridays: FhirDayOfWeek.Friday,
-  fri: FhirDayOfWeek.Friday,
-  saturday: FhirDayOfWeek.Saturday,
-  saturdays: FhirDayOfWeek.Saturday,
-  sat: FhirDayOfWeek.Saturday,
-  sunday: FhirDayOfWeek.Sunday,
-  sundays: FhirDayOfWeek.Sunday,
-  sun: FhirDayOfWeek.Sunday,
-  จ: FhirDayOfWeek.Monday,
-  จัน: FhirDayOfWeek.Monday,
-  จันทร์: FhirDayOfWeek.Monday,
-  อ: FhirDayOfWeek.Tuesday,
-  อัง: FhirDayOfWeek.Tuesday,
-  อังคาร: FhirDayOfWeek.Tuesday,
-  พ: FhirDayOfWeek.Wednesday,
-  พุธ: FhirDayOfWeek.Wednesday,
-  พฤ: FhirDayOfWeek.Thursday,
-  พฤหัส: FhirDayOfWeek.Thursday,
-  พฤหัสบดี: FhirDayOfWeek.Thursday,
-  ศ: FhirDayOfWeek.Friday,
-  ศุก: FhirDayOfWeek.Friday,
-  ศุกร์: FhirDayOfWeek.Friday,
-  ส: FhirDayOfWeek.Saturday,
-  เสา: FhirDayOfWeek.Saturday,
-  เสาร์: FhirDayOfWeek.Saturday,
-  อา: FhirDayOfWeek.Sunday,
-  อาท: FhirDayOfWeek.Sunday,
-  อาทิตย์: FhirDayOfWeek.Sunday
-};
+// Full calendar forms and contextual token aliases share one locale inventory.
+// Short Thai aliases remain available to the existing token/context owner only.
+export const DAY_OF_WEEK_TOKENS: Record<string, FhirDayOfWeek> = {};
+for (const entry of lexicalVocabulary.calendarWeekdayLexemes) {
+  for (const token of [...entry.en, ...entry.th, ...entry.thContextual]) {
+    DAY_OF_WEEK_TOKENS[token] = entry.day as FhirDayOfWeek;
+  }
+}
 
 export const WORD_FREQUENCIES: Record<string, { frequency: number; periodUnit: FhirPeriodUnit }> = {
   daily: { frequency: 1, periodUnit: FhirPeriodUnit.Day },
