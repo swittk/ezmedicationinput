@@ -16566,3 +16566,15 @@ FHIR projection keeps a single timing-bounds choice while retaining both calenda
 and duration constraints. Quantity annotations, markdown companions and typed
 arguments without display text survive current R5/R6 conversion. Regression checks
 retain original annotations, independent clinical oracles and fresh R6 coverage.
+
+
+## 2026-11-27 — Share weekly occurrence selection
+
+Weekly weekday schedules now use the existing clock-occurrence walker for due
+dates, prior-dose counts and supply. Explicit clocks retain the weekly frequency,
+and later queries retain the same selected opportunities. The resolved order and
+calendar opening are applied before an opportunity spends that allowance.
+
+The unclocked weekday path delegates its existing default clock to the same walker.
+Regression cases retain exact anchored dates, omitted-frequency behavior, finite
+counts, timestamp openings, successor timing and current R5/R6 annotations.
