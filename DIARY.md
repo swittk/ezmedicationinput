@@ -16357,3 +16357,28 @@ FHIR conversion retains Boolean condition
 subjects, unknown relation nodes, nested Coding quantities, spatial annotations
 and RelativeTime primitive metadata. Independent conforming fixtures preserve
 authored source, current structured facts and meaningful execution assertions.
+
+
+## 2026-11-27 — Shared recurrence limits and typed targets
+
+A condition that selects part of an administration schedule preserves one authored
+occurrence allowance and its period ceilings across the resulting members. The
+chronological scheduler and supply planner spend that allowance once, while clocks,
+phase dependencies and history windows remain distinct. Localized course previews
+state the shared total once and retain each selected clock and exclusion.
+
+Resolved site arguments carry anatomical multiplicity through the instruction
+graph and FHIR codec into withholding conditions. Route boundaries and weekday
+abbreviations remain owned by their registered vocabulary. Ordinary daily amounts,
+history predicates and independent ceilings retain their separate clinical roles.
+
+Dated replacements preserve earlier same-day administrations. Inherited phase
+origins and event offsets follow compatible cadence, and elapsed occurrence caps
+remain distinct from civil-day limits. Ranged supply and annotated strength
+comparisons use their existing execution owners.
+
+Current previews preserve independent instruments, temporal adjuncts and guards
+beside authored directions. FHIR projections retain nested quantity annotations,
+primitive Expression metadata, phase safety ownership and annotation-only spatial
+concepts. Clinical and wire-format assertions cover complete current facts and
+unknown annotations without introducing historical reconciliation.
