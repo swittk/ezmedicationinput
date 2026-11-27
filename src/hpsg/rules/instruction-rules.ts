@@ -195,7 +195,7 @@ export function proceduralActionLexicalRule(): HpsgLexicalRule<HpsgClauseContext
       if (!text) continue;
       const directiveInstructions = frame.polarity === AdvicePolarity.Negate
         ? parseInstructionCandidates(text, frame.span)
-        : [];
+        : frame.modality ? [{ text, frames: [frame] }] : [];
       // The action definition has already selected this directive's complete
       // frame. Advice coding and wording must not create a competing argument
       // interpretation for the same action occurrence.
@@ -206,7 +206,7 @@ export function proceduralActionLexicalRule(): HpsgLexicalRule<HpsgClauseContext
         tokens,
         synsem: {
           head: { dose: frameDose(context, frame) },
-          valence: frame.polarity === AdvicePolarity.Negate
+          valence: frame.polarity === AdvicePolarity.Negate || directiveInstructions.length
             ? { instructions: directiveInstructions.length ? directiveInstructions : [{ text, frames: [frame] }] }
             : { patientInstruction: { text } },
           cont: { clauseKind: "administration" }
@@ -450,7 +450,8 @@ function instructionStartIsLicensed(
   if (previousLower && WORKFLOW_CONTINUATION_LICENSES.has(`${previousLower} ${lower}`)) {
     return false;
   }
-  if (INSTRUCTION_START_WORDS.has(lower)) {
+  if (INSTRUCTION_START_WORDS.has(lower) || frames.some(frame =>
+      frame.span.start === token?.sourceStart && frameActionDefinition(frame, context.options)?.adviceClauseHead)) {
     return true;
   }
   return Boolean(previous && isMedicationAdministrationMethod(previousLower, context.options));
@@ -941,6 +942,25 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         isScheduleLead(context, cursor + 1)) return [];
     if (CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS.has(firstBodyLower)) return [];
     const firstBodyAction = resolveMedicationInstructionAction(firstBodyLower, context.options);
+    const adviceFrame = firstBodyToken && getProceduralFrames(context).find(frame =>
+      frame.span.start === firstBodyToken.sourceStart &&
+      frameActionDefinition(frame, context.options)?.adviceClauseHead);
+    if (adviceFrame) {
+      if (isProceduralInstructionFrame(context, adviceFrame)) return [];
+      const frame = adviceFrame;
+      const tokens = frameTokens(context, frame);
+      if (!tokens.length || tokens.some(token => context.state.consumed.has(token.index))) return [];
+      return [lexicalSign({
+        type: "instruction-sign", rule: "hpsg.lex.instruction", lexicalCategory: "instruction",
+        tokens: [...consumed, ...tokens],
+        synsem: {
+          head: {},
+          valence: { instructions: [{ text: frame.sourceText, frames: [frame] }] },
+          cont: { clauseKind: "administration" }
+        },
+        score: 18 + tokens.length + frame.args.length * 2
+      })];
+    }
     if (
       !consumed.length &&
       firstBodyAction &&

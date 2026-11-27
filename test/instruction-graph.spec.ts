@@ -7,6 +7,7 @@ import { getMedicationLexerLocalePack, registerMedicationLexerLocalePack } from 
 import { getInstructionActionLocaleAdapter, registerInstructionActionLocaleAdapter } from "../src/index";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
+import adviceTerminology from "../src/advice-terminology.json";
 import { setDosageCondition, withDosageEditProvenance, getDosageSourceOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
 import { buildInstructionGraph, realizeInstructionAction, instructionGraphRichPrimaryAction,
   instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose, instructionGraphCoversTypedWarnings
@@ -6758,4 +6759,24 @@ it("retains the typed bilateral Site count and its current argument annotations"
   expect(reopened.sourceExtensions).toContainEqual(unknown);
   expect(buildInstructionGraphExtension(restored)).toEqual(wire);
   expect(graph).toEqual(before);
+});
+
+
+describe("advice predicate terminology ownership", () => {
+  it("resolves every registered semantic advice verb through the canonical action vocabulary", () => {
+    const lemmas = new Set(adviceTerminology.lexemes.filter(lexeme => lexeme.partOfSpeech === "verb").map(lexeme => lexeme.lemma));
+    expect(lemmas.size).toBeGreaterThan(0);
+    for (const lemma of lemmas) expect(resolveMedicationInstructionAction(lemma), lemma).toBeDefined();
+    for (const [surface, code, semanticClass] of [
+      ["drive", "drive", "activity"], ["driving", "drive", "activity"],
+      ["cause", "cause", "effect"], ["causes", "cause", "effect"]
+    ]) {
+      const action = resolveMedicationInstructionAction(surface)!;
+      expect(action).toMatchObject({ code, semanticClass, adviceClauseHead: true });
+      expect(action.procedural).not.toBe(true);
+      expect(action.administrationMethod).toBeUndefined();
+      expect(action.definesDose).not.toBe(true);
+      if (code === "cause") expect(action.defaultForce).toBe(AdviceForce.Warning);
+    }
+  });
 });

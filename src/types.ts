@@ -1485,6 +1485,10 @@ export interface MedicationInstructionActionDefinition {
   separableAliases?: Array<{ lead: string; particle: string }>;
   /** Whether this is a procedural action rather than ordinary administration advice. */
   procedural?: boolean;
+  /** Licenses an informational or warning clause without declaring a procedure. */
+  adviceClauseHead?: boolean;
+  /** Force of an unqualified action; explicit directive grammar takes precedence. */
+  defaultForce?: AdviceForce;
   /** Declarative argument grammar family used by the instruction graph. */
   argumentParser?: MedicationInstructionActionArgumentParser;
   /** Declarative realization family used by English/Thai graph generation. */

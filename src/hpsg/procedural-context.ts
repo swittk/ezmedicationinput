@@ -71,9 +71,21 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
     const relation = resolveActionRelationSurface(token.canonical ?? token.lower);
     if (!relationHasGrammarFeature(relation, "conditionalTail")) continue;
     frames ??= getProceduralFrames(context);
-    const frame = frames.find(candidate => candidate.span.start >= token.sourceEnd &&
+    let frame = frames.find(candidate => candidate.span.start >= token.sourceEnd &&
       !context.tokens.some(boundary => boundary.sourceStart >= token.sourceEnd &&
         boundary.sourceEnd <= candidate.span.start && /^[;.!?]$/u.test(boundary.original)));
+    let postfix = false;
+    if (!frame) for (const candidate of frames) {
+      if (candidate.span.end > token.sourceStart ||
+          context.state.input.slice(candidate.span.end, token.sourceStart).trim()) continue;
+      const definition = frameActionDefinition(candidate, context.options);
+      if (candidate.polarity !== AdvicePolarity.Negate &&
+          !(definition?.procedural && !definition.primaryAdministrationHead)) continue;
+      if (!frame || candidate.span.end > frame.span.end) {
+        frame = candidate;
+        postfix = true;
+      }
+    }
     if (!frame) continue;
     // A registered action word inside the typed predicate is not its consequent.
     const guard = medicationGuardForContext(context);
@@ -109,7 +121,7 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
       if (hasFrontedDose) continue;
     }
     if (procedural || undosedAction) {
-      owners.set(token.index, proceduralInstructionProgram(context, frames.indexOf(frame), frames));
+      owners.set(token.index, postfix ? [frame] : proceduralInstructionProgram(context, frames.indexOf(frame), frames));
     }
   }
   return owners;
@@ -238,6 +250,7 @@ export function sourceRangeAttachmentClass(
   if (enclosing.polarity === AdvicePolarity.Negate || isConditionalAdviceFrame(context, enclosing) ||
       isFixedClockMealCounsel(context, enclosing, frames)) return "procedure";
   const definition = frameActionDefinition(enclosing, context.options);
+  if (definition?.adviceClauseHead) return "procedure";
   if (definition?.semanticClass === "administration_pattern") return "administration";
   if (definition && !definition.procedural &&
       !isSupplementalHydrationInstruction(enclosing)) return "administration";

@@ -762,7 +762,8 @@
                     "drowsiness"
                   ]
                 }
-              ]
+              ],
+              "modality": "may"
             }
           },
           {
@@ -770,7 +771,19 @@
               "predicateLemmas": [
                 "drive"
               ],
-              "polarity": "negate"
+              "polarity": "negate",
+              "relations": [
+                "if"
+              ],
+              "argLiterals": [
+                {
+                  "roles": [
+                    "free",
+                    "object"
+                  ],
+                  "value": "affected"
+                }
+              ]
             }
           }
         ]
@@ -840,7 +853,8 @@
                     "drowsiness"
                   ]
                 }
-              ]
+              ],
+              "modality": "may"
             }
           },
           {
@@ -848,7 +862,19 @@
               "predicateLemmas": [
                 "drive"
               ],
-              "polarity": "negate"
+              "polarity": "negate",
+              "relations": [
+                "if"
+              ],
+              "argLiterals": [
+                {
+                  "roles": [
+                    "free",
+                    "object"
+                  ],
+                  "value": "affected"
+                }
+              ]
             }
           },
           {
@@ -947,6 +973,26 @@
                 "alcohol"
               ],
               "role": "substance"
+            }
+          },
+          {
+            "frame": {
+              "predicateLemmas": [
+                "drive"
+              ],
+              "polarity": "negate",
+              "relations": [
+                "if"
+              ],
+              "argLiterals": [
+                {
+                  "roles": [
+                    "free",
+                    "object"
+                  ],
+                  "value": "affected"
+                }
+              ]
             }
           }
         ]

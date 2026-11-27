@@ -702,18 +702,21 @@ function scopedInstruction(
   condition: HpsgConditionFeature,
   target: HpsgSynsem
 ): HpsgInstructionFeature[] | undefined {
-  if (!condition.safety) return target.valence.instructions;
   // The selected condition owns these action daughters regardless of their
   // surface normalization. Keep unrelated or unframed instructions separate.
-  const targetInstructions = (target.valence.instructions ?? []).filter((instruction) =>
-    !instruction.frames?.length || !instruction.frames.every(frame =>
+  let hasOwnedInstruction = false;
+  const targetInstructions = (target.valence.instructions ?? []).filter(instruction => {
+    const owned = instruction.frames?.length && instruction.frames.every(frame =>
       condition.frames.some(selected =>
         selected.predicate.lemma === frame.predicate.lemma &&
         selected.polarity === frame.polarity &&
         selected.span.start <= frame.span.start && frame.span.end <= selected.span.end
       )
-    )
-  );
+    );
+    if (owned) hasOwnedInstruction = true;
+    return !owned;
+  });
+  if (!condition.safety && !hasOwnedInstruction) return target.valence.instructions;
   return mergeInstructions(
     [{ text: condition.fullText, frames: condition.frames }],
     targetInstructions

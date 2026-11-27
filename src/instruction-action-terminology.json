@@ -2,6 +2,34 @@
   "system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action",
   "actions": [
     {
+      "code": "drive",
+      "semanticClass": "activity",
+      "display": "Drive",
+      "aliases": [
+        "drive",
+        "driving"
+      ],
+      "adviceClauseHead": true,
+      "argumentParser": "default",
+      "realizer": "default"
+    },
+    {
+      "code": "cause",
+      "semanticClass": "effect",
+      "display": "Causes",
+      "aliases": [
+        "cause",
+        "causes"
+      ],
+      "i18n": {
+        "th": "ทำให้เกิด"
+      },
+      "adviceClauseHead": true,
+      "defaultForce": "warning",
+      "argumentParser": "default",
+      "realizer": "default"
+    },
+    {
       "code": "protect-from-light",
       "semanticClass": "storage",
       "display": "Protect from light",

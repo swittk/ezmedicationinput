@@ -1,3 +1,4 @@
+import { equalStructuredValues } from "./stable-structure";
 import { objectValues } from "./utils/object";
 import { courseContinuationDurationAt, doseComparatorNumberAt, DOSE_COMPARATOR_PREFIXES } from "./hpsg/lexical-classes";
 import { composeCoordinatedActionDirective, composePreposedContactTheme, licensesPreposedContactTheme } from "./hpsg/constructions";
@@ -1871,7 +1872,7 @@ function buildActionFrame(
     DEFAULT_ACTION_ARGUMENT_PARSER;
   const parsed = argumentParser({
     definition, parts, actionIndex, argumentStart,
-    segmentEnd: definition.argumentParser === "mix-substance" ? semanticEnd : segmentEnd,
+    segmentEnd: semanticEnd,
     input, offset, options,
     relation, relIndex, relationTargetEnd, conditionalTail, relationTimes, accompaniment, amount, duration,
     separableParticleIndex: actionMatch.separableParticleIndex
@@ -1999,7 +2000,7 @@ function buildActionFrame(
       ? AdviceForce.Warning
       : modality === AdviceModality.Should
         ? AdviceForce.Instruction
-        : AdviceForce.Sequence),
+        : definition.defaultForce ?? AdviceForce.Sequence),
     polarity,
     modality,
     predicate: {
@@ -4523,6 +4524,18 @@ export function instructionGraphSingleActionRepresentsText(
 }
 
 
+/** Complete typed warning equivalence; source wording is not instruction identity. */
+export function sameTypedWarning(left: AdviceFrame, right: AdviceFrame): boolean {
+  return left.predicate.lemma === right.predicate.lemma &&
+    left.predicate.semanticClass === right.predicate.semanticClass &&
+    (left.polarity ?? AdvicePolarity.Affirm) === (right.polarity ?? AdvicePolarity.Affirm) &&
+    (right.polarity === AdvicePolarity.Negate || left.force === right.force) &&
+    left.modality === right.modality && left.relation === right.relation &&
+    equalStructuredValues(left.predicate.semanticComponents, right.predicate.semanticComponents) &&
+    equalStructuredValues(left.args, right.args);
+}
+
+
 /**
  * Non-coded advice is redundant only when the grammar already owns every
  * negative predicate in the same source interval. Free text alone cannot
@@ -4534,7 +4547,16 @@ export function instructionGraphCoversTypedWarnings(
 ): boolean {
   if (!frames?.length) return false;
   return frames.every((expected) => {
-    if (expected.polarity !== AdvicePolarity.Negate) return false;
+    if (expected.polarity !== AdvicePolarity.Negate) {
+      // A modal action's isolated frame cannot replace its selected condition.
+      // Keep the complete related graph as the realization owner only for the
+      // same source occurrence with all typed arguments and modality intact.
+      return Boolean(expected.modality && graph.actions.some((actual, index) =>
+        actual.span.start < expected.span.end && expected.span.start < actual.span.end &&
+        sameTypedWarning(expected, actual) && graph.relations?.some(relation =>
+          relation.toActionIndex === index && relationHasGrammarFeature(relation.kind, "conditionalTail"))
+      ));
+    }
     const expectedCode = resolveMedicationInstructionAction(expected.predicate.lemma)?.code ??
       expected.predicate.lemma;
     return graph.actions.some((actual) => {

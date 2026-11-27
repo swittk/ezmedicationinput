@@ -1,11 +1,11 @@
 import { CALENDAR_WEEKDAY_LEXEMES } from "../src/hpsg/lexical-classes";
 import { siteLexicalRule } from "../src/hpsg/rules/site-rules";
-import { RouteCode } from "../src/types";
+import { EventTiming, RouteCode } from "../src/types";
 import { parseSigSegments as parseHpsgSegments } from "../src/hpsg/segmenter";
 import { describe, expect, it } from 'vitest';
 import {
   calculateTotalUnits, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
-  formatSig, importCanonicalCourse, lintSig, nextDueDoses, toDosageDetails, toFhirR5Dosages, getMedicationInstructionAction, parseSig as parsePublicSig
+  formatSig, importCanonicalCourse, projectCanonicalCourse, lintSig, nextDueDoses, toDosageDetails, toFhirR5Dosages, getMedicationInstructionAction, parseSig as parsePublicSig
 } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
 import { courseToR5 } from '../src/adapters/canonical-course';
@@ -3518,5 +3518,169 @@ describe("shared bounds of a selectively partitioned administration", () => {
       expect(JSON.stringify(input)).toBe(before);
     }
     expect(JSON.stringify(rows)).toBe(original);
+  });
+});
+
+
+describe("advice-owned continuation and procedural conditions", () => {
+  const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z",
+    timeZone: "UTC", limit: 2, eventClock: { [EventTiming["Before Sleep"]]: "22:00" } };
+
+  it("keeps a next-day warning and its affected-driving condition off the standing bedtime dose", () => {
+    const source = "Take 1 tablet once daily at bedtime. Causes drowsiness which may continue the next day. If affected do not drive or operate machinery. Avoid alcohol.";
+    const parsed = parseSig(source), before = JSON.stringify(parsed);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d", when: [EventTiming["Before Sleep"]] });
+    expect(clause.prn).toBeUndefined();
+    expect(clause.schedule?.treatmentStartOffsetDays).toBeUndefined();
+    expect(clause.additionalInstructions?.map(instruction => instruction.coding?.code)).not.toContain("418954008");
+    expect(clause.additionalInstructions?.map(instruction => instruction.coding?.code)).not.toContain("418914006");
+    const continuation = clause.instructionGraph?.actions.find(frame => frame.predicate.lemma === "cause");
+    expect(continuation?.predicate.semanticClass).toBe("effect");
+    expect(continuation?.force).toBe("warning");
+    expect(continuation?.sourceText).toBe("Causes drowsiness which may continue the next day");
+    expect(source.slice(continuation!.span.start, continuation!.span.end)).toBe(continuation!.sourceText);
+    const graph = clause.instructionGraph!;
+    const drive = graph.actions.findIndex(action => action.predicate.lemma === "drive");
+    expect(drive).toBeGreaterThanOrEqual(0);
+    expect(graph.actions[drive].polarity).toBe("negate");
+    expect(graph.relations).toContainEqual(expect.objectContaining({ kind: "if", toActionIndex: drive, text: "If affected" }));
+    expect(graph.actions[drive].sourceText).toContain("do not drive or operate machinery");
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const original = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].asNeeded).not.toBe(true);
+      expect(members[0].predicate).toBeUndefined();
+      expect(nextDueDoses(input, query)).toEqual(["2026-12-01T22:00:00+00:00", "2026-12-02T22:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d" }).totalUnits).toBe(2);
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(en).toContain("next day");
+      expect(en).toMatch(/if affected.*do not drive or operate machinery/i);
+      expect(en.match(/do not drive/gi)).toHaveLength(1);
+      expect(en).toMatch(/avoid alcohol/i);
+      for (const row of projectCanonicalCourse(importCanonicalCourse(input)).fhir) {
+        expect(row.additionalInstruction?.filter(instruction =>
+          instruction.text === "Causes drowsiness which may continue the next day")).toHaveLength(1);
+      }
+      expect(en).not.toMatch(/from day 2|as needed|no doses on/i);
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(th).toContain("1");
+      expect(th).toContain("affected");
+      expect(th.match(/drive/gi)).toHaveLength(1);
+      expect(JSON.stringify(input)).toBe(original);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("uses the canonical prefixed warning head without qualifying an unconditional driving prohibition", () => {
+    const source = "Take 1 tablet at bedtime. May cause drowsiness; do not drive.";
+    const parsed = parseSig(source), before = JSON.stringify(parsed);
+    const clause = parsed.meta.canonical.clauses[0];
+    const cause = clause.additionalInstructions?.flatMap(instruction => instruction.frames ?? [])
+      .find(frame => frame.predicate.lemma === "cause");
+    expect(cause).toMatchObject({ force: "warning", modality: "may",
+      predicate: { lemma: "cause", semanticClass: "effect", realizer: "default" } });
+    expect(cause?.sourceText).toBe("May cause drowsiness");
+    expect(clause.instructionGraph?.actions.find(frame => frame.predicate.lemma === "drive")?.polarity).toBe("negate");
+    expect(clause.additionalInstructions?.some(instruction => ["418954008", "418914006"].indexOf(instruction.coding?.code ?? "") >= 0)).not.toBe(true);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.asNeeded).not.toBe(true);
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(en).toMatch(/may cause(?:s)? drowsiness/i);
+      expect(en).toMatch(/do not drive/i);
+      expect(en).not.toContain("if affected");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("keeps positive driving history inside its medication guard", () => {
+    const source = "Only if you have finished driving, take 1 tablet at bedtime";
+    const parsed = parseSig(source), before = JSON.stringify(parsed);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.instructionGraph?.actions.some(action => action.predicate.lemma === "drive")).not.toBe(true);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.predicate).toMatchObject({ kind: "state", name: "you have finished driving", expected: true });
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(en).toContain("only if you have finished driving");
+      expect(en).not.toMatch(/then drive|do not drive/i);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("keeps a covering condition on the complete material-bearing procedure", () => {
+    const source = "Apply ointment then cover with occlusive dressing if instructed";
+    const parsed = parseSig(source), before = JSON.stringify(parsed);
+    const clause = parsed.meta.canonical.clauses[0], graph = clause.instructionGraph!;
+    expect(clause.prn).toBeUndefined();
+    const cover = graph.actions.findIndex(action => action.predicate.lemma === "cover");
+    expect(cover).toBeGreaterThanOrEqual(0);
+    expect(graph.actions[cover].args).toContainEqual(expect.objectContaining({ role: "material", text: "occlusive dressing" }));
+    expect(graph.actions[cover].sourceText).toBe("cover with occlusive dressing");
+    expect(graph.relations).toContainEqual(expect.objectContaining({ kind: "if", toActionIndex: cover, text: "if instructed" }));
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const original = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.asNeeded).not.toBe(true);
+      expect(member.predicate).toBeUndefined();
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(en).toMatch(/cover with (?:an )?occlusive dressing if instructed/i);
+      expect(en.match(/if instructed/gi)).toHaveLength(1);
+      expect(en).not.toContain("as needed");
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(th.match(/instructed/g)).toHaveLength(1);
+      expect(JSON.stringify(input)).toBe(original);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("keeps a modal covering condition in the standard advice row", () => {
+    const source = "Apply ointment then may cover with occlusive dressing if instructed";
+    const parsed = parseSig(source), before = JSON.stringify(parsed);
+    const clause = parsed.meta.canonical.clauses[0], graph = clause.instructionGraph!;
+    const cover = graph.actions.findIndex(action => action.predicate.lemma === "cover");
+    expect(graph.actions[cover].modality).toBe("may");
+    expect(graph.actions[cover].polarity).not.toBe("negate");
+    expect(graph.relations).toContainEqual(expect.objectContaining({ kind: "if", toActionIndex: cover, text: "if instructed" }));
+    expect(clause.prn).toBeUndefined();
+    expect(clause.additionalInstructions).toContainEqual(expect.objectContaining({
+      text: "may cover with occlusive dressing if instructed",
+      frames: [expect.objectContaining({ modality: "may", predicate: expect.objectContaining({ lemma: "cover" }) })]
+    }));
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const original = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.asNeeded).not.toBe(true);
+      expect(member.predicate).toBeUndefined();
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(en).toMatch(/may cover with (?:an )?occlusive dressing if instructed/i);
+      expect(en.match(/if instructed/gi)).toHaveLength(1);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }).match(/instructed/g)).toHaveLength(1);
+      for (const row of projectCanonicalCourse(importCanonicalCourse(input)).fhir) {
+        expect(row.additionalInstruction?.map(instruction => instruction.text)).toContain("may cover with occlusive dressing if instructed");
+        expect(row.additionalInstruction?.some(instruction => instruction.coding?.some(coding => coding.code === "OCD"))).not.toBe(true);
+      }
+      expect(JSON.stringify(input)).toBe(original);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
+    ["Take 1 tablet once daily at bedtime.", "2026-12-01T22:00:00+00:00"],
+    ["Take 1 tablet once daily at bedtime. Do not drive if drowsy.", "2026-12-01T22:00:00+00:00"],
+    ["Take 1 tablet once daily at bedtime starting the next day.", "2026-12-02T22:00:00+00:00"]
+  ])("preserves the existing dose-onset owner for %s", (source, first) => {
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[0].prn).toBeUndefined();
+    expect(nextDueDoses(parsed.meta.canonical.course!, { ...query, limit: 1 })).toEqual([first]);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });

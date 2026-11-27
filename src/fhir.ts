@@ -13,7 +13,7 @@ import {
   additionalInstructionFallbackText,
   findAdditionalInstructionDefinitionByCoding
 } from "./advice";
-import { realizeInstructionAction, instructionGraphAdministrationTechnique } from "./instruction-graph";
+import { realizeInstructionAction, instructionGraphAdministrationTechnique, sameTypedWarning } from "./instruction-graph";
 import { getAdviceLocaleAdapter } from "./advice-locale-adapter";
 import { localeKeys } from "./localization";
 import {
@@ -2025,16 +2025,6 @@ export function serializeCanonicalSchedule(
   return dosage;
 }
 
-/** Complete typed warning equivalence; source wording is not instruction identity. */
-function sameTypedWarning(left: AdviceFrame, right: AdviceFrame): boolean {
-  return left.predicate.lemma === right.predicate.lemma &&
-    left.predicate.semanticClass === right.predicate.semanticClass &&
-    (left.polarity ?? AdvicePolarity.Affirm) === (right.polarity ?? AdvicePolarity.Affirm) &&
-    (right.polarity === AdvicePolarity.Negate || left.force === right.force) &&
-    left.modality === right.modality && left.relation === right.relation &&
-    equalStructuredValues(left.predicate.semanticComponents, right.predicate.semanticComponents) &&
-    equalStructuredValues(left.args, right.args);
-}
 
 /** Project only independent typed warnings; related actions keep their graph scope.
  * Existing standard entries are never rewritten or removed. Generated wording

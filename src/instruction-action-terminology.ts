@@ -270,6 +270,8 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     localeAliases: cloneLocaleAliases(sourceDefinition.localeAliases),
     separableAliases: sourceDefinition.separableAliases?.map((alias) => ({ ...alias })),
     procedural: sourceDefinition.procedural,
+    adviceClauseHead: sourceDefinition.adviceClauseHead,
+    defaultForce: sourceDefinition.defaultForce,
     argumentParser: sourceDefinition.argumentParser,
     realizer: sourceDefinition.realizer,
     argumentParserConfig: sourceDefinition.argumentParserConfig ? {
@@ -319,6 +321,8 @@ function normalizeCustomDefinition(
     localeAliases: cloneLocaleAliases(input.localeAliases),
     separableAliases: input.separableAliases?.map((alias) => ({ ...alias })),
     procedural: input.procedural ?? true,
+    adviceClauseHead: input.adviceClauseHead,
+    defaultForce: input.defaultForce,
     argumentParser: input.argumentParser,
     realizer: input.realizer,
     argumentParserConfig: input.argumentParserConfig ? {
