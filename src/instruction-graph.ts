@@ -5491,7 +5491,8 @@ export function attachInstructionGraphPrimaryConditions(
 /** Associate selected advice with current typed action occurrences; no display coverage is inferred. */
 export function instructionGraphAdviceAssociation(
   graph: CanonicalInstructionGraph,
-  instruction: CanonicalAdditionalInstructionExpr
+  instruction: CanonicalAdditionalInstructionExpr,
+  includeRepresentation = false
 ): { actionIndices: number[]; representedActionIndices: number[]; codingProved: boolean } {
   let actionIndices: number[] = [];
   if (instruction.frames?.length) {
@@ -5512,9 +5513,10 @@ export function instructionGraphAdviceAssociation(
       .map(frame => graph.actions.indexOf(frame));
     codingProved = actionIndices.length > 0;
   }
-  // Association may license a richer graph realization. Standard materialization
-  // additionally needs every current qualifier represented by the selected row.
-  const representedFrames = actionIndices.length && instruction.frames?.length ? instruction.frames
+  // Association may license a richer graph realization. Only standard materialization
+  // requests the additional proof that every current qualifier is represented by the row.
+  const representedFrames = !includeRepresentation ? undefined
+    : actionIndices.length && instruction.frames?.length ? instruction.frames
     : actionIndices.length && instruction.coding?.code
       ? buildAdditionalInstructionFramesFromCoding(instruction.coding.system ?? SNOMED_SYSTEM, instruction.coding.code)
       : undefined;

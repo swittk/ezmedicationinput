@@ -2065,7 +2065,7 @@ export function independentGraphWarningAdvice(
     if (!represented) {
       represented = new Set();
       for (const instruction of typed ?? []) {
-        for (const actionIndex of instructionGraphAdviceAssociation(graph, instruction).representedActionIndices)
+        for (const actionIndex of instructionGraphAdviceAssociation(graph, instruction, true).representedActionIndices)
           represented.add(actionIndex);
       }
     }
