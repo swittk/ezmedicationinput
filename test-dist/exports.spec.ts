@@ -34,6 +34,8 @@ function runNode(args: string[], code: string): {
   occurrenceCapMax?: number;
   roundTripText?: string;
   currentText?: string;
+  naturalText?: string;
+  naturalRoundTripText?: string;
   originalComponentText?: string;
   roundTripDoseCount?: number;
   roundTripAdministrationCount?: number;
@@ -175,6 +177,9 @@ describe("published package entrypoints", () => {
         });
         // Reparse the independently rendered clinical facts while the original
         // authored fields remain available on the parser output above.
+        const naturalRoundTripText = mod.formatSig(parsed.fhirNext, "long", {
+          locale: "th", realizationMode: "roundtrip", sitePlacement: "natural"
+        });
         const current = JSON.parse(JSON.stringify(parsed.fhirNext));
         delete current.renderedInstruction;
         for (const step of current.step ?? [])
@@ -183,12 +188,17 @@ describe("published package entrypoints", () => {
           locale: "th",
           realizationMode: "roundtrip"
         });
+        const naturalText = mod.formatSig(current, "long", {
+          locale: "th", realizationMode: "roundtrip", sitePlacement: "natural"
+        });
         const reparsed = mod.parseSig(currentText, { locale: "th" });
         process.stdout.write(JSON.stringify({
           parseSigType: typeof mod.parseSig,
           formatSigType: typeof mod.formatSig,
           roundTripText,
           currentText,
+          naturalText,
+          naturalRoundTripText,
           originalInstruction: parsed.fhirNext.renderedInstruction,
           originalComponentText: parsed.fhirNext.step[0]?.component[0]?.text,
           roundTripAdministrationCount: reparsed.fhirNext.step.reduce((count, step) => count + (step.component?.length ?? 0), 0),
@@ -202,8 +212,10 @@ describe("published package entrypoints", () => {
         }));
       `
     );
-    expect(result.currentText).toBe("หยอดตาขวา วันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน.");
-    expect(result.roundTripText).toBe(result.currentText);
+    expect(result.currentText).toBe("หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา.");
+    expect(result.naturalText).toBe("หยอดตาขวา วันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน.");
+    expect(result.roundTripText).toBe("ปัจจุบัน: หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา; ข้อความเดิม: หยอดตาขวา วันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน.");
+    expect(result.naturalRoundTripText).toBe(result.naturalText);
     expect(result.originalInstruction).toBe("หยอดตาขวาวันละ 4 ครั้ง เช้า กลางวัน เย็น ก่อนนอน");
     expect(result.originalComponentText).toBe("หยอดตาขวา วันละ 4 ครั้ง ตอนเช้า, ตอนเที่ยง, ตอนเย็น และ ก่อนนอน.");
     expect(result.roundTripAdministrationCount).toBe(1);
