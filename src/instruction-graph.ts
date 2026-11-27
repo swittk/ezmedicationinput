@@ -2538,6 +2538,10 @@ export function parseInstructionActions(
     const startingMatch = prefixed?.match ?? actionMatchAt(parts, actionStart, options);
     let end = parts.length;
     for (let index = actionStart + (startingMatch?.length ?? 1); index < parts.length; index += 1) {
+      if (/^[;.!?]$/u.test(parts[index].lower)) {
+        end = index;
+        break;
+      }
       const currentKey = key(parts.slice(index, index + 1)[0]);
       if (actionTailIsRegimenModifier(
         parts, actionStart, index, startingMatch?.definition, sourceText, options, negative
@@ -3825,13 +3829,14 @@ export function buildInstructionGraph(
     for (const opaque of workflowOpaqueGaps(input, range, accepted)) {
       pushOpaqueSpan(opaqueSpans, opaque);
     }
-    if (
-      range.kind === "instruction" &&
-      accepted.length === 0 &&
-      actions.some((action) => action.span.start < range.end && range.start < action.span.end)
-    ) {
+    if (range.kind === "instruction" && accepted.length === 0) {
       const opaque = trimOpaqueSpan(input, range.start, range.end);
-      if (opaque) pushOpaqueSpan(opaqueSpans, opaque);
+      if (opaque && (
+        actions.some(action => action.span.start < range.end && range.start < action.span.end) ||
+        (clause.additionalInstructions ?? []).some(instruction =>
+          !instruction.coding?.code && !instruction.frames?.length &&
+          instruction.text?.trim().toLocaleLowerCase("en") === opaque.text.toLocaleLowerCase("en"))
+      )) pushOpaqueSpan(opaqueSpans, opaque);
     }
   }
   for (const span of clause.leftovers) {
@@ -3951,8 +3956,12 @@ export function buildInstructionGraph(
       instruction.frames?.some(frame => frame.span.start === action.span.start &&
         frame.span.end === action.span.end && sameTypedWarning(frame, action)))
   ))) {
-    const firstStart = Math.min(...actions.map((action) => action.span.start));
-    const lastEnd = Math.max(...actions.map((action) => action.span.end));
+    let firstStart = Math.min(...actions.map((action) => action.span.start));
+    let lastEnd = Math.max(...actions.map((action) => action.span.end));
+    for (const opaque of reconciledOpaque) {
+      firstStart = Math.min(firstStart, opaque.start);
+      lastEnd = Math.max(lastEnd, opaque.end);
+    }
     const exactProcedureText = input.slice(firstStart, lastEnd).trim();
     if (exactProcedureText) clause.patientInstruction = exactProcedureText;
   }

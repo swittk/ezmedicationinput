@@ -7469,3 +7469,187 @@ describe("object Time relation ownership", () => {
     expect(frame.args.some(arg => arg.text?.indexOf("damaged packaging") !== -1)).toBe(true);
   });
 });
+
+describe("independent instruction sentence boundaries", () => {
+  function graphsFrom(input: Parameters<typeof importCanonicalCourse>[0]): CanonicalInstructionGraph[] {
+    const graphs: CanonicalInstructionGraph[] = [];
+    for (const stage of importCanonicalCourse(input).stages) {
+      for (const administration of stage.administrations) {
+        if (administration.syntax?.instructionGraph) graphs.push(administration.syntax.instructionGraph);
+      }
+    }
+    return graphs;
+  }
+
+  it.each([".", ";", "!", "?"])("ends an action at an independent %s boundary", separator => {
+    const source = `Do not drive${separator} Arrange a ride home`;
+    const actions = parseInstructionActions(source);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      predicate: { lemma: "drive" }, polarity: AdvicePolarity.Negate,
+      span: { start: 0, end: 12 }, sourceText: "Do not drive", args: []
+    });
+  });
+
+  it.each([
+    { source: "Take 1 tablet daily. Do not drive. Arrange a ride home.", tail: "Arrange a ride home" },
+    { source: "Take 1 tablet daily. Do not drive. Sit down.", tail: "Sit down" },
+    { source: "Take 1 tablet daily; do not drive; arrange a ride home", tail: "arrange a ride home" }
+  ])("keeps an independent opaque instruction out of the preceding action: $source", ({ source, tail }) => {
+    const parsed = parsePublicSig(source);
+    const parsedBefore = JSON.stringify(parsed);
+    const driveStart = source.toLowerCase().indexOf("do not drive");
+    const tailStart = source.indexOf(tail);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const graphs = graphsFrom(input);
+      expect(graphs).toHaveLength(1);
+      expect(graphs[0].actions).toHaveLength(1);
+      expect(graphs[0].actions[0]).toMatchObject({
+        predicate: { lemma: "drive" }, polarity: AdvicePolarity.Negate,
+        span: { start: driveStart, end: driveStart + 12 }, args: [],
+        sourceText: source.slice(driveStart, driveStart + 12)
+      });
+      expect(graphs[0].sourceText).toBe(source);
+      expect(graphs[0].opaqueSpans).toEqual([{ start: tailStart, end: tailStart + tail.length, text: tail }]);
+      const projected = projectCanonicalCourse(importCanonicalCourse(input));
+      for (const row of [projected.fhir[0], toFhirR5Dosages(projected.fhirNext)[0]]) {
+        expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(row.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+        expect(row.additionalInstruction?.map(instruction => instruction.text)).toEqual(["Do not drive", tail]);
+        const selected = parseInstructionGraphExtension(row.additionalInstruction?.[0].extension)?.actions;
+        expect(selected).toHaveLength(1);
+        expect(selected?.[0]).toMatchObject({ predicate: { lemma: "drive" },
+          span: { start: driveStart, end: driveStart + 12 }, args: [] });
+        expect(row.additionalInstruction?.[1].coding).toBeUndefined();
+      }
+      const englishTail = tail.charAt(0).toUpperCase() + tail.slice(1);
+      expect(formatSig(input, "long", { locale: "en", instructionTextMode: "normalized" }))
+        .toBe(`Take 1 tablet orally once daily. Do not drive. ${englishTail}.`);
+      expect(formatSig(input, "long", { locale: "th", instructionTextMode: "normalized" }))
+        .toBe(`รับประทานครั้งละ 1 เม็ด วันละครั้ง. ห้ามDrive. ${tail}.`);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+
+  it("does not treat a terminal period after a full dose-unit word as an abbreviation", () => {
+    const source = "Take 1 tablet. Arrange a ride home.";
+    const actions = parseInstructionActions(source);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      predicate: { lemma: "take" }, sourceText: "Take 1 tablet", span: { start: 0, end: 13 }
+    });
+    expect(actions[0].args).toHaveLength(1);
+    expect(actions[0].args[0]).toMatchObject({
+      role: AdviceArgumentRole.Amount, quantity: { value: 1, unit: "tab" }
+    });
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].instructionGraph?.opaqueSpans)
+      .toEqual([{ start: 15, end: 34, text: "Arrange a ride home" }]);
+    expect(parsed.fhir[0].additionalInstruction?.map(instruction => instruction.text))
+      .toEqual(["Arrange a ride home"]);
+  });
+
+  it.each([
+    ["Call clinic", "call"],
+    ["Drink water", "drink"]
+  ])("retains a recognized independent action after a prohibition: %s", (tail, predicate) => {
+    const source = `Take 1 tablet daily. Do not drive. ${tail}.`;
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const graph = graphsFrom(input)[0];
+      expect(graph.actions.map(action => action.predicate.lemma)).toEqual(["drive", predicate]);
+      expect(graph.actions[0]).toMatchObject({ polarity: AdvicePolarity.Negate, args: [] });
+      expect(graph.actions[1].polarity).not.toBe(AdvicePolarity.Negate);
+      expect(graph.actions[1].sourceText).toBe(tail);
+      expect(graph.opaqueSpans).toBeUndefined();
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("preserves the registered dotted unit with its complete duration and event", () => {
+    const source = "บ้วนปาก 15 มล. นาน 30 วินาที หลังอาหาร";
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const graph = graphsFrom(input)[0];
+      expect(graph.actions).toHaveLength(1);
+      expect(graph.actions[0]).toMatchObject({ predicate: { lemma: "rinse_mouth" },
+        span: { start: 0, end: source.length }, sourceText: source });
+      expect(graph.actions[0].args).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: { value: 15, unit: "mL" } }),
+        expect.objectContaining({ role: AdviceArgumentRole.Duration, quantity: { value: 30, unit: "s" } }),
+        expect.objectContaining({ role: AdviceArgumentRole.Time, normalized: "C", relation: AdviceRelation.After })
+      ]));
+      expect(graph.opaqueSpans).toBeUndefined();
+      expect(formatSig(input, "long", { locale: "en", instructionTextMode: "normalized" })).toContain("30 seconds");
+      expect(formatSig(input, "long", { locale: "th", instructionTextMode: "normalized" })).toContain("30 วินาที");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("preserves a decimal quantity and a separate semicolon procedure", () => {
+    const source = "Rinse mouth with 1.5 mL water for 30 seconds; then spit";
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const graph = graphsFrom(input)[0];
+      expect(graph.actions.map(action => action.predicate.lemma)).toEqual(["rinse_mouth", "spit"]);
+      expect(graph.actions[0].args).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: AdviceArgumentRole.Substance, conceptId: "water",
+          quantity: { value: 1.5, unit: "mL" } }),
+        expect.objectContaining({ role: AdviceArgumentRole.Duration, quantity: { value: 30, unit: "s" } })
+      ]));
+      expect(graph.actions[0].span.end).toBe(source.indexOf(";"));
+      expect(graph.actions[1].sourceText).toBe("spit");
+      expect(graph.opaqueSpans).toBeUndefined();
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("keeps selected opaque advice in the standard patient carrier beside typed actions", () => {
+    const prefix = "Instill 1 drop in the right eye at 08:00 and 1 drop in the left eye at 20:00 daily for 7 days. ";
+    const instructions = ["Skip the drops in the left eye on Mondays",
+      "Skip the drops in the right eye on Fridays", "Do not drive", "Arrange a ride home"];
+    const patient = instructions.join(". ");
+    const source = prefix + patient + ".";
+    const clauseSource = source.slice(source.indexOf("1 drop in the left eye"));
+    const parsed = parsePublicSig(source);
+    const parsedBefore = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const graph = graphsFrom(input).find(candidate => candidate.actions.some(action => action.predicate.lemma === "drive"))!;
+      expect(graph.actions.map(action => action.predicate.lemma))
+        .toEqual(["withhold-administration", "withhold-administration", "drive"]);
+      expect(graph.sourceText).toBe(clauseSource);
+      expect(graph.actions[2]).toMatchObject({ predicate: { lemma: "drive" },
+        sourceText: "Do not drive", args: [],
+        span: { start: clauseSource.indexOf("Do not drive"), end: clauseSource.indexOf("Do not drive") + 12 } });
+      expect(graph.opaqueSpans).toEqual([{ text: instructions[3],
+        start: clauseSource.indexOf(instructions[3]),
+        end: clauseSource.indexOf(instructions[3]) + instructions[3].length }]);
+      const projected = projectCanonicalCourse(importCanonicalCourse(input));
+      for (const rows of [projected.fhir, toFhirR5Dosages(projected.fhirNext)]) {
+        const row = rows.find(candidate => candidate.patientInstruction === patient);
+        expect(row).toBeDefined();
+        expect(row?.additionalInstruction?.map(instruction => instruction.text)).toEqual(instructions);
+        expect(parseInstructionGraphExtension(row?.additionalInstruction?.[2].extension)?.actions[0])
+          .toMatchObject({ predicate: { lemma: "drive" }, args: [] });
+      }
+      for (const locale of ["en", "th"]) {
+        expect(formatSig(input, "long", { locale, instructionTextMode: "normalized" })
+          .match(/Arrange a ride home/gu)).toHaveLength(1);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+});
