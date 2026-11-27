@@ -6196,3 +6196,84 @@ describe("shared accepted counts across partitioned clock members", () => {
     expect(JSON.stringify(dosage)).toBe(before);
   });
 });
+
+
+describe("conditional shared-course opportunity admission", () => {
+  const options = { orderedAt: "2026-11-23T00:00:00Z", from: "2026-11-23T00:00:00Z", timeZone: "UTC" };
+  const guard: MedicationCondition = { kind: "not", condition: {
+    kind: "measurement", name: "systolicBloodPressure", operation: "lt", value: 90,
+    unit: "mmHg", text: "systolic BP is below 90",
+  } };
+  const course = (): CanonicalCourse => ({ kind: "course", stages: [{ administrations: [
+    { kind: "administration", sourceMember: 0, predicate: guard,
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { clocks: ["08:00:00"], sharedCount: { groupId: "conditional-course", count: 4 } } } },
+    { kind: "administration", sourceMember: 1,
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { clocks: ["20:00:00"], sharedCount: { groupId: "conditional-course", count: 4 } } } },
+  ] }] });
+  const evenings = ["2026-11-23T20:00:00+00:00", "2026-11-24T20:00:00+00:00",
+    "2026-11-25T20:00:00+00:00", "2026-11-26T20:00:00+00:00"];
+  const mornings = evenings.map(at => at.replace("T20:", "T08:"));
+
+  it("evaluates only the morning opportunities inside the shared count or requested supply window", () => {
+    const native = course();
+    for (const dosage of [native, courseToR5(native), courseToR6(native)]) {
+      const before = JSON.stringify(dosage);
+      let observed: string[] = [];
+      const evaluateCondition = (condition: MedicationCondition, at: string) => {
+        expect(condition).toEqual(guard);
+        observed.push(at);
+        return false;
+      };
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition, limit: 5 })).toEqual(evenings);
+      expect(observed).toEqual(mornings);
+      observed = [];
+      expect(calculateTotalUnits({ dosage, ...options, evaluateCondition, durationValue: 2, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      expect(observed).toEqual(mornings.slice(0, 2));
+      observed = [];
+      expect(calculateTotalUnits({ dosage, ...options, evaluateCondition, durationValue: 7, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 4, unit: "tab" });
+      expect(observed).toEqual(mornings);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("evaluates a changing condition at the displaced administration time", () => {
+    const dosage = course(), observed: string[] = [];
+    dosage.stages[0].administrations[0].delayMinutes = 60;
+    const before = JSON.stringify(dosage);
+    const evaluateCondition = (_condition: MedicationCondition, at: string) => {
+      observed.push(at);
+      return Date.parse(at) >= Date.parse("2026-11-24T00:00:00Z");
+    };
+    expect(nextDueDoses(dosage, { ...options, evaluateCondition, limit: 5 })).toEqual([
+      evenings[0], "2026-11-24T09:00:00+00:00", evenings[1], "2026-11-25T09:00:00+00:00",
+    ]);
+    expect(observed).toEqual(["2026-11-23T09:00:00+00:00", "2026-11-24T09:00:00+00:00", "2026-11-25T09:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage, ...options, evaluateCondition, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(3);
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+  it("retains recorded accepted use without reevaluating it through the present condition", () => {
+    const dosage = course(), observed: string[] = [], before = JSON.stringify(dosage);
+    const evaluateCondition = (_condition: MedicationCondition, at: string) => { observed.push(at); return false; };
+    const history = { ...options, from: "2026-11-24T00:00:00Z", priorDoseTimes: ["2026-11-23T08:00:00Z"], evaluateCondition };
+    expect(nextDueDoses(dosage, { ...history, limit: 5 })).toEqual(evenings.slice(1));
+    expect(observed).toEqual(mornings.slice(1));
+    expect(calculateTotalUnits({ dosage, ...history, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(3);
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+  it("finishes a bounded search without inventing completion when all members are withheld", () => {
+    const dosage = course();
+    dosage.stages[0].administrations[1].predicate = guard;
+    dosage.stages.push({ administrations: [{ kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }],
+      schedule: { recurrence: { clocks: ["12:00:00"], count: 1 } } }] });
+    const before = JSON.stringify(dosage), evaluateCondition = () => false;
+    expect(nextDueDoses(dosage, { ...options, evaluateCondition, limit: 5 })).toEqual([]);
+    expect(calculateTotalUnits({ dosage, ...options, evaluateCondition, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(0);
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+});

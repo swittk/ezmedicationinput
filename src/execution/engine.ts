@@ -3329,7 +3329,7 @@ interface CycleEventQuota extends CycleCountAllowance {
   /** Chronological replay must not spend a recorded instant again as a planned clock. */
   lastRecordedAt?: number;
   /** Lazily advance a finite capped phase after its candidate is decided. */
-  advance?: (at: number, accepted: boolean) => void;
+  advance?: (at: number, accepted: boolean, conditionEligible: boolean) => void;
 }
 function cycleCountAllowance(quota: CycleEventQuota): CycleCountAllowance {
   return quota.shared ?? quota;
@@ -3620,6 +3620,9 @@ function scheduleTreatmentRelativeCourse(
           : undefined;
         const execution: CanonicalAdministration = {
           ...original, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined, phasePredecessors: undefined,
+          // Lazy members offer raw opportunities; the chronological owner
+          // evaluates their original condition before spending shared limits.
+          ...(collect && (deferred || shared) ? { predicate: undefined } : {}),
           ...(collect ? { limits: original.limits?.filter(item => item.scope !== "period") } : {}),
           ...(collect && originalRepeat ? {
             schedule: { ...original.schedule, recurrence: {
@@ -3662,14 +3665,21 @@ function scheduleTreatmentRelativeCourse(
               for (const resolved of ready ?? []) scheduleMember(resolved, resolved.sourceIndex!, true);
             }
           };
+          // Retain this course search's opportunity bound even when every
+          // member is withheld. Rejected opportunities never spend a dose.
+          let remainingCandidates = limit;
           const emitNext = (after: Date) => {
             if (collect(undefined, key, original, quota)) return;
-            const next = nextDueDoses(execution, { ...localOptions, from: after, limit: 1 })[0];
+            const next = remainingCandidates-- > 0
+              ? nextDueDoses(execution, { ...localOptions, from: after, limit: 1 })[0] : undefined;
             if (next && (!effectiveEnd || Date.parse(next) < effectiveEnd.getTime()))
               collect(next, key, original, quota);
             else if (effectiveEnd) completeMember({ end: effectiveEnd });
           };
-          quota.advance = (at, accepted) => {
+          quota.advance = (at, accepted, conditionEligible) => {
+            // A condition-eligible candidate restarts the existing search
+            // allowance even when a rolling cap withholds that opportunity.
+            if (conditionEligible) remainingCandidates = limit;
             if (accepted && cycleCountAllowance(quota).remaining === 0) {
               const completion = completionAfterAcceptedAdministration(original, new Date(at), timeZone);
               if (!completion) {
@@ -4278,13 +4288,16 @@ function chronologicalRepeatedEvents(
       // whether the record coincides with its planned clock or arrives later.
       // This also ensures a ranged plan first observes the quota after all
       // of this phase's actual history has drained.
-      const accepted = actual || ((event.at >= from.getTime() ||
-        (!event.member.asNeeded && !(event.quota.shared ?? event.quota).hasActualHistory)) && accept(event));
+      const eligibleOpportunity = event.at >= from.getTime() ||
+        (!event.member.asNeeded && !(event.quota.shared ?? event.quota).hasActualHistory);
+      const conditionEligible = actual || !eligibleOpportunity || !event.quota.advance ||
+        conditionAllowsAdministration(getDosageCondition(event.member), options, event.iso);
+      const accepted = actual || eligibleOpportunity && conditionEligible && accept(event);
       if (actual) (event.quota.shared ?? event.quota).lastRecordedAt = event.at;
       if (actual && allowance.remaining !== undefined && allowance.remaining > 0) allowance.remaining--;
       if (accepted && event.quota.shared && allowance.remaining === 0) {
-        for (const member of event.quota.shared.members) member.advance?.(event.at, true);
-      } else event.quota.advance?.(event.at, accepted);
+        for (const member of event.quota.shared.members) member.advance?.(event.at, true, true);
+      } else event.quota.advance?.(event.at, accepted, conditionEligible);
       if (accepted && event.at >= from.getTime()) {
         if (explicitQuotas?.has(event.quota))
           explicitQuotas.set(event.quota, explicitQuotas.get(event.quota)! + 1);
@@ -4727,6 +4740,13 @@ type PhaseCountOptions = NextDueDoseOptions & {
   /** Only rounded course supply collects one remaining ceiling per contributing member. */
   roundingLimits?: Map<string, { remaining: number | undefined; unit: CanonicalMeasure | undefined }>;
 };
+/** A supplied evaluator owns this candidate's clinical condition. Missing
+ * evaluators retain the public opportunity-only scheduling contract. */
+function conditionAllowsAdministration(
+  condition: CanonicalAdministration["predicate"], options: NextDueDoseOptions, at: string
+): boolean {
+  return !condition || !options.evaluateCondition || !!options.evaluateCondition(condition, at);
+}
 function requiresCompleteSupplyTiming(options: NextDueDoseOptions): boolean {
   const phase = options as PhaseCountOptions;
   return phase.quantityEstimation === true && !phase.candidateOnly;
@@ -5014,10 +5034,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       for (const at of candidates) {
         if (recorded?.has(Date.parse(at))) continue;
         if (eligibleDate && !eligibleDate(new Date(at))) continue;
-        if (guard && options.evaluateCondition) {
-          const eligible = options.evaluateCondition(guard, at);
-          if (!eligible) continue;
-        }
+        if (!conditionAllowsAdministration(guard, options, at)) continue;
         accepted.push(at);
         if (!quantityCaps.length && !occurrenceCap &&
             accepted.length >= (maximumEligible ?? limit)) break;
