@@ -1696,7 +1696,8 @@ export function serializeCanonicalContext(
       i18n,
       coding: instruction.coding,
       hasTypedEvidence: Boolean(instruction.evidence?.length),
-      frames: !instruction.coding?.code && instruction.frames?.some(frame => frame.modality !== undefined)
+      frames: !instruction.coding?.code && instruction.frames?.some(frame => frame.modality !== undefined ||
+        frame.force === AdviceForce.Warning && frame.polarity !== AdvicePolarity.Negate)
         ? instruction.frames : undefined
     });
   }
@@ -1718,7 +1719,7 @@ export function serializeCanonicalContext(
         ? [{ system: instruction.coding.system ?? SNOMED_SYSTEM,
           code: instruction.coding.code, display: instruction.coding.display }]
         : undefined;
-      // Uncoded modal advice cannot recover its selected qualification from
+      // Uncoded modal/positive warning advice cannot recover its selected qualification from
       // a terminology template. The dosage graph retains the clause source;
       // this instruction carries only its own already-selected frames.
       if (instruction.frames?.length) projected.extension = [{
