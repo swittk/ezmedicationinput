@@ -2007,10 +2007,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         })
       : undefined;
   if (!graphWholeInstruction) {
-    const directInstruction = formatAdditionalInstructions({
-      ...clause,
-      additionalInstructions: additionalForDirectRendering
-    });
+    const directInstruction = formatAdditionalInstructions(clause, additionalForDirectRendering);
     if (directInstruction) instructionPhrases.push(directInstruction);
     const graphWarning = clause.instructionGraph && !positionedGraph
       ? realizeInstructionGraph(clause.instructionGraph, "en", {
@@ -2203,9 +2200,11 @@ export function isEmptyStomachInstruction(instruction: CanonicalAdditionalInstru
   ));
 }
 
-function formatAdditionalInstructions(clause: CanonicalSigClause): string | undefined {
-  const instructions = clause.additionalInstructions ?? [];
-  if (!instructions.length) {
+function formatAdditionalInstructions(
+  clause: CanonicalSigClause,
+  instructions: CanonicalSigClause["additionalInstructions"]
+): string | undefined {
+  if (!instructions?.length) {
     return undefined;
   }
   const phrases: string[] = [];
