@@ -1024,9 +1024,10 @@ function describeCalendarEventsEnglish(
  * @returns An English monthly day phrase when a selection is present.
  */
 export function dayOfMonthUsesSingleMonth(schedule: CanonicalScheduleExpr | undefined): boolean {
-  return schedule?.periodUnit !== FhirPeriodUnit.Month ||
+  return schedule?.periodUnit !== FhirPeriodUnit.Year &&
+    (schedule?.periodUnit !== FhirPeriodUnit.Month ||
     (schedule.period === undefined || schedule.period === 1) &&
-    (schedule.periodMax === undefined || schedule.periodMax === 1);
+    (schedule.periodMax === undefined || schedule.periodMax === 1));
 }
 
 function describeDayOfMonth(schedule: CanonicalScheduleExpr | undefined): string | undefined {

@@ -5336,3 +5336,108 @@ describe("fronted inherited infusion intervals", () => {
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });
+
+
+describe("selected branch preview and cadence ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const dose = (branchId: string, clock: string, start?: string): CanonicalAdministration => ({
+    kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+    choice: { groupId: "schedule", branchId, selectionBehavior: "exactly-one" },
+    schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      clocks: [clock], calendarWindow: start ? { start } : undefined } },
+  });
+  it.each([false, true])("keeps a course-wide pause only for an undated successor (dated=%s)", dated => {
+    const course: CanonicalCourse = { kind: "course", stages: [
+      { end: { anchor: "treatment-start", displacement: { value: 4, unit: "d" } }, administrations: [] },
+      { administrations: [dose("A", "08:00:00", dated ? "2027-01-03" : undefined),
+        dose("B", "08:00:00", dated ? "2027-01-03" : undefined)] },
+    ] };
+    const projected = projectCanonicalCourse(course);
+    for (const input of [course, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      const before = JSON.stringify(input), text = formatSig(input, "long", { locale: "en" });
+      if (dated) expect(text).not.toContain("No doses");
+      else expect(text).toContain("No doses from treatment start until 4 days after treatment start");
+      for (const branchId of ["A", "B"]) expect(nextDueDoses(input, {
+        orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC", limit: 1,
+        alternativeChoices: { schedule: branchId },
+      })).toEqual([dated ? "2027-01-03T08:00:00+00:00" : "2027-01-05T08:00:00+00:00"]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+  it("shows a shared count once inside each limited alternative", () => {
+    const administrations = [dose("A", "08:00:00"), dose("A", "20:00:00"),
+      dose("B", "09:00:00"), dose("B", "21:00:00")];
+    for (const member of administrations) member.schedule!.recurrence!.sharedCount = { groupId: "course-uses", count: 3 };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations }] };
+    const projected = projectCanonicalCourse(course);
+    for (const input of [course, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      const before = JSON.stringify(input), text = formatSig(input, "long", { locale: "en" });
+      expect(text.match(/3 administrations/gu)).toHaveLength(2);
+      for (const branchId of ["A", "B"]) {
+        const times = branchId === "A" ? ["08:00:00", "20:00:00"] : ["09:00:00", "21:00:00"];
+        expect(nextDueDoses(input, { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+          timeZone: "UTC", limit: 5, alternativeChoices: { schedule: branchId } })).toEqual([
+          "2026-12-01T" + times[0] + "+00:00", "2026-12-01T" + times[1] + "+00:00",
+          "2026-12-02T" + times[0] + "+00:00",
+        ]);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+  it("removes obsolete BID coding when a hold partitions the clocks", () => {
+    const source = "Take 1 tablet BID at 08:00 and 20:00. Hold the 08:00 dose if dizzy.";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const course = importCanonicalCourse(input);
+      expect(course.stages.flatMap(stage => stage.administrations)).toHaveLength(2);
+      for (const member of course.stages.flatMap(stage => stage.administrations)) {
+        expect(member.schedule?.recurrence?.frequency).toBe(1);
+        expect(member.schedule?.recurrence?.clocks).toHaveLength(1);
+        expect(member.schedule?.code?.coding?.some(code => code.code === "BID")).not.toBe(true);
+      }
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+    const control = parsePublicSig("Take 1 tablet BID at 08:00 and 20:00.");
+    expect(control.fhir[0].timing?.repeat?.frequency).toBe(2);
+    expect(control.fhir[0].timing?.code?.coding?.some(code => code.code === "BID")).toBe(true);
+  });
+  it.each([FhirPeriodUnit.Month, FhirPeriodUnit.Year])("describes the day selector within its %s cadence", periodUnit => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{
+      kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { frequency: 1, period: 1, periodUnit, monthDays: [15], clocks: ["08:00:00"] } },
+    }] }] };
+    const projected = projectCanonicalCourse(course);
+    for (const input of [course, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale });
+        expect(text).toContain("15");
+        if (periodUnit === FhirPeriodUnit.Year) expect(text).not.toContain(locale === "en" ? "of each month" : "ของทุกเดือน");
+        else expect(text).toContain(locale === "en" ? "of each month" : "ของทุกเดือน");
+      }
+      expect(nextDueDoses(input, { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z",
+        timeZone: "UTC", limit: 2 })).toEqual(["2026-01-15T08:00:00+00:00",
+        periodUnit === FhirPeriodUnit.Year ? "2027-01-15T08:00:00+00:00" : "2026-02-15T08:00:00+00:00"]);
+    }
+  });
+});
+
+
+it("moves a qualified inherited infusion duration with its comparator", () => {
+  const source = "Infuse 100 mL over 1 hour, then 100 mL over about 2 hours";
+  const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+  expect(parsed.meta.canonical.clauses[1].schedule).toMatchObject({
+    administrationDuration: 2, administrationDurationUnit: "h", administrationDurationComparator: "~",
+  });
+  expect(parsed.meta.canonical.clauses[1].schedule?.durationComparator).toBeUndefined();
+  for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+    JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+    const second = importCanonicalCourse(input).stages[1].administrations[0];
+    expect(second.schedule?.recurrence).toMatchObject({ occurrenceDuration: 2,
+      occurrenceDurationUnit: "h", occurrenceDurationComparator: "~" });
+    expect(second.schedule?.recurrence?.courseLength).toBeUndefined();
+    expect(formatSig(input, "long", { locale: "en" })).toContain("approximately 2 hours");
+  }
+  expect(JSON.stringify(parsed)).toBe(before);
+});

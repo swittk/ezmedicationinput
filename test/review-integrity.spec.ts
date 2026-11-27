@@ -2666,13 +2666,76 @@ describe("review source and interchange ownership", () => {
     };
     const rows = toFhirR5Dosages(input), row = saved(rows[0]);
     const opened = fromFhirDosage(row);
-    for (const text of [formatSig(saved(row)), formatSig(saved(row), { style: "long" }),
+    for (const text of [formatSig(saved(row)), formatSig(saved(row), "long"),
       opened.shortText, opened.longText]) {
+      expect(text).toContain("5 mg");
       expect(text).toContain("Across this course: max lifetime: 30 mg");
       expect(text).not.toContain("7 mg");
       if (withStage) expect(text).toContain("Within this stage: max per administration: 8 mg");
     }
     expect(importCanonicalCourse(saved(rows)).safety?.limits?.[0].amount?.value).toBe(30);
+  });
+
+  it.each([false, true])("retains the selected phase count in scalar previews (course cap=%s)", withCap => {
+    const input: FhirR6DosageInstruction = {
+      safety: withCap ? { doseLimit: [{ scope: "lifetime", valueQuantity: measure(30) }] } : undefined,
+      step: [{ count: 2, component: [5, 7].map(value => ({
+        doseAndRate: [{ doseQuantity: measure(value) }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          boundsDuration: { value: 7, unit: "d", code: "d" } } },
+      })) }],
+    };
+    const row = saved(toFhirR5Dosages(input)[0]);
+    const before = saved(row);
+    const opened = fromFhirDosage(row);
+    for (const text of [opened.shortText, opened.longText, formatSig(saved(row), "long")]) {
+      expect(text).toContain("Perform this phase 2 times");
+      expect(text).toContain("5 mg");
+      expect(text).not.toContain("7 mg");
+      if (withCap) expect(text).toContain("Across this course: max lifetime: 30 mg");
+    }
+    expect(row).toEqual(before);
+  });
+
+  it("retains bilateral nasal targets beside an entire-nose coding", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "spray" } }],
+      site: { text: "both nostrils", coding: [{ system: "http://snomed.info/sct", code: "181195007" }] },
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } },
+    };
+    const before = saved(row);
+    const native = importCanonicalCourse(saved(row));
+    const r6 = saved(toDosageDetails([saved(row)]));
+    for (const input of [native, saved(row), r6]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("into each nostril");
+      expect(calculateTotalUnits({ dosage: input, from: start, orderedAt: start, timeZone: "UTC",
+        durationValue: 3, durationUnit: "d" })).toMatchObject({ totalUnits: 6, unit: "spray" });
+      expect(projectCanonicalCourse(importCanonicalCourse(input)).fhir[0].site).toEqual(row.site);
+    }
+    expect(row).toEqual(before);
+    const opposite: FhirDosage = { ...saved(row), site: { text: "left nostril",
+      coding: [{ system: "http://snomed.info/sct", code: "723609004" }] } };
+    expect(formatSig(opposite, "long", { locale: "en", realizationMode: "normalized" })).toContain("right nostril");
+    expect(calculateTotalUnits({ dosage: opposite, from: start, orderedAt: start, timeZone: "UTC",
+      durationValue: 3, durationUnit: "d" })).toMatchObject({ totalUnits: 3, unit: "spray" });
+  });
+
+  it.each(["as directed by the infusion clinic", "BID"])("retains code-less timing display as literal text: %s", display => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: measure(1) }],
+      timing: { code: { coding: [{ display, id: "authored-timing" }] },
+        repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } },
+    };
+    const before = saved(row);
+    for (const input of [saved(row), importCanonicalCourse(saved(row)), saved(toDosageDetails([saved(row)]))]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toContain(display);
+      expect(text).not.toContain("twice");
+      expect(nextDueDoses(input, { from: start, orderedAt: start, timeZone: "UTC", limit: 3 }))
+        .toEqual(["2026-12-01T08:00:00+00:00", "2026-12-02T08:00:00+00:00", "2026-12-03T08:00:00+00:00"]);
+      expect(projectCanonicalCourse(importCanonicalCourse(input)).fhir[0].timing?.code).toEqual(row.timing!.code);
+    }
+    for (const text of [fromFhirDosage(saved(row)).shortText, fromFhirDosage(saved(row)).longText])
+      expect(text).toContain(display);
+    expect(row).toEqual(before);
   });
 
   it.each(["urn:clinic:pump-units", "http://unitsofmeasure.org"])

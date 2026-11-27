@@ -1027,7 +1027,9 @@ describe("scoped warning ownership with a registered course provider", () => {
       expect(text.split(warning)).toHaveLength(3);
       expect(text).not.toContain("Do not take the 1 tablet morning dose");
       expect(text).toContain("1 tablet orally at 8:00 am unless dizzy");
-      expect(text).toContain("1 tablet orally at 8:00 pm");
+      const evening = text.match(/1 tablet orally at 8:00 pm[^;.]*[;.]?/u)?.[0];
+      expect(evening).toBeDefined();
+      expect(evening).not.toMatch(/\b(?:unless|only if)\b/u);
       expect(JSON.stringify(input)).toBe(before);
     }
     expect(parsed.input).toBe(source);

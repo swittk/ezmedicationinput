@@ -913,8 +913,8 @@ describe("round35 action realization ownership", () => {
       expect(text).toContain("saline");
       expect(text.match(locale === "en" ? /before breakfast/gu : /ก่อนอาหารเช้า/gu)).toHaveLength(1);
       expect(text).not.toContain("CM");
-      expect(text).toContain(locale === "en" ? "1 mL" : "1 มิลลิลิตร");
-      expect(text).toContain(locale === "en" ? "10 mL" : "10 มิลลิลิตร");
+      expect(text).toMatch(locale === "en" ? /^Dilute 1 mL with 10 mL saline/u : /^เจือจาง\s*1 มิลลิลิตร/u);
+      if (locale === "th") expect(text).toMatch(/10 มิลลิลิตร\s*saline/u);
     }
     expect(JSON.stringify(frame)).toBe(saved);
   });
@@ -1129,8 +1129,8 @@ describe("round36 selected Time output evidence", () => {
       const coverage = { singleScheduledEvent: false };
       const text = realizeRichPrimaryWithCanonicalDose(frame, clause, locale, undefined, coverage);
       expect(text.match(locale === "en" ? /before breakfast/gu : /ก่อนอาหารเช้า/gu)).toHaveLength(1);
-      expect(text).toContain(locale === "en" ? "1 mL" : "1 มิลลิลิตร");
-      expect(text).toContain(locale === "en" ? "10 mL" : "10 มิลลิลิตร");
+      expect(text).toMatch(locale === "en" ? /^Dilute 1 mL with 10 mL saline/u : /^เจือจาง\s*1 มิลลิลิตร/u);
+      if (locale === "th") expect(text).toMatch(/10 มิลลิลิตร\s*saline/u);
       expect(coverage.singleScheduledEvent).toBe(true);
     }
     expect(JSON.stringify(frame)).toBe(before);
@@ -3303,6 +3303,8 @@ describe("round55: current clinical facts and independent graph meaning", () => 
           const text = formatSig(input, "long", { locale, realizationMode });
           expect(text.match(/if able to swallow/giu)).toHaveLength(1);
           expect(text.match(/systolic BP > 160/gu) ?? []).toHaveLength(guard ? 1 : 0);
+          if (guard) expect(text).toMatch(locale === "en"
+            ? /only if\s+systolic BP > 160/u : /เฉพาะเมื่อ\s*systolic BP > 160/u);
         }
       expect(JSON.stringify(row)).toBe(before);
       expect(parseInstructionGraphExtension(row.extension)?.relations?.[0].text).toBe(conditionText);

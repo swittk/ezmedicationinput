@@ -1946,7 +1946,7 @@ describe("round74 same-day dated clock replacement", () => {
     const component = (dose: number, clocks: string[]) => ({
       method: { text: "Instill" }, site: { concept: { text: "right eye" } },
       doseAndRate: [{ doseQuantity: { value: dose, unit: "drop" } }],
-      timing: { repeat: { boundsPeriod: { start: "2026-12-05" }, frequency: 1, period: 1,
+      timing: { repeat: { boundsPeriod: { start: "2026-12-05" }, frequency: clocks.length, period: 1,
         periodUnit: FhirPeriodUnit.Day, timeOfDay: clocks } }
     });
     const input = { step: [{ component: [component(1, ["08:00:00", "20:00:00"]), component(2, ["18:00:00"])] }] };
@@ -1984,7 +1984,7 @@ describe("round74 same-day dated clock replacement", () => {
 it("round74 explicit successor timestamp remains the replacement boundary", () => {
   const input = { step: [
     { component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
-      timing: { repeat: { boundsPeriod: { start: "2026-12-05" }, frequency: 1, period: 1,
+      timing: { repeat: { boundsPeriod: { start: "2026-12-05" }, frequency: 3, period: 1,
         periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00", "14:00:00", "20:00:00"] } } }] },
     { component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "drop" } }],
       timing: { repeat: { boundsPeriod: { start: "2026-12-05T12:00:00Z" }, frequency: 1, period: 1,
@@ -5503,4 +5503,53 @@ it("preserves the same-day predecessor before an exact date-list replacement clo
     expect(JSON.stringify(dosage)).toBe(before);
   }
   expect(JSON.stringify(parsed)).toBe(original);
+});
+
+
+it.each([false, true])("keeps the predecessor before an earlier clocked successor (reverse=%s)", reverse => {
+  const member = (value: number, start: string, clock: string | undefined, stageOrdinal: number): CanonicalAdministration => ({
+    kind: "administration", stageOrdinal, amounts: [{ quantity: { value, unit: "tab" } }],
+    schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      calendarWindow: { start }, clocks: clock ? [clock] : undefined } },
+  });
+  const later = [member(2, "2026-12-05", "20:00:00", 2), member(3, "2026-12-07", undefined, 2)];
+  if (reverse) later.reverse();
+  const course = courseFromAdministrations([member(1, "2026-12-01", "08:00:00", 1), ...later], "");
+  const projected = projectCanonicalCourse(course);
+  for (const input of [course, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+    const before = JSON.stringify(input);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 3 };
+    expect(nextDueDoses(input, query)).toEqual([
+      "2026-12-05T08:00:00+00:00", "2026-12-05T20:00:00+00:00", "2026-12-06T20:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d" }).totalUnits).toBe(5);
+    expect(JSON.stringify(input)).toBe(before);
+  }
+});
+
+
+it("keeps an earlier clocked opening when a parallel successor also has a later date-only member", () => {
+  const source = "Instill 1 drop OD daily at 08:00 starting 2026-12-01 through 2026-12-10 " +
+    "then instill 2 drops OD daily at 20:00 starting 2026-12-05 and instill 3 drops OD daily starting 2026-12-07; " +
+    "instill 1 drop OS daily at 10:00 starting 2026-12-01 through 2026-12-10";
+  const plan = createBoundaryPlan(source), states = plan.segments.map(segment => parseClauseState(segment.text));
+  const graph = buildRegimenGraph(plan, plan.segments);
+  scopeSequentialPhaseSemantics(states, plan.segments, graph, source);
+  // Submit an independent typed date-only successor to the existing compiler.
+  const clauses = JSON.parse(JSON.stringify(states.map(state => state.primaryClause)));
+  delete clauses[2].schedule.timeOfDay;
+  const parallel = buildCanonicalParallelRegimen(clauses, plan.segments, plan, graph);
+  const course = parallel.kind === "resolved" ? courseFromParallel(parallel, plan.segments.map(segment => segment.text), source)
+    : parallel.kind === "unresolved" ? courseFromPartialParallel(parallel, plan.segments.map(segment => segment.text), source)
+      : undefined;
+  expect(course).toBeDefined();
+  const projected = projectCanonicalCourse(course!);
+  for (const input of [course!, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+    const before = JSON.stringify(input);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 5 };
+    expect(nextDueDoses(input, query)).toEqual(["2026-12-05T08:00:00+00:00", "2026-12-05T10:00:00+00:00",
+      "2026-12-05T20:00:00+00:00", "2026-12-06T10:00:00+00:00", "2026-12-06T20:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d" }).totalUnits).toBe(7);
+    expect(JSON.stringify(input)).toBe(before);
+  }
 });

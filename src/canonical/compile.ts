@@ -14,7 +14,7 @@ import type {
   CanonicalStage,
   CanonicalBoundary,
 } from "./course";
-import { hasAmountRole, administrationHasAmountFacts, administrationHasDatedStart, administrationHasDatedClockStart } from "./course";
+import { hasAmountRole, administrationHasAmountFacts, administrationHasDatedStart, earliestCalendarOpening } from "./course";
 import type { CanonicalParallelRegimen, RegimenPosition } from "../regimen/parallel-course";
 import { bodySiteTextConflictsWithCoding, getBodySiteAdministrationTargetCount } from "../body-site-target";
 import { getBodySiteText } from "../body-site-lookup";
@@ -23,7 +23,7 @@ import {
   DEFAULT_PRN_REASON_DEFINITIONS, findPrnReasonDefinitionByCoding, normalizePrnReasonKey
 } from "../maps";
 import { SNOMED_SYSTEM } from "../snomed";
-import { standardTimingCodingFromSig, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding, timingCodeMeaning } from "../timing-summary";
+import { standardTimingCodingFromSig, preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding, timingCodeMeaning, codeLessTimingDisplay } from "../timing-summary";
 import type { RouteCode } from "../types";
 import { getQuantityDurationUnit } from "../unit-lexicon";
 import { additionalInstructionFallbackText } from "../advice";
@@ -655,11 +655,12 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     }
     schedule.maxDosePerPeriod=limits;
     const coding = preferredTimingCoding(a.schedule);
-    const literalTimingText = coding !== undefined && !isPreviewTimingCoding(coding);
+    const displayOnly = !coding && a.schedule.code?.text === undefined ? codeLessTimingDisplay(a.schedule) : undefined;
+    const literalTimingText = coding ? !isPreviewTimingCoding(coding) : displayOnly !== undefined;
     schedule.timingCode = literalTimingText ? undefined : timingCodeMeaning(coding) ?? a.schedule.code?.text;
     schedule.timingText = coding
       ? a.schedule.code?.text ?? (literalTimingText ? coding.display ?? coding.code : undefined)
-      : undefined;
+      : displayOnly;
     schedule.timingTextIsLiteral = literalTimingText ? true : undefined;
     result.schedule=schedule;
   }else result.schedule=undefined;
@@ -830,18 +831,8 @@ export function courseFromAdministrations(
     // authored event lists and the original duration retain their owners.
     const previous = stages[stages.length - 1];
     if (previous) {
-      let nextStart: string | undefined;
-      for (const administration of administrations) {
-        const timing = administration.schedule;
-        const candidate = timing?.recurrence?.calendarWindow?.start;
-        if (candidate && (nextStart === undefined || candidate < nextStart)) nextStart = candidate;
-        if (!candidate) for (const event of timing?.explicitEvents ?? [])
-          if (nextStart === undefined || event < nextStart) nextStart = event;
-      }
-      const clockBoundary = administrations.some(administrationHasDatedClockStart) &&
-        administrations.every(a => !a.schedule?.recurrence?.calendarWindow?.start && !a.schedule?.explicitEvents?.length ||
-          administrationHasDatedClockStart(a));
-      const cutoff = nextStart && !clockBoundary ? precedingCalendarDay(nextStart) : undefined;
+      const opening = earliestCalendarOpening(administrations);
+      const cutoff = opening && !opening.clocked ? precedingCalendarDay(opening.start) : undefined;
       if (cutoff) previous.administrations = previous.administrations.map(administration => {
         const timing = administration.schedule, recurrence = timing?.recurrence;
         const window = recurrence?.calendarWindow;

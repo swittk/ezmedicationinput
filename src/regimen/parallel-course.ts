@@ -1,5 +1,5 @@
 import { precedingCalendarDay, orderedCalendarBounds } from '../canonical/compile';
-import { administrationHasDatedClockStart, compareRegimenPositions, type CanonicalBoundary, type RegimenPosition } from '../canonical/course';
+import { earliestCalendarOpening, compareRegimenPositions, type CanonicalBoundary, type RegimenPosition } from '../canonical/course';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan } from '../hpsg/signature';
 import { anchoredScheduleDurationEnd, hasExactScheduleDuration, type RegimenGraph } from './regimen';
@@ -107,27 +107,19 @@ function calendarPhaseMembers(
   members: readonly CanonicalParallelComponent[],
   nextClauses: readonly CanonicalSigClause[] | undefined
 ): CanonicalParallelComponent[] | string {
-  let nextStart: string | undefined;
-  let clockBoundary = true;
-  for (const clause of nextClauses ?? []) {
-    const value = calendarPhaseStart(clause);
-    if (value && (nextStart === undefined || value < nextStart)) nextStart = value;
-    const schedule = clause.schedule;
-    // Every authored date keeps its explicit clock; undated concurrent
-    // members still receive their phase opening during execution.
-    if (value && !administrationHasDatedClockStart({
-      kind: "administration", asNeeded: clause.prn?.enabled,
-      predicate: clause.clinicalAdjuncts?.condition,
-      calendarPredicate: clause.clinicalAdjuncts?.calendarDayCondition,
-      schedule: {
-        recurrence: { calendarWindow: { start: schedule?.boundsStart },
-          clocks: schedule?.timeOfDay, anchors: schedule?.when },
-        explicitEvents: schedule?.calendarEvents?.map(event => event.fhirDateTime ?? event.isoDate),
-      },
-    })) clockBoundary = false;
-  }
+  const opening = earliestCalendarOpening((nextClauses ?? []).map(clause => ({
+    kind: "administration", asNeeded: clause.prn?.enabled,
+    predicate: clause.clinicalAdjuncts?.condition,
+    calendarPredicate: clause.clinicalAdjuncts?.calendarDayCondition,
+    schedule: {
+      recurrence: { calendarWindow: { start: clause.schedule?.boundsStart },
+        clocks: clause.schedule?.timeOfDay, anchors: clause.schedule?.when },
+      explicitEvents: clause.schedule?.calendarEvents?.map(event => event.fhirDateTime ?? event.isoDate),
+    },
+  })));
+  const nextStart = opening?.start;
   if (nextClauses?.length && !nextStart) return 'parallel-regimen-next-calendar-start-required';
-  const inferredEnd = nextStart && !clockBoundary ? precedingCalendarDay(nextStart) : undefined;
+  const inferredEnd = opening && !opening.clocked ? precedingCalendarDay(opening.start) : undefined;
   const normalized: CanonicalParallelComponent[] = [];
   for (const item of members) {
     const schedule = item.clause.schedule;

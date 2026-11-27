@@ -389,23 +389,27 @@ export function formatCourseChoices<T>(
   const groups = new Map<string, Map<string, RenderedMember[]>>();
   let displayedSharedGroups: Set<string> | undefined;
   for (const member of members) {
-    const sharedGroup = sharedGroupOf?.(member);
-    const sharedCountAlreadyDisplayed = sharedGroup !== undefined && displayedSharedGroups?.has(sharedGroup) === true;
-    const text = render(member, sharedCountAlreadyDisplayed).trim(),
-      choice = choiceOf(member);
-    if (text && sharedGroup !== undefined) (displayedSharedGroups ??= new Set()).add(sharedGroup);
-    if (!choice) {
-      if (text) slots.push({ text, sharedGroup });
-      continue;
+    const sharedGroup = sharedGroupOf?.(member), choice = choiceOf(member);
+    let branch: RenderedMember[] | undefined;
+    if (choice) {
+      let branches = groups.get(choice.groupId);
+      if (!branches) {
+        groups.set(choice.groupId, (branches = new Map()));
+        slots.push({ group: choice.groupId });
+      }
+      branch = branches.get(choice.branchId);
+      if (!branch) branches.set(choice.branchId, (branch = []));
     }
-    let branches = groups.get(choice.groupId);
-    if (!branches) {
-      groups.set(choice.groupId, (branches = new Map()));
-      slots.push({ group: choice.groupId });
+    const sharedCountAlreadyDisplayed = sharedGroup !== undefined && (branch
+      ? branch.some(item => item.sharedGroup === sharedGroup)
+      : displayedSharedGroups?.has(sharedGroup) === true);
+    const text = render(member, sharedCountAlreadyDisplayed).trim();
+    if (branch) {
+      if (text) branch.push({ text: text.replace(/[.!?]+$/u, ""), sharedGroup });
+    } else if (text) {
+      slots.push({ text, sharedGroup });
+      if (sharedGroup !== undefined) (displayedSharedGroups ??= new Set()).add(sharedGroup);
     }
-    let branch = branches.get(choice.branchId);
-    if (!branch) branches.set(choice.branchId, (branch = []));
-    if (text) branch.push({ text: text.replace(/[.!?]+$/u, ""), sharedGroup });
   }
   const output: RenderedMember[] = [];
   for (const slot of slots) {
@@ -488,7 +492,10 @@ function previewCourseWindows(
     // A choice can remove its own stage, but never an authored empty pause.
     if (selected && !members.length && step.administrations.length > 0) continue;
     if (step.start || step.end) hasTimedStages = true;
-    const datedStart = !step.start && included > 0 && members.some(administrationHasDatedStart);
+    // A selectable member has the same opening after its choice is resolved.
+    // Any such opening can shorten a nominal course-wide no-dose window.
+    const datedStart = !step.start && included > 0 && members.some(member =>
+      administrationHasDatedStart(member.choice ? { ...member, choice: undefined } : member));
     if (datedStart) {
       // A calendar replacement can precede the nominal relative end. Without
       // an order date, preview cannot state that nominal end as the actual cut.

@@ -1441,6 +1441,9 @@ function partitionConditionTargetStates(
     if (schedule.frequency === total && schedule.period === 1 && schedule.periodUnit === 'd') {
       schedule.frequency = total - count;
       selectedSchedule.frequency = count;
+      // The daughters own their selected cadence, not the complete source code.
+      delete schedule.timingCode;
+      delete selectedSchedule.timingCode;
     }
     if (index === donorIndex) {
       const clinical = state.primaryClause.clinicalAdjuncts;

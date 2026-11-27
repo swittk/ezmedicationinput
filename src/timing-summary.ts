@@ -52,6 +52,14 @@ export function preferredTimingCoding<T extends { system?: string; code?: string
   return systemless ?? preview ?? fallback;
 }
 
+/** Display-only coding is authored text, never an executable cadence. */
+export function codeLessTimingDisplay(timing: { code?: { coding?: readonly { code?: string; display?: string }[] } } | undefined): string | undefined {
+  for (const coding of timing?.code?.coding ?? []) {
+    if (!coding.code && coding.display !== undefined) return coding.display;
+  }
+  return undefined;
+}
+
 /** Preview shorthand does not change execution's standard-code preference. */
 export function preferredPreviewTimingCoding<T extends { system?: string; code?: string }>(
   timing: { code?: { coding?: readonly T[] } }

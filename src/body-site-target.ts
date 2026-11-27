@@ -45,8 +45,16 @@ const BODY_SITE_REFINEMENTS: Readonly<Record<string, { broader: string; laterali
   "723608007": { broader: "1797002", lateralized: true }, // Left anterior naris -> naris.
   "723609004": { broader: "1797002", lateralized: true }, // Right anterior naris -> naris.
   "244506005": { broader: "1797002" }, // Anterior nares -> naris.
+  "1797002": { broader: "181195007" }, // Naris -> entire nose.
   "68426009": { broader: "181195007" }, // Nasal septum -> entire nose.
 };
+
+function refinesBodySite(code: string, broader: string): boolean {
+  for (let parent = BODY_SITE_REFINEMENTS[code]; parent; parent = BODY_SITE_REFINEMENTS[parent.broader]) {
+    if (parent.broader === broader) return true;
+  }
+  return false;
+}
 
 /** Compare exact stock site labels only. A lateralized label can refine its
  * registered unqualified anatomy; a different code alone is not a conflict. */
@@ -57,7 +65,7 @@ export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirC
       (textCode.system ?? SNOMED_SYSTEM) !== (coding.system ?? SNOMED_SYSTEM)) return false;
   const textRefinement = BODY_SITE_REFINEMENTS[textCode.code];
   const codedRefinement = BODY_SITE_REFINEMENTS[coding.code];
-  if (textRefinement?.broader === coding.code) return false;
+  if (refinesBodySite(textCode.code, coding.code)) return false;
   if (textRefinement && codedRefinement && textRefinement.broader === codedRefinement.broader) {
     if (!codedRefinement.lateralized) return false;
     // A paired refinement can agree with the registered paired broader site.
@@ -70,7 +78,7 @@ export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirC
   const unqualified = canonical?.replace(/^(?:left|right|both) /u, "");
   if (unqualified && unqualified !== canonical) {
     const baseCode = DEFAULT_BODY_SITE_SNOMED[unqualified]?.coding;
-    if (baseCode?.code && (baseCode.code === coding.code || BODY_SITE_REFINEMENTS[baseCode.code]?.broader === coding.code ||
+    if (baseCode?.code && (baseCode.code === coding.code || refinesBodySite(baseCode.code, coding.code) ||
         !codedRefinement?.lateralized && baseCode.code === codedRefinement?.broader) &&
         (baseCode.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM)) return false;
   }

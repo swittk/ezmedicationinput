@@ -1485,9 +1485,11 @@ function fromFhirDosageInternal(
     : undefined;
   const nativeStage = nativeCourse?.stages.find(stage => stage.administrations.length);
   const native = nativeStage?.administrations[0];
-  const nativeDisplayCourse: CanonicalCourse | undefined = native && nativeCourse?.safety ? {
-    kind: "course", safety: nativeCourse.safety,
-    stages: [{ administrations: [native], safety: nativeStage?.safety }],
+  const nativeDisplayCourse: CanonicalCourse | undefined = native &&
+    (nativeCourse?.safety || nativeStage?.count !== undefined || nativeStage?.countUnresolved) ? {
+    kind: "course", safety: nativeCourse?.safety,
+    stages: [{ administrations: [native], safety: nativeStage?.safety,
+      count: nativeStage?.count, countUnresolved: nativeStage?.countUnresolved }],
   } : undefined;
   if (unverified && native?.provenance) native.provenance.sourceTextVerified = false;
   if (unverified && nativeCourse && !native)

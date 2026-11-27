@@ -583,6 +583,8 @@ export function applyAdministrationDurationSemantics(
     schedule.administrationDuration = schedule.duration;
     schedule.administrationDurationMax = schedule.durationMax;
     schedule.administrationDurationUnit = schedule.durationUnit;
+    schedule.administrationDurationComparator = schedule.durationComparator;
+    delete schedule.durationComparator;
     delete schedule.duration;
     delete schedule.durationMax;
     delete schedule.durationUnit;

@@ -328,6 +328,26 @@ export function administrationHasDatedClockStart(a: CanonicalAdministration): bo
   return Boolean(a.schedule?.recurrence?.clocks?.length && administrationHasDatedStart(a));
 }
 
+/** The earliest successor date owns any calendar-only cutoff. A clock on that
+ * opening leaves its exact cut to execution; a later date-only member cannot
+ * erase it. A date-only member on the same day opens first, at midnight. */
+export function earliestCalendarOpening(administrations: readonly CanonicalAdministration[]):
+  { start: string; clocked: boolean } | undefined {
+  let opening: { start: string; clocked: boolean } | undefined;
+  for (const administration of administrations) {
+    const timing = administration.schedule;
+    let start = timing?.recurrence?.calendarWindow?.start;
+    if (!start) for (const event of timing?.explicitEvents ?? []) {
+      if (start === undefined || event < start) start = event;
+    }
+    if (!start) continue;
+    const clocked = administrationHasDatedClockStart(administration);
+    if (!opening || start < opening.start) opening = { start, clocked };
+    else if (start === opening.start && !clocked) opening.clocked = false;
+  }
+  return opening;
+}
+
 /** Intersect usable scoped maxima in the administration's quantity unit.
  * Incomplete or incomparable retained constraints do not erase another
  * known maximum. `multiple` records constraints still requiring evaluation. */

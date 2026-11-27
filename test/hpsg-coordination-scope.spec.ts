@@ -3142,6 +3142,7 @@ describe("registered withholding calendar and maximum constituents", () => {
           scope: "period", amount: expect.objectContaining({ value: 0.5, unit: "mL" }),
           period: expect.objectContaining({ value: 1 })
         })]));
+        expect(member.limits?.[0].period?.code ?? member.limits?.[0].period?.unit).toBe("d");
         expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d" }))
           .toMatchObject({ totalUnits: 0.5, unit: "mL" });
       }

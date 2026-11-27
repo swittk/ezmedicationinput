@@ -6306,6 +6306,8 @@ describe("current graph realization families", () => {
     expect(reopened.relations).toMatchObject(graph.relations!);
     for (const value of [graph, reopened]) {
       const text = realizeInstructionGraph(value, "en")!;
+      expect(text).toContain("Remove the old patch");
+      expect(text.toLowerCase()).toContain("apply the new patch");
       expect(text.indexOf("Remove the old patch")).toBeLessThan(text.indexOf("skin is clean"));
       expect(text.indexOf("skin is clean")).toBeLessThan(text.toLowerCase().indexOf("apply the new patch"));
       expect(text.match(/skin is clean/gu)).toHaveLength(1);
@@ -6313,6 +6315,10 @@ describe("current graph realization families", () => {
     for (const value of [views.row, views.course, views.native]) {
       const en = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
       const th = formatSig(value, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en.toLowerCase()).toContain("remove the old patch");
+      expect(en.toLowerCase()).toContain("apply the new patch");
+      expect(th).toContain("แผ่นยาเก่า");
+      expect(th).toContain("แผ่นยาใหม่");
       expect(en.toLowerCase().indexOf("remove the old patch")).toBeLessThan(en.toLowerCase().indexOf("apply the new patch"));
       expect(th.indexOf("แผ่นยาเก่า")).toBeLessThan(th.indexOf("แผ่นยาใหม่"));
     }
