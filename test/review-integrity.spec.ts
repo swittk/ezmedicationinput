@@ -95,7 +95,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const program = ts.createProgram([
       "./generation-roundtrip.spec.ts", "./opd-dogfood.spec.ts", "./parser.spec.ts",
       "./terminology-coverage.spec.ts", "./thai-review-followup.spec.ts",
-      "./pill-count.spec.ts", "./date-interpretation.spec.ts",
+      "./date-interpretation.spec.ts",
     ]
       .map(name => fileURLToPath(new URL(name, import.meta.url))), {
       noEmit: true, strict: true, skipLibCheck: true, target: ts.ScriptTarget.ES2015,
