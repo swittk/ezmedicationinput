@@ -16382,3 +16382,17 @@ beside authored directions. FHIR projections retain nested quantity annotations,
 primitive Expression metadata, phase safety ownership and annotation-only spatial
 concepts. Clinical and wire-format assertions cover complete current facts and
 unknown annotations without introducing historical reconciliation.
+
+
+## 2026-11-27 — Conditional course admission and warning scope
+
+Lazy course opportunities retain their original clinical predicate for the shared
+chronological admission decision. Date-specific evaluation precedes count and
+period limits, and an entirely withheld course retains the existing bounded
+search. Recorded administrations keep their established history precedence.
+
+Safety instruction composition uses selected typed action membership to replace
+its subordinate warnings with the complete conditional instruction. Native and
+fresh FHIR previews project that scope consistently while preserving independent
+advice and annotations. Shared schedule wording remains within the private native
+locale provider, preserving the existing public provider contract.
