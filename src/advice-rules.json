@@ -612,9 +612,25 @@
           {
             "frame": {
               "predicateLemmas": [
-                "avoid",
+                "avoid"
+              ],
+              "polarity": "affirm",
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "alcohol"
+                  ],
+                  "role": "substance"
+                }
+              ]
+            }
+          },
+          {
+            "frame": {
+              "predicateLemmas": [
                 "drink"
               ],
+              "polarity": "negate",
               "argConcepts": [
                 {
                   "conceptIds": [
@@ -878,11 +894,18 @@
             }
           },
           {
-            "argConcept": {
-              "conceptIds": [
-                "alcohol"
+            "frame": {
+              "predicateLemmas": [
+                "avoid"
               ],
-              "role": "substance"
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "alcohol"
+                  ],
+                  "role": "substance"
+                }
+              ]
             }
           }
         ]

@@ -5534,3 +5534,71 @@ describe("whole-swallow coding retains its declared clinical facts", () => {
     });
   }
 });
+
+
+describe("alcohol advice action and polarity in current projections", () => {
+  it.each([
+    { source: "Avoid alcohol", avoidance: true },
+    { source: "No alcohol", avoidance: true },
+    { source: "Do not drink alcohol", avoidance: true },
+    { source: "Do not take with alcohol", avoidance: true },
+    { source: "Drink alcohol", avoidance: false },
+    { source: "Take with alcohol", avoidance: false }
+  ])("preserves authored alcohol polarity in standard rows and previews: $source", ({ source, avoidance }) => {
+    const parsed = parsePublicSig(source), parsedBefore = JSON.stringify(parsed);
+    const outputs = [parsed.fhir, parsed.fhirNext.step!.flatMap(step => step.component)];
+    for (const rows of outputs) {
+      const advice = rows.flatMap(row => row.additionalInstruction ?? []);
+      const selected = advice.filter(row => row.coding?.some(coding => coding.code === "419822006"));
+      expect(selected).toHaveLength(avoidance ? 1 : 0);
+      if (avoidance) expect(selected[0].text).toBe("Avoid alcoholic drinks");
+      expect(advice.some(row => row.coding?.some(coding => coding.code === "418914006"))).toBe(false);
+    }
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en.toLowerCase()).toContain("alcohol");
+      expect(th).toContain("แอลกอฮอล์");
+      if (avoidance) {
+        expect(en).toMatch(/avoid alcohol|do not drink alcohol/iu);
+        expect(th).toMatch(/งด|หลีกเลี่ยง|ห้าม/u);
+      } else {
+        expect(en).not.toMatch(/avoid alcohol|do not drink alcohol/iu);
+        expect(th).not.toMatch(/งด|หลีกเลี่ยง|ห้าม/u);
+      }
+      if (source === "Drink alcohol") {
+        expect(en).toBe("Drink alcohol.");
+        expect(th).toBe("ดื่มแอลกอฮอล์.");
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+
+  it.each(["take with alcohol", "mix with alcohol"])("does not invent avoidance beside the drowsiness warning: %s", ending => {
+    const source = `May cause drowsiness; do not drive if affected; ${ending}`;
+    const parsed = parsePublicSig(source), parsedBefore = JSON.stringify(parsed);
+    for (const rows of [parsed.fhir, parsed.fhirNext.step!.flatMap(step => step.component)]) {
+      const codes = rows.flatMap(row => row.additionalInstruction?.flatMap(advice =>
+        advice.coding?.map(coding => coding.code) ?? []) ?? []);
+      expect(codes).not.toContain("418914006");
+      expect(codes).not.toContain("419822006");
+    }
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en.toLowerCase()).toContain("drowsiness");
+      expect(en.toLowerCase()).toContain(ending);
+      expect(en).not.toMatch(/avoid alcohol/iu);
+      expect(th).toContain("ง่วงซึม");
+      expect(th).toContain("แอลกอฮอล์");
+      expect(th).not.toMatch(/งด|หลีกเลี่ยง/u);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+});

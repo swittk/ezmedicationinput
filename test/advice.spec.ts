@@ -5,6 +5,7 @@ import {
   buildAdditionalInstructionFramesFromCoding,
   __test__ as adviceTest,
   findAdditionalInstructionDefinitionByCoding,
+  matchComposedAdviceCodings,
   parseAdditionalInstructions,
   realizeAdviceFramesText
 } from "../src/advice";
@@ -446,4 +447,70 @@ describe("additional instruction rule inventory", () => {
     expect(realizeAdviceFramesText([frame], "th")).toBe("หลีกเลี่ยงตา, ปาก และ ผิวหนัง");
   });
 
+});
+
+
+describe("alcohol advice action and polarity proof", () => {
+  it.each([
+    { source: "Avoid alcohol", lemma: "avoid", negative: false, avoidance: true },
+    { source: "No alcohol", lemma: "drink", negative: true, avoidance: true },
+    { source: "Do not drink alcohol", lemma: "drink", negative: true, avoidance: true },
+    { source: "Do not take with alcohol", lemma: "take", negative: true, avoidance: true },
+    { source: "Drink alcohol", lemma: "drink", negative: false, avoidance: false },
+    { source: "Take with alcohol", lemma: "take", negative: false, avoidance: false }
+  ])("requires actual avoidance meaning for $source", ({ source, lemma, negative, avoidance }) => {
+    const rows = parseAdditionalInstructions(source, { start: 0, end: source.length });
+    const frames = rows.flatMap(row => row.frames);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].predicate.lemma).toBe(lemma);
+    expect(frames[0].polarity ?? AdvicePolarity.Affirm)
+      .toBe(negative ? AdvicePolarity.Negate : AdvicePolarity.Affirm);
+    expect(frames[0].args).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: AdviceArgumentRole.Substance, conceptId: "alcohol" })
+    ]));
+    expect(rows.some(row => row.coding?.code === "419822006")).toBe(avoidance);
+    expect(matchComposedAdviceCodings(frames).some(definition => definition.coding?.code === "419822006"))
+      .toBe(avoidance);
+  });
+
+  it.each([
+    { ending: "avoid alcohol", lemma: "avoid", compound: true },
+    { ending: "take with alcohol", lemma: "take", compound: false },
+    { ending: "mix with alcohol", lemma: "mix", compound: false }
+  ])("requires an Avoid owner in the drowsiness compound: $ending", ({ ending, lemma, compound }) => {
+    const source = `May cause drowsiness; do not drive if affected; ${ending}`;
+    const frames = parseAdditionalInstructions(source, { start: 0, end: source.length }).flatMap(row => row.frames);
+    expect(frames.map(frame => frame.predicate.lemma)).toEqual(["cause", "drive", lemma]);
+    expect(frames[0]).toMatchObject({ modality: AdviceModality.May, args: [
+      expect.objectContaining({ conceptId: "drowsiness" })
+    ] });
+    expect(frames[1]).toMatchObject({ polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
+      args: [expect.objectContaining({ text: "affected" })] });
+    expect(frames[2].args).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: AdviceArgumentRole.Substance, conceptId: "alcohol" })
+    ]));
+    const before = JSON.stringify(frames);
+    const codes = matchComposedAdviceCodings(frames).map(definition => definition.coding?.code);
+    expect(codes).toContain("418954008");
+    expect(codes.includes("418914006")).toBe(compound);
+    expect(JSON.stringify(frames)).toBe(before);
+  });
+
+  it.each(["419822006", "418914006"])("keeps the explicit %s template unchanged", code => {
+    const frames = buildAdditionalInstructionFramesFromCoding(SNOMED_SYSTEM, code)!;
+    expect(frames.map(frame => frame.predicate.lemma))
+      .toEqual(code === "419822006" ? ["avoid"] : ["cause", "drive", "avoid"]);
+    const avoidance = frames[frames.length - 1];
+    expect(avoidance.polarity ?? AdvicePolarity.Affirm).toBe(AdvicePolarity.Affirm);
+    expect(avoidance.args).toEqual([expect.objectContaining({
+      role: AdviceArgumentRole.Substance, text: "alcohol", conceptId: "alcohol"
+    })]);
+    if (code === "418914006") {
+      expect(frames[0]).toMatchObject({ modality: AdviceModality.May,
+        args: [expect.objectContaining({ conceptId: "drowsiness" })] });
+      expect(frames[1]).toMatchObject({ polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
+        args: [expect.objectContaining({ role: AdviceArgumentRole.Free, text: "affected" })] });
+    }
+    expect(matchComposedAdviceCodings(frames).map(definition => definition.coding?.code)).toContain(code);
+  });
 });
