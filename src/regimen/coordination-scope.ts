@@ -6,6 +6,7 @@ import {
 } from '../hpsg/constructions';
 import { grammaticalTrailingInstructionScope, hasAdministrationAdjunct } from './grammar';
 import { findUnparsedTokenGroups } from '../parser';
+import { buildInstructionCoverage } from '../instruction-graph';
 import { ParserState } from '../parser-state';
 import { AdviceArgumentRole, AdvicePolarity, FhirDayOfWeek, FhirPeriodUnit } from '../types';
 import { MEAL_TIMING_BY_RELATION } from '../hpsg/lexical-classes';
@@ -741,6 +742,70 @@ function cloneInstruction(
   };
 }
 
+/** Keep the selected action's existing scope when its instruction is inherited. */
+function inheritInstructionRelations(
+  target: CanonicalSigClause,
+  donor: NonNullable<CanonicalSigClause["instructionGraph"]>,
+  inherited: readonly CanonicalAdditionalInstructionExpr[],
+  offset: number,
+  sourceText: string
+): void {
+  if (!donor.relations?.length) return;
+  const selected = new Map<number, AdviceFrame>();
+  for (const instruction of inherited) {
+    for (const frame of instruction.frames ?? []) {
+      const index = donor.actions.findIndex(action =>
+        action.predicate.lemma === frame.predicate.lemma &&
+        action.span.start + offset === frame.span.start &&
+        action.span.end + offset === frame.span.end
+      );
+      if (index >= 0) selected.set(index, frame);
+    }
+  }
+  const relations = donor.relations.filter(relation =>
+    selected.has(relation.toActionIndex) &&
+    (relation.fromActionIndex === undefined || selected.has(relation.fromActionIndex))
+  );
+  if (!relations.length) return;
+  const graph = target.instructionGraph ?? (target.instructionGraph = {
+    actions: [], sourceText, sourceLocale: donor.sourceLocale, primaryOwnership: {}
+  });
+  // The inherited spans share the recipient's source origin, but may extend
+  // beyond its local dosage segment. Keep the complete authored source view.
+  graph.sourceText = sourceText;
+  // This source also contains the donor's administration, not just the
+  // recipient's current dose/timing. Retain it without granting whole replay.
+  target.sourceProjectionVerified = false;
+  const indices = new Map<number, number>();
+  for (const [donorIndex, frame] of selected) {
+    let index = graph.actions.findIndex(action =>
+      action.predicate.lemma === frame.predicate.lemma &&
+      action.span.start === frame.span.start && action.span.end === frame.span.end
+    );
+    if (index < 0) {
+      index = graph.actions.length;
+      const action = cloneAdviceFrame(donor.actions[donorIndex], offset);
+      action.sequenceIndex = index;
+      graph.actions.push(action);
+    }
+    indices.set(donorIndex, index);
+  }
+  const targetRelations = graph.relations ?? (graph.relations = []);
+  for (const relation of relations) {
+    targetRelations.push({
+      ...relation,
+      toActionIndex: indices.get(relation.toActionIndex)!,
+      ...(relation.fromActionIndex !== undefined
+        ? { fromActionIndex: indices.get(relation.fromActionIndex)! } : {}),
+      ...(relation.span ? { span: shiftedRange(relation.span, offset) } : {})
+    });
+  }
+  graph.coverage = {
+    ...graph.coverage,
+    ...buildInstructionCoverage(graph.actions, targetRelations, graph.opaqueSpans ?? [])
+  };
+}
+
 function terminalSemicolon(clause: CanonicalSigClause): CanonicalSourceSpan | undefined {
   let selected: CanonicalSourceSpan | undefined;
   for (const evidence of clause.evidence) {
@@ -1257,6 +1322,8 @@ export function scopeTrailingSharedNegativeInstructions(
       ...(targetClause.additionalInstructions ?? []),
       ...inherited
     ];
+    inheritInstructionRelations(targetClause, donorClause.instructionGraph!, inherited,
+      donorOffset, source.slice(segments[recipientIndex].start));
     if (sharedGuard?.condition) {
       const clinical = targetClause.clinicalAdjuncts ?? (targetClause.clinicalAdjuncts = {});
       composeMedicationCondition(clinical, sharedGuard.condition!, Boolean(sharedGuard.calendarDayCondition &&

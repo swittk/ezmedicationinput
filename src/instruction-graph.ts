@@ -3034,7 +3034,7 @@ function mergedSpanLength(spans: TextRange[]): number {
   return total + end - start;
 }
 
-function buildInstructionCoverage(
+export function buildInstructionCoverage(
   actions: AdviceFrame[],
   relations: CanonicalInstructionRelation[],
   opaqueSpans: CanonicalSourceSpan[]

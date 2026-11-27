@@ -2932,9 +2932,54 @@ describe("quantified withholding target ownership", () => {
         expect(graph!.relations?.some(relation => relation.kind === "if" && relation.toActionIndex === action)).toBe(true);
       }
       const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      if (tail.startsWith(";")) {
+        for (const member of members) {
+          const inheritedGraph = member.syntax?.instructionGraph;
+          expect(inheritedGraph?.actions).toHaveLength(1);
+          expect(inheritedGraph?.actions[0]).toMatchObject({
+            polarity: "negate", predicate: { lemma: "take" }
+          });
+          expect(inheritedGraph?.relations).toContainEqual(expect.objectContaining({
+            kind: "if", toActionIndex: 0, text: "if dizzy,"
+          }));
+          expect(inheritedGraph?.primaryOwnership?.administrationActionIndex).toBeUndefined();
+        }
+        const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+        expect(thai.match(/ถ้าเวียนศีรษะห้ามรับประทาน5 มิลลิลิตร/gu)).toHaveLength(2);
+        expect(thai).not.toContain("ห้ามรับประทาน 5 mL และ 5 mL");
+        const first = { kind: "course" as const, stages: [{ administrations: [members[0]] }] };
+        for (const locale of ["en", "th"]) for (const realizationMode of ["roundtrip", "normalized"] as const) {
+          const single = formatSig(first, "long", { locale, realizationMode });
+          expect(single).toContain(locale === "en" ? "If dizzy, do not take 5 mL" : "ถ้าเวียนศีรษะห้ามรับประทาน5 มิลลิลิตร");
+          expect(single).not.toMatch(/10 (?:mL|มิลลิลิตร)/u);
+        }
+      }
       if (tail.includes(", and")) {
         expect(english).toMatch(/If dizzy, do not take[^;]+; If dizzy, do not take/u);
         expect(english).not.toContain("then do not take");
+      }
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("keeps a shared conditional warning without replaying a sibling's dose", () => {
+    const source = "5 mL at 08:00 and 10 mL at 20:00 daily for 2 days; if dizzy, do not take 5 mL.";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const members = importCanonicalCourse(input).stages[0].administrations;
+      expect(members.map(member => member.amounts?.[0].quantity?.value)).toEqual([5, 10]);
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => false })).toEqual([
+        "2026-12-07T20:00:00+00:00", "2026-12-08T20:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d",
+        evaluateCondition: () => false })).toMatchObject({ totalUnits: 20, unit: "mL" });
+      const first = { kind: "course" as const, stages: [{ administrations: [members[0]] }] };
+      for (const locale of ["en", "th"]) for (const realizationMode of ["roundtrip", "normalized"] as const) {
+        const rendered = formatSig(first, "long", { locale, realizationMode });
+        expect(rendered).toContain(locale === "en" ? "If dizzy, do not take 5 mL" : "ถ้าเวียนศีรษะห้ามรับประทาน5 มิลลิลิตร");
+        expect(rendered).not.toMatch(/10 (?:mL|มิลลิลิตร)/u);
       }
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
