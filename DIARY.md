@@ -16478,3 +16478,32 @@ month. Execution dates for the supported monthly ordinal schedules are unchanged
 Thai previews preserve a word boundary before an English condition fallback, including conditions with a mixed-language opaque body. Thai condition wording retains its existing joining.
 
 Instruction parsing checks the existing following-site boundary before evaluating a style prefix whose result cannot otherwise end the instruction. Final instruction parsing and selected clinical meaning remain unchanged.
+
+## 2026-11-27 — Calendar origins and instruction ownership
+
+Clocked calendar successors retain their resolved opening, including as-needed
+phases, so earlier same-day administrations remain available. Daily clock defaults
+apply only to repeats without authored clocks, events, timing codes or windows.
+Whole-day elapsed intervals keep a stable grid inside their clock window. A counted
+loading dose completes before its finite recurring successor; that successor's
+full duration begins at its first eligible clock, independently of the nominal
+cadence origin used for signed offsets.
+
+Instruction Time arguments retain their selected relation through composition and
+localized realization. Mixing, object-duration and material instructions keep their
+separate arguments. Current FHIR conversion retains independent component directions,
+patient-instruction annotations and sparse sequence labels. Compatible per-weight
+doses and limits use the existing concentration conversion without rewriting their
+authored units.
+
+Both language realizers consume the same selected instruction occurrences, relations
+and remaining source fragments. Repeated holds retain their order and multiplicity;
+independent advice cannot supply a medication's missing condition. Primary flow uses
+the actual emitted action boundary, and sentence adjacency beside a warning does not
+invent a temporal sequence. Locale providers retain ownership of selected wording
+and the existing roundtrip labels.
+
+Current uncoded advice carries its selected frame separately from complete source
+coverage, keeping fresh projections stable. Coding and argument annotations remain
+at their original wire owners without changing clinical occurrence correspondence.
+Supplied conflicting facts and independently authored advice remain distinct.
