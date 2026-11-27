@@ -4279,6 +4279,38 @@ describe("clinical guard complement ownership", () => {
 });
 
 describe("selected instruction refinement at HPSG unification", () => {
+  it.each([
+    { text: "not crush or chew", heads: ["crush", "chew"], spans: [{ start: 24, end: 33 }, { start: 37, end: 41 }] },
+    { text: "not chew or crush", heads: ["chew", "crush"], spans: [{ start: 24, end: 32 }, { start: 36, end: 41 }] }
+  ])("retains each coordinated lexical action occurrence: $text", ({ text, heads, spans }) => {
+    const rows = parseAdditionalInstructions(text, { start: 24, end: 24 + text.length });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].frames.map(frame => frame.predicate.lemma)).toEqual(heads);
+    expect(rows[0].frames.map(frame => frame.span)).toEqual(spans);
+    for (const frame of rows[0].frames) {
+      expect(frame.force).toBe(AdviceForce.Warning);
+      expect(frame.polarity).toBe(AdvicePolarity.Negate);
+      expect(frame.args).toEqual([]);
+      expect(frame.sourceText).toBe(text.slice(frame.span.start - 24, frame.span.end - 24));
+    }
+  });
+
+  it("retains shared complements and polarity when coordinated heads receive source spans", () => {
+    const source = "do not crush or chew tablets";
+    const frames = parseAdditionalInstructions(source, { start: 0, end: source.length })[0].frames;
+    expect(frames).toHaveLength(2);
+    expect(frames.map(frame => frame.polarity)).toEqual([AdvicePolarity.Negate, AdvicePolarity.Negate]);
+    expect(frames.map(frame => frame.args)).toEqual([
+      [{ role: AdviceArgumentRole.Object, text: "tablets", normalized: "tablet",
+        conceptId: "medication-tablet", i18n: { en: "tablet", th: "ยาเม็ด" } }],
+      [{ role: AdviceArgumentRole.Object, text: "tablets", normalized: "tablet",
+        conceptId: "medication-tablet", i18n: { en: "tablet", th: "ยาเม็ด" } }]
+    ]);
+    expect(frames.map(frame => frame.span)).toEqual([
+      { start: 0, end: source.length }, { start: source.indexOf("chew"), end: source.length }
+    ]);
+  });
+
   const standing = "Take 5 mL at 08:00 and 10 mL at 20:00 daily for 2 days. ";
   const merge = (left: HpsgInstructionFeature, right: HpsgInstructionFeature) => unifySynsem(
     { head: {}, valence: { instructions: [left] }, cont: {} },

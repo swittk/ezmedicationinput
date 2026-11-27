@@ -1,6 +1,7 @@
 import adviceTerminologySource from "./advice-terminology.json";
 import adviceRulesSource from "./advice-rules.json";
 import { lexInput } from "./lexer/lex";
+import type { LexToken } from "./lexer/token-types";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import {
   AdditionalInstructionDefinition,
@@ -1504,8 +1505,9 @@ function splitInstructionSegments(sourceText: string, baseRange: TextRange): Adv
   ];
 }
 
-function splitSequenceSegments(sourceText: string, baseRange: TextRange): AdviceSegment[] {
-  const tokens = lexInput(sourceText);
+function splitSequenceSegments(
+  sourceText: string, baseRange: TextRange, tokens: readonly LexToken[]
+): AdviceSegment[] {
   if (!tokens.length) {
     return [];
   }
@@ -2013,7 +2015,9 @@ function tryParseClauseInstruction(
   context: AdviceParseContext,
   sequenceIndex: number,
   sequenceCount: number,
-  words: string[]
+  words: string[],
+  tokens: readonly LexToken[],
+  tokenOffset: number
 ): AdviceFrame[] | undefined {
   if (!words.length) {
     return undefined;
@@ -2064,12 +2068,32 @@ function tryParseClauseInstruction(
     return undefined;
   }
 
+  // The coordinated heads were already recognized above. Reuse the sequence
+  // lexer's source offsets rather than assigning every head the whole clause.
+  let heads: LexToken[] | undefined;
+  if (verbEntries.length > 1) {
+    heads = [];
+    for (const token of tokens) {
+      if (tokenOffset + token.sourceStart < span.start || tokenOffset + token.sourceEnd > span.end) continue;
+      if (findVerbLexeme(token.original) !== verbEntries[heads.length]) continue;
+      heads.push(token);
+      if (heads.length === verbEntries.length) break;
+    }
+    if (heads.length !== verbEntries.length) heads = undefined;
+  }
   const frames: AdviceFrame[] = [];
-  for (const verbEntry of verbEntries) {
+  for (let index = 0; index < verbEntries.length; index += 1) {
+    const verbEntry = verbEntries[index];
+    const head = heads?.[index];
+    const actionSpan = head ? {
+      start: index === 0 ? span.start : tokenOffset + head.sourceStart,
+      // Shared complements remain in every head's selected argument scope.
+      end: args.length || relation ? span.end : tokenOffset + head.sourceEnd
+    } : span;
     frames.push(
       createFrame(
-        sourceText,
-        span,
+        head ? sourceText.slice(actionSpan.start - span.start, actionSpan.end - span.start) : sourceText,
+        actionSpan,
         deriveClauseForce(
           sequenceCount,
           context,
@@ -2118,7 +2142,8 @@ function parseSequenceFrames(
   span: TextRange,
   context: AdviceParseContext
 ): AdviceFrame[] {
-  const sequenceSegments = splitSequenceSegments(sourceText, span);
+  const tokens = lexInput(sourceText);
+  const sequenceSegments = splitSequenceSegments(sourceText, span, tokens);
   if (!sequenceSegments.length) {
     return [];
   }
@@ -2142,7 +2167,7 @@ function parseSequenceFrames(
         sequenceSegments.length,
         words
       ) ??
-      tryParseClauseInstruction(segment.text, segment.range, context, index, sequenceSegments.length, words);
+      tryParseClauseInstruction(segment.text, segment.range, context, index, sequenceSegments.length, words, tokens, span.start);
     if (!parsed) {
       return [];
     }
