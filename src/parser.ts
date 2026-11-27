@@ -346,24 +346,18 @@ function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClau
     const wordingRange = range ?? warning.span;
     const composedSource = warning.polaritySource === "shared" || warning.args.some(argument =>
       argument.span && (argument.span.start < wordingRange.start || argument.span.end > wordingRange.end));
-    if (previous) {
-      const frame = previous.frames![0];
-      const richerModalSource = warning.modality !== undefined &&
-        (frame.modality !== warning.modality ||
-          warning.span.start < frame.span.start || warning.span.end > frame.span.end ||
-          !range || range.start !== warning.span.start || range.end !== warning.span.end);
-      if (!composedSource && !richerModalSource) {
-        if (frame !== warning) instructions![rowIndex] = { ...previous, frames: [warning] };
-        continue;
-      }
+    const realizeSelected = composedSource || warning.modality !== undefined;
+    if (previous && !realizeSelected) {
+      if (previous.frames![0] !== warning) instructions![rowIndex] = { ...previous, frames: [warning] };
+      continue;
     }
-    // A daughter source cannot express inherited polarity or arguments owned
-    // outside that source extent; realize the complete selected composition.
-    const text = composedSource
+    // Selected modality and inherited facts own the native row wording. Use
+    // that realization directly, without comparing it to preliminary prose.
+    const text = realizeSelected
       ? realizeInstructionAction(warning, "en")
       : sourceText.charAt(0).toUpperCase() + sourceText.slice(1);
     if (!text.trim()) continue;
-    const translated = composedSource ? realizeInstructionAction(warning, "th") : undefined;
+    const translated = realizeSelected ? realizeInstructionAction(warning, "th") : undefined;
     const selected: CanonicalAdditionalInstructionExpr = previous
       ? { ...previous, text, frames: [warning] } : { text, frames: [warning] };
     if (translated) selected.i18n = { ...previous?.i18n, th: translated };
