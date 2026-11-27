@@ -16,7 +16,7 @@
     {
       "code": "cause",
       "semanticClass": "effect",
-      "display": "Causes",
+      "display": "Cause",
       "aliases": [
         "cause",
         "causes"
@@ -27,7 +27,12 @@
       "adviceClauseHead": true,
       "defaultForce": "warning",
       "argumentParser": "default",
-      "realizer": "default"
+      "realizer": "default",
+      "realizerConfig": {
+        "locales": {
+          "en": { "finiteUnmodalLabel": "Causes" }
+        }
+      }
     },
     {
       "code": "protect-from-light",

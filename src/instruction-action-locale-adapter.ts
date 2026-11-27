@@ -17,6 +17,7 @@ import {
   AdviceArgumentRole,
   AdviceFrame,
   AdviceModality,
+  AdvicePolarity,
   AdviceRelation,
   MedicationInstructionActionDefinition,
   MedicationInstructionActionRealizer
@@ -717,6 +718,11 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
   directTime: englishDirectTime,
   withAuthoredDirections: ENGLISH_COURSE.withAuthoredDirections,
   selectLexicalRealization(input) {
+    const finiteLabel = input.frame.modality === undefined && input.frame.polarity !== AdvicePolarity.Negate &&
+      localizedValue(input.frame.predicate.i18n, input.locale) === undefined
+      ? medicationInstructionActionLocaleRealizerConfig(input.realizerConfig, input.locale)?.finiteUnmodalLabel
+      : undefined;
+    if (finiteLabel) input = { ...input, label: finiteLabel };
     if (!input.time || (input.frame.predicate.realizer ?? input.definition?.realizer) !== "amount-material-destination")
       return input;
     const relation = input.timeRelation;

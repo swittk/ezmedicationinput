@@ -1185,13 +1185,36 @@ function withoutNominalArticle(text: string): string {
     ? text.slice(end + 1).trim() : text;
 }
 
+function symptomAdviceArgument(normalized: string, sourceText: string): AdviceArgument | undefined {
+  const symptom = resolveSymptomDefinition(normalized);
+  if (symptom) {
+    const coding = symptom.coding ? { ...symptom.coding } : undefined;
+    return {
+      role: AdviceArgumentRole.Object,
+      text: sourceText,
+      normalized: symptom.text?.toLowerCase() ?? normalized,
+      conceptId: coding?.code ?? symptom.text ?? normalized,
+      coding,
+      codings: coding ? [coding] : undefined,
+      i18n: {
+        en: symptom.text ? symptom.text.charAt(0).toLowerCase() + symptom.text.slice(1) : sourceText,
+        ...(symptom.i18n ?? {})
+      }
+    };
+  }
+  return undefined;
+}
+
 /** Exact advice nominals share their existing lexical identity with action arguments. */
 export function resolveAdviceNominalArgument(surface: string, sourceText = surface): AdviceArgument | undefined {
   const normalized = normalizeAdditionalInstructionKey(surface);
   const concept = findExactConcept(withoutNominalArticle(normalized));
-  if (!concept || STYLE_SEMANTIC_CLASSES.has(concept.semanticClass ?? "")) return undefined;
-  return createArgument(mapSemanticClassToRole(concept.semanticClass),
-    sourceText, normalized, concept.conceptId);
+  if (concept) {
+    if (STYLE_SEMANTIC_CLASSES.has(concept.semanticClass ?? "")) return undefined;
+    return createArgument(mapSemanticClassToRole(concept.semanticClass),
+      sourceText, normalized, concept.conceptId);
+  }
+  return symptomAdviceArgument(normalized, sourceText);
 }
 
 function bodySiteAdviceArgument(text: string): AdviceArgument | undefined {
@@ -1273,22 +1296,8 @@ function classifyArgument(text: string, completeNominal = false): AdviceArgument
   const site = bodySiteAdviceArgument(cleaned);
   if (site) return site;
 
-  const symptom = resolveSymptomDefinition(normalized);
-  if (symptom) {
-    const coding = symptom.coding ? { ...symptom.coding } : undefined;
-    return {
-      role: AdviceArgumentRole.Object,
-      text: cleaned,
-      normalized: symptom.text?.toLowerCase() ?? normalized,
-      conceptId: coding?.code ?? symptom.text ?? normalized,
-      coding,
-      codings: coding ? [coding] : undefined,
-      i18n: {
-        en: symptom.text ? symptom.text.charAt(0).toLowerCase() + symptom.text.slice(1) : cleaned,
-        ...(symptom.i18n ?? {})
-      }
-    };
-  }
+  const symptom = symptomAdviceArgument(normalized, cleaned);
+  if (symptom) return symptom;
 
   const parts = normalized.split(" ");
   if (parts.length >= 2 && (!completeNominal || parts.length === 2)) {

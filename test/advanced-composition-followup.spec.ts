@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  AdviceArgumentRole, AdviceRelation, EventTiming, formatSig, fromFhirDosage,
+  AdviceArgumentRole, AdviceForce, AdviceModality, AdviceRelation, EventTiming, formatSig, fromFhirDosage,
   getDosageCondition, getDosageExcludedWeekdays, nextDueDoses, toDosageDetails, toFhirR5Dosages,
   parseSig as parseProductionSig
 } from "../src/index";
@@ -31,7 +31,8 @@ import { dosageMatchesSavedProjection, withDosageEditProvenance } from "../src/d
 import { registerMedicationLocaleDetector, inferMedicationLocale } from "../src/locale-detection";
 import { registerSigLocalization, resolveSigLocalization, DAY_NAMES_THAI, joinWithAndThai } from "../src/i18n";
 import { formatCanonicalClause, DAY_NAMES, joinWithAnd } from "../src/format";
-import { instructionGraphSourceConflictsWithDose } from "../src/instruction-graph";
+import { instructionGraphSourceConflictsWithDose, realizeInstructionAction } from "../src/instruction-graph";
+import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { ENGLISH_DAY_NAMES } from "../src/locales/course/en";
 import { THAI_DAY_NAMES } from "../src/locales/course/th";
 import { joinLocalizedList } from "../src/utils/text";
@@ -273,7 +274,14 @@ describe("advanced compositional follow-up", () => {
 
     const before = parseSig("dissolve in water before drinking, may cause vomiting");
     const graph = before.meta.canonical.clauses[0]?.instructionGraph;
-    expect(graph?.actions.map((action) => action.predicate.lemma)).toEqual(["dissolve"]);
+    expect(graph?.actions.map((action) => action.predicate.lemma)).toEqual(["dissolve", "cause"]);
+    expect(graph?.actions[1]).toMatchObject({
+      force: AdviceForce.Warning,
+      modality: AdviceModality.May,
+      predicate: { lemma: "cause", semanticClass: "effect" },
+      args: [expect.objectContaining({ role: AdviceArgumentRole.Object, conceptId: "422400008" })]
+    });
+    expect(graph?.relations ?? []).not.toContainEqual(expect.objectContaining({ fromActionIndex: 0, toActionIndex: 1 }));
     expect(graph?.actions[0]).toMatchObject({
       relation: AdviceRelation.In,
       args: expect.arrayContaining([
@@ -303,6 +311,110 @@ describe("advanced compositional follow-up", () => {
       row.coding?.map(coding => coding.code) ?? [])).toContain("417995008");
     expect(before.meta.canonical.clauses[0]?.additionalInstructions?.[0]?.frames?.[0]?.args?.[0]?.coding?.code)
       .toBe("422400008");
+  });
+
+  it("keeps an authored post-primary Then without creating a cross-primary warning edge", () => {
+    const source = "Dissolve in water then drink then may cause vomiting";
+    const parsed = parseProductionSig(source);
+    const native = parsed.meta.canonical.course;
+    const graph = parsed.items[0].meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.actions.map(action => action.predicate.lemma)).toEqual(["dissolve", "cause"]);
+    expect(graph.primaryAdministrationSpan).toEqual({ start: 23, end: 28 });
+    expect(graph.relations ?? []).not.toContainEqual(expect.objectContaining({ fromActionIndex: 0, toActionIndex: 1 }));
+    expect(graph.sourceText).toBe(source);
+    for (const input of [native, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Dissolve in water; then drink the medication; then may cause vomiting.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("ละลายในน้ำ จากนั้นดื่ม จากนั้นอาจทำให้เกิดอาเจียน.");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("uses finite effect wording while retaining the canonical base and selected label", () => {
+    const source = "Take 1 tablet every evening. Causes dizziness.";
+    const parsed = parseProductionSig(source);
+    const clause = parsed.items[0].meta.canonical.clauses[0];
+    const warning = clause.instructionGraph!.actions.find(action => action.predicate.lemma === "cause")!;
+    expect(warning).toMatchObject({ force: AdviceForce.Warning, predicate: { lemma: "cause", display: "Cause" } });
+    expect(warning.modality).toBeUndefined();
+    expect(warning.sourceText).toBe("Causes dizziness");
+    expect(realizeInstructionAction({ ...warning, predicate: {
+      ...warning.predicate, display: "Triggers", realizerConfig: undefined
+    } }, "en")).toBe("Triggers dizziness");
+    expect(realizeInstructionAction({ ...warning, predicate: {
+      ...warning.predicate, i18n: { en: "Triggers" }, realizerConfig: undefined
+    } }, "en")).toBe("Triggers dizziness");
+    for (const input of [parsed.meta.canonical.course, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Take 1 tablet orally daily in the evening. Causes dizziness.");
+      expect(projectCanonicalCourse(importCanonicalCourse(input)).fhir[0].additionalInstruction).toHaveLength(1);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(clause.dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(clause.instructionGraph!.sourceText).toBe(source);
+  });
+
+  it("round-trips an annotated finite label through the generic action locale codec", () => {
+    const finite = { id: "finite-label", url: "finiteUnmodalLabel", valueString: "Produces",
+      _valueString: { id: "finite-wording" } };
+    const unknown = { url: "urn:clinic:locale-note", valueString: "retain" };
+    const wire = [{ url: "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph", extension: [
+      { url: "sourceText", valueString: "Produces dizziness" },
+      { url: "sourceLocale", valueCode: "en" },
+      { url: "action", extension: [
+        { url: "force", valueCode: "warning" },
+        { url: "predicateLemma", valueString: "clinic-effect" },
+        { url: "predicateDisplay", valueString: "Produce" },
+        { url: "semanticClass", valueString: "effect" },
+        { url: "predicateRealizer", valueCode: "default" },
+        { url: "predicateRealizerLocale", extension: [{ url: "locale", valueCode: "en" }, finite, unknown] },
+        { url: "spanStart", valueInteger: 0 }, { url: "spanEnd", valueInteger: 18 },
+        { url: "sourceText", valueString: "Produces dizziness" },
+        { url: "argument", extension: [
+          { url: "role", valueCode: "object" }, { url: "text", valueString: "dizziness" }
+        ] }
+      ] }
+    ] }];
+    const before = JSON.stringify(wire);
+    const graph = parseInstructionGraphExtension(wire)!;
+    expect(graph.actions[0].predicate.realizerConfig?.locales?.en.finiteUnmodalLabel).toBe("Produces");
+    expect(realizeInstructionAction(graph.actions[0], "en")).toBe("Produces dizziness");
+    const projected = buildInstructionGraphExtension(graph)!;
+    const locale = projected.extension!.find(field => field.url === "action")!.extension!
+      .find(field => field.url === "predicateRealizerLocale")!;
+    expect(locale.extension).toContainEqual(finite);
+    expect(locale.extension).toContainEqual(unknown);
+    expect(parseInstructionGraphExtension(JSON.parse(JSON.stringify([projected])))!.actions[0]
+      .predicate.realizerConfig?.locales?.en.finiteUnmodalLabel).toBe("Produces");
+    expect(JSON.stringify(wire)).toBe(before);
+  });
+
+  it("keeps the modal effect separate from preparation and the current oral dose", () => {
+    const source = "Shake bottle then take 5 mL, may cause drowsiness";
+    const parsed = parseProductionSig(source);
+    const clause = parsed.items[0].meta.canonical.clauses[0];
+    const graph = clause.instructionGraph!;
+    const shake = graph.actions.findIndex(action => action.predicate.lemma === "shake");
+    const cause = graph.actions.findIndex(action => action.predicate.lemma === "cause");
+    expect(shake).toBeGreaterThanOrEqual(0);
+    expect(cause).toBeGreaterThanOrEqual(0);
+    expect(graph.relations ?? []).not.toContainEqual(expect.objectContaining({ fromActionIndex: shake, toActionIndex: cause }));
+    expect(clause.dose).toMatchObject({ value: 5, unit: "mL" });
+    for (const input of [parsed.meta.canonical.course, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Shake bottle; then take 5 mL orally. May cause drowsiness.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("เขย่าขวด จากนั้นรับประทานครั้งละ 5 มิลลิลิตร. อาจทำให้ง่วงซึม.");
+      const rows = projectCanonicalCourse(importCanonicalCourse(input)).fhir[0].additionalInstruction!;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].coding).toEqual([expect.objectContaining({ code: "418639000" })]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(graph.sourceText).toBe(source);
   });
 
   it("composes laterality and typed site qualifiers over coded anatomy", () => {

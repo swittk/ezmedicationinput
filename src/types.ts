@@ -1446,6 +1446,8 @@ export interface MedicationInstructionActionContextualSemanticComponentRule {
 }
 
 export interface MedicationInstructionActionLocaleRealizerConfig {
+  /** Finite affirmative wording when no modal supplies the base verb form. */
+  finiteUnmodalLabel?: string;
   fallbackObject?: string;
   suppressActivityConcepts?: string[];
   suppressSiteConcepts?: string[];

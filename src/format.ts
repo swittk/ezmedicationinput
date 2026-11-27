@@ -21,6 +21,8 @@ import { baseLanguageTag, quantityComparatorText } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
 import {
   instructionGraphHasNovelNonWarningContent,
+  isInstructionGraphDisplayWarning,
+  relationFromSourceText,
   instructionGraphPrimaryAdministrationModality,
   instructionGraphPrimarySiteRelation,
   canonicalSiteOwnsPrimaryPhrase,
@@ -54,6 +56,7 @@ import {
 } from "./relation-terminology";
 import {
   AdviceArgumentRole,
+  AdviceForce,
   type AdviceFrame,
   type CanonicalAdditionalInstructionExpr,
   AdvicePolarity,
@@ -1565,7 +1568,7 @@ export function collectGraphInstructionOwnership(
 ) {
   const graph = clause.instructionGraph;
   const actions = graph?.actions ?? [];
-  const graphWarnings = actions.filter((action) => action.polarity === AdvicePolarity.Negate);
+  const graphWarnings = actions.filter(isInstructionGraphDisplayWarning);
   const codedWarningSources: string[] = [];
   const codedWarningSourcesByInstruction: string[][] = [];
   const graphOwnedAdditional: CanonicalAdditionalInstructionExpr[] = [];
@@ -1658,7 +1661,11 @@ export function instructionGraphAdministrationFlow(
     ),
     postFlowsFromAdministration: Boolean(
       !roundTrip && postGraphInstruction && span && firstPost && firstPost.polarity !== AdvicePolarity.Negate &&
-      !/[.!?;]/u.test(source.slice(span.end, firstPost.span.start))
+      !/[.!?;]/u.test(source.slice(span.end, firstPost.span.start)) &&
+      // A warning is independent unless the bounded primary-to-warning gap
+      // supplies an explicit sequence from the existing relation inventory.
+      (!(isInstructionGraphDisplayWarning(firstPost) || firstPost.force === AdviceForce.Caution) ||
+        relationHasSemanticClass(relationFromSourceText(source.slice(span.end, firstPost.span.start)), "sequence"))
     )
   };
 }

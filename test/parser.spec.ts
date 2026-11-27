@@ -3863,6 +3863,8 @@ describe("parseSig core scenarios", () => {
       expect(result.fhir.additionalInstruction?.[0]?.coding?.[0]?.code).toBe("418639000");
       expect(result.meta.normalized.additionalInstructions?.[0]?.coding?.code).toBe("418639000");
       expect(result.meta.leftoverText).toBeUndefined();
+      expect(result.fhir.additionalInstruction).toHaveLength(1);
+      expect(result.meta.canonical.clauses[0]?.patientInstruction).toBeUndefined();
       expect(result.longText).toBe("Take 1 tablet orally as needed. May cause drowsiness.");
     }
   });

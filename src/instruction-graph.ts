@@ -2948,7 +2948,7 @@ function attachDoseToNearestAction(
   best.sourceText = input.slice(best.span.start, best.span.end);
 }
 
-function relationFromSourceText(text: string): AdviceRelation | undefined {
+export function relationFromSourceText(text: string): AdviceRelation | undefined {
   const keys = lexInput(text).map((token) => key(token)).filter(Boolean);
   for (const candidate of keys) {
     const relation = resolveActionRelationSurfaceByGrammarFeature(candidate, "detectInActionGap");
@@ -2963,7 +2963,8 @@ function relationFromSourceText(text: string): AdviceRelation | undefined {
 function buildInstructionRelations(
   input: string,
   actions: AdviceFrame[],
-  opaqueSpans: CanonicalSourceSpan[]
+  opaqueSpans: CanonicalSourceSpan[],
+  primary?: CanonicalInstructionGraph["primaryAdministrationSpan"]
 ): CanonicalInstructionRelation[] {
   const relations: CanonicalInstructionRelation[] = [];
   for (let index = 1; index < actions.length; index += 1) {
@@ -2971,6 +2972,9 @@ function buildInstructionRelations(
     const current = actions[index];
     const gapStart = previous.span.end;
     const gapEnd = current.span.start;
+    // An omitted canonical administration is still an intervening semantic
+    // node; a connector across it cannot directly relate these two actions.
+    if (primary && gapStart < primary.end && primary.start < gapEnd) continue;
     const source = gapEnd > gapStart ? input.slice(gapStart, gapEnd) : "";
     const trimmed = source.trim();
     const explicitRelation = relationFromSourceText(source);
@@ -3392,7 +3396,7 @@ export function refreshInstructionGraphDerivedState(
   const opaqueSpans = graph.opaqueSpans ?? [];
   opaqueSpans.sort((left, right) => left.start - right.start || left.end - right.end);
   graph.opaqueSpans = opaqueSpans.length ? opaqueSpans : undefined;
-  const derived = buildInstructionRelations(graph.sourceText, graph.actions, opaqueSpans);
+  const derived = buildInstructionRelations(graph.sourceText, graph.actions, opaqueSpans, graph.primaryAdministrationSpan);
   const preserved = (graph.relations ?? []).filter((relation) =>
     relationHasGrammarFeature(relation.kind, "conditionScope") && relation.fromActionIndex === undefined
   );
@@ -3542,14 +3546,25 @@ function reconcileComposedAdviceCoding(
     if (!coding?.code || !adviceCodingNeedsComposedScope(coding.system ?? SNOMED_SYSTEM, coding.code)) {
       // The selected modal occurrence now includes the action definition's
       // richer arguments. Advice and graph projection share that one frame.
+      let selected = instruction;
       if (instruction.frames?.some(frame => frame.modality !== undefined)) {
         const frames = instruction.frames.map(frame => frame.modality === undefined ? frame :
           actionProgram.find(semantic => semantic.predicate.lemma === frame.predicate.lemma &&
             semantic.polarity === frame.polarity && semantic.modality === frame.modality &&
             semantic.span.start === frame.span.start && semantic.span.end === frame.span.end) ?? frame);
-        if (frames.some((frame, index) => frame !== instruction.frames![index])) return { ...instruction, frames };
+        if (frames.some((frame, index) => frame !== instruction.frames![index])) selected = { ...instruction, frames };
       }
-      return instruction;
+      if (!coding?.code && selected.frames?.length) {
+        const definitions = matchComposedAdviceCodings(selected.frames);
+        const definition = definitions.length === 1 ? definitions[0] : undefined;
+        if (definition?.coding?.code) return {
+          ...selected,
+          text: definition.text ?? selected.text,
+          i18n: definition.i18n ? { ...selected.i18n, ...definition.i18n } : selected.i18n,
+          coding: { ...definition.coding, i18n: definition.i18n ? { ...definition.i18n } : undefined }
+        };
+      }
+      return selected;
     }
     if (provenCodes.has(`${coding.system ?? SNOMED_SYSTEM}|${coding.code}`)) return instruction;
 
@@ -3664,7 +3679,7 @@ export function buildInstructionGraph(
     };
   })();
   const temporalEndpoints = new Set<AdviceFrame>();
-  for (const relation of buildInstructionRelations(input, fullInputFrames, [])) {
+  for (const relation of buildInstructionRelations(input, fullInputFrames, [], primaryAdministrationSpan)) {
     if (relation.fromActionIndex === undefined || !relationHasSemanticClass(relation.kind, "temporal")) continue;
     temporalEndpoints.add(fullInputFrames[relation.fromActionIndex]);
     temporalEndpoints.add(fullInputFrames[relation.toActionIndex]);
@@ -3795,7 +3810,7 @@ export function buildInstructionGraph(
     }
   }
   const reconciledOpaque = reconcileOpaqueWithActionCoverage(input, opaqueSpans, actions);
-  if (!clause.method && actions.length) {
+  if (!clause.method && actions.some(action => !isInstructionGraphDisplayWarning(action))) {
     const firstStart = Math.min(...actions.map((action) => action.span.start));
     const lastEnd = Math.max(...actions.map((action) => action.span.end));
     const exactProcedureText = input.slice(firstStart, lastEnd).trim();
@@ -5290,6 +5305,11 @@ export function instructionGraphPrimaryAdministrationModality(
     )[0]?.modality;
 }
 
+/** Presentation classification only; action licensing and scope use their own typed facts. */
+export function isInstructionGraphDisplayWarning(frame: AdviceFrame): boolean {
+  return frame.polarity === AdvicePolarity.Negate || frame.force === AdviceForce.Warning;
+}
+
 export function instructionGraphHasNovelNonWarningContent(
   graph: CanonicalInstructionGraph,
   representedTexts: readonly string[]
@@ -5300,7 +5320,7 @@ export function instructionGraphHasNovelNonWarningContent(
     return Boolean(normalized && represented.some((candidate) => candidate.includes(normalized)));
   };
   for (const action of graph.actions) {
-    if (action.polarity !== AdvicePolarity.Negate && !isRepresented(action.sourceText)) return true;
+    if (!isInstructionGraphDisplayWarning(action) && !isRepresented(action.sourceText)) return true;
   }
   for (const opaque of graph.opaqueSpans ?? []) {
     if (!isRepresented(opaque.text)) return true;
@@ -5562,7 +5582,7 @@ export function realizeInstructionGraph(
       // The administration sentence covers this action, not its graph-only
       // conditional relation. Keep the target without emitting the action twice.
       if (!options?.onlyWarnings &&
-          !(options?.includeWarnings === false && frame.polarity === AdvicePolarity.Negate)) {
+          !(options?.includeWarnings === false && isInstructionGraphDisplayWarning(frame))) {
         conditionTargets.set(actionIndex, frame);
         if (ownsPrimary) coveredPrimaryAction = actionIndex;
       }
@@ -5582,7 +5602,7 @@ export function realizeInstructionGraph(
     ) {
       continue;
     }
-    const warning = frame.polarity === AdvicePolarity.Negate;
+    const warning = isInstructionGraphDisplayWarning(frame);
     if (options?.onlyWarnings ? !warning : options?.includeWarnings === false && warning) continue;
     frames.push(actionIndex);
     conditionTargets.set(actionIndex, frame);
@@ -5644,8 +5664,7 @@ export function realizeInstructionGraph(
         text,
         understood: true,
         actionIndex,
-        warning: frame.force === AdviceForce.Warning || frame.force === AdviceForce.Caution ||
-          frame.polarity === AdvicePolarity.Negate
+        warning: isInstructionGraphDisplayWarning(frame) || frame.force === AdviceForce.Caution
       });
     }
   }

@@ -1,4 +1,4 @@
-import { frameActionDefinition } from "../../instruction-graph";
+import { frameActionDefinition, realizeInstructionAction } from "../../instruction-graph";
 import { clinicalQuantityAt } from "./clinical-quantity-rules";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions, realizeAdviceFramesText } from "../../advice";
@@ -955,7 +955,10 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         tokens: [...consumed, ...tokens],
         synsem: {
           head: {},
-          valence: { instructions: [{ text: frame.sourceText, frames: [frame] }] },
+          valence: { instructions: [{
+            text: realizeInstructionAction(frame, context.options?.locale ?? "en") || frame.sourceText,
+            frames: [frame]
+          }] },
           cont: { clauseKind: "administration" }
         },
         score: 18 + tokens.length + frame.args.length * 2

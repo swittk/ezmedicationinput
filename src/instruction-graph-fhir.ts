@@ -287,6 +287,7 @@ export function buildActionExtension(frame: AdviceFrame): FhirExtension {
     const config = frame.predicate.realizerConfig?.locales?.[locale];
     if (!config) continue;
     const localized: FhirExtension[] = [{ url: "locale", valueCode: locale }];
+    add(localized, valueString("finiteUnmodalLabel", config.finiteUnmodalLabel));
     add(localized, valueString("fallbackObject", config.fallbackObject));
     add(localized, valueBoolean("implicitMedicationObject", config.implicitMedicationObject));
     add(localized, valueBoolean("directSiteObject", config.directSiteObject));
@@ -657,7 +658,7 @@ function parseRealizerLocale(extension:FhirExtension):{
   locale:string;config:NonNullable<NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"]>[string];
   source?: FhirExtension;
 }|undefined {
-  let locale:FhirExtension|undefined,fallback:FhirExtension|undefined,
+  let locale:FhirExtension|undefined,fallback:FhirExtension|undefined,finite:FhirExtension|undefined,
     implicit:FhirExtension|undefined,direct:FhirExtension|undefined,
     directDose:FhirExtension|undefined,durationPrefix:FhirExtension|undefined;
   let routePhrases:Record<string,string>|undefined;
@@ -670,6 +671,7 @@ function parseRealizerLocale(extension:FhirExtension):{
     switch(field.url){
     case "locale":if(!locale)locale=field;break;
     case "fallbackObject":if(!fallback)fallback=field;break;
+    case "finiteUnmodalLabel":if(!finite)finite=field;break;
     case "implicitMedicationObject":if(!implicit)implicit=field;break;
     case "directSiteObject":if(!direct)direct=field;break;
     case "directDose":if(!directDose)directDose=field;break;
@@ -688,10 +690,13 @@ function parseRealizerLocale(extension:FhirExtension):{
     }
   }
   if(!locale?.valueCode)return undefined;
-  return {locale:locale.valueCode,...(annotated ? { source: extension } : {}),config:{fallbackObject:fallback?.valueString,
+  const config: NonNullable<NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"]>[string] = {
+    fallbackObject:fallback?.valueString,
     implicitMedicationObject:implicit?.valueBoolean,directSiteObject:direct?.valueBoolean,
     directDose:directDose?.valueBoolean,routePhrases,administrationDurationPrefix:durationPrefix?.valueString,
-    suppressActivityConcepts:activities.length?activities:undefined,suppressSiteConcepts:sites.length?sites:undefined}};
+    suppressActivityConcepts:activities.length?activities:undefined,suppressSiteConcepts:sites.length?sites:undefined};
+  if (finite?.valueString !== undefined) config.finiteUnmodalLabel = finite.valueString;
+  return {locale:locale.valueCode,...(annotated ? { source: extension } : {}),config};
 }
 function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
   let lemma:FhirExtension|undefined,start:FhirExtension|undefined,end:FhirExtension|undefined,
