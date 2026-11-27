@@ -578,8 +578,6 @@ function argumentFromParts(
     // constructional fallback. The fallback is only for opaque/free text.
     return direct;
   }
-  const adviceNominal = resolveAdviceNominalArgument(canonical, text);
-  if (adviceNominal) return adviceNominal;
   const resolvedSite = codingFromSite(text, options);
   if (resolvedSite) {
     if (preferredRole === AdviceArgumentRole.Destination) resolvedSite.role = AdviceArgumentRole.Destination;
@@ -587,6 +585,8 @@ function argumentFromParts(
   }
   const coordinated = coordinatedTypedArgumentFromParts(parts, start, endExclusive, input, options);
   if (coordinated) return coordinated;
+  const adviceNominal = resolveAdviceNominalArgument(canonical, text);
+  if (adviceNominal) return adviceNominal;
   const allPartsCanonical = parts
     .slice(start, endExclusive)
     .every((part) => Boolean(part.canonical));
