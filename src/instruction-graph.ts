@@ -20,7 +20,7 @@ import {
 } from "./body-site-context-terminology";
 import { lexInput } from "./lexer/lex";
 import { normalizeUnit } from "./unit-lexicon";
-import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS, TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
+import { DAY_OF_WEEK_TOKENS, EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS, TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
 import { resolveEventTimingExpression } from "./event-timing-expression";
 import { maximumDosePerPeriodAt, parseClockToken } from "./hpsg/rule-context";
 import { resolveSymptomDefinition } from "./symptom-terminology";
@@ -443,6 +443,13 @@ function timeArgumentFromParts(
   // single-complement path retains its existing event search.
   let first = 0;
   while (EVENT_ARTICLE_TOKENS.has(canonicalParts[first])) first++;
+  const weekday = canonicalParts.length - first === 1
+    ? DAY_OF_WEEK_TOKENS[canonicalParts[first].replace(/[.]/g, "")] : undefined;
+  if (weekday) return {
+    role: AdviceArgumentRole.Time,
+    text: trimSemanticText(sourceFor(parts, start, endExclusive, input)),
+    normalized: weekday
+  };
   let event: EventTiming | undefined;
   for (let index = first; index < canonicalParts.length; index += 1) {
     const candidate = resolveEventTimingExpression(canonicalParts, index);
@@ -1457,18 +1464,8 @@ function trailingTimeArgument(
     if (declared?.role === AdviceArgumentRole.Time) {
       return { start: index, argument: declared };
     }
-    const event = resolveEventTimingExpression(canonical, 0);
-    if (!event || event.length !== canonical.length) continue;
-    const resolved = argumentFromParts(parts, index, end, input, AdviceArgumentRole.Time, options);
-    if (resolved?.conceptId) return { start: index, argument: resolved };
-    return {
-      start: index,
-      argument: {
-        role: AdviceArgumentRole.Time,
-        text: trimSemanticText(sourceFor(parts, index, end, input)),
-        normalized: event.timing
-      }
-    };
+    const time = timeArgumentFromParts(parts, index, end, input, true, options, true);
+    if (time) return { start: index, argument: time };
   }
   return undefined;
 }
@@ -1494,7 +1491,8 @@ const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const materialEnd = c.relationTargetEnd < segmentEnd &&
     (relationHasSemanticClass(tailRelation, "temporal") ||
       relationHasGrammarFeature(tailRelation, "timeComplement") &&
-        clockArgumentFromParts(parts, c.relationTargetEnd + 1, segmentEnd, input))
+        timeArgumentsFromParts(parts, c.relationTargetEnd + 1, segmentEnd,
+          input, offset, tailRelation, segmentEnd, options))
     ? c.relationTargetEnd : segmentEnd;
   const absolutePrimary = configuredConceptIndex(
     parts, argumentStart, materialEnd, definition.argumentParserConfig?.primaryConcepts);

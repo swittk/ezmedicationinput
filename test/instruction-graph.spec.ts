@@ -7146,3 +7146,75 @@ describe("coded warning frame ownership on fresh interchange", () => {
     expect(JSON.stringify(row)).toBe(before);
   });
 });
+
+
+describe("Mix material and calendar Time ownership", () => {
+  it.each([
+    ["Mix powder with milk on Mondays", "milk", AdviceArgumentRole.Material, "Mondays", "mon", /Mondays?|วันจันทร์/gu],
+    ["Do not mix with milk on Mondays", "milk", AdviceArgumentRole.Material, "Mondays", "mon", /Mondays?|วันจันทร์/gu],
+    ["Mix with household spoon on Mondays", "household spoon", AdviceArgumentRole.Object, "Mondays", "mon", /Mondays?|วันจันทร์/gu],
+    ["Do not mix with milk on Wednesdays", "milk", AdviceArgumentRole.Material, "Wednesdays", "wed", /Wednesdays?|วันพุธ/gu],
+    ["Mix powder with milk at 08:00", "milk", AdviceArgumentRole.Material, "08:00", "08:00:00", /08:00/gu],
+    ["Do not mix with milk at 08:00", "milk", AdviceArgumentRole.Material, "08:00", "08:00:00", /08:00/gu],
+    ["ผสมผงกับนมในวันจันทร์", "นม", AdviceArgumentRole.Material, "วันจันทร์", "mon", /Mondays?|วันจันทร์/gu]
+  ] as const)("keeps the complete Time daughter outside its material: %s", (source, material, role, timeText, normalized, timePattern) => {
+    const parsed = parsePublicSig(source);
+    const direct = parseInstructionActions(source);
+    expect(direct).toHaveLength(1);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhir)))]) {
+      const before = JSON.stringify(input);
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      const graph = member.syntax?.instructionGraph!;
+      expect(graph.sourceText).toBe(source);
+      expect(graph.coverage?.complete).toBe(true);
+      expect(graph.actions).toHaveLength(1);
+      for (const action of [direct[0], graph.actions[0]]) {
+        expect(action.sourceText).toBe(source);
+        expect(action.span).toEqual({ start: 0, end: source.length });
+        expect(action.args?.filter(arg => arg.role === AdviceArgumentRole.Time)).toEqual([
+          expect.objectContaining({ role: AdviceArgumentRole.Time, text: timeText, normalized,
+            span: { start: source.indexOf(timeText), end: source.indexOf(timeText) + timeText.length } })
+        ]);
+        expect(action.args).toContainEqual(expect.objectContaining({ role, text: material,
+          relation: AdviceRelation.With,
+          span: { start: source.indexOf(material), end: source.indexOf(material) + material.length } }));
+      }
+      for (const locale of ["en", "th"])
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized" }).match(timePattern)).toHaveLength(1);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("keeps weekday conjunctions and choices in their declared Time scope", () => {
+    for (const connector of ["and", "or"]) {
+      const source = `Mix with household spoon on Mondays ${connector} Fridays`;
+      const action = parseInstructionActions(source)[0];
+      expect(action.sourceText).toBe(source);
+      expect(action.span).toEqual({ start: 0, end: source.length });
+      expect(action.args).toContainEqual(expect.objectContaining({
+        role: AdviceArgumentRole.Object, conceptId: "household-spoon", text: "household spoon"
+      }));
+      const times = action.args?.filter(arg => arg.role === AdviceArgumentRole.Time);
+      if (connector === "and") {
+        expect(times?.map(arg => arg.normalized)).toEqual(["mon", "fri"]);
+      } else {
+        expect(times).toEqual([expect.objectContaining({ text: "Mondays or Fridays", relation: AdviceRelation.On })]);
+      }
+      const roundtrip = parseInstructionGraphExtension([buildInstructionGraphExtension({ sourceText: source, actions: [action] })!]);
+      expect(roundtrip?.actions[0]).toMatchObject(JSON.parse(JSON.stringify(action)));
+    }
+  });
+
+  it("ends its Time before the independent conditional daughter", () => {
+    const source = "Mix with household spoon at 08:00 if instructed";
+    const parsed = parsePublicSig(source), graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.actions[0].sourceText).toBe("Mix with household spoon at 08:00");
+    expect(graph.actions[0].args?.filter(arg => arg.role === AdviceArgumentRole.Time)).toEqual([
+      expect.objectContaining({ text: "08:00", normalized: "08:00:00", relation: AdviceRelation.On })
+    ]);
+    expect(graph.relations).toContainEqual(expect.objectContaining({ kind: AdviceRelation.If, text: "if instructed" }));
+    for (const locale of ["en", "th"])
+      expect(formatSig(parsed.fhir, "long", { locale, realizationMode: "normalized" }).match(/if instructed/gu)).toHaveLength(1);
+  });
+});
