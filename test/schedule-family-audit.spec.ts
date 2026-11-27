@@ -3,7 +3,7 @@ import {
   calculateTotalUnits, formatSig, lintSig, nextDueDoses, parseSig, parseSigAsync, suggestSig, toDosageDetails,
   MedicationQuantityCalculationError, importCanonicalCourse,
   toFhirR5Dosages, fromFhir, getDosageExcludedWeekdays,
-  EventTiming, FhirDayOfWeek, FhirPeriodUnit, TIMING_OCCURRENCE_CAP_EXTENSION_URL
+  EventTiming, FhirDayOfWeek, FhirPeriodUnit, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL
 } from "../src";
 import type { CanonicalScheduleExpr, FhirDosage, FhirR6DosageInstruction, FhirR6DosageStep } from "../src";
 import { canonicalToFhir, getTimingClocks } from "../src/fhir";
@@ -7078,7 +7078,8 @@ describe("coded bedtime retains its anchor day", () => {
     const note = { url: "urn:clinic:bedtime-day", valueString: "Monday sleep anchor; retain the lead" };
     const supplied: FhirDosage = { extension: [note], doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BED" }] },
-        repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, dayOfWeek: [FhirDayOfWeek.Monday], offset,
+        repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, dayOfWeek: [FhirDayOfWeek.Monday],
+          extension: [{ url: TIMING_OFFSET_EXACT_EXTENSION_URL, valueInteger: offset }],
           ...(timeOfDay ? { timeOfDay: [...timeOfDay] } : {}) } } };
     const native = importCanonicalCourse(supplied);
     const options = { orderedAt: "2026-01-04T23:00:00Z", from: "2026-01-04T23:00:00Z", timeZone: "UTC",
@@ -7087,7 +7088,11 @@ describe("coded bedtime retains its anchor day", () => {
       const before = JSON.stringify(dosage);
       expect(nextDueDoses(dosage, { ...options, limit: 1 })).toEqual([first]);
       expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: FhirPeriodUnit.Hour }).totalUnits).toBe(total);
-      expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.recurrence?.offset).toBe(offset);
+      const retained = importCanonicalCourse(dosage);
+      expect(retained.stages[0].administrations[0].schedule?.recurrence?.offset).toBe(offset);
+      const projected = courseToR5(retained)[0].timing?.repeat;
+      expect(projected?.offset).toBeUndefined();
+      expect(projected?.extension).toContainEqual({ url: TIMING_OFFSET_EXACT_EXTENSION_URL, valueInteger: offset });
       expect(before).toContain(note.valueString);
       expect(JSON.stringify(dosage)).toBe(before);
     }

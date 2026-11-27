@@ -582,19 +582,16 @@ function prepareBestEffortTiming(dosage: CanonicalAdministration): CanonicalAdmi
   const frequencyMax = positiveInteger(repeat.frequencyMax);
   const period = positiveNumber(repeat.period);
   const periodMax = positiveNumber(repeat.periodMax);
-  const count = positiveInteger(repeat.count);
-  const countMax = positiveInteger(repeat.countMax);
   const executableFrequency = explicitAnchors
     ? repeat.frequency
     : frequencyMax && (!frequency || frequencyMax >= frequency)
     ? frequencyMax
     : repeat.frequency;
   const executablePeriod = period ?? periodMax ?? repeat.period;
-  const executableCount = countMax && (!count || countMax >= count) ? countMax : repeat.count;
   const nextRepeat: CanonicalRecurrence = {
     ...(licensedCode ?? repeat),
-    count: executableCount,
-    countMax: undefined,
+    // Count ceilings remain ceilings; repeatOccurrenceCap already owns
+    // their executable limit without inventing an exact completion.
     frequency: licensedCode?.frequency ?? executableFrequency,
     frequencyMax: undefined,
     period: licensedCode?.period ?? executablePeriod,
@@ -752,7 +749,7 @@ function finiteCompletionCount(repeat: CanonicalRecurrence | undefined): number 
   return count !== undefined && Number.isInteger(count) && count > 0 &&
     (declared?.countMax === undefined || declared.countMax === count) ? count : undefined;
 }
-function isSingleAdministrationRepeat(
+function isSingleAdministrationAllowance(
   repeat: CanonicalRecurrence, explicitEvents: readonly string[] | undefined
 ): boolean {
   return (
@@ -767,6 +764,11 @@ function isSingleAdministrationRepeat(
     (repeat.anchors?.length ?? 0) === 0 &&
     (repeat.clocks?.length ?? 0) === 0
   );
+}
+function isSingleAdministrationRepeat(
+  repeat: CanonicalRecurrence, explicitEvents: readonly string[] | undefined
+): boolean {
+  return finiteCompletionCount(repeat) === 1 && isSingleAdministrationAllowance(repeat, explicitEvents);
 }
 function minDate(left: Date, right: Date | null): Date {
   if (!right) {
@@ -3590,6 +3592,14 @@ function scheduleTreatmentRelativeCourse(
           } else { canComplete = false; break; }
         }
       }
+      // A bounded terminal range has no successor whose opening depends on
+      // the first accepted dose. Its existing fixed-window collector can offer
+      // all eligible opportunities to the final quota-constrained range plan.
+      if (canComplete && (options as PhaseCountOptions).quantityEstimation &&
+          index === course.stages.length - 1 && (stage.count ?? 1) === 1 &&
+          !dependencies?.pending && window.administrations.every(member => member.endExclusive) &&
+          window.administrations.some(member => member.administration.amounts?.[0]?.range))
+        canComplete = false;
       const suspended = canComplete && pending > 0;
       const finishMember = (completion: AcceptedStageCompletion) => {
         if (!latest || completion.end > latest.end) latest = completion;
@@ -3627,7 +3637,9 @@ function scheduleTreatmentRelativeCourse(
         if (quota.remaining !== undefined && member.priorCount !== undefined)
           quota.remaining = Math.max(0, quota.remaining - Math.floor(member.priorCount));
         if (shared) {
-          const group = `${shared.groupId}:${member.recurrenceOrigin.getTime()}`;
+          // A resolved stage occurrence owns one shared allowance even when
+          // its members have different calendar eligibility floors.
+          const group = `${shared.groupId}:${window.start.getTime()}`;
           let allowance = sharedCounts?.get(group);
           if (!allowance) {
             const maximum = repeatOccurrenceCap(originalRepeat!);
@@ -5183,14 +5195,11 @@ function intervalEventWindow(repeat: CanonicalRecurrence | undefined):
       end: TimingEvent;
     }
   | undefined {
-  if (
-    !repeat ||
-    (repeat.clocks?.length ?? 0) !== 0 ||
-    !usesIntervalCadence(repeat)
-  )
-    return undefined;
+  if (!repeat || (repeat.clocks?.length ?? 0) !== 0) return undefined;
+  const interval = usesIntervalCadence(repeat);
   const typed = getTimingEventWindow(repeat);
-  if (typed) return typed;
+  if (typed && (interval || repeat.frequency === 1 && usesClockWindowCadence(repeat))) return typed;
+  if (!interval) return undefined;
   // The legacy WAKE-plus-interval shorthand remains limited to subday units.
   if (repeat.periodUnit !== DurationUnit.Second && repeat.periodUnit !== DurationUnit.Minute &&
       repeat.periodUnit !== DurationUnit.Hour) return undefined;
@@ -5215,6 +5224,7 @@ function isWakingHoursInterval(repeat: CanonicalRecurrence | undefined): boolean
 /** Execute WAKE as the daily recurrence origin and HS as the exclusive end of
  * the caller's configured waking window. Absent clocks are never guessed. */
 function generateWakingHoursIntervalSeries(
+  timing: CanonicalTiming,
   repeat: CanonicalRecurrence,
   config: NextDueDoseConfig,
   from: Date,
@@ -5243,6 +5253,15 @@ function generateWakingHoursIntervalSeries(
   // A patient may wake in the evening and go to sleep the next morning.
   // Anchor weekday rules to the wake date, not to the spillover date.
   const overnight = sleepClock < wakeClock;
+  // An explicit daily frequency retains its institution clocks when the typed
+  // event window admits them. An omitted frequency remains window-origin owned.
+  const dailyClocks = window && !clockWindow && repeat.frequency === 1 && !usesIntervalCadence(repeat)
+    ? resolveFrequencyCadence(timing, repeat, config).clocks.filter(clock =>
+        overnight ? clock >= wakeClock || clock < sleepClock : clock >= wakeClock && clock < sleepClock)
+    : undefined;
+  if (dailyClocks && !dailyClocks.length) dailyClocks.push(wakeClock);
+  const eveningIndex = overnight && dailyClocks ? dailyClocks.findIndex(clock => clock >= wakeClock) : 0;
+  const firstDailyClock = eveningIndex > 0 ? eveningIndex : 0;
   const firstWindowDay = overnight && orderedAt
     ? addLocalDays(startOfLocalDay(orderedAt, timeZone), -1, timeZone) : null;
   const calendarCadence = normalizedCalendarInterval(repeat.period, repeat.periodUnit);
@@ -5282,6 +5301,13 @@ function generateWakingHoursIntervalSeries(
             openingPending = false;
             if (currentDay < queryDay) currentDay = queryDay;
             continue;
+          }
+        } else if (dailyClocks) {
+          for (let index = 0; index < dailyClocks.length && results.length < limit; index++) {
+            const clock = dailyClocks[(firstDailyClock + index) % dailyClocks.length];
+            const candidate = makeZonedDateFromDay(overnight && clock < wakeClock ? sleepDay : currentDay, timeZone, clock);
+            if (candidate && candidate >= from && (!orderedAt || candidate >= orderedAt) &&
+                (!courseEnd || candidate < courseEnd)) results.push(formatZonedIso(candidate, timeZone));
           }
         } else if (clockWindow && repeat.frequency! > 1 && repeat.period === 1 && repeat.periodUnit === DurationUnit.Day) {
           // The authored window bounds the same evenly distributed frequency
@@ -5546,6 +5572,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   const dayFilteredSeriesRepeat = resolveDayFilteredSeriesRepeat(repeat, enforceDayFilter);
   const calendarDays = resolveCalendarDaySelection(repeat, baseTime, timeZone);
   const wakingHours = generateWakingHoursIntervalSeries(
+    timing,
     repeat,
     config,
     from,
@@ -5780,7 +5807,7 @@ function derivePriorCountFromHistory(
     count += 1;
     return true;
   };
-  const waking = generateWakingHoursIntervalSeries(repeat, config, orderedAt,
+  const waking = generateWakingHoursIntervalSeries(timing, repeat, config, orderedAt,
     orderedAt, from, timeZone, normalizedCount ?? 100000, dayFilter,
     enforceDayFilter, calendarDays);
   if (waking) return waking.length;
@@ -6603,9 +6630,9 @@ function countScheduleEvents(
     return 0;
   }
   const hardLimit = Number.isFinite(countLimit) ? countLimit : 365 * 31;
-  if (isSingleAdministrationRepeat(repeat, dosage.schedule?.explicitEvents)) {
-    if (dosage.asNeeded || parseActivityTimingExtensions(repeat)?.length) {
-      // An untimed PRN use or activity trigger has no executable timestamp.
+  if (isSingleAdministrationAllowance(repeat, dosage.schedule?.explicitEvents)) {
+    if (finiteCompletionCount(repeat) === undefined || dosage.asNeeded || parseActivityTimingExtensions(repeat)?.length) {
+      // An upper allowance, untimed PRN use or activity trigger has no executable timestamp.
       // Its remaining allowance is available after the order, never before it.
       return orderedAt && to <= orderedAt ? 0 : 1;
     }
@@ -6925,7 +6952,7 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
     // The lower/shorter period produces the maximum number of opportunities.
     // If only the upper endpoint is executable, it is still more useful than
     // discarding the entire cadence.
-    if (!preserveCadence) nextRepeat = { ...nextRepeat, period: period ?? periodMax, periodMax: undefined };
+    if (!preserveCadence || !period) nextRepeat = { ...nextRepeat, period: period ?? periodMax, periodMax: undefined };
     periodMinimum = true;
   }
   const first = dosage.amounts?.length === 1 ? dosage.amounts[0] : undefined;
@@ -7501,7 +7528,14 @@ function sumCourseUnits(
   };
   if (unitResult) unitResult.unit = hasQuantity ? commonBasis : zeroBasis;
   const context = options.context;
-  if (containerComparable && context?.containerValue && context.containerValue > 0) {
+  const scalarContainer = !context?.containerUnit && !context?.packageUnit &&
+      entries.length === 1 && entries[0].total.totalUnits === totalUnits
+    ? entries[0].total : undefined;
+  if (scalarContainer?.totalContainers !== undefined) {
+    result.totalContainers = scalarContainer.totalContainers;
+    if (scalarContainer.totalContainerQuantity !== undefined)
+      result.totalContainerQuantity = scalarContainer.totalContainerQuantity;
+  } else if (containerComparable && context?.containerValue && context.containerValue > 0) {
     const containerUnit = context.containerUnit;
     const packageUnit = context.packageUnit;
     const estimateValue = approximate?.value;

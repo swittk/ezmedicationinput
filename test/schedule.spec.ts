@@ -6360,3 +6360,120 @@ describe("conditional shared-course opportunity admission", () => {
     expect(JSON.stringify(dosage)).toBe(before);
   });
 });
+
+
+describe("review814 current finite allowances and supplied cadence endpoints", () => {
+  const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  const course = (administration: CanonicalAdministration): CanonicalCourse => ({ kind: "course", stages: [{ administrations: [administration] }] });
+  const member = (recurrence: NonNullable<NonNullable<CanonicalAdministration["schedule"]>["recurrence"]>, value = 1): CanonicalAdministration => ({
+    kind: "administration", text: "Retain this current administration", amounts: [{ quantity: { value, unit: "tab" } }], schedule: { recurrence }
+  });
+  const forms = (native: CanonicalCourse) => [native, courseToR5(native), courseToR6(native)];
+
+  it.each([false, true])("uses only an exact one-use count as an order-time instruction (exact=%s)", exact => {
+    const repeat = exact ? { count: 1 } : { countMax: 1 };
+    const native = course(member(repeat));
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...query, limit: 3 })).toEqual(exact ? ["2026-01-01T00:00:00+00:00"] : []);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: exact ? "scheduled" : "maximum" });
+      const retained = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(retained.schedule?.recurrence).toMatchObject(repeat);
+      expect(retained.schedule?.recurrence?.clocks).toBeUndefined();
+      const later = { ...query, from: "2026-01-02T00:00:00Z" };
+      expect(nextDueDoses(dosage, { ...later, limit: 3 })).toEqual([]);
+      expect(calculateTotalUnits({ dosage, ...later, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(exact ? 0 : 1);
+      expect(calculateTotalUnits({ dosage, ...later, priorCount: 1, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+      expect(retained.text).toBe(native.stages[0].administrations[0].text);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each([false, true])("uses an authored sole period endpoint in both due dates and supply (clock=%s)", clock => {
+    const repeat = { frequency: 1, periodMax: 2, periodUnit: Unit.Day, ...(clock ? { clocks: ["09:00:00"] } : {}) };
+    const native = course(member(repeat));
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage), suffix = clock ? "09:00:00" : "00:00:00";
+      expect(nextDueDoses(dosage, { ...query, limit: 3 })).toEqual([1, 3, 5].map(day => `2026-01-0${day}T${suffix}+00:00`));
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab", quantityKind: "maximum" });
+      const retained = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(retained.schedule?.recurrence).toMatchObject(repeat);
+      expect(retained.schedule?.recurrence?.period).toBeUndefined();
+      expect(retained.text).toBe(native.stages[0].administrations[0].text);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("keeps a known scalar container estimate through an equivalent course wrapper", () => {
+    const scalar = member({ frequency: 2, period: 1, periodUnit: Unit.Day }, 2);
+    const options = { ...query, durationValue: 1, durationUnit: Unit.Day, context: { containerValue: 3 } };
+    const expected = calculateTotalUnits({ dosage: scalar, ...options });
+    expect(expected).toMatchObject({ totalUnits: 4, unit: "tab", totalContainers: 2 });
+    for (const dosage of forms(course(scalar))) {
+      const before = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, ...options })).toMatchObject({ totalUnits: 4, unit: "tab", totalContainers: 2 });
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.recurrence)
+        .toMatchObject({ frequency: 2, period: 1, periodUnit: Unit.Day });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each(["once", "stage", "course"] as const)("shares one count across member origins and resets only at the next %s occurrence", repetition => {
+    const sharedCount = { groupId: "two current uses", count: 2 };
+    const evening = member({ clocks: ["20:00:00"], sharedCount });
+    const morning = member({ clocks: ["08:00:00"], sharedCount, calendarWindow: { start: "2026-01-02" } });
+    evening.sourceMember = 0; morning.sourceMember = 1;
+    const native: CanonicalCourse = { kind: "course", stages: [{ administrations: [evening, morning], ...(repetition === "stage" ? { count: 2 } : {}) }],
+      ...(repetition === "course" ? { cycleInterval: { value: 3, unit: "d" }, cycleCount: 2 } : {}) };
+    const options = { ...query, from: "2026-01-01T12:00:00Z", orderedAt: "2026-01-01T12:00:00Z" };
+    const expected = ["2026-01-01T20:00:00+00:00", "2026-01-02T08:00:00+00:00",
+      ...(repetition === "stage" ? ["2026-01-02T20:00:00+00:00", "2026-01-03T08:00:00+00:00"] :
+        repetition === "course" ? ["2026-01-04T20:00:00+00:00", "2026-01-05T08:00:00+00:00"] : [])];
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 6 })).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: expected.length, unit: "tab" });
+      expect(nextDueDoses(dosage, { ...options, from: "2026-01-02T00:00:00Z", limit: 6 })).toEqual(expected.slice(1));
+      const retained = importCanonicalCourse(dosage).stages[0].administrations;
+      expect(retained.map(value => value.schedule?.recurrence?.sharedCount)).toEqual([sharedCount, sharedCount]);
+      expect(retained[1].schedule?.recurrence?.calendarWindow?.start).toBe("2026-01-02");
+      expect(retained[0].schedule?.recurrence?.count).toBeUndefined();
+      expect(retained[1].schedule?.recurrence?.count).toBeUndefined();
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+});
+
+
+describe("review814 bounded ranged supply opportunities", () => {
+  const start = "2026-01-01T00:00:00Z";
+  const options = { orderedAt: start, from: start, timeZone: "UTC", priorDoseTimes: ["2025-12-31T12:00:00Z"] };
+  it.each(["terminal", "repeated", "dependent"] as const)("retains later maximum-supply opportunities with %s completion", kind => {
+    const ranged: CanonicalAdministration = { kind: "administration", text: "1–2 tablets at 08:00 or 20:00, one use in one day",
+      amounts: [{ range: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } }],
+      limits: [{ scope: "period", amount: { value: 3, unit: "tab" }, period: { value: 24, unit: "h" } }],
+      schedule: { recurrence: { count: 1, clocks: ["08:00:00", "20:00:00"], courseLength: { value: 1, unit: "d" } } } };
+    const native: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "wk" }, cycleCount: 1,
+      stages: [{ administrations: [ranged], ...(kind === "repeated" ? { count: 2 } : {}) },
+        ...(kind === "dependent" ? [{ administrations: [{ kind: "administration" as const,
+          amounts: [{ quantity: { value: 1, unit: "tab" } }],
+          schedule: { recurrence: { count: 1, clocks: ["10:00:00"] } } }] }] : [])] };
+    const expectedDue = ["2026-01-01T08:00:00+00:00", ...(kind === "terminal" ? [] :
+      [kind === "repeated" ? "2026-01-01T20:00:00+00:00" : "2026-01-01T10:00:00+00:00"])];
+    for (const dosage of [native, courseToR5(native), courseToR6(native)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual(expectedDue);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: kind === "repeated" ? 3 : 2, unit: "tab", quantityKind: "maximum" });
+      const retained = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(retained.amounts?.[0].range).toMatchObject({ low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } });
+      expect(retained.schedule?.recurrence?.count).toBe(1);
+      expect(retained.limits?.[0]).toMatchObject({ scope: "period", amount: { value: 3, unit: "tab" }, period: { value: 24, unit: "h" } });
+      expect(retained.text).toBe(ranged.text);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+});

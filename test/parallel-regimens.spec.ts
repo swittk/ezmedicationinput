@@ -4064,9 +4064,31 @@ describe("round55 execution preserves authored calendar and terminology meaning"
     expect(nextDueDoses(wire(punctual, version), query)).toEqual([
       "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
     ]);
-    expect(nextDueDoses(wire(calendar, version), query)).toEqual([
-      "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
-    ]);
+    for (const frequency of [undefined, 1]) {
+      calendar.step![0].component![0].timing!.repeat!.frequency = frequency;
+      for (const dosage of [importCanonicalCourse(calendar), wire(calendar, version)]) {
+        const before = JSON.stringify(dosage);
+        const clock = frequency === undefined ? "08:00:00" : "09:00:00";
+        expect(nextDueDoses(dosage, query)).toEqual([
+          `2026-01-01T${clock}+00:00`, `2026-01-02T${clock}+00:00`,
+        ]);
+        const clinic = { ...query, eventClock: { WAKE: "10:00", HS: "20:00" } };
+        expect(nextDueDoses(dosage, clinic)).toEqual([
+          "2026-01-01T10:00:00+00:00", "2026-01-02T10:00:00+00:00",
+        ]);
+        expect(calculateTotalUnits({ dosage, ...clinic, from: "2026-01-01T10:00:00Z",
+          durationValue: 10, durationUnit: Unit.Hour })).toMatchObject({ totalUnits: 1, unit: "tab" });
+        if (frequency === 1) {
+          const configured = { ...clinic, config: { frequencyDefaults: { byFrequency: { "freq:1/per:1d": ["14:00"] } } } };
+          expect(nextDueDoses(dosage, configured)).toEqual([
+            "2026-01-01T14:00:00+00:00", "2026-01-02T14:00:00+00:00",
+          ]);
+        }
+        expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.recurrence)
+          .toMatchObject({ period: 1, periodUnit: Unit.Day, eventWindow: { start: EventTiming.Wake, end: EventTiming["Before Sleep"] } });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    }
     expect(nextDueDoses(wire(unwindowed, version), query)).toEqual([
       "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00",
     ]);
@@ -5784,7 +5806,7 @@ describe("review51 structural openings and clinic clocks", () => {
     const parsed = parseSig(source), original = JSON.stringify(parsed);
     const course = parsed.meta.canonical.course!;
     const predicate = course.stages[1].administrations[0].predicate;
-    expect(predicate).toBeDefined();
+    expect(predicate).toMatchObject({ kind: "measurement", name: "sbp", operation: "gt", value: 160 });
     expect(course.stages[0].administrations[0].schedule?.recurrence?.calendarWindow?.end).toBeUndefined();
     const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC",
       evaluateCondition: () => accepted };
@@ -5798,6 +5820,7 @@ describe("review51 structural openings and clinic clocks", () => {
         durationValue: 1, durationUnit: Unit.Day })).toMatchObject({ totalUnits: accepted ? 3 : 1, unit: "tab" });
       const successor = importCanonicalCourse(dosage).stages[1].administrations[0];
       expect(successor.predicate).toEqual(predicate);
+      expect(successor.predicate).toMatchObject({ kind: "measurement", name: "sbp", operation: "gt", value: 160 });
       expect(successor.schedule?.recurrence?.clocks).toEqual(["20:00:00"]);
       expect(successor.schedule?.recurrence?.calendarWindow?.start).toBe("2026-12-02");
       expect(JSON.stringify(dosage)).toBe(before);
@@ -5824,6 +5847,10 @@ describe("review51 structural openings and clinic clocks", () => {
       const monday = members.find(member => member.schedule?.recurrence?.dayOfWeek?.[0] === FhirDayOfWeek.Monday)!;
       expect(monday.schedule?.recurrence?.calendarWindow?.start).toBe("2027-01-03");
       expect(monday.schedule?.recurrence?.dayOfWeek).toEqual([FhirDayOfWeek.Monday]);
+      expect(monday.target?.coding).toContainEqual(expect.objectContaining({ system: "http://snomed.info/sct", code: "1290032005" }));
+      expect(members).toHaveLength(3);
+      expect(members[2].target?.coding).toContainEqual(expect.objectContaining({ system: "http://snomed.info/sct", code: "1290031003" }));
+      expect(members[2].schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: Unit.Day });
       expect(JSON.stringify(dosage)).toBe(before);
     }
     expect(JSON.stringify(parsed)).toBe(original);
@@ -5858,5 +5885,42 @@ describe("review51 structural openings and clinic clocks", () => {
       expect(current.amounts?.[0].quantity?.extension).toEqual([note]);
       expect(JSON.stringify(dosage)).toBe(before);
     }
+  });
+});
+
+
+describe("review814 selected calendar recurrence before NEXT", () => {
+  it("retains the Wednesday predecessor when its Monday floor cannot complete the phase", () => {
+    const source = "Take 1 tablet every Wednesday at 09:00 starting 5 January 2026, then take 2 tablets the next morning";
+    const parsed = parseSig(source), original = JSON.stringify(parsed);
+    const options = { orderedAt: "2026-01-05T00:00:00Z", from: "2026-01-05T00:00:00Z", timeZone: "UTC" };
+    for (const dosage of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)) as FhirDosage[],
+      JSON.parse(JSON.stringify(parsed.fhirNext)) as FhirR6DosageInstruction]) {
+      const before = JSON.stringify(dosage);
+      const retained = importCanonicalCourse(dosage), predecessor = retained.stages[0].administrations[0];
+      expect(predecessor.schedule?.recurrence).toMatchObject({ clocks: ["09:00:00"], dayOfWeek: [FhirDayOfWeek.Wednesday],
+        calendarWindow: { start: "2026-01-05" } });
+      expect(predecessor.schedule?.recurrence?.calendarWindow?.end).toBeUndefined();
+      expect(predecessor.schedule?.recurrence?.count).toBeUndefined();
+      expect(nextDueDoses(predecessor, { ...options, limit: 3 })).toEqual([
+        "2026-01-07T09:00:00+00:00", "2026-01-14T09:00:00+00:00", "2026-01-21T09:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: predecessor, ...options, durationValue: 14, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      expect(retained.stages[1].start).toMatchObject({ anchor: "previous-phase-next-day" });
+      expect(nextDueDoses(dosage, { ...options, limit: 3 })).toEqual([
+        "2026-01-07T09:00:00+00:00", "2026-01-14T09:00:00+00:00", "2026-01-21T09:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 14, durationUnit: Unit.Day })).toEqual({
+        totalUnits: 2, unit: "tab", quantityKind: "scheduled",
+        explanation: "A stage without a stated cutover was continued through the requested calculation horizon."
+      });
+      expect(retained.instruction).toBe(source);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    expect(parsed.meta.canonical.clauses[1].schedule?.phaseStartReference).toBe("previous-phase-next-day");
+    expect(parsed.meta.canonical.clauses[1].schedule?.boundsStart).toBeUndefined();
+    expect(parsed.input).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(original);
   });
 });

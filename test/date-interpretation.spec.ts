@@ -2987,6 +2987,11 @@ describe("cycle-day eligibility is not an unrestricted bedtime schedule", () => 
       expect(times).toHaveLength(30);
       expect(times[0]).toContain("2026-11-16T22:00:00");
       expect(times[times.length - 1]).toContain("2027-01-20T22:00:00");
+      expect(times).toEqual([
+        ...Array.from({ length: 10 }, (_, i) => `2026-11-${16 + i}T22:00:00+00:00`),
+        ...Array.from({ length: 10 }, (_, i) => `2026-12-${14 + i}T22:00:00+00:00`),
+        ...Array.from({ length: 10 }, (_, i) => `2027-01-${11 + i}T22:00:00+00:00`),
+      ]);
     }
   });
 

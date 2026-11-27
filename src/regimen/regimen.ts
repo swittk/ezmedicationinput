@@ -99,6 +99,12 @@ function advanceDate(value: string, days = 1): string | undefined {
   return date.toISOString().slice(0, 10);
 }
 
+/** Calendar selection makes a dated opening an eligibility floor, not a
+ * completed administration from which a NEXT phase can be dated. */
+function hasCalendarSelection(schedule: CanonicalSigClause["schedule"]): boolean {
+  return Boolean(schedule?.dayOfWeek?.length || schedule?.dayOfMonth?.length || schedule?.weekdayOrdinal !== undefined);
+}
+
 /** Whether the authored endpoints identify one exact course duration. */
 export function hasExactScheduleDuration(
   schedule: CanonicalSigClause["schedule"]
@@ -425,8 +431,7 @@ export function scopeSequentialPhaseSemantics(
             preceding.durationMax === undefined && preceding.durationUnit === undefined &&
             (onceDaily || preceding.frequency === undefined && preceding.period === undefined) &&
             preceding.frequencyMax === undefined && preceding.periodMax === undefined &&
-            !preceding.dayOfWeek?.length && !preceding.dayOfMonth?.length &&
-            preceding.weekdayOrdinal === undefined && !preceding.repeatCycle &&
+            !hasCalendarSelection(preceding) && !preceding.repeatCycle &&
             !preceding.boundsStart && !preceding.boundsEnd && !preceding.calendarEvents?.length) {
           // A named daypart can qualify this same clock. A separate event
           // position, including a meal, cannot be closed by a one-dose cap.
@@ -446,9 +451,9 @@ export function scopeSequentialPhaseSemantics(
           schedules.some(value => value?.count !== undefined || value?.countMax !== undefined || value?.sharedCount ||
             value?.phaseStartReference === 'previous-phase-next-day' ||
             value?.duration !== undefined || value?.durationUnit !== undefined ||
-            // An open phase with one shared calendar origin already locates NEXT.
-            // Recurrence alone cannot turn it into a completion dependency.
-            !firstSchedule?.boundsStart && hasIndependentRecurrence(value, false)));
+            // An unfiltered open phase keeps its shared civil origin. A day
+            // selection leaves that date as a floor, not a known completion.
+            (!firstSchedule?.boundsStart || hasCalendarSelection(value)) && hasIndependentRecurrence(value, false)));
       }
       const authoredOffset = schedule.evidence.some(item => !isNextDayScheduleRule(item.rule) &&
         (item.scheduleFields?.indexOf('treatmentStartOffsetDays') ?? -1) >= 0 &&
