@@ -7711,4 +7711,39 @@ describe("dotted quantity unit continuation", () => {
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(before);
   });
+
+  it("keeps a measured liquid nominal separate from its bare duration", () => {
+    const source = "Rinse mouth with 15 mL water 30 seconds then spit.";
+    const parsed = parsePublicSig(source);
+    const parsedBefore = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].schedule?.duration).toBeUndefined();
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const course = importCanonicalCourse(input);
+      expect(course.stages).toHaveLength(1);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      const graph = course.stages[0].administrations[0].syntax?.instructionGraph;
+      expect(graph?.actions.map(action => action.predicate.lemma)).toEqual(["rinse_mouth", "spit"]);
+      const args = graph!.actions[0].args;
+      expect(args).toHaveLength(2);
+      const material = args.find(arg => arg.role === AdviceArgumentRole.Substance);
+      const duration = args.find(arg => arg.role === AdviceArgumentRole.Duration);
+      expect(material).toMatchObject({ text: "15 mL water", normalized: "water", conceptId: "water",
+        relation: AdviceRelation.With, quantity: { value: 15, unit: "mL" } });
+      expect(duration).toMatchObject({ text: "30 seconds", quantity: { value: 30, unit: "s" } });
+      expect(material?.span?.end).toBeLessThanOrEqual(duration!.span!.start);
+      for (const arg of [material!, duration!]) {
+        expect(source.slice(arg.span!.start, arg.span!.end)).toBe(arg.text);
+      }
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Rinse mouth for 30 seconds with 15 mL water; then spit out.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("บ้วนปาก นาน 30 วินาทีด้วย15 มิลลิลิตรน้ำ จากนั้นบ้วนทิ้ง.");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+
 });

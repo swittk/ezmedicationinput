@@ -1442,9 +1442,13 @@ function quantifiedEntityArgument(
 /** A measured nominal owns its quantity; a bare quantity remains the head Amount. */
 function nominalAccompanimentArgument(
   parts: Lexeme[], start: number, end: number, input: string, offset: number,
-  relation: AdviceRelation | undefined, options?: ParseOptions
+  relation: AdviceRelation | undefined, options?: ParseOptions, duration?: AdviceArgument
 ): AdviceArgument | undefined {
   if (!relationHasSemanticClass(relation, "accompaniment")) return undefined;
+  const durationStart = duration?.span
+    ? partIndexForAbsoluteSourceStart(parts, duration.span.start, offset) : undefined;
+  // The selected duration is a separate daughter, not part of the material nominal.
+  if (durationStart !== undefined && start <= durationStart && durationStart < end) end = durationStart;
   const nominal = argumentFromParts(parts, start, end, input, AdviceArgumentRole.Substance, options);
   const companion = quantifiedEntityArgument(parts, start, end, input, offset,
     nominal?.role ?? AdviceArgumentRole.Substance, options, nominal);
@@ -1849,6 +1853,7 @@ function buildActionFrame(
   // Resolve the typed event daughter once, before deciding which complement
   // owns a quantity. WITH breakfast is temporal; WITH 200 mL water owns its
   // own amount. The default argument parser reuses this same daughter.
+  const duration = parseAnyDurationArgument(parts, argumentStart, semanticEnd, input, offset);
   const nominalAccompanimentValence = definition.argumentParser === "amount-duration" ||
     definition.argumentParser === "site-relation";
   const relationTimes = (directObjectValence || nominalAccompanimentValence) &&
@@ -1856,7 +1861,7 @@ function buildActionFrame(
     ? timeArgumentsFromParts(parts, relIndex + 1, semanticEnd, input, offset, relation, relationTargetEnd, options,
         definition.argumentParser === "site-relation") : undefined;
   const accompaniment = nominalAccompanimentValence && !relationTimes && relIndex >= 0
-    ? nominalAccompanimentArgument(parts, relIndex + 1, relationTargetEnd, input, offset, relation, options)
+    ? nominalAccompanimentArgument(parts, relIndex + 1, relationTargetEnd, input, offset, relation, options, duration)
     : undefined;
   const headOwnsAmount = accompaniment !== undefined || directObjectValence && !relationTimes &&
       relationHasGrammarFeature(relation, "accompanimentComplement") ||
@@ -1874,7 +1879,7 @@ function buildActionFrame(
       const following = relationIndex(parts, index + 1, semanticEnd);
       const complementEnd = following < 0 ? semanticEnd : following;
       const nominal = nominalAccompanimentValence
-        ? nominalAccompanimentArgument(parts, index + 1, complementEnd, input, offset, current, options)
+        ? nominalAccompanimentArgument(parts, index + 1, complementEnd, input, offset, current, options, duration)
         : undefined;
       const ownsQuantity = nominal !== undefined || (directObjectValence
         ? relationHasGrammarFeature(current, "accompanimentComplement") &&
@@ -1901,7 +1906,6 @@ function buildActionFrame(
   const amount = definition.acceptsAmount
     ? parseQuantityArgument(parts, argumentStart, semanticEnd, input, offset, options, amountEnd)
     : undefined;
-  const duration = parseAnyDurationArgument(parts, argumentStart, semanticEnd, input, offset);
 
   const argumentParser = ACTION_ARGUMENT_PARSERS[definition.argumentParser ?? "default"] ??
     DEFAULT_ACTION_ARGUMENT_PARSER;
