@@ -2319,9 +2319,11 @@ function formatLongThai(
       formatPatientInstructionSentence(graphInstruction, false), fallbackPatientInstruction]
       .filter((value): value is string => Boolean(value));
     if (deferredDirections?.current || authoredPrimary || clause.clinicalAdjuncts?.condition || clause.clinicalAdjuncts?.excludedDates?.length ||
-        clause.clinicalAdjuncts?.excludedWeekdays?.length)
-      parts.unshift(formatPatientInstructionSentence(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary,
-        clause.clinicalAdjuncts?.condition, words, deferredDirections, clause))!);
+        clause.clinicalAdjuncts?.excludedWeekdays?.length) {
+      const primary = composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary,
+        clause.clinicalAdjuncts?.condition, words, deferredDirections, clause);
+      parts.unshift(parts.length ? formatPatientInstructionSentence(primary)! : primary);
+    }
     return parts.join(" ").trim() || `${verb}.`;
   }
 
@@ -2427,11 +2429,12 @@ function formatAdditionalInstructionThai(
   ) : undefined;
   // A stock code label translates its stock wording. Independently authored
   // wording may contain more instructions than that label or its template;
-  // retain it whole unless the caller supplied its Thai realization.
-  const wording = definition ? instruction.text?.trim().replace(/[.!?]+$/u, "").toLowerCase() : undefined;
+  // retain it whole unless the caller supplied its Thai realization. Comma
+  // and semicolon presentation alone do not add meaning to full stock wording.
+  const wording = definition ? instruction.text?.trim().replace(/[.!?]+$/u, "").replace(/,/gu, ";").toLowerCase() : undefined;
   const authoredWording = wording && definition &&
-    wording !== definition.text?.trim().replace(/[.!?]+$/u, "").toLowerCase() &&
-    wording !== definition.coding?.display?.trim().replace(/[.!?]+$/u, "").toLowerCase();
+    wording !== definition.text?.trim().replace(/[.!?]+$/u, "").replace(/,/gu, ";").toLowerCase() &&
+    wording !== definition.coding?.display?.trim().replace(/[.!?]+$/u, "").replace(/,/gu, ";").toLowerCase();
   let text = instruction.i18n?.th ?? (authoredWording ? instruction.text : undefined) ??
     (instruction.frames?.length ? realizeAdviceFramesThai(instruction.frames) : undefined) ??
     (instruction.text ? THAI_ADMINISTRATION_WINDOW_TRANSLATIONS.get(instruction.text.toLowerCase().trim()) : undefined) ??

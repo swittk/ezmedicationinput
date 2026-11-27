@@ -753,7 +753,7 @@ function formatCanonicalBaseNative(
   // the administration and must not acquire that guard. Do not parse the text.
   const hasPrimaryQualifiers = a.predicate || a.excludedDates?.length || a.excludedWeekdays?.length;
   const authoredQualifiers = !deferredDirections?.current &&
-    hasPrimaryQualifiers && a.text?.trim() &&
+    hasPrimaryQualifiers && a.text?.trim() && !administrationHasAmountFacts(a) &&
     !canonicalClauseHasAdministrationSemantics(clause) && !clause.instructionGraph?.actions.length;
   const sourceOwnsPrimary = !administrationOwnsSourceDirections(source, clause.instructionGraph, a.text);
   const graphOwnsDirections = clause.instructionGraph?.coverage?.complete &&

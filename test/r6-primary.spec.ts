@@ -7568,6 +7568,36 @@ describe("review814 primary quantity and precise clock-window previews", () => {
     expect(JSON.stringify(input)).toBe(before);
   });
 
+  it("keeps a current labelled amount guarded when no compact head or cadence exists", () => {
+    const source = "Take 1 tablet.";
+    const predicate: MedicationCondition = { kind: "measurement", name: "SBP", operation: "gt", value: 160, text: "SBP > 160" };
+    const note = { url: "urn:clinic:ordered-dose-note", valueString: "retain" };
+    const row: FhirDosage = { text: source,
+      doseAndRate: [{ type: { coding: [{ code: "ordered" }] }, doseQuantity: { value: 1, unit: "tab" }, extension: [note] }],
+      additionalInstruction: [{ text: "Otherwise hold." }]
+    };
+    setDosageCondition(row, predicate);
+    const before = JSON.stringify(row), course = importCanonicalCourse([row]);
+    const expected = {
+      en: "Current: Use; Dose (ordered): 1 tablet only if SBP > 160. Otherwise hold; original directions: Take 1 tablet.",
+      th: "ปัจจุบัน: ใช้; ขนาดยา (ordered): ครั้งละ 1 เม็ด เฉพาะเมื่อ SBP > 160. Otherwise hold; ข้อความเดิม: Take 1 tablet."
+    };
+    for (const view of [course, fresh([row]), fresh(projectCanonicalCourse(course).fhirNext)]) {
+      const snapshot = JSON.stringify(view);
+      for (const locale of ["en", "th"] as const)
+        expect(formatSig(view, "long", { locale, realizationMode: "normalized" })).toBe(expected[locale]);
+      const retained = importCanonicalCourse(view).stages[0].administrations[0];
+      expect(retained.predicate).toEqual(predicate);
+      expect(retained.text).toBe(source);
+      expect(retained.amounts?.[0]).toMatchObject({ role: { coding: [{ code: "ordered" }] }, quantity: { value: 1, unit: "tab" } });
+      const projected = projectCanonicalCourse(importCanonicalCourse(view)).fhir[0];
+      expect(projected.doseAndRate![0].extension).toContainEqual(note);
+      expect(projected.additionalInstruction).toEqual(row.additionalInstruction);
+      expect(JSON.stringify(view)).toBe(snapshot);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
   it.each([false, true])("retains nonzero seconds at both clock-window bounds, inclusive=%s", inclusive => {
     const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
       amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { recurrence: {

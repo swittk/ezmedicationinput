@@ -1878,9 +1878,11 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     const parts = [formatPatientInstructionSentence(preGraphInstruction),
       formatPatientInstructionSentence(graphInstruction), fallbackPatientInstruction]
       .filter((value): value is string => Boolean(value));
-    if (deferredDirections?.current || authoredPrimary || condition || hasCalendarQualifiers)
-      parts.unshift(formatPatientInstructionSentence(composeNativePrimaryDirections(
-        authoredPrimary ? "" : verb, authoredPrimary, condition, words, deferredDirections, clause))!);
+    if (deferredDirections?.current || authoredPrimary || condition || hasCalendarQualifiers) {
+      const primary = composeNativePrimaryDirections(
+        authoredPrimary ? "" : verb, authoredPrimary, condition, words, deferredDirections, clause);
+      parts.unshift(parts.length ? formatPatientInstructionSentence(primary)! : primary);
+    }
     return parts.join(" ").trim() || `${verb}.`;
   }
   const leadingInstructionText = preFlowsIntoAdministration
