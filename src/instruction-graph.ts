@@ -1675,7 +1675,7 @@ const SITE_RELATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   // daughter as wait/infusion rather than turning "one minute" into a substance.
   const elapsed = relIndex >= 0 && relIndex < semanticEnd &&
     DURATION_LEAD_TOKENS.has(key(parts[relIndex]))
-      ? durationArgumentAt(parts, relIndex, semanticEnd, input, c.offset)
+      ? c.duration
       : undefined;
   if (elapsed) pushArgument(args, elapsed);
   else if (c.accompaniment) pushArgument(args, c.accompaniment);
@@ -1687,8 +1687,15 @@ const SITE_RELATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       target.relation = relation;
     pushArgument(args, target);
   }
-  else pushArgument(args, argumentFromParts(
-    parts, argumentStart, semanticEnd, input, preferredRinseRole(relation), options));
+  else {
+    const durationStart = c.duration?.span
+      ? partIndexForAbsoluteSourceStart(parts, c.duration.span.start, c.offset) : undefined;
+    const nominalEnd = durationStart === undefined ? semanticEnd : Math.min(semanticEnd, durationStart);
+    pushArgument(args, argumentFromParts(
+      parts, argumentStart, nominalEnd, input, preferredRinseRole(relation), options));
+  }
+  // A material or time complement does not consume the selected elapsed duration.
+  if (!elapsed) pushArgument(args, c.duration);
   pushArgument(args, resultTail?.argument);
   return { args };
 };

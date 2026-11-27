@@ -1178,6 +1178,85 @@ describe("source-backed duration valence for procedural rinsing", () => {
   });
 
   it.each([
+    ["Rinse with water for 30 seconds then spit", "water", undefined],
+    ["Rinse with water 30 seconds then spit", "water", undefined],
+    ["Rinse with 15 mL water 30 seconds then spit", "15 mL water", 15]
+  ] as const)("retains the site-relation duration beside its material: %s", (source, materialText, volume) => {
+    const parsed = parsePublicSig(source);
+    const parsedBefore = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].schedule?.duration).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].dose).toBeUndefined();
+    const note: FhirExtension = { url: "urn:review:site-relation-duration-note", valueString: "keep this note" };
+    const r5: FhirDosage[] = JSON.parse(JSON.stringify(parsed.fhir));
+    r5[0].extension = [...(r5[0].extension ?? []), note];
+    const r6: FhirR6DosageInstruction = JSON.parse(JSON.stringify(parsed.fhirNext));
+    r6.extension = [...(r6.extension ?? []), note];
+    for (const [kind, input] of [
+      ["native", parsed.meta.canonical.course!], ["r5", r5], ["r6", r6]
+    ] as const) {
+      const before = JSON.stringify(input);
+      const course = importCanonicalCourse(input);
+      expect(course.stages).toHaveLength(1);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      const graph = course.stages[0].administrations[0].syntax?.instructionGraph;
+      expect(graph?.sourceText).toBe(source);
+      expect(graph?.actions.map(action => action.predicate.lemma)).toEqual(["rinse", "spit"]);
+      const args = graph!.actions[0].args;
+      expect(args).toHaveLength(2);
+      const material = args.find(arg => arg.role === AdviceArgumentRole.Substance)!;
+      const duration = args.find(arg => arg.role === AdviceArgumentRole.Duration)!;
+      expect(material).toMatchObject({ text: materialText, normalized: "water", conceptId: "water",
+        relation: AdviceRelation.With });
+      expect(material.quantity).toEqual(volume === undefined ? undefined : { value: volume, unit: "mL" });
+      expect(duration).toMatchObject({ quantity: { value: 30, unit: "s" } });
+      expect(material.span!.end).toBeLessThanOrEqual(duration.span!.start);
+      for (const arg of [material, duration]) {
+        expect(source.slice(arg.span!.start, arg.span!.end)).toBe(arg.text);
+      }
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe(`Rinse for 30 seconds with ${materialText}; then spit out.`);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe(`ล้างเป็นเวลา 30 วินาทีด้วย${volume === undefined ? "น้ำ" : "15 มิลลิลิตรน้ำ"} จากนั้นบ้วนทิ้ง.`);
+      const projected = projectCanonicalCourse(course);
+      for (const dosage of projected.fhir) {
+        expect(dosage.timing?.repeat?.boundsDuration).toBeUndefined();
+        expect(dosage.doseAndRate).toBeUndefined();
+      }
+      if (kind === "r5") expect(projected.fhir[0].extension).toContainEqual(note);
+      if (kind === "r6") expect(projected.fhirNext.extension).toContainEqual(note);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+
+  it("keeps a bare site-relation duration out of the opaque nominal", () => {
+    const source = "Rinse 30 seconds then spit";
+    const parsed = parsePublicSig(source);
+    const parsedBefore = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].schedule?.duration).toBeUndefined();
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const course = importCanonicalCourse(input);
+      const graph = course.stages[0].administrations[0].syntax?.instructionGraph;
+      expect(graph?.sourceText).toBe(source);
+      expect(graph?.actions.map(action => action.predicate.lemma)).toEqual(["rinse", "spit"]);
+      expect(graph!.actions[0].args).toHaveLength(1);
+      expect(graph!.actions[0].args[0]).toMatchObject({ role: AdviceArgumentRole.Duration,
+        text: "30 seconds", quantity: { value: 30, unit: "s" }, span: { start: 6, end: 16 } });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Rinse for 30 seconds; then spit out.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("ล้างเป็นเวลา 30 วินาที จากนั้นบ้วนทิ้ง.");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+
+  it.each([
     ["Rinse for one minute then spit", "rinse", "Rinse for 1 minute", "ล้างเป็นเวลา 1 นาที"],
     ["Rinse mouth for one minute then spit", "rinse_mouth", "Rinse mouth for 1 minute", "บ้วนปาก นาน 1 นาที"]
   ] as const)("keeps separate non-dosed rinse and mouth-rinse duration: %s", (source, lemma, english, thai) => {
