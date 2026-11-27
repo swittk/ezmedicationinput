@@ -3717,3 +3717,42 @@ describe("advice-owned continuation and procedural conditions", () => {
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });
+
+
+describe("complete withholding weekday arguments", () => {
+  it.each([
+    ["Mondays and Wednesdays", [7, 9], false],
+    ["Mondays and Wednesdays", [7, 9], true],
+    ["Monday and Wednesday", [7, 9], false],
+    ["Mon-Wed", [7, 8, 9], false],
+    ["Monday", [7], false],
+    ["Monday", [7], true]
+  ] as const)("withholds only the selected morning doses on %s", (days, excluded, preposed) => {
+    const withholding = preposed ? `On ${days}, hold the morning dose.` : `Hold the morning dose on ${days}.`;
+    const source = `Take 1 tablet at 08:00 and 20:00 for 7 days. ${withholding}`;
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const expected: string[] = [];
+    for (let day = 7; day <= 13; day++) {
+      const date = `2026-12-${String(day).padStart(2, "0")}`;
+      if (!(excluded as readonly number[]).includes(day)) expected.push(`${date}T08:00:00+00:00`);
+      expected.push(`${date}T20:00:00+00:00`);
+    }
+    const query = { orderedAt: "2026-12-07T00:00:00Z", from: "2026-12-07T00:00:00Z", timeZone: "UTC", limit: 20 };
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const current = JSON.stringify(input);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: expected.length, unit: "tab" });
+      const members = importCanonicalCourse(input).stages[0].administrations;
+      expect(members).toHaveLength(2);
+      const morning = members.find(member => member.schedule?.recurrence?.clocks?.includes("08:00:00"));
+      const hold = morning?.syntax?.instructionGraph?.actions.find(action => action.predicate.lemma === "hold");
+      expect(hold?.args).toEqual(expect.arrayContaining([expect.objectContaining({ role: "time", text: days })]));
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase()).toContain(days.toLowerCase());
+      expect(JSON.stringify(input)).toBe(current);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+});

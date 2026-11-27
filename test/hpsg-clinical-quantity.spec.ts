@@ -5441,3 +5441,64 @@ describe("elapsed occurrence windows and canonical rate terms", () => {
     }
   });
 });
+
+
+describe("owned event onsets and canonical duration tokens", () => {
+  it.each([
+    ["bedtime", "HS", "22:00:00"],
+    ["bed", "HS", "22:00:00"],
+    ["sleep", "HS", "22:00:00"],
+    ["breakfast", "ACM", "07:30:00"]
+  ] as const)("keeps before %s as administration timing beside a next-day onset", (event, anchor, clock) => {
+    const source = `Take 1 tablet once before ${event} the next day`;
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].schedule?.treatmentStartOffsetDays).toBe(1);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const current = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages).toHaveLength(1);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      const member = course.stages[0].administrations[0];
+      expect(member.phaseEnd).toBeUndefined();
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ count: 1, anchors: [anchor] });
+      expect(nextDueDoses(input, { orderedAt: "2026-12-07T00:00:00Z", from: "2026-12-07T00:00:00Z",
+        timeZone: "UTC", limit: 5 })).toEqual([`2026-12-08T${clock}+00:00`]);
+      expect(JSON.stringify(input)).toBe(current);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("reads a registered leading-decimal attached duration without rewriting its source", () => {
+    const original = getMedicationLexerLocalePack("en");
+    let hits = 0;
+    registerMedicationLexerLocalePack({ locale: "en", apply: (tokens, input) =>
+      (original?.apply(tokens, input) ?? tokens).map((token, index) => {
+        if (token.lower === "clinicspan") { hits++; return { ...token, index, canonical: ".5h" }; }
+        return { ...token, index };
+      })
+    });
+    try {
+      for (const duration of ["clinicspan", ".5h"]) {
+        const source = `Infuse 100 mL over ${duration}`, parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+        for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+          JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+          const current = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+          expect(member.schedule?.recurrence).toMatchObject({ count: 1, occurrenceDuration: 0.5, occurrenceDurationUnit: "h" });
+          expect(member.amounts?.[0]).toMatchObject({ quantity: { value: 100, unit: "mL" },
+            rateRatio: { numerator: { value: 100, unit: "mL" }, denominator: { value: 0.5, unit: "h" } } });
+          expect(nextDueDoses(input, { orderedAt: "2026-12-07T00:00:00Z", from: "2026-12-07T00:00:00Z",
+            timeZone: "UTC", limit: 5 })).toEqual(["2026-12-07T00:00:00+00:00"]);
+          expect(JSON.stringify(input)).toBe(current);
+        }
+        expect(parsed.fhirNext.renderedInstruction).toBe(source);
+        expect(JSON.stringify(parsed)).toBe(before);
+      }
+      expect(hits).toBeGreaterThan(0);
+    } finally {
+      registerMedicationLexerLocalePack(original ?? { locale: "en", apply: tokens =>
+        tokens.map((token, index) => ({ ...token, index })) });
+    }
+  });
+});

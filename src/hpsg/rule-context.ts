@@ -44,6 +44,7 @@ import {
   RELATIVE_TIME_END_LEADS,
   MEAL_RELATION_BY_TOKEN,
   MEAL_TIMING_BY_RELATION,
+  SLEEP_EVENT_ALIASES,
   NEXT_DAY_MODIFIERS,
   NEXT_DAY_HEADS,
   NEXT_DAY_PREPOSITIONS,
@@ -275,7 +276,7 @@ export function clinicalDurationAt(context: QuantityLexicalContext, start: numbe
     quantityTokenAvailable(context, start + 1)
     ? DOSE_FRACTION_WORDS.get(normalizeTokenLower(context.tokens[start + 1])) : undefined;
   const attached = !qualified && token.kind !== LexKind.Number
-    ? attachedNumberUnitAt(token.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
+    ? attachedNumberUnitAt((token.canonical ?? token.lower).replace(/[{};]+|\.+$/gu, "")) : undefined;
   const cardinal = articleFraction ?? attached?.value ?? (qualified ? undefined : clinicalDurationNumber(token));
   const denominator = articleFraction === undefined && cardinal !== undefined && quantityTokenAvailable(context, start + 1)
     ? DOSE_FRACTION_DENOMINATOR_WORDS.get(normalizeTokenLower(context.tokens[start + 1])) : undefined;
@@ -573,10 +574,11 @@ export function courseEndClockAt(tokens: readonly Token[], start: number, limit 
   const named = resolveEventTimingExpression(parts);
   const governor = tokens[start - 1];
   const mealRelation = governor && MEAL_RELATION_BY_TOKEN.get(normalizeTokenLower(governor));
-  // A licensed meal relation owns its event as administration timing. It is
-  // not an end-clock complement merely because the same preposition can end
-  // a course; the NEXT nominal remains available to the onset construction.
-  if (named && mealRelation && MEAL_TIMING_BY_RELATION.get(mealRelation)?.has(named.timing)) return undefined;
+  // A licensed event relation owns administration timing, including BEFORE
+  // SLEEP. Its event is not an end-clock complement; the NEXT nominal remains
+  // available to the onset construction.
+  if (named && mealRelation && (MEAL_TIMING_BY_RELATION.get(mealRelation)?.has(named.timing) ||
+      mealRelation === "before" && SLEEP_EVENT_ALIASES.has(normalizeTokenLower(first)))) return undefined;
   return named ? { tokens: tokens.slice(start, start + named.length), event: named.timing } : undefined;
 }
 
