@@ -1299,6 +1299,72 @@ describe("coordinated prohibition scope across lists and sequence boundaries", (
   });
 });
 
+describe("selected negative directive row materialization", () => {
+  it.each([
+    {
+      source: "Do not shake or mix",
+      texts: ["Do not shake", "Do not mix"],
+      actions: [["shake", "negate", undefined], ["mix", "negate", undefined]],
+      thai: ["ห้ามเขย่า", "ห้ามผสม"],
+      duration: undefined
+    },
+    {
+      source: "Should not take with grapefruit",
+      texts: ["Should not take with grapefruit"],
+      actions: [["take", "negate", AdviceModality.Should]],
+      thai: ["ไม่ควร"],
+      duration: undefined
+    },
+    {
+      source: "Do not eat or drink for 30 minutes",
+      texts: ["Do not eat food for 30 minutes", "Do not drink for 30 minutes"],
+      actions: [["eat-food", "negate", undefined], ["drink", "negate", undefined]],
+      thai: ["ห้ามรับประทานอาหารเป็นเวลา 30 นาที", "ห้ามดื่มเป็นเวลา 30 นาที"],
+      duration: { value: 30, unit: "min" }
+    }
+  ])("retains selected negative and modal wording in native and fresh standard rows: $source",
+    ({ source, texts, actions, thai, duration }) => {
+      const parsed = parseProductionSig(source, { locale: "en" });
+      const clause = parsed.meta.canonical.clauses[0];
+      expect(clause.additionalInstructions?.map(row => row.text)).toEqual(texts);
+      expect(clause.instructionGraph?.actions.map(action =>
+        [action.predicate.lemma, action.polarity, action.modality])).toEqual(actions);
+      expect(clause.instructionGraph?.sourceText).toBe(source);
+      for (const input of [
+        parsed.meta.canonical.course!,
+        JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext))
+      ]) {
+        const before = JSON.stringify(input);
+        const projected = projectCanonicalCourse(importCanonicalCourse(input));
+        expect(projected.fhir).toHaveLength(1);
+        expect(projected.fhir[0].additionalInstruction?.map(row => row.text)).toEqual(texts);
+        expect(projected.fhirNext.step?.[0]?.component[0].additionalInstruction?.map(row => row.text))
+          .toEqual(texts);
+        const current = fromFhirDosage(projected.fhir[0], { locale: "en" })
+          .meta.canonical.clauses[0];
+        expect(current.instructionGraph?.actions.map(action =>
+          [action.predicate.lemma, action.polarity, action.modality])).toEqual(actions);
+        expect(current.instructionGraph?.sourceText).toBe(source);
+        if (duration) {
+          expect(current.instructionGraph?.actions.map(action =>
+            action.args.filter(argument => argument.role === AdviceArgumentRole.Duration)
+              .map(argument => argument.quantity))).toEqual([[duration], [duration]]);
+          expect(current.schedule?.duration).toBeUndefined();
+        }
+        const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        if (actions[0][2] === AdviceModality.Should) {
+          expect(english).toBe("Should not take with grapefruit.");
+        }
+        const translated = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+        for (const phrase of thai) expect(translated).toContain(phrase);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(parsed.input).toBe(source);
+    }
+  );
+});
+
 describe("negated procedural complements of typed WITHOUT relation", () => {
   it.each([
     ["Swallow two tablets whole without chewing", "chew", 2],

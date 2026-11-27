@@ -1,4 +1,4 @@
-import type { CanonicalEvidence, CanonicalLexicalCategory } from "./types";
+import type { CanonicalAdditionalInstructionExpr, CanonicalEvidence, CanonicalLexicalCategory } from "./types";
 import { parseHpsgClause } from "./hpsg/clause-parser";
 import { getProceduralFrames } from "./hpsg/procedural-context";
 import { findMedicationDateListSpans } from "./date-interpretation";
@@ -13,7 +13,7 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { ParserState, Token } from "./parser-state";
-import { buildInstructionGraph, instructionGraphAdviceAssociation, realizeInstructionAction } from "./instruction-graph";
+import { buildInstructionGraph, instructionGraphAdviceAssociation, instructionSourceRange, realizeInstructionAction } from "./instruction-graph";
 import { resolveMedicationAdministrationMethod } from "./hpsg/method-lexicon";
 export {
   applyPrnReasonCoding,
@@ -314,32 +314,61 @@ function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClau
   if (!graph) return;
   const primary = graph.primaryAdministrationSpan;
   let instructions = clause.additionalInstructions;
-  let represented: Set<number> | undefined;
+  let associations: ReturnType<typeof instructionGraphAdviceAssociation>[] | undefined;
+  let source: string | undefined;
   for (let index = 0; index < graph.actions.length; index += 1) {
     const warning = graph.actions[index];
     const sourceText = warning.sourceText.trim();
     if (!sourceText || (warning.polarity !== AdvicePolarity.Negate &&
         (!warning.modality || !primary ||
           warning.span.end > primary.start && warning.span.start < primary.end))) continue;
-    if (!represented) {
-      represented = new Set();
-      for (const instruction of instructions ?? []) {
-        for (const actionIndex of instructionGraphAdviceAssociation(graph, instruction).representedActionIndices)
-          represented.add(actionIndex);
+    if (!associations) associations = (instructions ?? []).map(instruction =>
+      instructionGraphAdviceAssociation(graph, instruction));
+    let rowIndex = -1;
+    let uncodedBindings = 0;
+    for (let candidate = 0; candidate < associations.length; candidate += 1) {
+      if (associations[candidate].actionIndices.indexOf(index) < 0) continue;
+      const coded = Boolean(instructions![candidate].coding?.code);
+      if (rowIndex < 0 || !coded && instructions![rowIndex].coding?.code) rowIndex = candidate;
+      if (!coded) uncodedBindings += 1;
+    }
+    let previous: CanonicalAdditionalInstructionExpr | undefined;
+    let range: TextRange | undefined;
+    if (rowIndex >= 0) {
+      previous = instructions![rowIndex];
+      // One daughter cannot replace a split or wider selected instruction.
+      if (previous.coding?.code || uncodedBindings !== 1 || previous.frames?.length !== 1 ||
+          associations[rowIndex].actionIndices.length !== 1) continue;
+      range = instructionSourceRange(graph, previous.text,
+        source ??= graph.sourceText.toLocaleLowerCase("en"));
+      if (range && (range.start < warning.span.start || range.end > warning.span.end)) continue;
+    }
+    const wordingRange = range ?? warning.span;
+    const composedSource = warning.polaritySource === "shared" || warning.args.some(argument =>
+      argument.span && (argument.span.start < wordingRange.start || argument.span.end > wordingRange.end));
+    if (previous) {
+      const frame = previous.frames![0];
+      const richerModalSource = warning.modality !== undefined &&
+        (frame.modality !== warning.modality ||
+          warning.span.start < frame.span.start || warning.span.end > frame.span.end ||
+          !range || range.start !== warning.span.start || range.end !== warning.span.end);
+      if (!composedSource && !richerModalSource) {
+        if (frame !== warning) instructions![rowIndex] = { ...previous, frames: [warning] };
+        continue;
       }
     }
-    if (represented.has(index)) continue;
-    // Shared polarity belongs to the selected composed directive, so its raw
-    // daughter source cannot supply the complete negative wording.
-    const sharedNegation = warning.polaritySource === "shared";
-    const text = sharedNegation
+    // A daughter source cannot express inherited polarity or arguments owned
+    // outside that source extent; realize the complete selected composition.
+    const text = composedSource
       ? realizeInstructionAction(warning, "en")
       : sourceText.charAt(0).toUpperCase() + sourceText.slice(1);
     if (!text.trim()) continue;
-    const translated = sharedNegation ? realizeInstructionAction(warning, "th") : undefined;
-    (instructions ??= clause.additionalInstructions = []).push({
-      text, ...(translated ? { i18n: { th: translated } } : {}), frames: [warning]
-    });
+    const translated = composedSource ? realizeInstructionAction(warning, "th") : undefined;
+    const selected: CanonicalAdditionalInstructionExpr = previous
+      ? { ...previous, text, frames: [warning] } : { text, frames: [warning] };
+    if (translated) selected.i18n = { ...previous?.i18n, th: translated };
+    if (previous) instructions![rowIndex] = selected;
+    else (instructions ??= clause.additionalInstructions = []).push(selected);
   }
 }
 
