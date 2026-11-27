@@ -16578,3 +16578,10 @@ The existing parsed and external-input clinical controls retain this distinction
 The execution documentation now reflects the current unresolved-boundary behavior:
 required whole-course boundaries must resolve; separately selected resolvable
 tracks remain schedulable.
+
+
+## 2026-11-27 — Compact dose and cumulative limit ownership
+
+Oral doses written with a 24-hour denominator retain their amount and cadence beside compact cumulative limits. The shared quantity owner recognizes an already-admitted dose before a later qualified quantity seeks an administration head. Genuine infusion rates and standalone comparative amounts retain their existing meaning.
+
+Regression cases cover the separate dose and cap, due dates, supply, English and Thai previews, and source preservation across native and fresh FHIR forms.
