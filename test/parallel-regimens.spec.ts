@@ -7,7 +7,7 @@ import {
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
 import { shiftCanonicalSigClauses } from "../src/ir";
-import { administrationFromClause, courseFromAdministrations, courseFromPartialParallel } from "../src/canonical/compile";
+import { administrationFromClause, courseFromAdministrations, courseFromParallel, courseFromPartialParallel } from "../src/canonical/compile";
 import { parseClauseState } from "../src/parser";
 import {
   buildCanonicalParallelRegimen
@@ -18,7 +18,6 @@ import {
 import { normalizeClock } from "../src/execution/calendar";
 import { lexInput } from "../src/lexer/lex";
 import { anchoredScheduleDurationEnd } from "../src/regimen/regimen";
-import { projectParallelRegimen } from "../src/regimen/parallel-course";
 import { clauseForAdministration } from "../src/canonical/compile";
 import { courseToR5 } from "../src/adapters/canonical-course";
 import { courseToR6 } from "../src/adapters/canonical-course";
@@ -4809,8 +4808,7 @@ describe("round58 execution phase ownership and local clocks", () => {
     const clauses = persist(states.map(state => state.primaryClause));
     clauses[1].schedule!.treatmentStartOffsetDays = onset;
     const parallel = buildCanonicalParallelRegimen(clauses, plan.segments, plan, graph);
-    const projected = projectParallelRegimen(parallel, plan.segments.map(segment => segment.text), text);
-    const course = projected.kind === "resolved" ? projected.canonical
+    const course = parallel.kind === "resolved" ? courseFromParallel(parallel, plan.segments.map(segment => segment.text), text)
       : parallel.kind === "unresolved" ? courseFromPartialParallel(parallel, plan.segments.map(segment => segment.text), text)
         : undefined;
     if (!course) throw new Error("Expected the independent typed parallel tracks");

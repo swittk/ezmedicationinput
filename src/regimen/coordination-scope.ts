@@ -1,4 +1,5 @@
 import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
+import { withMedicationSourceI18n } from '../locale-detection';
 import {
   selectHpsgCoordinationScopeConstruction,
   selectHpsgCalendarClockEllipsisConstruction,
@@ -742,6 +743,11 @@ function cloneInstruction(
   };
 }
 
+function sameSourceAction(left: AdviceFrame, right: AdviceFrame, offset = 0): boolean {
+  return left.predicate.lemma === right.predicate.lemma && left.polarity === right.polarity &&
+    left.span.start + offset === right.span.start && left.span.end + offset === right.span.end;
+}
+
 /** Keep the selected action's existing scope when its instruction is inherited. */
 function inheritInstructionRelations(
   target: CanonicalSigClause,
@@ -754,11 +760,7 @@ function inheritInstructionRelations(
   const selected = new Map<number, AdviceFrame>();
   for (const instruction of inherited) {
     for (const frame of instruction.frames ?? []) {
-      const index = donor.actions.findIndex(action =>
-        action.predicate.lemma === frame.predicate.lemma &&
-        action.span.start + offset === frame.span.start &&
-        action.span.end + offset === frame.span.end
-      );
+      const index = donor.actions.findIndex(action => sameSourceAction(action, frame, offset));
       if (index >= 0) selected.set(index, frame);
     }
   }
@@ -778,10 +780,7 @@ function inheritInstructionRelations(
   target.sourceProjectionVerified = false;
   const indices = new Map<number, number>();
   for (const [donorIndex, frame] of selected) {
-    let index = graph.actions.findIndex(action =>
-      action.predicate.lemma === frame.predicate.lemma &&
-      action.span.start === frame.span.start && action.span.end === frame.span.end
-    );
+    let index = graph.actions.findIndex(action => sameSourceAction(action, frame));
     if (index < 0) {
       index = graph.actions.length;
       const action = cloneAdviceFrame(donor.actions[donorIndex], offset);
@@ -1248,16 +1247,12 @@ export function scopeTrailingSharedNegativeInstructions(
   const tail = trimmedTailSpan(donor, separator.end);
   if (!tail) return;
   const negativeActions = (donorClause.instructionGraph?.actions ?? []).filter(action =>
-    action.polarity === AdvicePolarity.Negate && action.span.start >= separator.end
+    action.polarity === AdvicePolarity.Negate && tail.start <= action.span.start && action.span.end <= tail.end
   );
   if (!negativeActions.length) return;
-  const tailText = normalizedInstructionText(tail.text);
-  const shared = (donorClause.additionalInstructions ?? []).filter(instruction => {
-    const text = normalizedInstructionText(instruction.text);
-    return Boolean(text && tailText.includes(text) && instruction.frames?.some(frame =>
-      frame.polarity === AdvicePolarity.Negate && frame.span.start >= separator.end
-    ));
-  });
+  const shared = (donorClause.additionalInstructions ?? []).filter(instruction =>
+    instruction.frames?.some(frame => negativeActions.some(action => sameSourceAction(action, frame)))
+  );
   if (!shared.length) return;
   // Share the predicate only when it is source-owned by this same untargeted
   // prohibition. A selected clock/daypart is handled by nominal target scope,
@@ -1297,13 +1292,13 @@ export function scopeTrailingSharedNegativeInstructions(
     });
     if (!selected) continue;
 
+    const donorOffset = segments[donorIndex].start - segments[recipientIndex].start;
     const additions = shared.filter(instruction =>
-      !targetClause.additionalInstructions?.some(existing =>
-        normalizedInstructionText(existing.text) === normalizedInstructionText(instruction.text)
-      )
+      !targetClause.additionalInstructions?.some(existing => instruction.frames!.every(frame =>
+        existing.frames?.some(retained => sameSourceAction(frame, retained, donorOffset))
+      ))
     );
     if (!additions.length && !sharedGuard) continue;
-    const donorOffset = segments[donorIndex].start - segments[recipientIndex].start;
     const scopeEvidence: CanonicalEvidence = {
       rule: selected.construction.id,
       spans: [
@@ -1322,10 +1317,7 @@ export function scopeTrailingSharedNegativeInstructions(
     };
     const inherited = additions.map(instruction => {
       const clone = cloneInstruction(instruction, donorOffset);
-      if (donorClause.instructionGraph?.sourceLocale?.toLowerCase().startsWith('th') &&
-          clone.text && /[\u0E00-\u0E7F]/u.test(clone.text)) {
-        clone.i18n = { ...(clone.i18n ?? {}), th: clone.text };
-      }
+      if (clone.text) clone.i18n = withMedicationSourceI18n(clone.text, clone.i18n);
       clone.evidence = [...(clone.evidence ?? [])];
       appendEvidence(clone.evidence, cloneEvidence(scopeEvidence));
       return clone;

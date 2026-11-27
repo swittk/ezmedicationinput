@@ -97,7 +97,6 @@ import type { FhirR6Dosage } from "../src/types";
 import { normalizeClock } from "../src/execution/calendar";
 import { lexInput } from "../src/lexer/lex";
 import { anchoredScheduleDurationEnd } from "../src/regimen/regimen";
-import { projectParallelRegimen } from "../src/regimen/parallel-course";
 import { courseToR5 } from "../src/adapters/canonical-course";
 import { toEzDosages } from "../src/index";
 import { TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src/index";
@@ -307,6 +306,24 @@ describe("heterogeneous multi-dose regimens", () => {
         instruction.coding?.some((coding) => coding.code === "311504000")
       )).toBe(false);
     }
+  });
+
+  it("retains independent same-text warning occurrences when the trailing instruction is shared", () => {
+    const source = "Take 1 tablet at 12:00 do not take with food, then 2 tablets at 16:00; do not take with food";
+    const parsed = parseProductionSig(source);
+    const clauses = parsed.meta.canonical.clauses;
+    expect(parsed.count).toBe(2);
+    expect(clauses.map(clause => clause.dose?.value)).toEqual([1, 2]);
+    expect(clauses.map(clause => clause.schedule?.timeOfDay)).toEqual([["12:00:00"], ["16:00:00"]]);
+    const first = clauses[0].additionalInstructions!, second = clauses[1].additionalInstructions!;
+    expect(first.map(instruction => instruction.text)).toEqual(["Do not take with food", "Do not take with food"]);
+    expect(second.map(instruction => instruction.text)).toEqual(["Do not take with food"]);
+    const firstFrames = first.map(instruction => instruction.frames![0]);
+    expect(firstFrames.map(frame => frame.polarity)).toEqual([AdvicePolarity.Negate, AdvicePolarity.Negate]);
+    expect(firstFrames[0].span.start).toBeLessThan(firstFrames[1].span.start);
+    expect(firstFrames[1].span).toEqual(second[0].frames![0].span);
+    for (const row of parsed.fhir) expect(row.additionalInstruction?.some(instruction => instruction.text === "Do not take with food")).toBe(true);
+    expect(parsed.input).toBe(source);
   });
 
   it("round-trips negated food relation across English and Thai surfaces", () => {

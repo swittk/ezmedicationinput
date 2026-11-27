@@ -1,18 +1,9 @@
-import { projectNativeR5Course } from "../adapters/r5-course";
-import { fromDosageDetails } from '../dosage-course';
-import { type FhirProjectionOptions } from '../fhir';
-import { courseFromParallel, precedingCalendarDay, orderedCalendarBounds } from '../canonical/compile';
-import { projectFreshlyCompiledCourseToR6 } from '../adapters/canonical-course';
-import { administrationHasDatedClockStart, compareRegimenPositions, type CanonicalCourse, type CanonicalBoundary, type RegimenPosition } from '../canonical/course';
+import { precedingCalendarDay, orderedCalendarBounds } from '../canonical/compile';
+import { administrationHasDatedClockStart, compareRegimenPositions, type CanonicalBoundary, type RegimenPosition } from '../canonical/course';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan } from '../hpsg/signature';
 import { anchoredScheduleDurationEnd, hasExactScheduleDuration, type RegimenGraph } from './regimen';
-import type {
-  CanonicalSigClause,
-  EzCourseMetadata,
-  EzDosage,
-  FhirR6DosageInstruction
-} from '../types';
+import type { CanonicalSigClause } from '../types';
 
 export type { RegimenPosition } from '../canonical/course';
 
@@ -55,17 +46,6 @@ export type CanonicalParallelRegimen =
       kind: 'resolved';
       tracks: CanonicalParallelTrack[];
       stages: CanonicalParallelStage[];
-    };
-
-type ParallelProjection =
-  | { kind: 'not-parallel' }
-  | { kind: 'unresolved'; reason: string }
-  | {
-      kind: 'resolved';
-      dosages: EzDosage[];
-      course: EzCourseMetadata;
-      details: FhirR6DosageInstruction;
-      canonical: CanonicalCourse;
     };
 
 const ZERO: RegimenPosition = { unit: 'd', value: 0 };
@@ -459,43 +439,4 @@ export function buildCanonicalParallelRegimen(
     stages.push({ sequence: index + 1, start, ...(end ? { end } : {}), components });
   }
   return { kind: 'resolved', tracks, stages };
-}
-
-const TREATMENT_START_CODE = 'treatment-start';
-export const TREATMENT_START_SYSTEM = 'http://hl7.org/fhir/evidence-variable-event';
-
-/** Shared pure lowering of an already-typed treatment-relative position. */
-export function relativeTime(position: RegimenPosition | {
-  unit: "s" | "min" | "h" | "wk" | "a"; value: number
-}) {
-  return {
-    contextCode: {
-      coding: [{
-        system: TREATMENT_START_SYSTEM,
-        code: TREATMENT_START_CODE,
-        display: 'Start of Treatment'
-      }]
-    },
-    offsetDuration: {
-      value: position.value,
-      unit: position.unit,
-      system: 'http://unitsofmeasure.org',
-      code: position.unit
-    }
-  };
-}
-
-/** Pure one-way serialization of an already composed canonical course. */
-export function projectParallelRegimen(
-  regimen: CanonicalParallelRegimen,
-  clauseTexts: readonly (string | undefined)[],
-  renderedInstruction: string,
-  options?: FhirProjectionOptions
-): ParallelProjection {
-  if (regimen.kind !== 'resolved') return regimen;
-  const canonical = courseFromParallel(regimen, clauseTexts, renderedInstruction);
-  const details = projectFreshlyCompiledCourseToR6(canonical, options);
-  // These are public interchange projections, not the course's working state.
-  const { dosages, course } = projectNativeR5Course(canonical,options,true,true);
-  return { kind: 'resolved', dosages, course, details, canonical };
 }

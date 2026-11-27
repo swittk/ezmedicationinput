@@ -286,6 +286,28 @@ describe("round54 descriptor-owned surface segmenter callbacks", () => {
 });
 
 
+describe("registered source locale in shared warning clones", () => {
+  it("retains the registered Spanish article surface through the existing negative-instruction owner", () => {
+    registerMedicationLocaleDetector({ locale: "es", priority: 1000, test: text => /\bel\b/u.test(text) });
+    registerMedicationLexerLocalePack({
+      locale: "es",
+      apply: tokens => tokens.map((token, index) => ({ ...token, index,
+        ...(token.lower === "el" ? { canonical: "the" } : {}) })),
+      listLexemes: () => [{ surface: "el", canonical: "the" }],
+    });
+    const source = "take 1 tab at 12:00, 2 tabs at 16:00; do not take with el food";
+    const parsed = parseSig(source), clauses = parsed.meta.canonical.clauses;
+    expect(parsed.count).toBe(2);
+    expect(clauses.map(clause => clause.dose?.value)).toEqual([1, 2]);
+    expect(clauses.map(clause => clause.schedule?.timeOfDay)).toEqual([["12:00:00"], ["16:00:00"]]);
+    const inherited = clauses[0].additionalInstructions![0];
+    expect(inherited).toMatchObject({ text: "Do not take with el food", i18n: { es: "Do not take with el food" } });
+    expect(inherited.frames![0].polarity).toBe("negate");
+    expect(inherited.frames![0].span).toEqual(clauses[1].additionalInstructions![0].frames![0].span);
+    expect(parsed.input).toBe(source);
+  });
+});
+
 describe("shared timing article roles", () => {
   it("accepts a registered Spanish article alias through existing timing constructions", () => {
     registerMedicationLocaleDetector({ locale: "es", priority: 1000, test: text => /\bel\b/u.test(text) });

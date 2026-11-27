@@ -20,9 +20,10 @@ import {
 import { recognizeCycles } from "../src/hpsg/rules/timing-rules";
 import { parseClauseState } from "../src/parser";
 import {
-  buildCanonicalParallelRegimen, projectParallelRegimen
+  buildCanonicalParallelRegimen
 } from "../src/regimen/parallel-course";
 import { buildRegimenGraph } from "../src/regimen/regimen";
+import { courseFromParallel } from "../src/canonical/compile";
 import type { BoundaryPlan } from "../src/hpsg/signature";
 import type { HpsgSigSegment } from "../src/hpsg/segmenter";
 import { BODY_SITE_RESTRICTION_EXTENSION_URL } from "../src/fhir";
@@ -1012,15 +1013,13 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     ];
     const graph = buildRegimenGraph(plan, expanded);
     const regimen = buildCanonicalParallelRegimen(values.map(state => state.primaryClause), expanded, plan, graph);
-    const projection = projectParallelRegimen(
-      regimen,
-      values.map(value => value.primaryClause.rawText),
-      "multiple independent plans"
-    );
-    expect(projection.kind).toBe("resolved");
-    if (projection.kind === "resolved") {
-      expect(projection.details.step[0].component).toHaveLength(4);
-      expect(projection.details.step.map(step => step.end?.offsetDuration?.value))
+    expect(regimen.kind).toBe("resolved");
+    if (regimen.kind === "resolved") {
+      const canonical = courseFromParallel(regimen, values.map(value => value.primaryClause.rawText),
+        "multiple independent plans");
+      const projection = projectCanonicalCourse(canonical).fhirNext;
+      expect(projection.step[0].component).toHaveLength(4);
+      expect(projection.step.map(step => step.end?.offsetDuration?.value))
         .toEqual([7, 1, undefined]);
     }
   });

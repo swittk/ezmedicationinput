@@ -16,8 +16,7 @@ import { buildRegimenGraph } from "../src/regimen/regimen";
 import { scopeSequentialPhaseSemantics } from "../src/regimen/regimen";
 import { anchoredScheduleDurationEnd } from "../src/regimen/regimen";
 import { buildCanonicalParallelRegimen } from "../src/regimen/parallel-course";
-import { projectParallelRegimen } from "../src/regimen/parallel-course";
-import { courseFromAdministrations } from "../src/canonical/compile";
+import { courseFromAdministrations, courseFromParallel } from "../src/canonical/compile";
 import { clauseForAdministration } from "../src/canonical/compile";
 import { courseFromPartialParallel } from "../src/canonical/compile";
 import { courseToR5 } from "../src/adapters/canonical-course";
@@ -3225,16 +3224,17 @@ describe("round 25 execution boundary and history oracles", () => {
     scopeSequentialPhaseSemantics(states, plan.segments, graph, text);
     const clauses = states.map(state => state.primaryClause);
     expect(clauses[1].schedule).toMatchObject({ duration: 1.5, durationUnit: "d", frequency: 2 });
-    const projected = projectParallelRegimen(buildCanonicalParallelRegimen(clauses, plan.segments, plan, graph),
-      plan.segments.map(segment => segment.text), text);
-    expect(projected.kind).toBe("resolved");
-    if (projected.kind !== "resolved") return;
-    const terminal = projected.canonical.stages.reduce<CanonicalAdministration[]>((all, stage) => all.concat(stage.administrations), [])
+    const parallel = buildCanonicalParallelRegimen(clauses, plan.segments, plan, graph);
+    expect(parallel.kind).toBe("resolved");
+    if (parallel.kind !== "resolved") return;
+    const canonical = courseFromParallel(parallel, plan.segments.map(segment => segment.text), text);
+    const projected = projectCanonicalCourse(canonical);
+    const terminal = canonical.stages.reduce<CanonicalAdministration[]>((all, stage) => all.concat(stage.administrations), [])
       .filter(member => member.target?.text === "right eye" &&
         member.schedule?.recurrence?.frequency === 2 && member.phaseOrigin?.value === 7);
     expect(terminal.length).toBeGreaterThan(0);
     for (const member of terminal) expect(member.schedule?.recurrence?.courseLength).toMatchObject({ value: 1.5, unit: "d" });
-    for (const rows of [projected.dosages, (projected.details.step ?? []).flatMap(step => step.component)]) {
+    for (const rows of [projected.fhir, (projected.fhirNext.step ?? []).flatMap(step => step.component)]) {
       const terminalRows = rows.filter(row => {
         const site = row.site;
         const text = site && "concept" in site ? site.concept?.text : site && "text" in site ? site.text : undefined;
