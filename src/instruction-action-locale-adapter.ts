@@ -9,6 +9,7 @@ import {
   relationHasSemanticClass
 } from "./relation-terminology";
 import { baseLanguageTag, localizedValue } from "./localization";
+import { inferMedicationLocale } from "./locale-detection";
 import { joinLocalizedTokens } from "./locale-realization";
 import { ENGLISH_COURSE, ENGLISH_DAY_NAMES } from "./locales/course/en";
 import { THAI_COURSE, THAI_DAY_NAMES } from "./locales/course/th";
@@ -866,7 +867,10 @@ const TH_ADAPTER: InstructionActionLocaleAdapter = {
   },
   joinConditionLead(lead, body) { return `${lead}${body}`.trim(); },
   conditionalContinuation(text, imperative) { return `${imperative ? "ให้" : ""}${text}`; },
-  postposedCondition(text) { return text; },
+  postposedCondition(text) {
+    // Join the realized lead, independently of the language of its opaque body.
+    return inferMedicationLocale(text.charAt(0), "en") === "th" ? text : ` ${text}`;
+  },
   sequenceSeparator() { return " จากนั้น"; },
   continuationText(text) { return text; }
 };

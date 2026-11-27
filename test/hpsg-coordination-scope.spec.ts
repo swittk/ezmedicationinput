@@ -2586,6 +2586,61 @@ describe("condition and successor timing ownership", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 
+  it("separates fallback condition words in Thai while preserving independent counseling and its medication guard", () => {
+    const source = "Call the clinic if SBP > 160; when SBP > 160, take 1 tablet every 6 hours for 2 days, no more than 2 doses/day.";
+    const parsed = parsePublicSig(source), before = structuredClone(parsed);
+    const expected = [
+      "2026-12-01T18:00:00+00:00", "2026-12-02T00:00:00+00:00", "2026-12-02T06:00:00+00:00",
+      "2026-12-03T00:00:00+00:00", "2026-12-03T06:00:00+00:00"
+    ];
+    const query = { from: "2026-12-01T18:00:00Z", orderedAt: "2026-12-01T18:00:00Z", timeZone: "UTC", limit: 8 };
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const saved = structuredClone(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.predicate).toMatchObject({ kind: "measurement", name: "sbp", operation: "gt", value: 160 });
+      expect(member.schedule?.recurrence).toMatchObject({ period: 6, periodUnit: "h",
+        courseLength: { value: 2 }, occurrenceCap: { max: 2, period: 1, periodUnit: "d" } });
+      expect(member.asNeeded).not.toBe(true);
+      expect(member.limits).toBeUndefined();
+      const graph = member.syntax?.instructionGraph;
+      expect(graph?.actions.map(action => action.predicate.lemma)).toEqual(["call"]);
+      expect(graph?.relations).toContainEqual(expect.objectContaining({ kind: "if", toActionIndex: 0, text: "if SBP > 160" }));
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => true })).toEqual(expected);
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => false })).toEqual([]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d",
+        evaluateCondition: () => true }).totalUnits).toBe(5);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d",
+        evaluateCondition: () => false }).totalUnits).toBe(0);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("Call the clinic if SBP > 160. รับประทานครั้งละ 1 เม็ด ทุก 6 ชั่วโมง เป็นเวลา 2 วัน ไม่เกิน 2 ครั้งต่อวัน เฉพาะเมื่อ SBP > 160.");
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Call the clinic if SBP > 160. Take 1 tablet orally every 6 hours for 2 days maximum 2 doses per day only if SBP > 160.");
+      expect(input).toEqual(saved);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(parsed).toEqual(before);
+  });
+
+  it.each([
+    ["Call the clinic if dizzy.", "Call the clinicถ้าเวียนศีรษะ."],
+    ["Call the clinic if อาการ persists.", "Call the clinic if อาการ persists."]
+  ])("preserves the realized condition boundary beside opaque fallback words: %s", (source, expected) => {
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const saved = structuredClone(input);
+      const course = importCanonicalCourse(input);
+      expect(course.stages.flatMap(stage => stage.administrations).every(member => member.predicate === undefined)).toBe(true);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(expected);
+      expect(input).toEqual(saved);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
   it("keeps Hold unless ability as a positive permission beside independent counseling", () => {
     const source = "Take 1 tablet at 08:00 daily for 2 days; hold the morning dose unless you are able to swallow; call the clinic.";
     const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
