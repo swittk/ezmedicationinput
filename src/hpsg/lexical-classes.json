@@ -2090,6 +2090,7 @@
     }
   ],
   "courseDurationUnits": ["min", "h", "d", "wk", "mo", "a"],
+  "dottedDoseUnitAbbreviations": { "ml": "mL" },
   "instructionDurationUnits": {
     "second": "s",
     "seconds": "s",

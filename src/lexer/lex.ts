@@ -1,5 +1,6 @@
 import { DAY_OF_WEEK_TOKENS } from "../maps";
 import lexicalVocabulary from "../hpsg/lexical-classes.json";
+import { DURATION_LEAD_TOKENS, INSTRUCTION_DURATION_UNITS } from "../hpsg/lexical-classes";
 import { LexKind, LexToken, SurfaceToken, SurfaceTokenKind } from "./token-types";
 import { scanSurfaceTokens } from "./surface";
 import { applyLocaleLexicon } from "./locale";
@@ -526,6 +527,43 @@ function pushTextToken(output: LexToken[], surface: SurfaceToken, input: string)
   pushSplitParts(output, surface, splitCompactToken(surface.original), input);
 }
 
+const DOTTED_DOSE_UNIT_ABBREVIATIONS: Readonly<Record<string, string>> =
+  lexicalVocabulary.dottedDoseUnitAbbreviations;
+
+/** A unit abbreviation may continue into a licensed duration, but its period
+ * remains a sentence boundary before independent advice. Locale normalization
+ * has already supplied the canonical unit/relation/numeric daughters. */
+function mergeDottedDoseUnitContinuations(tokens: LexToken[], input: string): LexToken[] {
+  if (input.indexOf(".") < 0) return tokens;
+  let output = 0;
+  for (let cursor = 0; cursor < tokens.length; cursor += 1) {
+    let token = tokens[cursor];
+    const dot = tokens[cursor + 1];
+    if (dot?.lower === "." && token.sourceEnd === dot.sourceStart) {
+      const canonical = DOTTED_DOSE_UNIT_ABBREVIATIONS[token.canonical ?? token.lower];
+      const quantity = tokens[cursor - 1];
+      const lead = tokens[cursor + 2];
+      const duration = tokens[cursor + 3];
+      const durationUnit = tokens[cursor + 4];
+      if (canonical && quantity &&
+          (quantity.kind === LexKind.Number || quantity.kind === LexKind.NumberRange) &&
+          lead && DURATION_LEAD_TOKENS.has(lead.canonical ?? lead.lower) && duration &&
+          (duration.kind === LexKind.Number || duration.kind === LexKind.NumberRange) &&
+          durationUnit && INSTRUCTION_DURATION_UNITS.has(durationUnit.canonical ?? durationUnit.lower)) {
+        const original = input.slice(token.sourceStart, dot.sourceEnd);
+        token = { ...token, original, lower: original.toLowerCase(), canonical,
+          sourceEnd: dot.sourceEnd, sourceText: original,
+          surfaceIndices: token.surfaceIndices.concat(dot.surfaceIndices), derived: true };
+        cursor += 1;
+      }
+    }
+    token.index = output;
+    tokens[output++] = token;
+  }
+  tokens.length = output;
+  return tokens;
+}
+
 export function lexInput(input: string): LexToken[] {
   const surfaces = scanSurfaceTokens(input);
   const output: LexToken[] = [];
@@ -602,5 +640,5 @@ export function lexInput(input: string): LexToken[] {
     index += 1;
   }
 
-  return applyLocaleLexicon(output, input);
+  return mergeDottedDoseUnitContinuations(applyLocaleLexicon(output, input), input);
 }
