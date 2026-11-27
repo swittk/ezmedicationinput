@@ -16462,3 +16462,12 @@ Current FHIR import and projection preserve unknown cycle counts, nested Quantit
 annotations, code-only clinical meaning, spatial site relations and unfamiliar
 annotated graph relations. Preview labels use the existing terminology owners. Monthly day wording reflects
 the actual recurrence without changing scheduled dates.
+
+
+## 2026-11-27 — Annual weekday cadence and ordinal preview
+
+Annual recurrences with selected weekdays now share the existing twelve-month
+calendar selection. The authored annual unit and supplied annotations remain
+intact through current FHIR conversion. Ordinal weekday previews use the shared
+cadence rule, so a two-month recurrence no longer promises an occurrence every
+month. Execution dates for the supported monthly ordinal schedules are unchanged.
