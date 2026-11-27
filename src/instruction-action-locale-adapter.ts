@@ -160,29 +160,36 @@ function siteRelationActivity(input: InstructionActionRealizationInput): string 
 }
 
 /** Keep the selected nominal and its attachment together, independently of Time. */
-function accompanimentContent(c: InstructionActionRealizationInput): { text: string; relation: AdviceRelation } | undefined {
-  const arg = c.frame.args.find(arg => arg.role === AdviceArgumentRole.Substance ||
-    arg.role !== AdviceArgumentRole.Time && relationHasSemanticClass(arg.relation, "accompaniment"));
-  if (!arg) return undefined;
-  const relation = arg.relation ?? (relationHasSemanticClass(c.frame.relation, "accompaniment")
-    ? c.frame.relation! : AdviceRelation.With);
-  const { amount, text } = instructionCompanionContent(c, arg);
-  return { text: joinLocalizedTokens(c.locale, [amount, text]), relation };
+function accompanimentContent(c: InstructionActionRealizationInput): Array<{ text: string; relation: AdviceRelation }> {
+  const contents: Array<{ text: string; relation: AdviceRelation }> = [];
+  for (const arg of c.frame.args) {
+    if (arg.role !== AdviceArgumentRole.Substance &&
+        (arg.role === AdviceArgumentRole.Time || !relationHasSemanticClass(arg.relation, "accompaniment"))) continue;
+    const relation = arg.relation ?? (relationHasSemanticClass(c.frame.relation, "accompaniment")
+      ? c.frame.relation! : AdviceRelation.With);
+    const { amount, text } = instructionCompanionContent(c, arg);
+    contents.push({ text: joinLocalizedTokens(c.locale, [amount, text]), relation });
+  }
+  return contents;
 }
 
 function renderEnglishAccompaniment(c: InstructionActionRealizationInput): string {
-  const content = accompanimentContent(c);
-  return content?.text
-    ? ` ${localizeAdviceRelation(content.relation, c.locale, "complement") ?? content.relation} ${content.text}` : "";
+  let text = "";
+  for (const content of accompanimentContent(c)) if (content.text)
+    text += ` ${localizeAdviceRelation(content.relation, c.locale, "complement") ?? content.relation} ${content.text}`;
+  return text;
 }
 
 function renderThaiAccompaniment(c: InstructionActionRealizationInput): string {
-  const content = accompanimentContent(c);
-  if (!content?.text) return "";
-  const label = content.relation === AdviceRelation.With ? "ด้วย"
-    : content.relation === AdviceRelation.Without ? "โดยไม่ใช้"
-      : localizeAdviceRelation(content.relation, c.locale, "complement") ?? content.relation;
-  return label + content.text;
+  let text = "";
+  for (const content of accompanimentContent(c)) {
+    if (!content.text) continue;
+    const label = content.relation === AdviceRelation.With ? "ด้วย"
+      : content.relation === AdviceRelation.Without ? "โดยไม่ใช้"
+        : localizeAdviceRelation(content.relation, c.locale, "complement") ?? content.relation;
+    text += label + content.text;
+  }
+  return text;
 }
 
 /** Preserve both typed participants of a negated relational action. */

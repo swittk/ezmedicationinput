@@ -610,7 +610,7 @@ function argumentCoordinationMembers(parts: Lexeme[], start: number, endExclusiv
   let memberStart = start, connector = "";
   for (let index = start; index < endExclusive; index++) {
     const token = key(parts[index]);
-    if (token !== "," && token !== "and" && token !== "or") continue;
+    if (token !== "," && !ACTION_COORDINATION_CONNECTORS.has(token)) continue;
     if (index > memberStart) members.push({ start: memberStart, end: index, connector });
     connector = token;
     memberStart = index + 1;
@@ -627,7 +627,7 @@ function timeArgumentsFromParts(
   const members = argumentCoordinationMembers(parts, start, endExclusive);
   // A choice is not a list of conjunctive event obligations. Preserve its
   // complete source complement through the existing opaque argument owner.
-  if (members.some(member => member.connector === "or")) return undefined;
+  if (members.some(member => coordinationConnectorKind(member.connector) === "disjunction")) return undefined;
   if (members.length > 1) {
     const times: AdviceArgument[] = [];
     let inheritedRelation = relation;
@@ -1269,9 +1269,22 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   let targetRelation = relation;
   let tailRelationIndex: number | undefined;
   while (targetIndex >= 0 && targetIndex + 1 < targetEnd) {
-    const temporal = relationHasSemanticClass(targetRelation, "temporal");
-    const times = relationHasGrammarFeature(targetRelation, "timeComplement")
+    let times = relationHasGrammarFeature(targetRelation, "timeComplement")
       ? timeArgumentsFromParts(parts, targetIndex + 1, targetEnd, input, offset, targetRelation, targetEnd, options) : undefined;
+    let alternativeTime = false;
+    if (times) {
+      // The selected Time daughter licenses an overt relation after a
+      // disjunction as part of its complete source-backed alternative.
+      while (targetEnd < segmentEnd &&
+          coordinationConnectorKind(key(parts[targetEnd - 1])) === "disjunction" &&
+          relationHasGrammarFeature(actionArgumentRelation(key(parts[targetEnd])), "timeComplement")) {
+        alternativeTime = true;
+        const next = relationIndex(parts, targetEnd + 1, segmentEnd);
+        targetEnd = next >= 0 ? next : segmentEnd;
+      }
+      if (alternativeTime) times = undefined;
+    }
+    const temporal = alternativeTime || relationHasSemanticClass(targetRelation, "temporal");
     if (temporal) tailRelationIndex = -1;
     if (times) {
       // Each bounded clock or event remains with this action while later
@@ -5481,7 +5494,7 @@ export function realizeInstructionGraph(
         relation.kind !== AdviceRelation.Then) continue;
     const targets = temporalEdges.get(from) ?? [];
     targets.push(to); temporalEdges.set(from, targets);
-    if (graph.actions[from]?.span.start > graph.actions[to]?.span.start)
+    if (graph.actions[from]?.span.start >= graph.actions[to]?.span.start)
       temporalOrderDiffersFromSource = true;
   }
   const precedes = (from: number, to: number): boolean => {

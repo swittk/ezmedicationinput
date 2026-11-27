@@ -6476,6 +6476,31 @@ describe("complete typed action participants", () => {
     }
   });
 
+  it("preserves the complete choice between explicitly marked dilution times", () => {
+    const source = "Dilute 1 mL at 08:00 or at 20:00";
+    const action = parseInstructionActions(source)[0];
+    expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Time)).toEqual([
+      expect.objectContaining({ text: "08:00 or at 20:00", relation: AdviceRelation.On })
+    ]);
+    expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Amount,
+      quantity: { value: 1, unit: "mL" } }));
+    expect(action.args.some(arg => arg.role === AdviceArgumentRole.Destination)).toBe(false);
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed.fhirNext);
+    for (const value of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const member = importCanonicalCourse(value).stages[0].administrations[0];
+      const selected = member.syntax!.instructionGraph!.actions.find(frame => frame.predicate.lemma === "dilute")!;
+      expect(selected.args.filter(arg => arg.role === AdviceArgumentRole.Time)).toHaveLength(1);
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(value, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain("08:00 or at 20:00");
+        expect(text).toContain(locale === "en" ? "1 mL" : "1 มิลลิลิตร");
+      }
+    }
+    expect(parseInstructionGraphExtension(parsed.fhir[0].extension)?.sourceText).toBe(source);
+    expect(JSON.stringify(parsed.fhirNext)).toBe(before);
+  });
+
   it("keeps both marked dilution clocks out of the destination slot", () => {
     const source = "Dilute 1 mL at 08:00 and at 20:00";
     const parsed = parsePublicSig(source);
@@ -6514,6 +6539,57 @@ describe("current graph realization families", () => {
     const course = toDosageDetails([row]);
     return { marker, row, course, native: importCanonicalCourse(course) };
   };
+
+  it("keeps every selected rinse accompaniment and its own relation", () => {
+    const saline = { role: AdviceArgumentRole.Substance, relation: AdviceRelation.With,
+      text: "saline", normalized: "saline", i18n: { en: "saline", th: "น้ำเกลือ" } };
+    const soap = { role: AdviceArgumentRole.Substance, relation: AdviceRelation.Without,
+      text: "soap", normalized: "soap", i18n: { en: "soap", th: "สบู่" } };
+    const rinse: AdviceFrame = { ...parseInstructionActions("Rinse the wound")[0], sourceText: "", args: [
+      { role: AdviceArgumentRole.Site, text: "the wound", normalized: "wound", i18n: { en: "the wound", th: "แผล" } }, saline
+    ] };
+    expect(realizeInstructionAction(rinse, "en")).toBe("Rinse the wound with saline");
+    expect(realizeInstructionAction(rinse, "th")).toBe("ล้างแผลด้วยน้ำเกลือ");
+    for (const companions of [[saline, soap], [soap, saline]]) {
+      const selected = { ...rinse, args: [rinse.args[0], ...companions] };
+      const graph = { sourceText: "", sourceLocale: "en", actions: [selected] };
+      const before = JSON.stringify(graph), views = publicViews(graph);
+      for (const value of [views.native, JSON.parse(JSON.stringify([views.row])), JSON.parse(JSON.stringify(views.course))]) {
+        const en = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
+        const th = formatSig(value, "long", { locale: "th", realizationMode: "normalized" });
+        expect(en).toContain("with saline");
+        expect(en).toContain("without soap");
+        expect(th).toContain("ด้วยน้ำเกลือ");
+        expect(th).toContain("โดยไม่ใช้สบู่");
+        const current = importCanonicalCourse(value).stages[0].administrations[0].syntax!.instructionGraph!.actions[0];
+        expect(current.args.filter(arg => arg.role === AdviceArgumentRole.Substance)).toMatchObject(companions);
+      }
+      expect(JSON.stringify(graph)).toBe(before);
+    }
+  });
+
+  it("honors temporal edges when supplied actions have tied source starts", () => {
+    for (const relation of [AdviceRelation.Before, AdviceRelation.After]) {
+      const apply = { ...frame("apply", "Apply", "the new patch", 0, "แผ่นยาใหม่"), span: { start: 0, end: 0 } };
+      const remove = { ...frame("remove", "Remove", "the old patch", 0, "แผ่นยาเก่า"), span: { start: 0, end: 0 } };
+      const graph: CanonicalInstructionGraph = { sourceText: "", sourceLocale: "en", actions: [apply, remove],
+        relations: [{ kind: relation, fromActionIndex: relation === AdviceRelation.Before ? 1 : 0,
+          toActionIndex: relation === AdviceRelation.Before ? 0 : 1 }] };
+      const before = JSON.stringify(graph), views = publicViews(graph);
+      for (const value of [views.native, JSON.parse(JSON.stringify([views.row])), JSON.parse(JSON.stringify(views.course))]) {
+        const en = formatSig(value, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase();
+        const th = formatSig(value, "long", { locale: "th", realizationMode: "normalized" });
+        expect(en).toContain("remove the old patch");
+        expect(en).toContain("apply the new patch");
+        expect(en.indexOf("remove the old patch")).toBeLessThan(en.indexOf("apply the new patch"));
+        expect(th.indexOf("แผ่นยาเก่า")).toBeLessThan(th.indexOf("แผ่นยาใหม่"));
+        const current = importCanonicalCourse(value).stages[0].administrations[0].syntax!.instructionGraph!;
+        expect(current.relations).toMatchObject(graph.relations!);
+        expect(current.actions.map(action => action.span)).toEqual([apply.span, remove.span]);
+      }
+      expect(JSON.stringify(graph)).toBe(before);
+    }
+  });
 
   it("orders removal before application and keeps its condition attached to application", () => {
     const apply = frame("apply", "Apply", "the new patch", 24, "แผ่นยาใหม่");
