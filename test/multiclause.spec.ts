@@ -5403,23 +5403,36 @@ describe("selected branch preview and cadence ownership", () => {
     expect(control.fhir[0].timing?.repeat?.frequency).toBe(2);
     expect(control.fhir[0].timing?.code?.coding?.some(code => code.code === "BID")).toBe(true);
   });
-  it.each([FhirPeriodUnit.Month, FhirPeriodUnit.Year])("describes the day selector within its %s cadence", periodUnit => {
+  it.each([
+    ["weekly", 1, FhirPeriodUnit.Week, undefined, false, ["2026-01-15", "2026-10-15", "2027-04-15"]],
+    ["alternate-day", 2, FhirPeriodUnit.Day, undefined, false, ["2026-01-15", "2026-04-15", "2026-05-15"]],
+    ["daily", 1, FhirPeriodUnit.Day, undefined, true, ["2026-01-15", "2026-02-15", "2026-03-15"]],
+    ["monthly", 1, FhirPeriodUnit.Month, undefined, true, ["2026-01-15", "2026-02-15", "2026-03-15"]],
+    ["yearly", 1, FhirPeriodUnit.Year, undefined, false, ["2026-01-15", "2027-01-15", "2028-01-15"]],
+    ["bare calendar", undefined, undefined, undefined, true, ["2026-01-15", "2026-02-15", "2026-03-15"]],
+    ["one-to-two-day range", 1, FhirPeriodUnit.Day, 2, false, ["2026-01-15", "2026-02-15", "2026-03-15"]]
+  ] as const)("describes the day selector within its %s cadence", (_name, period, periodUnit, periodMax, eachMonth, dates) => {
     const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{
       kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
-      schedule: { recurrence: { frequency: 1, period: 1, periodUnit, monthDays: [15], clocks: ["08:00:00"] } },
+      schedule: { recurrence: { frequency: 1, period, periodUnit, periodMax, monthDays: [15], clocks: ["08:00:00"] } },
     }] }] };
-    const projected = projectCanonicalCourse(course);
+    const before = JSON.stringify(course), projected = projectCanonicalCourse(course);
     for (const input of [course, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      const current = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ period, periodUnit, periodMax, monthDays: [15], clocks: ["08:00:00"] });
       for (const locale of ["en", "th"]) {
         const text = formatSig(input, "long", { locale });
         expect(text).toContain("15");
-        if (periodUnit === FhirPeriodUnit.Year) expect(text).not.toContain(locale === "en" ? "of each month" : "ของทุกเดือน");
-        else expect(text).toContain(locale === "en" ? "of each month" : "ของทุกเดือน");
+        expect(text.includes(locale === "en" ? "of each month" : "ของทุกเดือน")).toBe(eachMonth);
       }
+      // Range execution chooses the existing best-effort cadence; preview
+      // must still describe the full authored range without a monthly promise.
       expect(nextDueDoses(input, { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z",
-        timeZone: "UTC", limit: 2 })).toEqual(["2026-01-15T08:00:00+00:00",
-        periodUnit === FhirPeriodUnit.Year ? "2027-01-15T08:00:00+00:00" : "2026-02-15T08:00:00+00:00"]);
+        timeZone: "UTC", limit: 3 })).toEqual(dates.map(date => `${date}T08:00:00+00:00`));
+      expect(JSON.stringify(input)).toBe(current);
     }
+    expect(JSON.stringify(course)).toBe(before);
   });
 });
 

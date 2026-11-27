@@ -1026,10 +1026,23 @@ function describeCalendarEventsEnglish(
  * @returns An English monthly day phrase when a selection is present.
  */
 export function dayOfMonthUsesSingleMonth(schedule: CanonicalScheduleExpr | undefined): boolean {
-  return schedule?.periodUnit !== FhirPeriodUnit.Year &&
-    (schedule?.periodUnit !== FhirPeriodUnit.Month ||
-    (schedule.period === undefined || schedule.period === 1) &&
-    (schedule.periodMax === undefined || schedule.periodMax === 1));
+  if (!schedule || schedule.periodMax !== undefined ||
+      schedule.frequency !== undefined && schedule.frequencyMax !== undefined &&
+      schedule.frequencyMax !== schedule.frequency) return false;
+  const period = schedule.period;
+  // A bare calendar selection retains its monthly domain. An unresolved
+  // cadence reference or code does not establish that same guarantee.
+  if (period === undefined) return schedule.periodUnit === undefined &&
+    schedule.timingCode === undefined && schedule.timingReference === undefined;
+  if (period <= 0) return false;
+  switch (schedule.periodUnit) {
+    case FhirPeriodUnit.Second: return period <= 86400;
+    case FhirPeriodUnit.Minute: return period <= 1440;
+    case FhirPeriodUnit.Hour: return period <= 24;
+    case FhirPeriodUnit.Day: return period <= 1;
+    case FhirPeriodUnit.Month: return period === 1;
+    default: return false;
+  }
 }
 
 function describeDayOfMonth(schedule: CanonicalScheduleExpr | undefined): string | undefined {
