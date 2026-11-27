@@ -911,9 +911,9 @@ export function parseMedicationGuard(
       if (token.sourceStart >= end) break;
       const maximumHead = maximumCountLeadAt(lexicalContext, index);
       if (!maximumHead) continue;
-      const quantityCap = maximumDosePerPeriodAt(lexicalContext, index, maximumHead);
-      const occurrenceCap = quantityCap ? undefined : maximumOccurrenceAt(lexicalContext, index, maximumHead);
-      if (!quantityCap && !occurrenceCap) continue;
+      const maximum = maximumDosePerPeriodAt(lexicalContext, index, maximumHead) ??
+        maximumOccurrenceAt(lexicalContext, index, maximumHead);
+      if (!maximum) continue;
       const capStart = token.sourceStart;
       const context: GuardConstituentContext = { source, range: { start: lead.start, end: capStart },
         ...(withholdingConsequent ? { withholdingConsequent } : {}) };
@@ -923,12 +923,12 @@ export function parseMedicationGuard(
       const guard = predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate);
       const condition = guard?.synsem.cont.clinicalAdjunct?.condition;
       if (!condition) continue;
-      // A bare comparative count can be the predicate's own complement.
+      // A bare comparative maximum can be the predicate's own complement.
       // An opaque state prefix does not prove an independent treatment limit.
       // A denominator/registered cadence, separator, explicit maximum head,
       // or structured predicate supplies independent ownership. An observation
-      // window alone does not separate a count from the patient's history.
-      if (occurrenceCap && !isIndependentMaximum(lexicalContext, index, occurrenceCap) &&
+      // window alone does not separate a maximum from the patient's history.
+      if (!isIndependentMaximum(lexicalContext, index, maximum) &&
           !predicate?.synsem.cont.guard?.licensesBareIf && !guardHasMeasurement(condition)) continue;
       end = capStart;
       scopedGuard = guard;

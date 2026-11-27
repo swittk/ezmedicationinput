@@ -2228,8 +2228,10 @@ describe("condition and successor timing ownership", () => {
   it.each([
     "you have taken at most 2 doses in the past 24 hours",
     "you have vomited no more than twice in 24 hours",
-    "you have taken no more than 2 doses in 24 hours"
-  ])("retains a complete occurrence-history predicate without inventing treatment bounds: %s", condition => {
+    "you have taken no more than 2 doses in 24 hours",
+    "you have taken no more than 2 tablets in 24 hours",
+    "you have taken no more than 2 tablets within 24 hours"
+  ])("retains a complete medication-history predicate without inventing treatment bounds: %s", condition => {
     const source = "Take 1 tablet only if " + condition;
     const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
     for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
@@ -2242,6 +2244,53 @@ describe("condition and successor timing ownership", () => {
       expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
       expect(member.schedule?.recurrence?.occurrenceCap).toBeUndefined();
       expect(member.limits).toBeUndefined();
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([false, true])("keeps medication history separate from an independent treatment maximum (%s)", capped => {
+    const condition = "you have taken no more than 2 tablets within 24 hours";
+    const source = "Take 1 tablet every 6 hours only if " + condition +
+      (capped ? ", maximum 2 tablets per day." : ".");
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const expected = { kind: "state", name: condition, text: condition };
+    const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 4 };
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const saved = JSON.stringify(input), members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.predicate).toMatchObject(expected);
+      expect(member.schedule?.recurrence).toMatchObject({ period: 6, periodUnit: "h" });
+      expect(member.schedule?.recurrence?.occurrenceCap).toBeUndefined();
+      expect(member.schedule?.recurrence?.countMax).toBeUndefined();
+      expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
+      if (capped) {
+        expect(member.limits).toHaveLength(1);
+        expect(member.limits?.[0]).toMatchObject({ scope: "period", amount: { value: 2, unit: "tab" },
+          period: { value: 1, unit: "d" } });
+      } else expect(member.limits).toBeUndefined();
+      expect(nextDueDoses(input, { ...query, evaluateCondition: condition => {
+        expect(condition).toMatchObject(expected); return true;
+      } })).toEqual(capped ? [
+        "2026-12-01T00:00:00+00:00", "2026-12-01T06:00:00+00:00",
+        "2026-12-02T00:00:00+00:00", "2026-12-02T06:00:00+00:00"
+      ] : ["2026-12-01T00:00:00+00:00", "2026-12-01T06:00:00+00:00",
+        "2026-12-01T12:00:00+00:00", "2026-12-01T18:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d",
+        evaluateCondition: () => true }).totalUnits).toBe(capped ? 2 : 4);
+      let calls = 0;
+      const reject = (condition: unknown) => { expect(condition).toMatchObject(expected); calls++; return false; };
+      expect(nextDueDoses(input, { ...query, evaluateCondition: reject })).toEqual([]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d",
+        evaluateCondition: reject }).totalUnits).toBe(0);
+      expect(calls).toBeGreaterThan(0);
+      for (const locale of ["en", "th"] as const) {
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toContain(condition);
+      }
+      expect(JSON.stringify(input)).toBe(saved);
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(before);
