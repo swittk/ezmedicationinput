@@ -5651,6 +5651,57 @@ describe("current calendar openings and finite clock continuations", () => {
     }
   });
 
+  it.each([false, true])("keeps an end-only fence separate from a finite successor origin (exclude Monday=%s)", excludeMonday => {
+    const loading = tablet(1);
+    loading.schedule = { recurrence: { count: 1, clocks: ["22:00:00"] } };
+    const successor = tablet(2);
+    if (excludeMonday) successor.excludedWeekdays = [FhirDayOfWeek.Monday];
+    successor.schedule = { recurrence: { frequency: 1, period: 1, periodUnit: Unit.Day,
+      clocks: ["08:00:00"], courseLength: { value: 2, unit: "d" },
+      calendarWindow: { end: "2027-01-08T00:00:00Z" } } };
+    const course: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [loading] }, { administrations: [successor] }
+    ] };
+    const query = { orderedAt: "2027-01-03T00:00:00Z", from: "2027-01-03T00:00:00Z", timeZone: "UTC" };
+    const queryBefore = JSON.stringify(query);
+    const due = excludeMonday
+      ? ["2027-01-03T22:00:00+00:00", "2027-01-05T08:00:00+00:00", "2027-01-06T08:00:00+00:00"]
+      : ["2027-01-03T22:00:00+00:00", "2027-01-04T08:00:00+00:00", "2027-01-05T08:00:00+00:00"];
+    const lateDue = excludeMonday
+      ? ["2027-01-05T08:00:00+00:00", "2027-01-06T08:00:00+00:00"]
+      : ["2027-01-05T08:00:00+00:00"];
+    const outputs = forms(course).map(dosage => {
+      const before = JSON.stringify(dosage);
+      const result = {
+        due: nextDueDoses(dosage, { ...query, limit: 8 }),
+        lateDue: nextDueDoses(dosage, { ...query, from: "2027-01-05T00:00:00Z", limit: 8 }),
+        supply: calculateTotalUnits({ dosage, ...query, durationValue: 7, durationUnit: Unit.Day }),
+        lateSupply: calculateTotalUnits({ dosage, ...query, from: "2027-01-05T00:00:00Z",
+          durationValue: 3, durationUnit: Unit.Day }),
+        lastDaySupply: calculateTotalUnits({ dosage, ...query, from: "2027-01-06T00:00:00Z",
+          durationValue: 1, durationUnit: Unit.Day }),
+        afterEndSupply: calculateTotalUnits({ dosage, ...query, from: "2027-01-08T00:00:00Z",
+          durationValue: 1, durationUnit: Unit.Day }),
+      };
+      expect(result.due).toEqual(due);
+      expect(result.lateDue).toEqual(lateDue);
+      expect(result.supply).toMatchObject({ totalUnits: 5, unit: "tab", quantityKind: "scheduled" });
+      expect(result.lateSupply).toMatchObject({ totalUnits: excludeMonday ? 4 : 2, unit: "tab", quantityKind: "scheduled" });
+      expect(result.lastDaySupply.totalUnits).toBe(excludeMonday ? 2 : 0);
+      expect(result.afterEndSupply.totalUnits).toBe(0);
+      const current = importCanonicalCourse(dosage).stages[1].administrations[0];
+      expect(current.schedule?.recurrence?.courseLength).toMatchObject({ value: 2, unit: "d" });
+      expect(current.schedule?.recurrence?.calendarWindow).toEqual({ end: "2027-01-08T00:00:00Z" });
+      expect(current.schedule?.recurrence?.clocks).toEqual(["08:00:00"]);
+      expect(current.excludedWeekdays ?? []).toEqual(excludeMonday ? [FhirDayOfWeek.Monday] : []);
+      expect(current.amounts?.[0].quantity?.extension).toContainEqual(note);
+      expect(JSON.stringify(dosage)).toBe(before);
+      return result;
+    });
+    for (const output of outputs.slice(1)) expect(output).toEqual(outputs[0]);
+    expect(JSON.stringify(query)).toBe(queryBefore);
+  });
+
   it("prepares a coded QOD range before selecting a finite successor origin", () => {
     const loading = tablet(1);
     loading.schedule = { recurrence: { count: 1, frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["09:00:00"] } };

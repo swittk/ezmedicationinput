@@ -2690,9 +2690,9 @@ function resolveAdministrationWindow(
         timeZone, displacement, options, calendar.nominalEnd);
   const implicitStart = implicitWindow.recurrenceOrigin;
   const componentClock = implicitStart > start ? getTimeParts(implicitStart, timeZone) : capClock;
-  const cadence = recurrence?.calendarWindow && !administration.phaseStart &&
-      (!administration.phaseOrigin || absoluteStart)
-    ? { origin: absoluteStart ?? anchor, capClock, hasPhaseOrigin: false }
+  // A calendar end only clips the window; an authored start can own cadence.
+  const cadence = absoluteStart && !administration.phaseStart
+    ? { origin: absoluteStart, capClock, hasPhaseOrigin: false }
     : parallelComponentCadence(
         administration,
         anchor,
