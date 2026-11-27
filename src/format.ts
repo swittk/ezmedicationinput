@@ -1021,10 +1021,7 @@ function describeCalendarEventsEnglish(
   return parts.length ? `on ${joinWithAnd(parts)}` : undefined;
 }
 
-/** Describe typed month-day selection independently of medication amount.
- * @param schedule Calendar-day membership from grammar or a structured import.
- * @returns An English monthly day phrase when a selection is present.
- */
+/** Whether the recurrence supports describing selected days as occurring each month. */
 export function dayOfMonthUsesSingleMonth(schedule: CanonicalScheduleExpr | undefined): boolean {
   if (!schedule || schedule.periodMax !== undefined ||
       schedule.frequency !== undefined && schedule.frequencyMax !== undefined &&
@@ -1045,6 +1042,10 @@ export function dayOfMonthUsesSingleMonth(schedule: CanonicalScheduleExpr | unde
   }
 }
 
+/** Describe typed month-day selection independently of medication amount.
+ * @param schedule Calendar-day membership from grammar or a structured import.
+ * @returns An English monthly day phrase when a selection is present.
+ */
 function describeDayOfMonth(schedule: CanonicalScheduleExpr | undefined): string | undefined {
   const days = schedule?.dayOfMonth ?? [];
   if (!days.length) return undefined;
