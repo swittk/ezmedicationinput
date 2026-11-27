@@ -3052,9 +3052,11 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
     const maximum = maximumHead ? maximumOccurrenceAt(context, start, maximumHead) : undefined;
     if (maximum?.headStart === start) {
       const { tokens: matched, count: countValue, period } = maximum;
-      if (period && ("daypart" in period || period.rolling)) {
-        // A rolling occurrence window cannot be represented by the existing
-        // civil bucket cap. Keep the complete limit as authored instruction.
+      if (period && ("daypart" in period || period.rolling &&
+          period.periodUnit !== FhirPeriodUnit.Hour && period.periodUnit !== FhirPeriodUnit.Minute &&
+          period.periodUnit !== FhirPeriodUnit.Second)) {
+        // Elapsed-unit occurrence caps use the existing rolling ledger. Dayparts
+        // and rolling civil periods remain complete authored instructions.
         const owned = context.clinicalCache.quantityTokenIndices ??= new Set<number>();
         for (const token of matched) owned.add(token.index);
         return [authoredMaximumConstraint(context, matched)];

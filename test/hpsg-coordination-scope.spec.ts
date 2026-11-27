@@ -2733,20 +2733,33 @@ describe("condition and successor timing ownership", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 
-  it.each(["rolling", "consecutive"])("retains an occurrence window as authored advice: %s", window => {
+  it.each(["rolling", "consecutive"])("executes the typed elapsed occurrence window: %s", window => {
     const limit = `maximum 2 doses per ${window} 24 hours`;
     const source = "Take 1 tablet every 6 hours for 2 days, " + limit;
     const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
-    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+    const query = { from: "2026-12-01T18:00:00Z", orderedAt: "2026-12-01T18:00:00Z", timeZone: "UTC", limit: 5 };
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const inputBefore = JSON.stringify(input);
       const member = importCanonicalCourse(input).stages[0].administrations[0];
       expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
       expect(member.schedule?.recurrence).toMatchObject({ period: 6, periodUnit: "h", courseLength: { value: 2 } });
       const duration = member.schedule?.recurrence?.courseLength;
       expect(duration?.code ?? duration?.unit).toBe("d");
-      expect(member.schedule?.recurrence?.occurrenceCap).toBeUndefined();
+      expect(member.schedule?.recurrence?.occurrenceCap).toEqual({ max: 2, period: 24, periodUnit: "h" });
       expect(member.schedule?.recurrence?.countMax).toBeUndefined();
-      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase()).toContain(limit);
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-12-01T18:00:00+00:00", "2026-12-02T00:00:00+00:00",
+        "2026-12-02T18:00:00+00:00", "2026-12-03T00:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 4, unit: "tab" });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase())
+        .toContain("maximum 2 doses per 24 hours");
+      expect(JSON.stringify(input)).toBe(inputBefore);
     }
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].rawText).toBe(source);
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(before);
   });
@@ -2755,21 +2768,41 @@ describe("condition and successor timing ownership", () => {
     const source = "Take 1 tablet every 4 hours as needed for pain, maximum 1 dose within 6 hours";
     const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
     const civil = parsePublicSig("Take 1 tablet every 4 hours as needed for pain, maximum 1 dose daily");
-    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+    const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC",
+      limit: 4, evaluateCondition: () => true };
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const inputBefore = JSON.stringify(input);
       const member = importCanonicalCourse(input).stages[0].administrations[0];
       expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
       expect(member.asNeeded).toBe(true);
       expect(member.schedule?.recurrence).toMatchObject({ period: 4, periodUnit: "h" });
-      expect(member.schedule?.recurrence?.occurrenceCap).toBeUndefined();
+      expect(member.schedule?.recurrence?.occurrenceCap).toEqual({ max: 1, period: 6, periodUnit: "h" });
       expect(member.schedule?.recurrence?.countMax).toBeUndefined();
       expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
-      for (const locale of ["en", "th"] as const)
-        expect(formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase())
-          .toContain("maximum 1 dose within 6 hours");
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-12-01T00:00:00+00:00", "2026-12-01T08:00:00+00:00",
+        "2026-12-01T16:00:00+00:00", "2026-12-02T00:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 3, unit: "tab", quantityKind: "maximum" });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase())
+        .toContain("per 6 hours");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toContain("ไม่เกิน 1 ครั้งต่อ6 ชั่วโมง");
+      expect(JSON.stringify(input)).toBe(inputBefore);
     }
-    for (const input of [civil.meta.canonical.course!, civil.fhir, civil.fhirNext])
+    for (const input of [civil.meta.canonical.course!, civil.fhir, civil.fhirNext]) {
       expect(importCanonicalCourse(input).stages[0].administrations[0].schedule?.recurrence?.occurrenceCap)
         .toEqual({ max: 1, period: 1, periodUnit: "d" });
+      expect(nextDueDoses(input, { ...query, limit: 2 })).toEqual([
+        "2026-12-01T00:00:00+00:00", "2026-12-02T00:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: "maximum" });
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].rawText).toBe(source);
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(before);
   });

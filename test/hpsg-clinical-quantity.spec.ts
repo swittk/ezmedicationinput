@@ -5347,3 +5347,97 @@ describe("fixed amount and rate denominator ownership", () => {
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });
+
+
+describe("elapsed occurrence windows and canonical rate terms", () => {
+  const views = (parsed: ReturnType<typeof parsePublicSig>) => [
+    parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+    JSON.parse(JSON.stringify(parsed.fhirNext))
+  ];
+  const query = { orderedAt: "2026-12-01T18:00:00Z", from: "2026-12-01T18:00:00Z", timeZone: "UTC" };
+
+  it.each([
+    ["within 24 hours", 24, FhirPeriodUnit.Hour],
+    ["within 1440 minutes", 1440, FhirPeriodUnit.Minute],
+    ["per 24 hours", 24, FhirPeriodUnit.Hour]
+  ] as const)("keeps the elapsed occurrence maximum executable: %s", (period, value, unit) => {
+    const source = "Take 1 tablet every 6 hours, maximum 2 doses " + period;
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of views(parsed)) {
+      const inputBefore = JSON.stringify(input);
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ period: 6, periodUnit: "h",
+        occurrenceCap: { max: 2, period: value, periodUnit: unit } });
+      expect(member.schedule?.recurrence?.countMax).toBeUndefined();
+      expect(nextDueDoses(input, { ...query, limit: 4 })).toEqual([
+        "2026-12-01T18:00:00+00:00", "2026-12-02T00:00:00+00:00",
+        "2026-12-02T18:00:00+00:00", "2026-12-03T00:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 24, durationUnit: "h" }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 48, durationUnit: "h" }))
+        .toMatchObject({ totalUnits: 4, unit: "tab" });
+      expect(JSON.stringify(input)).toBe(inputBefore);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("retains an unresolved rolling civil period as complete advice beside the cadence", () => {
+    const source = "Take 1 tablet every 6 hours, maximum 2 doses within 1 day";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of views(parsed)) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.schedule?.recurrence).toMatchObject({ period: 6, periodUnit: "h" });
+      expect(member.schedule?.recurrence?.occurrenceCap).toBeUndefined();
+      expect(member.schedule?.recurrence?.countMax).toBeUndefined();
+      expect(member.additionalInstructions?.some(item => item.text === "maximum 2 doses within 1 day")).toBe(true);
+      expect(nextDueDoses(input, { ...query, limit: 4 })).toEqual([
+        "2026-12-01T18:00:00+00:00", "2026-12-02T00:00:00+00:00",
+        "2026-12-02T06:00:00+00:00", "2026-12-02T12:00:00+00:00"
+      ]);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each(["ชั่วโมง", "1 ชั่วโมง", "hr"])("uses the canonical rate denominator while retaining its source: %s", denominator => {
+    const source = "IV 10 mL / " + denominator, parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of views(parsed)) {
+      const inputBefore = JSON.stringify(input);
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts?.[0].rate).toMatchObject({ value: 10, unit: "mL/h" });
+      expect(member.amounts?.[0].quantity).toBeUndefined();
+      expect(member.route?.coding?.some(coding => coding.code === RouteCode["Intravenous route"])).toBe(true);
+      expect(JSON.stringify(input)).toBe(inputBefore);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("uses a registered canonical denominator without adding its surface to the clinical unit reader", () => {
+    const original = getMedicationLexerLocalePack("en");
+    registerMedicationLexerLocalePack({ locale: "en", apply: (tokens, input) =>
+      (original?.apply(tokens, input) ?? tokens).map((token, index) => token.lower === "clinichour"
+        ? { ...token, index, canonical: "hour" } : { ...token, index })
+    });
+    try {
+      const source = "IV 10 mL / clinichour", parsed = parsePublicSig(source);
+      for (const input of views(parsed)) {
+        const member = importCanonicalCourse(input).stages[0].administrations[0];
+        expect(member.amounts?.[0].rate).toMatchObject({ value: 10, unit: "mL/h" });
+        expect(member.amounts?.[0].quantity).toBeUndefined();
+      }
+      expect(parsed.input).toBe(source);
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    } finally {
+      registerMedicationLexerLocalePack(original ?? { locale: "en", apply: tokens =>
+        tokens.map((token, index) => ({ ...token, index })) });
+    }
+  });
+});

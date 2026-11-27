@@ -116,7 +116,7 @@ function compactUnitExpression(
     if (part > 1 || attachedPrefix) {
       if (separator !== expectsSeparator) break;
     } else if (separator) break;
-    let term = token.original.replace(/\s+/gu, "");
+    let term = (token.canonical ?? token.original).replace(/\s+/gu, "");
     cursor++;
     if (!separator && part > 1) {
       const number = clinicalDurationNumber(token);
