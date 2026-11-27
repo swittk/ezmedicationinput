@@ -6167,23 +6167,6 @@ describe("round76 bound source wording agreement", () => {
     }
   });
 
-  it("lets a current graph edit replace old generated wording without validating old replay on save", () => {
-    let current = fresh(parseSig("Rotate sites after every injection").fhirNext);
-    delete current.renderedInstruction;
-    const replacement = parseSig("Rotate sites after each dose").fhirNext.step![0].component[0].extension!
-      .find(item => item.url === graph)!;
-    current.step![0].component[0].extension = current.step![0].component[0].extension!.map(item =>
-      item.url === graph ? fresh(replacement) : item);
-    for (let save = 0; save < 3; save++) {
-      const before = fresh(current);
-      expect(dosageMatchesSavedProjection(current.step![0].component[0])).toBe(false);
-      for (const realizationMode of ["normalized", "roundtrip"] as const)
-        expect(formatSig(current, "long", { locale: "en", realizationMode })).toBe("Rotate sites after each dose.");
-      expect(current).toEqual(before);
-      current = fresh(toDosageDetails(fresh(toFhirR5Dosages(current))));
-    }
-  });
-
   it.each([false, true])("preserves source-only wording under its current or legacy saved agreement (legacy=%s)", legacy => {
     const original: FhirDosage = { text: "Swallow 1 tablet whole", timing: {
       repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day },

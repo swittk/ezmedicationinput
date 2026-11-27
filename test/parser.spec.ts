@@ -1393,10 +1393,29 @@ describe("parseSig core scenarios", () => {
 
   it("preserves free-form additional instructions when unmatched", () => {
     const result = parseSig("1 tab po daily; use caution in storms");
-    expect(result.fhir.additionalInstruction?.[0]).toEqual({
-      text: "Use caution in storms",
-      coding: undefined
-    });
+    expect(result.fhir.additionalInstruction).toHaveLength(1);
+    const { extension: instructionExtensions, ...instructionFields } = result.fhir.additionalInstruction![0];
+    expect(instructionFields).toEqual({ text: "Use caution in storms", coding: undefined });
+    expect(instructionExtensions).toHaveLength(1);
+    expect(instructionExtensions![0].url).toBe("urn:ezmedicationinput:StructureDefinition:medication-instruction-graph");
+    expect(instructionExtensions![0].extension?.map(child => child.url)).toEqual(["action"]);
+    const instructionGraph = parseInstructionGraphExtension(instructionExtensions);
+    expect(instructionGraph?.actions).toEqual([{
+      force: "sequence", relation: AdviceRelation.In,
+      predicate: {
+        lemma: "use", display: "Use", semanticClass: "administration", i18n: { th: "ใช้" },
+        codings: [{ system: "http://snomed.info/sct", code: "419385000", display: "Use" }]
+      },
+      args: [
+        { role: AdviceArgumentRole.Object, text: "caution", normalized: "caution", codings: [] },
+        { role: AdviceArgumentRole.Object, text: "storms", normalized: "storms", codings: [] }
+      ],
+      span: { start: 16, end: 37 }, sourceText: "use caution in storms", sequenceIndex: 0,
+      sourceRelationCoding: { system: "http://snomed.info/sct", code: "18720000", display: "In" }
+    }]);
+    expect(instructionGraph?.relations).toBeUndefined();
+    expect(instructionGraph?.coverage).toBeUndefined();
+    expect(parseInstructionGraphExtension(result.fhir.extension)?.actions).toEqual(instructionGraph!.actions);
     expect(result.meta.normalized.additionalInstructions).toEqual([
       { text: "Use caution in storms", coding: undefined }
     ]);

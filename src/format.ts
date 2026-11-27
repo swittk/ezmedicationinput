@@ -13,14 +13,13 @@ import { ParserState } from "./parser-state";
 import { appendClinicalConditionText, resolveNativeClauseRendering, type SigLocalization, type SigLongContext, type SigShortContext, type SigDoseScope } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
-import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding } from "./advice";
+import { findAdditionalInstructionDefinitionByCoding } from "./advice";
 import { getPrimitiveTranslation } from "./fhir-translations";
 import { EN_POSITIVE_MODALITY_PREFIX } from "./instruction-action-locale-adapter";
 import { getMedicationInstructionAction, medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "./instruction-action-terminology";
 import { baseLanguageTag, quantityComparatorText } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
 import {
-  instructionGraphHasNovelNonWarningContent,
   isInstructionGraphDisplayWarning,
   relationFromSourceText,
   instructionGraphPrimaryAdministrationModality,
@@ -31,17 +30,8 @@ import {
   instructionGraphSourceConflictsWithDose,
   instructionGraphPreparationOwnsDose,
   instructionGraphRoundTripPrimaryAction,
-  instructionGraphEntailsAdviceCoding,
-  instructionGraphCoversTypedWarnings,
-  instructionGraphRealizesWarningText,
-  instructionGraphSourceOwnedByAdvice,
-  instructionGraphFullyOwnsAdvice,
-  instructionGraphRepresentsText,
-  instructionGraphSingleActionRepresentsText,
-  instructionGraphTextParticipatesInRelation,
   realizeInstructionAction,
-  realizeInstructionGraph,
-  realizeInstructionGraphWithSources,
+  realizeClauseInstructions,
   attachInstructionGraphPrimaryConditions,
   type InstructionGraphPrimaryCondition,
   instructionGraphPostAdministrationDiscourseConnector
@@ -1558,139 +1548,6 @@ export function instructionGraphMatchesDose(clause: CanonicalSigClause): boolean
   ));
 }
 
-export function normalizeInstructionText(value: string): string {
-  return value.toLowerCase().replace(/[\s,;:.()]+/gu, " ").trim();
-}
-
-export function collectGraphInstructionOwnership(
-  clause: CanonicalSigClause,
-  hasCanonicalAdministration: boolean,
-  preserveOpaqueSourceSuffix = false
-) {
-  const graph = clause.instructionGraph;
-  const actions = graph?.actions ?? [];
-  const graphWarnings = actions.filter(isInstructionGraphDisplayWarning);
-  const codedWarningSources: string[] = [];
-  const codedWarningSourcesByInstruction: string[][] = [];
-  const graphOwnedAdditional: CanonicalAdditionalInstructionExpr[] = [];
-  const instructions = clause.additionalInstructions ?? [];
-  // A mixed collection retains its existing ordering and realization owner.
-  const ownsTypedCollection = Boolean(graph && instructions.length && instructions.every(instruction =>
-    !instruction.coding?.code && instruction.frames?.length && instructionGraphFullyOwnsAdvice(graph, instruction)));
-  for (const instruction of instructions) {
-    const sources = composedCodedWarningActionSources(actions, instruction.coding);
-    codedWarningSourcesByInstruction.push(sources);
-    codedWarningSources.push(...sources);
-    if (!instruction.text || !graph) continue;
-    let owned = ownsTypedCollection || !instruction.frames?.length && instructionGraphFullyOwnsAdvice(graph, instruction);
-    if (!owned && instruction.coding?.code) {
-      owned = !sources.length && instructionGraphEntailsAdviceCoding(graph, instruction.coding);
-    } else if (!owned) {
-      const normalized = normalizeInstructionText(instruction.text);
-      // Source realization can retain a contiguous opaque suffix that a
-      // translated action cannot claim from its shorter typed advice label.
-      owned = preserveOpaqueSourceSuffix && !instruction.frames?.length && actions.some((action) => {
-        const actionText = normalizeInstructionText(action.sourceText);
-        return Boolean(actionText && normalized.includes(actionText) && graph.opaqueSpans?.some((opaque) =>
-          opaque.start >= action.span.end && opaque.text.trim() &&
-          !graph.sourceText.slice(action.span.end, opaque.start).trim()
-        ));
-      });
-      if (!owned) {
-        const representedByWarning = graphWarnings.some((action) => {
-          const source = normalizeInstructionText(action.sourceText);
-          return source === normalized || source.includes(normalized) || normalized.includes(source);
-        });
-        owned = instructionGraphCoversTypedWarnings(graph, instruction.frames) ||
-          instructionGraphRealizesWarningText(graph, instruction.text) ||
-          instructionGraphRepresentsText(graph, instruction.text) && (
-            representedByWarning ||
-            Boolean(graph.primaryAdministrationSpan) &&
-              instructionGraphSingleActionRepresentsText(graph, instruction.text) &&
-              instructionGraphTextParticipatesInRelation(graph, instruction.text) ||
-            !hasCanonicalAdministration && instructionGraphSingleActionRepresentsText(graph, instruction.text)
-          );
-      }
-    }
-    if (owned) graphOwnedAdditional.push(instruction);
-  }
-  return { codedWarningSources, codedWarningSourcesByInstruction, graphOwnedAdditional, graphWarnings };
-}
-
-export function instructionGraphAdviceSourceTexts(
-  clause: CanonicalSigClause,
-  instructions: CanonicalAdditionalInstructionExpr[],
-  additionalSources: string[] = []
-): string[] {
-  const sources = instructions.map((instruction) => instruction.text?.trim())
-    .filter((text): text is string => Boolean(text));
-  for (const instruction of instructions) {
-    for (const frame of instruction.frames ?? []) {
-      const source = frame.sourceText?.trim();
-      if (source && sources.indexOf(source) === -1) sources.push(source);
-    }
-  }
-  for (const source of additionalSources) {
-    if (sources.indexOf(source) === -1) sources.push(source);
-  }
-  if (clause.instructionGraph) {
-    for (const instruction of instructions) {
-      for (const source of instructionGraphSourceOwnedByAdvice(clause.instructionGraph, instruction)) {
-        if (sources.indexOf(source) === -1) sources.push(source);
-      }
-    }
-  }
-  return sources;
-}
-
-/** Direct advice and emitted graph actions already own this patient fragment. */
-export function instructionGraphPatientInstructionAlreadyRendered(
-  clause: CanonicalSigClause,
-  directSourceTexts: readonly string[],
-  renderedGraphSources?: readonly string[]
-): boolean {
-  if (!clause.instructionGraph || !clause.patientInstruction) return false;
-  const sources = instructionGraphSourceOwnedByAdvice(clause.instructionGraph, {
-    text: clause.patientInstruction, frames: []
-  });
-  return sources.length > 0 && sources.every(source =>
-    directSourceTexts.indexOf(source) !== -1 ||
-    Boolean(renderedGraphSources && renderedGraphSources.indexOf(source) !== -1)
-  );
-}
-
-export function instructionGraphAdministrationFlow(
-  clause: CanonicalSigClause,
-  roundTrip: boolean,
-  preGraphInstruction: string | undefined,
-  postGraphInstruction: string | undefined
-) {
-  const span = clause.instructionGraph?.primaryAdministrationSpan;
-  let lastPre: AdviceFrame | undefined;
-  let firstPost: AdviceFrame | undefined;
-  if (span) {
-    for (const action of clause.instructionGraph?.actions ?? []) {
-      if (action.span.end <= span.start && (!lastPre || action.span.end > lastPre.span.end)) lastPre = action;
-      if (action.span.start >= span.end && (!firstPost || action.span.start < firstPost.span.start)) firstPost = action;
-    }
-  }
-  const source = clause.instructionGraph?.sourceText ?? clause.rawText;
-  return {
-    preFlowsIntoAdministration: Boolean(
-      !roundTrip && preGraphInstruction && span && lastPre && lastPre.polarity !== AdvicePolarity.Negate &&
-      !/[.!?;]/u.test(source.slice(lastPre.span.end, span.start))
-    ),
-    postFlowsFromAdministration: Boolean(
-      !roundTrip && postGraphInstruction && span && firstPost && firstPost.polarity !== AdvicePolarity.Negate &&
-      !/[.!?;]/u.test(source.slice(span.end, firstPost.span.start)) &&
-      // A warning is independent unless the bounded primary-to-warning gap
-      // supplies an explicit sequence from the existing relation inventory.
-      (!(isInstructionGraphDisplayWarning(firstPost) || firstPost.force === AdviceForce.Caution) ||
-        relationHasSemanticClass(relationFromSourceText(source.slice(span.end, firstPost.span.start)), "sequence"))
-    )
-  };
-}
-
 export function instructionGraphActionHasSequenceSuccessor(
   clause: CanonicalSigClause, action: AdviceFrame | undefined
 ): boolean {
@@ -1980,140 +1837,32 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         [richPrimaryGraphText, ...graphRegimenTail].filter(Boolean).join(" ")
       )
     : undefined;
-  const instructionPhrases: string[] = [];
-  const renderedGraphSources: string[] | undefined = clause.patientInstruction && clause.instructionGraph
-    ? [] : undefined;
-  const { codedWarningSources, codedWarningSourcesByInstruction, graphOwnedAdditional, graphWarnings } =
-    collectGraphInstructionOwnership(clause, hasCanonicalAdministration, true);
-  const hasCodedAdditionalInstruction = Boolean(
-    clause.additionalInstructions?.some((instruction, index) =>
-      instruction.coding?.code && (
-        codedWarningSourcesByInstruction[index].length > 0 ||
-        !clause.instructionGraph ||
-        !instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding)
-      ))
-  );
-  const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
-  const additionalForDirectRendering = (clause.additionalInstructions ?? []).filter((instruction) =>
-    graphOwnedAdditional.indexOf(instruction) === -1 && instruction !== integratedThinLayer
-  );
-  const additionalTexts = additionalForDirectRendering
-    .map((instruction) => instruction.text?.trim())
-    .filter((text): text is string => Boolean(text));
-  const additionalSemanticSourceTexts = instructionGraphAdviceSourceTexts(
-    clause, additionalForDirectRendering, codedWarningSources
-  );
-  const allAdditionalRepresentedByGraphWarnings = Boolean(
-    graphWarnings.length &&
-    additionalTexts.every((text) => {
-      return Boolean(clause.instructionGraph &&
-        instructionGraphRealizesWarningText(clause.instructionGraph, text));
-    })
-  );
   const primaryConditions: InstructionGraphPrimaryCondition[] | undefined =
     clause.instructionGraph?.relations?.length ? [] : undefined;
+  const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
   const positionedRoundTrip = Boolean(roundTrip && positionedGraph);
-  const graphWholeInstruction = clause.instructionGraph &&
-    !positionedGraph &&
-    !hasCodedAdditionalInstruction &&
-    allAdditionalRepresentedByGraphWarnings
-      ? realizeInstructionGraph(clause.instructionGraph, "en", {
-          includeWarnings: true,
-          omitCanonicalAdministration: clause,
-          instructionActionMap: options?.instructionActionMap,
-          preferSourceText: roundTrip,
-          roundtripSafe: roundTrip,
-          omitSourceTexts: additionalSemanticSourceTexts,
-          omitRenderedAction: richPrimaryGraphAction,
-          primaryConditions
-        })
-      : undefined;
-  if (!graphWholeInstruction) {
-    const directInstruction = formatAdditionalInstructions(additionalForDirectRendering, baseVerb);
-    if (directInstruction) instructionPhrases.push(directInstruction);
-    const graphWarning = clause.instructionGraph && !positionedGraph
-      ? realizeInstructionGraphWithSources(clause.instructionGraph, "en", {
-          onlyWarnings: true,
-          omitCanonicalAdministration: clause,
-          instructionActionMap: options?.instructionActionMap,
-          preferSourceText: roundTrip,
-          roundtripSafe: roundTrip,
-          omitSourceTexts: additionalSemanticSourceTexts
-        }, renderedGraphSources)
-      : undefined;
-    const graphWarningText = graphWarning ? formatPatientInstructionSentence(graphWarning) : undefined;
-    if (graphWarningText) instructionPhrases.push(graphWarningText);
-  }
-  const representedInstructionTexts = additionalForDirectRendering
-    .map((instruction) => instruction.text)
-    .filter((text): text is string => Boolean(text));
-  const preGraphInstruction = positionedGraph && clause.instructionGraph
-    ? realizeInstructionGraph(clause.instructionGraph, "en", {
-        includeWarnings: true,
-        omitCanonicalAdministration: clause,
-        instructionActionMap: options?.instructionActionMap,
-        preferSourceText: roundTrip,
-        roundtripSafe: roundTrip,
-        omitSourceTexts: additionalSemanticSourceTexts,
-        omitRenderedAction: primaryGraphAction ?? richPrimaryGraphAction,
-        position: "pre",
-        primaryConditions
-      })
-    : undefined;
-  const graphPrimaryForOmission = primaryGraphAction ?? richPrimaryGraphAction;
-  const postGraphInstruction = positionedGraph && clause.instructionGraph
-    ? realizeInstructionGraph(clause.instructionGraph, "en", {
-        includeWarnings: true,
-        omitCanonicalAdministration: clause,
-        instructionActionMap: options?.instructionActionMap,
-        preferSourceText: roundTrip,
-        roundtripSafe: roundTrip,
-        omitSourceTexts: additionalSemanticSourceTexts,
-        omitRenderedAction: graphPrimaryForOmission,
-        position: "post",
-        primaryConditions
-      })
-    : undefined;
-  const graphInstruction = graphWholeInstruction ?? postGraphInstruction ?? (
-    !positionedGraph && clause.instructionGraph &&
-    instructionGraphHasNovelNonWarningContent(clause.instructionGraph, representedInstructionTexts)
-      ? realizeInstructionGraph(clause.instructionGraph, "en", {
-          includeWarnings: false,
-          omitCanonicalAdministration: clause,
-          instructionActionMap: options?.instructionActionMap,
-          preferSourceText: roundTrip,
-          roundtripSafe: roundTrip,
-          omitSourceTexts: additionalSemanticSourceTexts,
-          omitRenderedAction: graphPrimaryForOmission,
-          primaryConditions
-        })
-      : undefined
-  );
-  const graphFlow = instructionGraphAdministrationFlow(clause, roundTrip, preGraphInstruction, postGraphInstruction);
-  const preFlowsIntoAdministration = graphFlow.preFlowsIntoAdministration;
+  const instructionPreview = realizeClauseInstructions(clause, "en", {
+    includeWarnings: true,
+    omitCanonicalAdministration: clause,
+    instructionActionMap: options?.instructionActionMap,
+    preferSourceText: roundTrip,
+    roundtripSafe: roundTrip,
+    omitRenderedAction: primaryGraphAction ?? richPrimaryGraphAction,
+    primaryConditions
+  }, instruction => formatAdditionalInstruction(instruction, baseVerb),
+    integratedThinLayer ? [integratedThinLayer] : []);
+  const preGraphInstruction = instructionPreview.pre;
+  const postGraphInstruction = instructionPreview.post;
+  const graphInstruction = instructionPreview.whole ?? postGraphInstruction;
+  const preFlowsIntoAdministration = instructionPreview.preFlowsIntoAdministration;
   // A source-backed contrast already joins the English post-action.
-  const postFlowsFromAdministration = graphFlow.postFlowsFromAdministration &&
+  const postFlowsFromAdministration = instructionPreview.postFlowsFromAdministration &&
     !instructionGraphPostAdministrationDiscourseConnector(clause.instructionGraph!);
-
-  const graphOwnsPatientInstruction = instructionGraphPatientInstructionAlreadyRendered(
-    clause, additionalSemanticSourceTexts, renderedGraphSources
-  ) || Boolean(
-    clause.patientInstruction && clause.instructionGraph && (
-      richPrimaryGraphAction &&
-      instructionGraphSingleActionRepresentsText(clause.instructionGraph, clause.patientInstruction) ||
-      !hasCanonicalAdministration &&
-      instructionGraphFullyOwnsAdvice(clause.instructionGraph, {
-        text: clause.patientInstruction, frames: []
-      })
-    )
-  );
   const patientInstruction = postFlowsFromAdministration
-    ? undefined
-    : formatPatientInstructionSentence(
-        graphInstruction ?? (positionedGraph || graphOwnsPatientInstruction ? undefined : clause.patientInstruction)
-      );
-  if (patientInstruction) instructionPhrases.push(patientInstruction);
-  const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
+    ? undefined : formatPatientInstructionSentence(graphInstruction);
+  const fallbackPatientInstruction = formatPatientInstructionSentence(instructionPreview.patient);
+  const trailingInstructionText = [patientInstruction, fallbackPatientInstruction]
+    .filter(Boolean).join(" ").trim() || undefined;
   const hasExplicitMethod = hasExplicitAdministrationMethod(clause);
   if (
     !authoredPrimary && !hasCalendarQualifiers && roundTrip && (!hasExplicitMethod || primaryGraphAction && !needsCurrentPrimary) && graphSourceIsEnglish &&
@@ -2123,20 +1872,9 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     return clause.instructionGraph.sourceText.trim();
   }
   if (!hasCanonicalAdministration) {
-    const wholeGraph = clause.instructionGraph
-      ? realizeInstructionGraph(clause.instructionGraph, "en", {
-          includeWarnings: true,
-          omitCanonicalAdministration: clause,
-          preferSourceText: roundTrip,
-          roundtripSafe: roundTrip
-        })
-      : undefined;
-    const wholeGraphText = formatPatientInstructionSentence(wholeGraph);
-    const parts: string[] = [];
-    for (const value of [wholeGraphText, ...instructionPhrases]) {
-      if (!value || parts.indexOf(value) !== -1) continue;
-      parts.push(value);
-    }
+    const parts = [formatPatientInstructionSentence(preGraphInstruction),
+      formatPatientInstructionSentence(graphInstruction), fallbackPatientInstruction]
+      .filter((value): value is string => Boolean(value));
     if (authoredPrimary || condition || hasCalendarQualifiers)
       parts.unshift(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary, condition, words, deferredDirections, clause));
     return parts.join(" ").trim() || `${verb}.`;
@@ -2215,41 +1953,19 @@ export function isEmptyStomachInstruction(instruction: CanonicalAdditionalInstru
   ));
 }
 
-function formatAdditionalInstructions(instructions: readonly CanonicalAdditionalInstructionExpr[], verb: string): string | undefined {
-  if (!instructions.length) {
-    return undefined;
-  }
-  const phrases: string[] = [];
-  for (const instruction of instructions) {
-    if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) {
-      const contextual = verb ? `${verb} slowly` : "Slowly";
-      phrases.push(contextual);
-      continue;
-    }
-    if (isEmptyStomachInstruction(instruction)) {
-      phrases.push("On an empty stomach");
-      continue;
-    }
-    const text = instruction.text ?? instruction.coding?.display ?? (
-      instruction.coding?.code ? findAdditionalInstructionDefinitionByCoding(
-        instruction.coding.system ?? "http://snomed.info/sct", instruction.coding.code
-      )?.text : undefined
-    );
-    if (!text) {
-      continue;
-    }
-    const trimmed = text.trim();
-    if (trimmed) {
-      phrases.push(trimmed);
-    }
-  }
-  if (!phrases.length) {
-    return undefined;
-  }
-  return phrases.map((phrase) => {
-    const sentence = phrase.charAt(0).toUpperCase() + phrase.slice(1);
-    return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
-  }).join(" ").trim();
+function formatAdditionalInstruction(instruction: CanonicalAdditionalInstructionExpr, verb: string): string | undefined {
+  let text: string | undefined;
+  if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) text = verb ? `${verb} slowly` : "Slowly";
+  else if (isEmptyStomachInstruction(instruction)) text = "On an empty stomach";
+  else text = instruction.i18n?.en ?? instruction.text ?? instruction.coding?.display ?? (
+    instruction.coding?.code ? findAdditionalInstructionDefinitionByCoding(
+      instruction.coding.system ?? "http://snomed.info/sct", instruction.coding.code
+    )?.text : undefined
+  );
+  const trimmed = text?.trim();
+  if (!trimmed) return undefined;
+  const sentence = trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
 }
 
 function firstCanonicalClause(internal: ParserState): CanonicalSigClause {

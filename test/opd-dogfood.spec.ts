@@ -5153,7 +5153,17 @@ describe("round74 reviewed interchange directions", () => {
     const before = persist(source), projected = projectCanonicalCourse(importCanonicalCourse([source]));
     const expectedGraph = parseInstructionGraphExtension(source.extension)!;
     for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
-      expect(output.additionalInstruction).toEqual([...source.additionalInstruction!, { text: "Do not crush" }]);
+      expect(output.additionalInstruction).toHaveLength(2);
+      expect(output.additionalInstruction![0]).toEqual(source.additionalInstruction![0]);
+      const { extension: warningExtensions, ...warningFields } = output.additionalInstruction![1];
+      expect(warningFields).toEqual({ text: "Do not crush" });
+      expect(warningExtensions).toHaveLength(1);
+      expect(warningExtensions![0].url).toBe("urn:ezmedicationinput:StructureDefinition:medication-instruction-graph");
+      expect(warningExtensions![0].extension?.map(child => child.url)).toEqual(["action"]);
+      const warningGraph = parseInstructionGraphExtension(warningExtensions);
+      expect(warningGraph?.actions).toEqual(expectedGraph.actions);
+      expect(warningGraph?.relations).toBeUndefined();
+      expect(warningGraph?.coverage).toBeUndefined();
       expect(output.additionalInstruction?.map(item => item.text)).not.toContain("Do not crush or chew");
       expect(output.doseAndRate).toEqual(source.doseAndRate);
       const retained = parseInstructionGraphExtension(output.extension);

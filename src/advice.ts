@@ -896,22 +896,19 @@ function supportingFramesForMatcher(
 }
 
 /**
- * Standardized coded warnings retain their clinical wording when precisely
- * one composed action entails that warning. Return its original action source
- * for exclusion from a DUPLICATE realization; neither action nor code is lost.
+ * Retain the existing coding matcher's exact supporting action objects for
+ * occurrence-aware realization. Clinical coding and wording remain with their
+ * existing owners; no action identity is reconstructed from rendered text.
  */
-export function composedCodedWarningActionSources(
+export function composedCodedAdviceActions(
   frames: readonly AdviceFrame[],
   coding: Pick<FhirCoding, "system" | "code"> | undefined
-): string[] {
+): AdviceFrame[] {
   if (!coding?.code) return [];
   const rule = findRuleByCoding(coding.system ?? SNOMED_SYSTEM, coding.code);
-  if (!rule?.frames.some((frame) => frame.force === AdviceForce.Warning) ||
-      !matchesAdviceMatcher([...frames], "", rule.matcher)) return [];
+  if (!rule || !matchesAdviceMatcher([...frames], "", rule.matcher)) return [];
   const supporting = supportingFramesForMatcher(frames, rule.matcher);
-  // Multiple possibly distinct warnings must remain individually visible.
-  return supporting.length === 1 && supporting[0].sourceText
-    ? [supporting[0].sourceText] : [];
+  return supporting.filter((frame, index) => supporting.indexOf(frame) === index);
 }
 
 function createArgument(

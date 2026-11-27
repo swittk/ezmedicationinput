@@ -11,7 +11,7 @@ import adviceRulesSource from "../src/advice-rules.json";
 import adviceTerminology from "../src/advice-terminology.json";
 import { setDosageCondition, withDosageEditProvenance, getDosageSourceOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
 import { buildInstructionGraph, realizeInstructionAction, instructionGraphRichPrimaryAction,
-  instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose, instructionGraphCoversTypedWarnings, instructionGraphFullyOwnsAdvice
+  instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose
 } from "../src/instruction-graph";
 import { formatCanonicalClause } from "../src/format";
 import { formatCanonicalCourse } from "../src/canonical/format-course";
@@ -2140,7 +2140,9 @@ describe("selected optional action meaning", () => {
       frame => frame.predicate.lemma === "withhold-administration"
     ))!;
     const graph = clause.instructionGraph!;
-    expect(instructionGraphFullyOwnsAdvice(graph, instruction)).toBe(true);
+    const render = (value: CanonicalAdditionalInstructionExpr) => formatCanonicalClause(
+      { ...clause, additionalInstructions: [value] }, "long", { locale: "en" }, { realizationMode: "normalized" });
+    expect(render(instruction).match(/(?:Skip|Withhold administration)\b/gu)).toHaveLength(1);
     const frame = instruction.frames![0];
     const opaqueText = `${instruction.text}; follow the supplied clinic card`;
     const partial: CanonicalAdditionalInstructionExpr = {
@@ -2150,10 +2152,9 @@ describe("selected optional action meaning", () => {
         }]
       }]
     };
-    expect(instructionGraphFullyOwnsAdvice(graph, partial)).toBe(false);
-    const rendered = formatCanonicalClause({ ...clause, additionalInstructions: [partial] },
-      "long", { locale: "en" }, { realizationMode: "normalized" });
+    const rendered = render(partial);
     expect(rendered).toContain("follow the supplied clinic card");
+    expect(rendered.match(/(?:Skip|Withhold administration)\b/gu)).toHaveLength(1);
     const other = { ...frame, span: { start: frame.span.end + 1, end: frame.span.end + 1 + frame.sourceText.length } };
     const selected: CanonicalAdditionalInstructionExpr = {
       text: frame.sourceText, frames: [other], evidence: [{
@@ -2162,13 +2163,14 @@ describe("selected optional action meaning", () => {
         }]
       }]
     };
-    expect(instructionGraphFullyOwnsAdvice(graph, selected)).toBe(false);
+    expect(render(selected).match(/(?:Skip|Withhold administration)\b/gu)).toHaveLength(2);
     for (const distinct of [
       { ...frame, force: AdviceForce.Caution },
       { ...frame, predicate: { ...frame.predicate, codings: [{ system: "urn:clinic:actions", code: "independent" }] } },
       { ...frame, predicate: { ...frame.predicate, display: "Clinic-selected holding instruction" } },
       { ...frame, predicate: { ...frame.predicate, i18n: { en: "Clinic-selected holding instruction" } } }
-    ]) expect(instructionGraphFullyOwnsAdvice(graph, { ...instruction, frames: [distinct] })).toBe(false);
+    ]) expect(render({ ...instruction, frames: [distinct] }).match(/(?:Skip|Withhold administration)\b/gu)).toHaveLength(2);
+    expect(clause.instructionGraph).toBe(graph);
   });
 
   it("retains advice annotations and the code-only template beside an uncoded selected frame", () => {
@@ -2316,12 +2318,32 @@ describe("qualified composite technique ownership", () => {
   it("keeps ordinary unqualified and conditional advice at its existing wire owner", () => {
     const source = "Take 1 tablet once daily. Do not crush. Do not chew. Do not drive if dizzy.";
     const parsed = parsePublicSig(source);
+    const instructions = parsed.meta.canonical.clauses[0].additionalInstructions ?? [];
+    const driveRow = instructions.findIndex(instruction => instruction.frames?.some(frame => frame.predicate.lemma === "drive"));
+    expect(driveRow).toBeGreaterThanOrEqual(0);
+    const selected = instructions[driveRow].frames!.find(frame => frame.predicate.lemma === "drive")!;
     for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
       expect(row.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
-      expect(row.additionalInstruction?.length).toBeGreaterThan(0);
-      expect(row.additionalInstruction?.every(instruction => !instruction.extension?.some(field =>
-        field.url === "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph"))).toBe(true);
+      expect(row.additionalInstruction?.length).toBe(instructions.length);
+      const owned = parseInstructionGraphExtension(row.additionalInstruction![driveRow].extension ?? []);
+      expect(owned?.actions).toHaveLength(1);
+      expect(JSON.parse(JSON.stringify(owned!.actions[0].predicate))).toEqual(JSON.parse(JSON.stringify(selected.predicate)));
+      expect(owned!.actions[0]).toMatchObject({ args: selected.args,
+        polarity: selected.polarity, span: selected.span, sourceText: selected.sourceText });
+      expect(owned!.actions[0].modality).toBe(selected.modality);
+      expect(owned!.coverage?.complete).not.toBe(true);
+      expect(owned!.relations ?? []).toHaveLength(0);
+      const graph = parseInstructionGraphExtension(row.extension ?? [])!;
+      const driveIndex = graph.actions.findIndex(frame => frame.predicate.lemma === "drive");
+      expect(graph.relations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: AdviceRelation.If, toActionIndex: driveIndex })
+      ]));
+      for (const [index, instruction] of instructions.entries()) {
+        if (!instruction.coding?.code) continue;
+        expect(row.additionalInstruction![index]).toMatchObject({ text: instruction.text,
+          coding: [expect.objectContaining({ code: instruction.coding.code })] });
+      }
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
@@ -7024,11 +7046,22 @@ describe("current graph realization families", () => {
       predicate: { lemma: "eat-food", display: "Eat food" }, sourceText: "Do not eat food", span: { start: 0, end: 15 },
       args: [{ role: AdviceArgumentRole.Object, text: "food", normalized: "food", conceptId: "food" }] };
     const graph = { sourceText: action.sourceText, actions: [action] };
-    const warning: AdviceFrame = { ...action, predicate: { lemma: "eat", display: "Eat" } };
-    expect(instructionGraphCoversTypedWarnings(graph, [warning])).toBe(true);
-    expect(instructionGraphCoversTypedWarnings(graph, [{ ...warning, span: { start: 20, end: 35 } }])).toBe(false);
-    expect(instructionGraphCoversTypedWarnings(graph, [{ ...warning,
-      args: [{ role: AdviceArgumentRole.Object, text: "grapefruit", normalized: "grapefruit", conceptId: "grapefruit" }] }])).toBe(false);
+    // A thin registered alias can receive the selected canonical action's
+    // wording; explicit conflicting labels are covered independently above.
+    const warning: AdviceFrame = { ...action, predicate: { lemma: "eat" } };
+    const render = (frame: AdviceFrame, text = "Do not eat food") => formatCanonicalClause({
+      kind: "administration", rawText: graph.sourceText,
+      raw: { start: 0, end: graph.sourceText.length, text: graph.sourceText },
+      leftovers: [], evidence: [], confidence: 1, instructionGraph: graph,
+      additionalInstructions: [{ text, frames: [frame], evidence: [{ rule: "selected-advice",
+        lexicalCategory: "instruction", spans: [{ ...frame.span, text: frame.sourceText }] }] }]
+    }, "long", { locale: "en" }, { realizationMode: "normalized" });
+    expect(render(warning)).toBe("Do not eat food.");
+    expect(render({ ...warning, span: { start: 20, end: 35 } }).match(/Do not eat food/gu)).toHaveLength(2);
+    const distinct = render({ ...warning,
+      args: [{ role: AdviceArgumentRole.Object, text: "grapefruit", normalized: "grapefruit", conceptId: "grapefruit" }] }, "Do not eat grapefruit");
+    expect(distinct).toContain("Do not eat food.");
+    expect(distinct).toContain("Do not eat grapefruit.");
   });
 });
 

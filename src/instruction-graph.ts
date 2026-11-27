@@ -3,6 +3,8 @@ import { objectValues } from "./utils/object";
 import { courseContinuationDurationAt, doseComparatorNumberAt, DOSE_COMPARATOR_PREFIXES } from "./hpsg/lexical-classes";
 import { composeCoordinatedActionDirective, composePreposedContactTheme, licensesPreposedContactTheme } from "./hpsg/constructions";
 import {
+  composedCodedAdviceActions,
+  buildAdditionalInstructionFramesFromCoding,
   resolveAdviceMannerModifier,
   resolveAdviceNominalArgument,
   matchComposedAdviceCodings,
@@ -3025,11 +3027,12 @@ function buildInstructionRelations(
     const onlyStructuralGap = !trimmed || /^[,;:.()\-]+$/.test(trimmed);
     if (!explicitRelation && !onlyStructuralGap) continue;
     // Whitespace/punctuation can license an implicit procedural sequence, but it
-    // must not turn a following safety statement into a temporal "then".
+    // must not turn either independent safety statement into a temporal "then".
     // Warnings/cautions need an explicit sequence marker to acquire that edge.
     if (
       !explicitRelation &&
-      (current.force === AdviceForce.Warning || current.force === AdviceForce.Caution)
+      (current.force === AdviceForce.Warning || current.force === AdviceForce.Caution ||
+        previous.force === AdviceForce.Warning || previous.force === AdviceForce.Caution)
     ) continue;
     const directEventLink = explicitRelation && relationHasSemanticClass(explicitRelation, "temporal") &&
       resolveActionRelationSurface(trimmed.replace(/^[,;:.()\-\s]+|[,;:.()\-\s]+$/gu, "")) === explicitRelation;
@@ -3354,6 +3357,24 @@ function proceduralFramesFromSpan(
     .filter((frame) => frameIsProcedural(frame, options));
 }
 
+function uncoveredSourceRanges(range: TextRange, covered: readonly TextRange[]): TextRange[] {
+  let fragments: TextRange[] = [range];
+  for (const span of covered) {
+    const next: TextRange[] = [];
+    for (const fragment of fragments) {
+      if (span.end <= fragment.start || span.start >= fragment.end) {
+        next.push(fragment);
+        continue;
+      }
+      if (span.start > fragment.start) next.push({ start: fragment.start, end: span.start });
+      if (span.end < fragment.end) next.push({ start: span.end, end: fragment.end });
+    }
+    fragments = next;
+    if (!fragments.length) break;
+  }
+  return fragments;
+}
+
 function reconcileOpaqueWithActionCoverage(
   input: string,
   opaqueSpans: CanonicalSourceSpan[],
@@ -3367,24 +3388,7 @@ function reconcileOpaqueWithActionCoverage(
     for (const evidence of instruction.evidence ?? []) understood.push(...evidence.spans);
   }
   for (const opaque of opaqueSpans) {
-    let fragments: TextRange[] = [{ start: opaque.start, end: opaque.end }];
-    for (const span of understood) {
-      const next: TextRange[] = [];
-      for (const fragment of fragments) {
-        if (span.end <= fragment.start || span.start >= fragment.end) {
-          next.push(fragment);
-          continue;
-        }
-        if (span.start > fragment.start) {
-          next.push({ start: fragment.start, end: span.start });
-        }
-        if (span.end < fragment.end) {
-          next.push({ start: span.end, end: fragment.end });
-        }
-      }
-      fragments = next;
-      if (!fragments.length) break;
-    }
+    const fragments = uncoveredSourceRanges(opaque, understood);
     for (const fragment of fragments) {
       const trimmed = trimOpaqueSpan(input, fragment.start, fragment.end);
       if (trimmed) pushOpaqueSpan(result, trimmed);
@@ -3510,10 +3514,19 @@ function canonicalPrimaryAdministrationSpan(
   clause: CanonicalSigClause,
   frames: readonly AdviceFrame[]
 ): TextRange | undefined {
-  const semantic = frames
-    .filter((frame) => frame.polarity !== AdvicePolarity.Negate && actionMatchesCanonicalMethod(frame, clause))
-    .slice()
-    .sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end)[0];
+  let methodSpan: TextRange | undefined;
+  let methodSpanCount = 0;
+  for (const evidence of clause.evidence) if (evidence.lexicalCategory === "method") {
+    for (const span of evidence.spans) { methodSpan = span; methodSpanCount++; }
+  }
+  let semantic: AdviceFrame | undefined;
+  for (const frame of frames) {
+    if (frame.polarity === AdvicePolarity.Negate || !actionMatchesCanonicalMethod(frame, clause) ||
+        methodSpanCount === 1 && methodSpan &&
+        !(frame.span.start <= methodSpan.start && methodSpan.end <= frame.span.end)) continue;
+    if (!semantic || frame.span.start < semantic.span.start ||
+        frame.span.start === semantic.span.start && frame.span.end < semantic.span.end) semantic = frame;
+  }
   if (semantic) {
     let best: TextRange | undefined;
     for (const evidence of clause.evidence) {
@@ -3594,15 +3607,59 @@ function reconcileComposedAdviceCoding(
     );
     if (supersededLocalParaphrase) return undefined;
     if (!coding?.code || !adviceCodingNeedsComposedScope(coding.system ?? SNOMED_SYSTEM, coding.code)) {
-      // The selected modal occurrence now includes the action definition's
-      // richer arguments. Advice and graph projection share that one frame.
+      // The selected indexed action head and valence refine provisional advice
+      // frames here, before native projection. Imported current rows never run
+      // this composition step; their supplied facts retain their own authority.
       let selected = instruction;
-      if (instruction.frames?.some(frame => frame.modality !== undefined)) {
-        const frames = instruction.frames.map(frame => frame.modality === undefined ? frame :
-          actionProgram.find(semantic => semantic.predicate.lemma === frame.predicate.lemma &&
-            semantic.polarity === frame.polarity && semantic.modality === frame.modality &&
-            semantic.span.start === frame.span.start && semantic.span.end === frame.span.end) ?? frame);
-        if (frames.some((frame, index) => frame !== instruction.frames![index])) selected = { ...instruction, frames };
+      if (instruction.frames?.length) {
+        const frames: AdviceFrame[] = [];
+        for (const frame of instruction.frames) {
+          const semantic = actionProgram.find(candidate => {
+            if (candidate === frame) return true;
+            if (frame.modality !== undefined && candidate.predicate.lemma === frame.predicate.lemma &&
+                candidate.polarity === frame.polarity && candidate.modality === frame.modality &&
+                candidate.span.start === frame.span.start && candidate.span.end === frame.span.end) return true;
+            if (coding?.code || frame.predicate.display !== undefined || frame.predicate.realizer !== undefined ||
+                frame.predicate.realizerConfig !== undefined || frame.predicate.codings?.length ||
+                frame.predicate.i18n || frame.predicate.semanticComponents?.length ||
+                frame.span.end > candidate.span.end ||
+                frame.predicate.semanticClass !== candidate.predicate.semanticClass ||
+                frame.polarity !== candidate.polarity || frame.modality !== undefined && frame.modality !== candidate.modality ||
+                frame.force !== candidate.force && !(frame.force === AdviceForce.Instruction && candidate.force === AdviceForce.Sequence) ||
+                frame.relation !== undefined && frame.relation !== candidate.relation) return false;
+            let selectedStart = frame.span.start;
+            if (candidate.span.start > selectedStart) {
+              const prefix = frame.sourceText.slice(0, candidate.span.start - selectedStart);
+              const consumed = leadingStructuralConnectorLength(prefix);
+              if (!consumed || prefix.slice(consumed).trim()) return false;
+              selectedStart = candidate.span.start;
+            }
+            const definition = frameActionDefinition(candidate);
+            if (!definition || !candidate.predicate.display) return false;
+            // A longer indexed head can supersede the legacy short predicate,
+            // but only the unique selected canonical occurrence may refine it.
+            if (actionProgram.some(other => other !== candidate && other.predicate.display &&
+                other.span.start <= selectedStart && frame.span.end <= other.span.end &&
+                other.predicate.semanticClass === frame.predicate.semanticClass &&
+                other.polarity === frame.polarity && (frame.modality === undefined || other.modality === frame.modality))) return false;
+            // The selected valence may divide a provisional nominal into Site,
+            // Material and Time. Every already-typed fact must survive in order.
+            const typed = frame.args.filter(arg => arg.conceptId || arg.coding || arg.codings?.length ||
+              arg.quantity || arg.relation || arg.administrationTargetCount || arg.components?.length || arg.i18n);
+            return correspondingAdviceArguments(typed, candidate.args, (arg, actual) =>
+              (arg.conceptId === undefined || arg.conceptId === actual.conceptId) &&
+              (arg.relation === undefined || arg.relation === actual.relation) &&
+              (arg.coding === undefined || equalStructuredValues(arg.coding, actual.coding)) &&
+              (!arg.codings?.length || equalStructuredValues(arg.codings, actual.codings)) &&
+              (arg.quantity === undefined || equalStructuredValues(arg.quantity, actual.quantity)) &&
+              (arg.administrationTargetCount === undefined || arg.administrationTargetCount === actual.administrationTargetCount) &&
+              (!arg.components?.length || equalStructuredValues(arg.components, actual.components)) &&
+              Object.keys(arg.i18n ?? {}).every(locale => arg.i18n![locale] === actual.i18n?.[locale]), false);
+          }) ?? frame;
+          if (frames.indexOf(semantic) < 0) frames.push(semantic);
+        }
+        if (frames.length !== instruction.frames.length || frames.some((frame, index) => frame !== instruction.frames![index]))
+          selected = { ...instruction, frames };
       }
       if (!coding?.code && selected.frames?.length) {
         const definitions = matchComposedAdviceCodings(selected.frames);
@@ -4540,75 +4597,59 @@ function normalizedInstructionSurface(value: string): string {
   return value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
 }
 
-export function instructionGraphRepresentsText(
-  graph: CanonicalInstructionGraph,
-  text: string
+
+/** Argument roles are independent slots; the order within a role is retained. */
+function correspondingAdviceArguments(
+  selected: readonly AdviceArgument[], actual: readonly AdviceArgument[],
+  matches: (left: AdviceArgument, right: AdviceArgument) => boolean,
+  complete = true
 ): boolean {
-  const normalized = normalizedInstructionSurface(text);
-  if (!normalized) return false;
-  const compact = (value: string): string => value.replace(/\s+/gu, "");
-  const pieces: Array<{ start: number; end: number; text: string }> = [];
-  for (const action of graph.actions) {
-    if (action.sourceText?.trim()) {
-      pieces.push({ start: action.span.start, end: action.span.end, text: action.sourceText });
+  if (complete && selected.length !== actual.length) return false;
+  for (let index = 0; index < selected.length; index++) {
+    const expected = selected[index];
+    let ordinal = 0;
+    for (let prior = 0; prior < index; prior++) if (selected[prior].role === expected.role) ordinal++;
+    let found: AdviceArgument | undefined;
+    for (const candidate of actual) {
+      if (candidate.role !== expected.role) continue;
+      if (ordinal-- === 0) { found = candidate; break; }
     }
+    if (!found || !matches(expected, found)) return false;
   }
-  for (const relation of graph.relations ?? []) {
-    if (relation.text?.trim() && relation.span) {
-      pieces.push({ start: relation.span.start, end: relation.span.end, text: relation.text });
-    }
-  }
-  for (const opaque of graph.opaqueSpans ?? []) {
-    if (opaque.text?.trim()) {
-      pieces.push({ start: opaque.start, end: opaque.end, text: opaque.text });
-    }
-  }
-  pieces.sort((left, right) => left.start - right.start || left.end - right.end);
-  const represented = normalizedInstructionSurface(pieces.map((piece) => piece.text).join(" "));
-  if (represented && compact(represented).includes(compact(normalized))) {
-    return true;
-  }
-  return graph.actions.some((action) => {
-    const candidate = normalizedInstructionSurface(action.sourceText);
-    return Boolean(candidate && (candidate === normalized || candidate.includes(normalized)));
-  });
+  return true;
 }
 
-export function instructionGraphTextParticipatesInRelation(
-  graph: CanonicalInstructionGraph,
-  text: string
-): boolean {
-  const normalized = normalizedInstructionSurface(text);
-  if (!normalized) return false;
-  const compact = (value: string): string => value.replace(/\s+/gu, "");
-  const matchingIndices: number[] = [];
-  for (let index = 0; index < graph.actions.length; index += 1) {
-    const source = normalizedInstructionSurface(graph.actions[index]?.sourceText ?? "");
-    if (!source) continue;
-    if (source === normalized || compact(source).includes(compact(normalized)) || compact(normalized).includes(compact(source))) {
-      matchingIndices.push(index);
-    }
-  }
-  return matchingIndices.some((index) =>
-    graph.relations?.some((relation) =>
-      relation.fromActionIndex === index || relation.toActionIndex === index
-    ) ?? false
-  );
+/** Coding annotations stay on their wire element; only declared Coding facts
+ * participate in directed selected-meaning correspondence. */
+function selectedCodingMatches(selected: FhirCoding | undefined, actual: FhirCoding | undefined): boolean {
+  if (!selected) return true;
+  for (const field of ["system", "version", "code", "display", "userSelected"] as const)
+    if (selected[field] !== undefined && selected[field] !== actual?.[field]) return false;
+  for (const locale of Object.keys(selected.i18n ?? {}))
+    if (selected.i18n![locale] !== actual?.i18n?.[locale]) return false;
+  return true;
 }
-
-export function instructionGraphSingleActionRepresentsText(
-  graph: CanonicalInstructionGraph,
-  text: string
-): boolean {
-  const normalized = normalizedInstructionSurface(text);
-  if (!normalized) return false;
-  const compact = (value: string): string => value.replace(/\s+/gu, "");
-  return graph.actions.some((action) => {
-    const candidate = normalizedInstructionSurface(action.sourceText);
-    return Boolean(candidate && compact(candidate) === compact(normalized));
-  });
+function selectedCodingsMatch(selected: readonly FhirCoding[] | undefined, actual: readonly FhirCoding[] | undefined): boolean {
+  return !selected?.length || selected.length === actual?.length &&
+    selected.every((coding, index) => selectedCodingMatches(coding, actual[index]));
 }
-
+function selectedComponentsMatch(
+  selected: readonly { role: string; text?: string; coding?: FhirCoding }[] | undefined,
+  actual: readonly { role: string; text?: string; coding?: FhirCoding }[] | undefined
+): boolean {
+  return !selected?.length || selected.length === actual?.length && selected.every((component, index) =>
+    component.role === actual[index].role && component.text === actual[index].text &&
+    selectedCodingMatches(component.coding, actual[index].coding));
+}
+function sameAdviceArgumentMeaning(left: AdviceArgument, right: AdviceArgument): boolean {
+  for (const field of ["role", "text", "normalized", "relation", "conceptId", "administrationTargetCount"] as const)
+    if (left[field] !== right[field]) return false;
+  return equalStructuredValues(left.span, right.span) && equalStructuredValues(left.i18n, right.i18n) &&
+    sameArgumentQuantity(left, right) &&
+    selectedCodingMatches(left.coding, right.coding) && selectedCodingMatches(right.coding, left.coding) &&
+    selectedCodingsMatch(left.codings, right.codings) && selectedCodingsMatch(right.codings, left.codings) &&
+    selectedComponentsMatch(left.components, right.components) && selectedComponentsMatch(right.components, left.components);
+}
 
 /** Typed warning equivalence retains the established negative-force tolerance. */
 export function sameTypedWarning(left: AdviceFrame, right: AdviceFrame): boolean {
@@ -4617,106 +4658,63 @@ export function sameTypedWarning(left: AdviceFrame, right: AdviceFrame): boolean
     (left.polarity ?? AdvicePolarity.Affirm) === (right.polarity ?? AdvicePolarity.Affirm) &&
     (right.polarity === AdvicePolarity.Negate || left.force === right.force) &&
     left.modality === right.modality && left.relation === right.relation &&
-    equalStructuredValues(left.predicate.semanticComponents, right.predicate.semanticComponents) &&
-    equalStructuredValues(left.args, right.args);
+    selectedComponentsMatch(left.predicate.semanticComponents, right.predicate.semanticComponents) &&
+    selectedComponentsMatch(right.predicate.semanticComponents, left.predicate.semanticComponents) &&
+    correspondingAdviceArguments(left.args, right.args, sameAdviceArgumentMeaning);
 }
 
 
-/** Full current action identity for selected instruction ownership. */
-function sameTypedAdviceFrame(left: AdviceFrame, right: AdviceFrame): boolean {
-  return sameTypedWarning(left, right) && left.force === right.force &&
-    left.predicate.display === right.predicate.display &&
-    equalStructuredValues(left.predicate.i18n, right.predicate.i18n) &&
-    left.predicate.realizer === right.predicate.realizer &&
-    equalStructuredValues(left.predicate.codings, right.predicate.codings) &&
-    equalStructuredValues(left.predicate.realizerConfig, right.predicate.realizerConfig) &&
-    equalStructuredValues(left.coding, right.coding);
-}
-
-/**
- * Non-coded advice is redundant only when the grammar already owns every
- * negative predicate in the same source interval. Free text alone cannot
- * justify deleting a distinct clinical prohibition.
- */
-export function instructionGraphCoversTypedWarnings(
-  graph: CanonicalInstructionGraph,
-  frames: readonly AdviceFrame[] | undefined
-): boolean {
-  if (!frames?.length) return false;
-  return frames.every((expected) => {
-    if (expected.polarity !== AdvicePolarity.Negate) {
-      // A modal action's isolated frame cannot replace its selected condition.
-      // Keep the complete related graph as the realization owner only for the
-      // same source occurrence with all typed arguments and modality intact.
-      return Boolean(expected.modality && graph.actions.some((actual, index) =>
-        actual.span.start < expected.span.end && expected.span.start < actual.span.end &&
-        sameTypedWarning(expected, actual) && graph.relations?.some(relation =>
-          relation.toActionIndex === index && relationHasGrammarFeature(relation.kind, "conditionalTail"))
-      ));
-    }
-    const expectedCode = resolveMedicationInstructionAction(expected.predicate.lemma)?.code ??
-      expected.predicate.lemma;
-    return graph.actions.some((actual) => {
-      if (actual.polarity !== AdvicePolarity.Negate) return false;
-      const actualCode = resolveMedicationInstructionAction(actual.predicate.lemma)?.code ??
-        actual.predicate.lemma;
-      if (actualCode !== expectedCode ||
-          actual.span.end <= expected.span.start ||
-          expected.span.end <= actual.span.start) return false;
-      return expected.args.filter((arg) => arg.quantity || arg.conceptId).every((arg) =>
-        actual.args.some((candidate) =>
-          candidate.role === arg.role &&
-          (arg.conceptId === undefined || arg.conceptId === candidate.conceptId) &&
-          (!arg.quantity || Boolean(candidate.quantity &&
-            arg.quantity.value === candidate.quantity.value &&
-            arg.quantity.unit === candidate.quantity.unit &&
-            arg.quantity.comparator === candidate.quantity.comparator &&
-            arg.quantity.range?.low === candidate.quantity.range?.low &&
-            arg.quantity.range?.high === candidate.quantity.range?.high))
-        )
-      );
-    });
-  });
-}
-
-/** A coded qualifier already entailed by the displayed action graph needs no
- * second patient-visible sentence, but keeps its exact FHIR coding. */
-export function instructionGraphEntailsAdviceCoding(
-  graph: CanonicalInstructionGraph,
-  coding: FhirCoding | undefined
-): boolean {
-  if (!coding?.code) return false;
-  return matchComposedAdviceCodings(graph.actions).some((definition) => {
-    const candidate = definition.coding;
-    return candidate?.code === coding.code &&
-      (candidate?.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM);
-  });
-}
-
-/**
- * Give a complete source-preserved free-text instruction ownership of the
- * graph actions whose exact source ranges it contains. This prevents duplicate
- * rendering without reinterpreting the instruction or dropping its remaining
- * unparsed clinical content.
- */
-export function instructionGraphSourceOwnedByAdvice(
-  graph: CanonicalInstructionGraph,
-  instruction: CanonicalAdditionalInstructionExpr
-): string[] {
-  if (!instruction.text?.trim() || instruction.coding?.code || instruction.frames?.length) {
-    return [];
+/** The selected occurrence may gain presentation/coding facts during graph
+ * composition. Absent facts permit enrichment; supplied conflicting facts do not. */
+function selectedAdviceFrameMatchesGraph(selected: AdviceFrame, actual: AdviceFrame): boolean {
+  const sameOccurrence = selected.span.start === actual.span.start && selected.span.end === actual.span.end;
+  const timeExtension = !sameOccurrence && sourceBackedTimeExtension(selected, actual);
+  if (!sameOccurrence && !timeExtension) return false;
+  let samePredicate = selected.predicate.lemma === actual.predicate.lemma;
+  if (!samePredicate) {
+    const code = resolveMedicationInstructionAction(selected.predicate.lemma)?.code;
+    samePredicate = code !== undefined && code === resolveMedicationInstructionAction(actual.predicate.lemma)?.code;
   }
-  const source = graph.sourceText.toLocaleLowerCase("en");
-  const phrase = instruction.text.trim().toLocaleLowerCase("en");
+  if (!samePredicate ||
+      selected.predicate.semanticClass !== undefined && selected.predicate.semanticClass !== actual.predicate.semanticClass ||
+      (selected.polarity ?? AdvicePolarity.Affirm) !== (actual.polarity ?? AdvicePolarity.Affirm) ||
+      selected.modality !== actual.modality ||
+      selected.force !== actual.force && !(selected.force === AdviceForce.Instruction && actual.force === AdviceForce.Sequence) ||
+      selected.relation !== undefined && selected.relation !== actual.relation) return false;
+  for (const field of ["display", "realizer", "realizerConfig"] as const)
+    if (selected.predicate[field] !== undefined && !equalStructuredValues(selected.predicate[field], actual.predicate[field])) return false;
+  if (!selectedCodingsMatch(selected.predicate.codings, actual.predicate.codings) ||
+      !selectedComponentsMatch(selected.predicate.semanticComponents, actual.predicate.semanticComponents)) return false;
+  for (const locale of Object.keys(selected.predicate.i18n ?? {}))
+    if (selected.predicate.i18n![locale] !== actual.predicate.i18n?.[locale]) return false;
+  if (!selectedCodingMatches(selected.coding, actual.coding) ||
+      !selectedCodingMatches(selected.sourceRelationCoding, actual.sourceRelationCoding) ||
+      selected.polaritySource !== undefined && selected.polaritySource !== actual.polaritySource) return false;
+  return correspondingAdviceArguments(selected.args, actual.args, (expected, candidate) => {
+    const extendedTime = timeExtension && expected === selected.args.find(arg => arg.role === AdviceArgumentRole.Time) &&
+      candidate === actual.args.find(arg => arg.role === AdviceArgumentRole.Time);
+    if (!extendedTime && (expected.normalized ?? expected.text) !== (candidate.normalized ?? candidate.text)) return false;
+    for (const field of ["relation", "conceptId", "administrationTargetCount", "span"] as const)
+      if (expected[field] !== undefined && !(extendedTime && field === "span") &&
+          !equalStructuredValues(expected[field], candidate[field])) return false;
+    if (!selectedCodingMatches(expected.coding, candidate.coding) ||
+        !selectedCodingsMatch(expected.codings, candidate.codings) ||
+        !selectedComponentsMatch(expected.components, candidate.components) ||
+        expected.quantity && !sameArgumentQuantity(expected, candidate)) return false;
+    for (const locale of Object.keys(expected.i18n ?? {}))
+      if (expected.i18n![locale] !== candidate.i18n?.[locale]) return false;
+    return true;
+  }, false);
+}
+
+/** Locate an authored fragment; this is correspondence, not action identity. */
+function instructionSourceRange(graph: CanonicalInstructionGraph, text: string | undefined,
+  source = graph.sourceText.toLocaleLowerCase("en")): TextRange | undefined {
+  if (!text?.trim()) return undefined;
+  const phrase = text.trim().toLocaleLowerCase("en");
   const start = source.indexOf(phrase);
-  if (start < 0 || source.indexOf(phrase, start + 1) !== -1) return [];
-  const end = start + phrase.length;
-  return graph.actions
-    .filter((action) =>
-      action.span.start >= start && action.span.end <= end &&
-      Boolean(action.sourceText.trim())
-    )
-    .map((action) => action.sourceText);
+  return start < 0 || source.indexOf(phrase, start + 1) !== -1
+    ? undefined : { start, end: start + phrase.length };
 }
 
 /** Selected instruction evidence covers exactly its complete typed frames. */
@@ -4731,46 +4729,6 @@ export function instructionHasCompleteFrameEvidence(
         frame.span.start === span.start && frame.span.end === span.end))) &&
     frames.every(frame => evidence.some(item => item.spans.some(span =>
       span.start === frame.span.start && span.end === frame.span.end))));
-}
-
-/**
- * A source-backed additional fragment is fully represented when every
- * lexical constituent belongs to a composed action or its licensed
- * coordination connector. A partial match cannot delete unresolved advice.
- */
-export function instructionGraphFullyOwnsAdvice(
-  graph: CanonicalInstructionGraph,
-  instruction: CanonicalAdditionalInstructionExpr
-): boolean {
-  if (!instruction.text?.trim() || instruction.coding?.code) return false;
-  if (instruction.frames?.length) {
-    // A complete selected instruction can delegate realization to its graph
-    // occurrence. Partial evidence cannot hide an additional opaque tail.
-    return instructionHasCompleteFrameEvidence(instruction) && instruction.frames.every(frame =>
-      graph.actions.some(action => action.span.start === frame.span.start &&
-        action.span.end === frame.span.end && sameTypedAdviceFrame(frame, action))
-    );
-  }
-  const source = graph.sourceText.toLocaleLowerCase("en");
-  const phrase = instruction.text.trim().toLocaleLowerCase("en");
-  const start = source.indexOf(phrase);
-  if (start < 0 || source.indexOf(phrase, start + 1) !== -1) return false;
-  const end = start + phrase.length;
-  const actions = graph.actions.filter((action) =>
-    action.span.start < end && start < action.span.end
-  );
-  if (!actions.length) return false;
-  return lexInput(graph.sourceText.slice(start, end)).every((token) => {
-    const localStart = start + token.sourceStart;
-    const localEnd = start + token.sourceEnd;
-    if (actions.some((action) =>
-      action.span.start <= localStart && localEnd <= action.span.end
-    )) return true;
-    const normalized = key(token);
-    return normalized === "," ||
-      ACTION_COORDINATION_CONNECTORS.has(normalized) ||
-      ACTION_DISCOURSE_CONNECTORS.has(normalized);
-  });
 }
 
 /** Exact source-backed discourse connector that introduces the first action
@@ -4790,21 +4748,6 @@ export function instructionGraphPostAdministrationDiscourseConnector(
     span.start >= primary.end && span.end <= firstPostAction.span.start &&
     ACTION_DISCOURSE_CONNECTORS.has(normalizedInstructionSurface(span.text)) &&
     !graph.sourceText.slice(span.end, firstPostAction.span.start).trim()
-  );
-}
-
-/** Use complete realized negative actions to recognize otherwise untyped FHIR text. */
-export function instructionGraphRealizesWarningText(
-  graph: CanonicalInstructionGraph,
-  text: string
-): boolean {
-  const normalized = normalizedInstructionSurface(text);
-  if (!normalized) return false;
-  return graph.actions.some((frame) =>
-    frame.polarity === AdvicePolarity.Negate &&
-    ["en", "th"].some((locale) =>
-      normalizedInstructionSurface(realizeInstructionAction(frame, locale)) === normalized
-    )
   );
 }
 
@@ -5401,24 +5344,6 @@ export function isInstructionGraphDisplayWarning(frame: AdviceFrame): boolean {
   return frame.polarity === AdvicePolarity.Negate || frame.force === AdviceForce.Warning;
 }
 
-export function instructionGraphHasNovelNonWarningContent(
-  graph: CanonicalInstructionGraph,
-  representedTexts: readonly string[]
-): boolean {
-  const represented = representedTexts.map(normalizedInstructionSurface).filter(Boolean);
-  const isRepresented = (text: string): boolean => {
-    const normalized = normalizedInstructionSurface(text);
-    return Boolean(normalized && represented.some((candidate) => candidate.includes(normalized)));
-  };
-  for (const action of graph.actions) {
-    if (!isInstructionGraphDisplayWarning(action) && !isRepresented(action.sourceText)) return true;
-  }
-  for (const opaque of graph.opaqueSpans ?? []) {
-    if (!isRepresented(opaque.text)) return true;
-  }
-  return false;
-}
-
 function sourceTextCoversFrameMeaning(frame: AdviceFrame): boolean {
   const source = normalizedInstructionSurface(frame.sourceText);
   if (!source) return false;
@@ -5564,6 +5489,146 @@ export function attachInstructionGraphPrimaryConditions(
   return body.charAt(0).toUpperCase() + body.slice(1) + ending;
 }
 
+interface InstructionAdviceBinding {
+  instruction: CanonicalAdditionalInstructionExpr;
+  actionIndices: number[];
+  range?: TextRange;
+  rowIndex: number;
+  graphOwnsWording: boolean;
+  completeRow: boolean;
+  derivedQualifier: boolean;
+  codingProved: boolean;
+  alreadyRendered: boolean;
+}
+
+/** Select current occurrences once, before either locale chooses their wording. */
+function collectGraphInstructionOwnership(
+  graph: CanonicalInstructionGraph,
+  instructions: readonly CanonicalAdditionalInstructionExpr[],
+  rendered: readonly CanonicalAdditionalInstructionExpr[],
+  source: string
+): InstructionAdviceBinding[] {
+  return instructions.map((instruction, rowIndex) => {
+    let actionIndices: number[] = [];
+    if (instruction.frames?.length) {
+      const selected = instruction.frames.map(frame => graph.actions.findIndex(action =>
+        selectedAdviceFrameMatchesGraph(frame, action)));
+      if (selected.every(index => index >= 0)) actionIndices = selected;
+    }
+    // This existing coded matcher retains its selected frame identity instead
+    // of projecting it to a source string and finding that occurrence again.
+    let derivedQualifier = false;
+    let codingProved = false;
+    const firstFrame = instruction.frames?.[0];
+    const templateFrames = !actionIndices.length && firstFrame && instruction.coding?.code && !instruction.evidence?.length
+      ? buildAdditionalInstructionFramesFromCoding(instruction.coding.system ?? SNOMED_SYSTEM,
+        instruction.coding.code, firstFrame.sourceText, firstFrame.span) : undefined;
+    const onlyCodedTemplate = templateFrames && equalStructuredValues(instruction.frames, templateFrames);
+    if (!actionIndices.length && (!instruction.frames?.length || onlyCodedTemplate) && instruction.coding?.code) {
+      actionIndices = composedCodedAdviceActions(graph.actions, instruction.coding)
+        .map(frame => graph.actions.indexOf(frame));
+      codingProved = actionIndices.length > 0;
+      derivedQualifier = actionIndices.length > 0 && actionIndices.every(index =>
+        !isInstructionGraphDisplayWarning(graph.actions[index]));
+    }
+    const completeFrames = instructionHasCompleteFrameEvidence(instruction);
+    let range = completeFrames && actionIndices.length === 1 ? graph.actions[actionIndices[0]].span
+      : instructionSourceRange(graph, instruction.text, source);
+    if (range && actionIndices.length && !actionIndices.some(index =>
+        range!.start < graph.actions[index].span.end && graph.actions[index].span.start < range!.end)) range = undefined;
+    if (!instruction.frames?.length && !instruction.coding?.code && range) {
+      actionIndices = graph.actions.map((action, index) =>
+        range!.start < action.span.end && action.span.start < range!.end ? index : -1).filter(index => index >= 0);
+    } else if (!instruction.coding?.code && actionIndices.length && range) {
+      // A selected row can name a complete procedure while its frames record
+      // only one daughter. Keep all selected actions wholly owned by its range;
+      // a conflicting supplied frame never enters this source association.
+      for (let index = 0; index < graph.actions.length; index++) {
+        const action = graph.actions[index];
+        if (range.start <= action.span.start && action.span.end <= range.end && actionIndices.indexOf(index) < 0)
+          actionIndices.push(index);
+      }
+    }
+    const externalCondition = actionIndices.some(index => graph.relations?.some(relation =>
+      relation.fromActionIndex === undefined && relation.toActionIndex === index));
+    if (externalCondition && completeFrames && actionIndices.length === 1) {
+      // Action evidence does not include an external qualifier. Retain the
+      // selected row's own range when its wording also owns that relation.
+      const rowRange = instructionSourceRange(graph, instruction.text, source);
+      const action = graph.actions[actionIndices[0]];
+      if (rowRange && rowRange.start < action.span.end && action.span.start < rowRange.end) range = rowRange;
+    }
+    let completeRow = completeFrames;
+    if (!completeRow && range && actionIndices.length) {
+      const selectedRanges = actionIndices.map(index => graph.actions[index].span);
+      for (const relation of graph.relations ?? []) {
+        if (relation.span && actionIndices.indexOf(relation.toActionIndex) >= 0 &&
+            (relation.fromActionIndex === undefined || actionIndices.indexOf(relation.fromActionIndex) >= 0))
+          selectedRanges.push(relation.span);
+      }
+      for (const opaque of graph.opaqueSpans ?? []) selectedRanges.push(opaque);
+      completeRow = uncoveredSourceRanges(range, selectedRanges).every(part =>
+        !trimOpaqueSpan(graph.sourceText, part.start, part.end));
+    }
+    return {
+      instruction, actionIndices, range, rowIndex, derivedQualifier, codingProved, completeRow,
+      // External qualifiers remain graph nodes; a row's frame evidence does
+      // not license deletion of an IF/UNLESS relation or a temporal edge.
+      graphOwnsWording: derivedQualifier || Boolean(actionIndices.length && completeRow &&
+        (externalCondition || actionIndices.length > 1 || !instruction.coding?.code)),
+      alreadyRendered: rendered.indexOf(instruction) >= 0
+    };
+  });
+}
+
+interface ClauseInstructionRealization {
+  pre?: string;
+  post?: string;
+  whole?: string;
+  patient?: string;
+  preFlowsIntoAdministration?: boolean;
+  postFlowsFromAdministration?: boolean;
+}
+interface ClauseInstructionContext {
+  clause: CanonicalSigClause;
+  bindings: InstructionAdviceBinding[];
+  render: (instruction: CanonicalAdditionalInstructionExpr) => string | undefined;
+  presentGraphAction?: (text: string) => string | undefined;
+  result: ClauseInstructionRealization;
+  source: string;
+}
+
+/** Internal clause preview uses the same selected node walk as the public graph
+ * realizer. No receipt or source ownership is stored on the clinical values. */
+export function realizeClauseInstructions(
+  clause: CanonicalSigClause,
+  locale: string,
+  options: Parameters<typeof realizeInstructionGraph>[2],
+  render: (instruction: CanonicalAdditionalInstructionExpr) => string | undefined,
+  alreadyRendered: readonly CanonicalAdditionalInstructionExpr[] = [],
+  presentGraphAction?: (text: string) => string | undefined
+): ClauseInstructionRealization {
+  const instructions = clause.additionalInstructions ?? [];
+  if (!clause.instructionGraph) {
+    let whole = "";
+    for (const instruction of instructions) {
+      if (alreadyRendered.indexOf(instruction) >= 0) continue;
+      const text = render(instruction);
+      if (text) whole += (whole ? " " : "") + text;
+    }
+    return { whole: whole || undefined, patient: clause.patientInstruction };
+  }
+  const source = clause.instructionGraph.sourceText.toLocaleLowerCase("en");
+  const context: ClauseInstructionContext = {
+    clause, source,
+    bindings: collectGraphInstructionOwnership(clause.instructionGraph, instructions, alreadyRendered, source),
+    render, presentGraphAction,
+    result: {}
+  };
+  realizeInstructionGraphInternal(clause.instructionGraph, locale, options, context);
+  return context.result;
+}
+
 export function realizeInstructionGraph(
   graph: CanonicalInstructionGraph,
   locale = graph.sourceLocale ?? "en",
@@ -5587,21 +5652,47 @@ export function realizeInstructionGraph(
     instructionActionMap?: ParseOptions["instructionActionMap"];
   }
 ): string | undefined {
-  return realizeInstructionGraphWithSources(graph, locale, options);
+  return realizeInstructionGraphInternal(graph, locale, options);
 }
 
-/** Internal formatter receipt from the same graph realization walk. */
-export function realizeInstructionGraphWithSources(
+/** The single action/condition/opaque node selection and emission owner. */
+function realizeInstructionGraphInternal(
   graph: CanonicalInstructionGraph,
   locale: string,
   options: Parameters<typeof realizeInstructionGraph>[2],
-  renderedSourceTexts?: string[]
+  preview?: ClauseInstructionContext
 ): string | undefined {
   const omittedSources = (options?.omitSourceTexts ?? [])
     .map(normalizedInstructionSurface)
     .filter(Boolean);
   const position = options?.position ?? "all";
   const primary = graph.primaryAdministrationSpan;
+  let patientRanges: TextRange[] | undefined;
+  if (preview?.clause.patientInstruction) {
+    const exact = instructionSourceRange(graph, preview.clause.patientInstruction, preview.source);
+    if (exact) patientRanges = [exact];
+    else {
+      // HPSG composes selected patient fragments with this existing separator.
+      // Locate every complete fragment; no punctuation normalization or clinical
+      // interpretation is used to turn an unrelated supplied passage into one.
+      const fragments = preview.clause.patientInstruction.split("; ");
+      if (fragments.length > 1) {
+        const ranges = fragments.map(text => instructionSourceRange(graph, text, preview.source));
+        if (ranges.every((range): range is TextRange => Boolean(range)) &&
+            ranges.every((range, index) => index === 0 || ranges[index - 1].end <= range.start)) patientRanges = ranges;
+      }
+    }
+  }
+  const coveredRanges: TextRange[] | undefined = patientRanges ? [] : undefined;
+  const coveredActions = preview ? new Set<number>() : undefined;
+  const renderedRows = preview ? new Set<number>() : undefined;
+  let rowByAction: Map<number, InstructionAdviceBinding[]> | undefined;
+  for (const binding of preview?.bindings ?? [])
+    for (const index of binding.actionIndices) {
+      if (!rowByAction) rowByAction = new Map();
+      const rows = rowByAction.get(index);
+      if (rows) rows.push(binding); else rowByAction.set(index, [binding]);
+    }
   const doseOwner = options?.omitCanonicalAdministration
     ? primaryDoseAmountOwner(graph, options.omitCanonicalAdministration, options) : undefined;
   const amountOwner = doseOwner?.action;
@@ -5650,6 +5741,8 @@ export function realizeInstructionGraphWithSources(
   for (let actionIndex = 0; actionIndex < graph.actions.length; actionIndex += 1) {
     const sourceFrame = graph.actions[actionIndex];
     if (sourceFrame === options?.omitRenderedAction) {
+      coveredRanges?.push(sourceFrame.span);
+      coveredActions?.add(actionIndex);
       if (!options?.onlyWarnings) {
         conditionTargets.set(actionIndex, sourceFrame);
         coveredPrimaryAction = actionIndex;
@@ -5666,7 +5759,7 @@ export function realizeInstructionGraphWithSources(
     // action. Resolve that one target even when the action is outside PRE.
     if (!inPosition && !(position === "pre" && primaryAction >= 0 &&
         sourceFrame === graph.actions[primaryAction] && options?.omitCanonicalAdministration)) continue;
-    const frameSource = normalizedInstructionSurface(sourceFrame.sourceText);
+    const frameSource = omittedSources.length ? normalizedInstructionSurface(sourceFrame.sourceText) : undefined;
     // A partial text overlap is not evidence that an independent action was
     // rendered. In particular, it cannot erase one half of a prohibition.
     if (frameSource && omittedSources.indexOf(frameSource) >= 0) continue;
@@ -5684,6 +5777,8 @@ export function realizeInstructionGraphWithSources(
         graph.primaryOwnership ? primaryAction >= 0 ? graph.actions[primaryAction] : null
           : primary ? !hasAmount && primaryAction >= 0 ? graph.actions[primaryAction] : amountOwner : undefined,
         sourceFrame)) {
+      coveredRanges?.push(sourceFrame.span);
+      coveredActions?.add(actionIndex);
       // The administration sentence covers this action, not its graph-only
       // conditional relation. Keep the target without emitting the action twice.
       if (!options?.onlyWarnings &&
@@ -5713,6 +5808,11 @@ export function realizeInstructionGraphWithSources(
     conditionTargets.set(actionIndex, frame);
   }
   const localeAdapter = getInstructionActionLocaleAdapter(locale);
+  let directRanges: TextRange[] | undefined;
+  const directRowCoversRelation = preview ? (binding: InstructionAdviceBinding, relation: CanonicalInstructionRelation): boolean =>
+    Boolean(relation.span && binding.range && renderedRows?.has(binding.rowIndex) &&
+      directRanges && directRanges.indexOf(binding.range) >= 0 &&
+      binding.range.start <= relation.span.start && relation.span.end <= binding.range.end) : undefined;
   const nodes: Array<{
     start: number;
     end: number;
@@ -5722,6 +5822,8 @@ export function realizeInstructionGraphWithSources(
     conditionTargetActionIndex?: number;
     warning?: boolean;
     sourceReplayed?: boolean;
+    completeAction?: boolean;
+    rowIndex?: number;
   }> = [];
   const targetLanguage = baseLanguageTag(locale) ?? locale.toLowerCase();
   const sourceLocale = graph.sourceLocale ?? "en";
@@ -5762,15 +5864,78 @@ export function realizeInstructionGraphWithSources(
       targetLanguage === sourceLanguage && sourceTextCoversFrameMeaning(frame)
       ? trimSemanticText(frame.sourceText)
       : undefined;
-    const text = sourceFaithful || realizeAction(frame, locale, options?.roundtripSafe === true);
+    const bindings = rowByAction?.get(actionIndex);
+    const binding = bindings?.[0];
+    if (bindings && bindings.length > 1 && bindings.every((row, index) => row.range &&
+          (index === 0 || bindings[index - 1].range!.end <= row.range.start)) &&
+        uncoveredSourceRanges(frame.span, bindings.map(row => row.range!)).every(range =>
+          !trimOpaqueSpan(graph.sourceText, range.start, range.end))) {
+      // Several selected rows can be pieces of one enriched action frame.
+      // Their own authored pieces, not a replay of that full frame per row,
+      // supply wording while the action and external relations keep identity.
+      for (let index = 0; index < bindings.length; index++) {
+        const row = bindings[index];
+        const text = localizedValue(row.instruction.i18n, locale) ?? row.instruction.text;
+        if (!text || row.alreadyRendered) continue;
+        renderedRows!.add(row.rowIndex);
+        coveredRanges?.push(row.range!);
+        (directRanges ??= []).push(row.range!);
+        nodes.push({ start: row.range!.start, end: row.range!.end, text: text.trim().replace(/[.!?]+$/u, ""),
+          understood: index === 0, actionIndex: index === 0 ? actionIndex : undefined,
+          rowIndex: row.rowIndex, warning: isInstructionGraphDisplayWarning(frame) });
+      }
+      coveredActions?.add(actionIndex);
+      continue;
+    }
+    if (binding?.alreadyRendered) {
+      renderedRows!.add(binding.rowIndex);
+      coveredRanges?.push(frame.span);
+      coveredActions?.add(actionIndex);
+      continue;
+    }
+    // One authored row can cover several selected actions. Its actual emitted
+    // range owns those actions once; their typed relations remain in the graph.
+    const rowAlreadyEmitted = Boolean(binding && binding.actionIndices.length > 1 &&
+      renderedRows!.has(binding.rowIndex) && binding.range && directRanges &&
+      directRanges.indexOf(binding.range) >= 0 &&
+      binding.range.start <= frame.span.start && frame.span.end <= binding.range.end);
+    if (rowAlreadyEmitted && !graph.relations?.some(relation => relation.fromActionIndex === undefined &&
+        relation.toActionIndex === actionIndex && !directRowCoversRelation!(binding!, relation))) {
+      coveredActions?.add(actionIndex);
+      continue;
+    }
+    // A structural composite may include the already-rendered administration
+    // plus a warning. Keep each remaining exact action at its own node instead
+    // of repeating the whole composite label at that warning.
+    const composedWithCoveredPrimary = Boolean(binding?.codingProved && binding.actionIndices.length > 1 &&
+      coveredPrimaryAction !== undefined && binding.actionIndices.indexOf(coveredPrimaryAction) >= 0);
+    const graphOwnsWording = binding?.graphOwnsWording || composedWithCoveredPrimary || rowAlreadyEmitted;
+    let explicitWording = binding && !binding.derivedQualifier && !composedWithCoveredPrimary && !rowAlreadyEmitted
+      ? localizedValue(binding.instruction.i18n, locale) : undefined;
+    if (explicitWording && graphOwnsWording && options?.roundtripSafe) {
+      const definition = instructionActionDefinitionForRealization(frame);
+      const ordinaryLabel = actionLabel(frame, locale, definition);
+      if (explicitWording === ordinaryLabel && actionLabel(frame, locale, definition, true) !== ordinaryLabel)
+        explicitWording = undefined;
+    }
+    const direct = explicitWording ?? (binding && !graphOwnsWording
+      ? preview!.render(binding.instruction) : undefined);
+    const graphText = direct ? undefined : sourceFaithful || realizeAction(frame, locale, options?.roundtripSafe === true);
+    const text = direct ? direct.trim().replace(/[.!?]+$/u, "") : graphText;
     if (text) {
+      if (binding) renderedRows!.add(binding.rowIndex);
+      coveredRanges?.push(direct && binding?.range ? binding.range : frame.span);
+      if (direct && binding?.range) (directRanges ??= []).push(binding.range);
+      coveredActions?.add(actionIndex);
       nodes.push({
-        start: frame.span.start,
-        end: frame.span.end,
+        start: direct && binding?.range ? binding.range.start : frame.span.start,
+        end: direct && binding?.range ? binding.range.end : frame.span.end,
         text,
         understood: true,
         actionIndex,
-        sourceReplayed: Boolean(sourceFaithful),
+        sourceReplayed: !direct && Boolean(sourceFaithful),
+        completeAction: !direct || binding?.completeRow,
+        rowIndex: direct ? binding?.rowIndex : undefined,
         warning: isInstructionGraphDisplayWarning(frame) || frame.force === AdviceForce.Caution
       });
     }
@@ -5780,23 +5945,34 @@ export function realizeInstructionGraphWithSources(
     const target = conditionTargets.get(relation.toActionIndex);
     if (!target || !relation.text || relation.span &&
         !inRequestedPosition(relation.span.start, relation.span.end, relation.toActionIndex)) continue;
+    if (rowByAction?.get(relation.toActionIndex)?.some(binding => directRowCoversRelation!(binding, relation))) {
+      coveredRanges?.push(relation.span!);
+      continue;
+    }
     const mayReplayCondition = target.sourceText && (!relation.span ||
       target.span.start <= relation.span.start && relation.span.end <= target.span.end);
     const targetNode = !relation.span || mayReplayCondition
       ? nodes.find(node => node.actionIndex === relation.toActionIndex) : undefined;
     const condition = instructionGraphCondition(relation, target, graph.sourceLocale ?? "en", locale,
       targetNode?.sourceReplayed);
-    if (!condition) continue;
+    if (!condition) {
+      if (relation.span && targetNode?.sourceReplayed) coveredRanges?.push(relation.span);
+      continue;
+    }
     const currentCondition = options?.omitCanonicalAdministration?.clinicalAdjuncts?.condition;
     if (currentCondition && relation.toActionIndex === coveredPrimaryAction &&
         relationHasSemanticClass(relation.kind, "conditional")) {
       const sourceBody = conditionRelationBody(relation.text, relation.kind);
       if (sourceBody && primaryConditionOwnsSource(currentCondition,
-          normalizedInstructionSurface(sourceBody), relation.kind === AdviceRelation.Unless)) continue;
+          normalizedInstructionSurface(sourceBody), relation.kind === AdviceRelation.Unless)) {
+        if (relation.span) coveredRanges?.push(relation.span);
+        continue;
+      }
     }
     if (options?.primaryConditions && relation.toActionIndex === coveredPrimaryAction &&
         relationHasGrammarFeature(relation.kind, "conditionScope")) {
       if (!relation.span && position === "pre") continue;
+      if (relation.span) coveredRanges?.push(relation.span);
       options.primaryConditions.push({
         ...condition,
         position: relation.span && relation.span.end <= (primary?.start ?? target.span.start) ? "pre" : "post"
@@ -5807,6 +5983,7 @@ export function realizeInstructionGraphWithSources(
       if (targetNode) targetNode.text += localeAdapter.postposedCondition(condition.text);
       continue;
     }
+    coveredRanges?.push(relation.span);
     nodes.push({
       start: relation.span.start,
       end: relation.span.end,
@@ -5815,11 +5992,61 @@ export function realizeInstructionGraphWithSources(
       conditionTargetActionIndex: relation.toActionIndex
     });
   }
+  if (preview) {
+    for (const binding of preview.bindings) {
+      if (binding.alreadyRendered || renderedRows!.has(binding.rowIndex) ||
+          (binding.graphOwnsWording || binding.codingProved && binding.actionIndices.length > 1 &&
+            coveredPrimaryAction !== undefined && binding.actionIndices.indexOf(coveredPrimaryAction) >= 0) &&
+          binding.actionIndices.every(index => coveredActions!.has(index))) continue;
+      const text = preview.render(binding.instruction);
+      if (!text) continue;
+      let start = binding.range?.start;
+      if (start === undefined) {
+        const next = preview.bindings.slice(binding.rowIndex + 1).find(row => row.actionIndices.length || row.range);
+        start = next?.range?.start ?? (next?.actionIndices.length ? graph.actions[next.actionIndices[0]].span.start : Number.POSITIVE_INFINITY);
+      }
+      nodes.push({ start, end: binding.range?.end ?? start, text: text.trim().replace(/[.!?]+$/u, ""),
+        understood: false, rowIndex: binding.rowIndex });
+      if (binding.range) {
+        (directRanges ??= []).push(binding.range);
+        coveredRanges?.push(binding.range);
+      }
+    }
+  }
   if (!options?.onlyWarnings) {
     for (const opaque of graph.opaqueSpans ?? []) {
       if (!inRequestedPosition(opaque.start, opaque.end)) continue;
-      const text = opaque.text.trim();
-      if (text) nodes.push({ start: opaque.start, end: opaque.end, text, understood: false });
+      if (!directRanges?.length) {
+        const text = opaque.text.trim();
+        if (text) {
+          coveredRanges?.push(opaque);
+          nodes.push({ start: opaque.start, end: opaque.end, text, understood: false });
+        }
+        continue;
+      }
+      for (const range of uncoveredSourceRanges(opaque, directRanges)) {
+        const fragment = trimOpaqueSpan(graph.sourceText, range.start, range.end);
+        if (fragment) {
+          coveredRanges?.push(fragment);
+          nodes.push({ start: fragment.start, end: fragment.end, text: fragment.text, understood: false });
+        }
+      }
+    }
+  }
+  if (preview?.clause.patientInstruction) {
+    if (!patientRanges) preview.result.patient = preview.clause.patientInstruction;
+    else {
+      // A selected relation is covered only with its actual endpoints. External
+      // conditions were recorded at their own emission/primary attachment above.
+      for (const relation of graph.relations ?? []) {
+        if (relation.span && relation.fromActionIndex !== undefined &&
+            coveredActions!.has(relation.fromActionIndex) && coveredActions!.has(relation.toActionIndex))
+          coveredRanges!.push(relation.span);
+      }
+      for (const patientRange of patientRanges) for (const range of uncoveredSourceRanges(patientRange, coveredRanges!)) {
+        const fragment = trimOpaqueSpan(graph.sourceText, range.start, range.end);
+        if (fragment) nodes.push({ start: fragment.start, end: fragment.end, text: fragment.text, understood: false });
+      }
     }
   }
   if (!nodes.length) return undefined;
@@ -5831,7 +6058,7 @@ export function realizeInstructionGraphWithSources(
     const rightOwner = right.conditionTargetActionIndex === undefined ? undefined
       : graph.actions[right.conditionTargetActionIndex];
     return (leftOwner?.span.start ?? left.start) - (rightOwner?.span.start ?? right.start) ||
-      left.start - right.start;
+      left.start - right.start || (left.rowIndex ?? Number.MAX_SAFE_INTEGER) - (right.rowIndex ?? Number.MAX_SAFE_INTEGER);
   });
   if (temporalOrderDiffersFromSource && nodes.length > 1) {
     // Include omitted actions in the edge walk so their predecessors still
@@ -5879,60 +6106,86 @@ export function realizeInstructionGraphWithSources(
     }
   }
   let output = "";
-  for (let index = 0; index < nodes.length; index += 1) {
-    const node = nodes[index];
-    if (node.actionIndex !== undefined) {
-      renderedSourceTexts?.push(graph.actions[node.actionIndex].sourceText);
+  let previous: typeof nodes[number] | undefined;
+  let preOutput = "";
+  let postOutput = "";
+  let prePrevious: typeof previous;
+  let postPrevious: typeof previous;
+  let firstPost: typeof previous;
+  for (const node of nodes) {
+    const ownerIndex = node.actionIndex ?? node.conditionTargetActionIndex;
+    const owner = ownerIndex === undefined ? undefined : graph.actions[ownerIndex];
+    let beforePrimary = false;
+    if (preview && primary) {
+      const before = ownerIndex !== undefined && primaryAction >= 0 && ownerIndex !== primaryAction
+        ? precedes(ownerIndex, primaryAction) : false;
+      const after = ownerIndex !== undefined && primaryAction >= 0 && ownerIndex !== primaryAction
+        ? precedes(primaryAction, ownerIndex) : false;
+      beforePrimary = before !== after ? before : (owner?.span.end ?? node.end) <= primary.start;
+      output = beforePrimary ? preOutput : postOutput;
+      previous = beforePrimary ? prePrevious : postPrevious;
     }
-    if (!output) {
-      output = node.text;
-      continue;
+    const presentSentence = node.actionIndex !== undefined && node.rowIndex === undefined
+      ? preview?.presentGraphAction : undefined;
+    if (!previous) output = presentSentence
+      ? (presentSentence(node.text) ?? node.text).trim().replace(/[.!?]+$/u, "") : node.text;
+    else {
+      const conditional = !previous.understood && node.understood
+        ? graph.relations?.find(relation => relation.fromActionIndex === undefined &&
+            relation.toActionIndex === node.actionIndex &&
+            relation.span?.start === previous!.start && relation.span?.end === previous!.end)
+        : undefined;
+      const postposedConditional = previous.understood && !node.understood &&
+        node.conditionTargetActionIndex === previous.actionIndex;
+      const discourseConnector = !previous.understood && node.understood &&
+        ACTION_DISCOURSE_CONNECTORS.has(normalizedInstructionSurface(previous.text)) &&
+        !graph.sourceText.slice(previous.end, node.start).trim();
+      if (conditional) {
+        const target = conditionTargets.get(node.actionIndex);
+        output += localeAdapter.conditionalContinuation(node.text,
+          Boolean(target && !target.modality && target.polarity !== AdvicePolarity.Negate));
+      } else if (postposedConditional) output += localeAdapter.postposedCondition(node.text);
+      else if (discourseConnector) output += " " + localeAdapter.continuationText(node.text, true);
+      else {
+        const explicitRelation = previous.understood && node.understood
+          ? graph.relations?.find(relation => relation.fromActionIndex === previous!.actionIndex &&
+              relation.toActionIndex === node.actionIndex) : undefined;
+        if (previous.understood && node.understood && node.warning && !explicitRelation) {
+          const text = presentSentence
+            ? (presentSentence(node.text) ?? node.text).trim().replace(/[.!?]+$/u, "") : node.text;
+          output += `. ${text}`;
+        }
+        else {
+          const sequence = previous.understood && node.understood && relationHasSemanticClass(explicitRelation?.kind, "sequence");
+          const sentence = !sequence && (previous.rowIndex !== undefined || node.rowIndex !== undefined);
+          output += sequence ? localeAdapter.sequenceSeparator() : sentence ? ". " : "; ";
+          const text = sentence && presentSentence
+            ? (presentSentence(node.text) ?? node.text).trim().replace(/[.!?]+$/u, "") : node.text;
+          output += localeAdapter.continuationText(text, sentence ? false : node.understood);
+        }
+      }
     }
-    const previous = nodes[index - 1];
-    const conditional = !previous?.understood && node.understood
-      ? graph.relations?.find((relation) =>
-        relation.fromActionIndex === undefined &&
-        relation.toActionIndex === node.actionIndex &&
-        relation.span?.start === previous.start &&
-        relation.span?.end === previous.end
-      )
-      : undefined;
-    if (conditional) {
-      const target = conditionTargets.get(node.actionIndex);
-      const imperative = Boolean(target && !target.modality && target.polarity !== AdvicePolarity.Negate);
-      output += localeAdapter.conditionalContinuation(node.text, imperative);
-      continue;
+    previous = node;
+    if (preview && primary) {
+      if (beforePrimary) { preOutput = output; prePrevious = node; }
+      else { postOutput = output; postPrevious = node; firstPost ??= node; }
     }
-    const postposedConditional = Boolean(
-      previous?.understood &&
-      !node.understood &&
-      node.conditionTargetActionIndex === previous.actionIndex
-    );
-    if (postposedConditional) {
-      output += localeAdapter.postposedCondition(node.text);
-      continue;
-    }
-    const discourseConnector = !previous?.understood && node.understood &&
-      ACTION_DISCOURSE_CONNECTORS.has(normalizedInstructionSurface(previous?.text ?? "")) &&
-      !graph.sourceText.slice(previous.end, node.start).trim();
-    if (discourseConnector) {
-      output += " " + localeAdapter.continuationText(node.text, true);
-      continue;
-    }
-    const explicitRelation = previous?.understood && node.understood
-      ? graph.relations?.find((relation) =>
-          relation.fromActionIndex === previous.actionIndex &&
-          relation.toActionIndex === node.actionIndex
-        )
-      : undefined;
-    if (previous?.understood && node.understood && node.warning && !explicitRelation) {
-      output += `. ${node.text}`;
-      continue;
-    }
-    output += previous?.understood && node.understood && relationHasSemanticClass(explicitRelation?.kind, "sequence")
-      ? localeAdapter.sequenceSeparator()
-      : "; ";
-    output += localeAdapter.continuationText(node.text, node.understood);
   }
-  return output;
+  if (preview) {
+    if (primary) {
+      preview.result.pre = preOutput || undefined;
+      preview.result.post = postOutput || undefined;
+      if (!options?.roundtripSafe) {
+        const lastPreAction = prePrevious?.actionIndex === undefined ? undefined : graph.actions[prePrevious.actionIndex];
+        const firstPostAction = firstPost?.actionIndex === undefined ? undefined : graph.actions[firstPost.actionIndex];
+        preview.result.preFlowsIntoAdministration = Boolean(prePrevious?.completeAction && lastPreAction &&
+          lastPreAction.polarity !== AdvicePolarity.Negate && !/[.!?;]/u.test(graph.sourceText.slice(prePrevious.end, primary.start)));
+        preview.result.postFlowsFromAdministration = Boolean(firstPost?.completeAction && firstPostAction &&
+          firstPostAction.polarity !== AdvicePolarity.Negate && !/[.!?;]/u.test(graph.sourceText.slice(primary.end, firstPost.start)) &&
+          (!(firstPostAction.modality || isInstructionGraphDisplayWarning(firstPostAction) || firstPostAction.force === AdviceForce.Caution) ||
+            relationHasSemanticClass(relationFromSourceText(graph.sourceText.slice(primary.end, firstPost.start)), "sequence")));
+      }
+    } else preview.result.whole = output || undefined;
+  }
+  return output || undefined;
 }

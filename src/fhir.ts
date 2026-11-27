@@ -1682,8 +1682,11 @@ export function serializeCanonicalContext(
         if (translated) (i18n ??= {})[locale] = translated;
       }
     }
-    let frames: AdviceFrame[] | undefined;
-    if (instruction.frames?.some(frame => frame.modality !== undefined ||
+    // The selected row occurrence is independent of complete source coverage.
+    // In particular, uncoded negative advice must retain its exact action frame.
+    let frames: AdviceFrame[] | undefined = !instruction.coding?.code && instruction.frames?.length
+      ? instruction.frames : undefined;
+    if (!frames && instruction.frames?.some(frame => frame.modality !== undefined ||
         frame.force === AdviceForce.Warning && frame.polarity !== AdvicePolarity.Negate)) {
       const recovered = instruction.coding?.code
         ? buildAdditionalInstructionFramesFromCoding(instruction.coding.system ?? SNOMED_SYSTEM,
@@ -2066,7 +2069,11 @@ export function independentGraphWarningAdvice(
     const locale = graph.sourceLocale ?? "en";
     const text = getAdviceLocaleAdapter(locale).finalize(
       realizeInstructionAction({ ...action, sourceText: "" }, locale));
-    if (text) (projected ??= []).push({ text });
+    if (text) (projected ??= []).push({
+      text,
+      extension: [{ url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL,
+        extension: [buildActionExtension(action)] }]
+    });
   }
   return projected;
 }

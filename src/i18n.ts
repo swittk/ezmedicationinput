@@ -16,11 +16,6 @@ import {
   dayOfMonthUsesSingleMonth,
   richGraphAdministrationTail,
   instructionGraphMatchesDose,
-  normalizeInstructionText,
-  collectGraphInstructionOwnership,
-  instructionGraphAdviceSourceTexts,
-  instructionGraphPatientInstructionAlreadyRendered,
-  instructionGraphAdministrationFlow,
   instructionGraphActionHasSequenceSuccessor,
   instructionGraphCanStandAlone,
   isEmptyStomachInstruction,
@@ -75,12 +70,8 @@ import {
   instructionGraphSourceConflictsWithDose,
   instructionGraphPreparationOwnsDose,
   instructionGraphRoundTripPrimaryAction,
-  instructionGraphFullyOwnsAdvice,
-  instructionGraphRepresentsText,
-  instructionGraphSingleActionRepresentsText,
   realizeInstructionAction,
-  realizeInstructionGraph,
-  realizeInstructionGraphWithSources,
+  realizeClauseInstructions,
   attachInstructionGraphPrimaryConditions,
   type InstructionGraphPrimaryCondition
 } from "./instruction-graph";
@@ -2281,51 +2272,25 @@ function formatLongThai(
     ? [richPrimaryGraphText, ...graphRegimenTail].filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
     : undefined;
   const roundTrip = options?.realizationMode === "roundtrip";
-  const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
-  const { codedWarningSources, graphOwnedAdditional } =
-    collectGraphInstructionOwnership(clause, hasCanonicalAdministration);
-  const directAdditional = (clause.additionalInstructions ?? []).filter((instruction) =>
-    graphOwnedAdditional.indexOf(instruction) === -1 &&
-    !integratedQualifiers.has(instruction)
-  );
-  const additionalSemanticSourceTexts = instructionGraphAdviceSourceTexts(clause, directAdditional);
-  const graphRealizationOmissions = [...additionalSemanticSourceTexts, ...codedWarningSources];
-  const renderedGraphSources: string[] | undefined = clause.patientInstruction && clause.instructionGraph
-    ? [] : undefined;
   const primaryConditions: InstructionGraphPrimaryCondition[] | undefined =
     clause.instructionGraph?.relations?.length ? [] : undefined;
-  const graphRealizationOptions = {
+  const instructionPreview = realizeClauseInstructions(clause, "th", {
     primaryConditions,
     includeWarnings: true,
     omitCanonicalAdministration: clause,
     instructionActionMap: options?.instructionActionMap,
     preferSourceText: roundTrip,
     roundtripSafe: roundTrip,
-    omitSourceTexts: graphRealizationOmissions,
     omitRenderedAction: richPrimaryGraphAction
-  } as const;
-  const preGraphInstruction = positionedGraph && clause.instructionGraph
-    ? realizeInstructionGraphWithSources(clause.instructionGraph, "th", {
-        ...graphRealizationOptions,
-        position: "pre"
-      }, renderedGraphSources)
-    : undefined;
-  const postGraphInstruction = positionedGraph && clause.instructionGraph
-    ? realizeInstructionGraphWithSources(clause.instructionGraph, "th", {
-        ...graphRealizationOptions,
-        position: "post"
-      }, renderedGraphSources)
-    : undefined;
-  const wholeGraphInstruction = !positionedGraph && clause.instructionGraph
-    ? realizeInstructionGraphWithSources(clause.instructionGraph, "th", graphRealizationOptions, renderedGraphSources)
-    : undefined;
-
-  const directInstruction = formatAdditionalInstructionsThai(directAdditional, baseVerb);
-  const { preFlowsIntoAdministration, postFlowsFromAdministration } =
-    instructionGraphAdministrationFlow(clause, roundTrip, preGraphInstruction, postGraphInstruction);
+  }, instruction => formatAdditionalInstructionThai(instruction, baseVerb),
+    Array.from(integratedQualifiers.keys()), formatPatientInstructionSentence);
+  const preGraphInstruction = instructionPreview.pre;
+  const postGraphInstruction = instructionPreview.post;
+  const wholeGraphInstruction = instructionPreview.whole;
+  const { preFlowsIntoAdministration, postFlowsFromAdministration } = instructionPreview;
   const leadingInstructionText = preFlowsIntoAdministration
     ? undefined
-    : formatPatientInstructionSentence(preGraphInstruction);
+    : formatPatientInstructionSentence(preGraphInstruction, false);
   const graphInstruction = postGraphInstruction ?? wholeGraphInstruction;
   const graphContinuesWithThen = instructionGraphActionHasSequenceSuccessor(clause, richPrimaryGraphAction);
   const sequenceRelation = getUniqueAdviceRelationByGrammarFeature("defaultSequenceRelation");
@@ -2333,65 +2298,18 @@ function formatLongThai(
   const sequenceSurface = localizeAdviceRelation(sequenceRelation, "th") ?? sequenceRelation;
   const rawGraphInstructionText = postFlowsFromAdministration
     ? undefined
-    : formatPatientInstructionSentence(graphInstruction);
+    : formatPatientInstructionSentence(graphInstruction, false);
   const graphInstructionText = rawGraphInstructionText && graphContinuesWithThen
     ? `${sequenceSurface}${rawGraphInstructionText}`
     : rawGraphInstructionText;
-  const patientSource = clause.patientInstruction?.trim();
-  const patientSourceRepresented = instructionGraphPatientInstructionAlreadyRendered(
-    clause, graphRealizationOmissions, renderedGraphSources
-  ) || Boolean(
-    // Complete direct advice already owns these exact graph action sources.
-    // Do not re-emit the shorter patient fragment after its full instruction.
-    patientSource && directInstruction && additionalSemanticSourceTexts.some((source) =>
-      source.toLowerCase() === patientSource.toLowerCase()
-    )
-  ) || Boolean(
-    clause.patientInstruction &&
-    clause.instructionGraph &&
-    (preGraphInstruction || graphInstruction || richPrimaryGraphText) &&
-    (
-      instructionGraphRepresentsText(clause.instructionGraph, clause.patientInstruction) ||
-      clause.instructionGraph.coverage?.complete === true
-    )
-  ) || Boolean(
-    clause.patientInstruction && clause.instructionGraph &&
-    !hasCanonicalAdministration &&
-    instructionGraphFullyOwnsAdvice(clause.instructionGraph, {
-      text: clause.patientInstruction, frames: []
-    })
-  );
-  const fallbackPatientInstruction = formatPatientInstructionSentence(
-    patientSourceRepresented ? undefined : clause.patientInstruction
-  );
-  const trailingInstructionText = [
-    directInstruction,
-    graphInstructionText,
-    fallbackPatientInstruction
-  ].filter(Boolean).join(" ").trim() || undefined;
+  const fallbackPatientInstruction = formatPatientInstructionSentence(instructionPreview.patient);
+  const trailingInstructionText = [graphInstructionText, fallbackPatientInstruction]
+    .filter(Boolean).join(" ").trim() || undefined;
 
   if (!hasCanonicalAdministration) {
-    const wholeGraph = clause.instructionGraph
-      ? realizeInstructionGraph(clause.instructionGraph, "th", {
-          includeWarnings: true,
-          omitCanonicalAdministration: clause,
-          preferSourceText: roundTrip,
-          roundtripSafe: roundTrip
-        })
-      : undefined;
-    const wholeGraphText = formatPatientInstructionSentence(wholeGraph);
-    const parts: string[] = [];
-    for (const value of [
-      leadingInstructionText, wholeGraphText, directInstruction, graphInstructionText, fallbackPatientInstruction
-    ]) {
-      if (!value) continue;
-      const normalized = normalizeInstructionText(value);
-      if (parts.some((existing) => {
-        const candidate = normalizeInstructionText(existing);
-        return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
-      })) continue;
-      parts.push(value);
-    }
+    const parts = [formatPatientInstructionSentence(preGraphInstruction, false),
+      formatPatientInstructionSentence(graphInstruction, false), fallbackPatientInstruction]
+      .filter((value): value is string => Boolean(value));
     if (authoredPrimary || clause.clinicalAdjuncts?.condition || clause.clinicalAdjuncts?.excludedDates?.length ||
         clause.clinicalAdjuncts?.excludedWeekdays?.length)
       parts.unshift(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary,
@@ -2405,7 +2323,7 @@ function formatLongThai(
     wholeGraphInstruction, primaryConditions
   );
   if (graphCanStandAlone && !authoredPrimary) {
-    const text = [directInstruction, graphInstructionText, fallbackPatientInstruction]
+    const text = [graphInstructionText, fallbackPatientInstruction]
       .filter(Boolean).join(" ").trim();
     return clause.clinicalAdjuncts?.condition
       ? appendClinicalConditionText(text, clause.clinicalAdjuncts.condition, words) : text;
@@ -2491,56 +2409,36 @@ function reconstructAdditionalInstructionThai(text: string): string | undefined 
   return undefined;
 }
 
-function formatAdditionalInstructionsThai(
-  instructions: readonly NonNullable<CanonicalSigClause["additionalInstructions"]>[number][], verb: string
+function formatAdditionalInstructionThai(
+  instruction: NonNullable<CanonicalSigClause["additionalInstructions"]>[number], verb: string
 ): string | undefined {
-  if (!instructions.length) {
-    return undefined;
-  }
-  const phrases: string[] = [];
-  for (const instruction of instructions) {
-    if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) {
-      const contextual = verb ? `${verb}ช้าๆ` : "ช้าๆ";
-      phrases.push(contextual);
-      continue;
-    }
-    if (isEmptyStomachInstruction(instruction)) {
-      phrases.push("ขณะท้องว่าง");
-      continue;
-    }
+  if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) return `${verb ? `${verb}ช้าๆ` : "ช้าๆ"}.`;
+  if (isEmptyStomachInstruction(instruction)) return "ขณะท้องว่าง.";
     let text = instruction.i18n?.th ??
-      (instruction.frames?.length ? realizeAdviceFramesThai(instruction.frames) : undefined) ??
-      (instruction.text ? THAI_ADMINISTRATION_WINDOW_TRANSLATIONS.get(instruction.text.toLowerCase().trim()) : undefined) ??
-      (instruction.text ? translateCoordinatedActivityWindowThai(instruction.text) : undefined) ??
-      (instruction.text ? reconstructAdditionalInstructionThai(instruction.text) : undefined) ??
-      instruction.text ?? instruction.coding?.display;
-    if (!instruction.i18n?.th && instruction.coding?.code) {
-      const concept = getMedicationInstructionConcept(instruction.coding.code, instruction.coding.system);
-      const definition = findAdditionalInstructionDefinitionByCoding(
-        instruction.coding.system ?? "http://snomed.info/sct",
-        instruction.coding.code
-      );
-      text = concept?.i18n?.th ?? definition?.i18n?.th ?? text;
-    }
-    if (!text) {
-      continue;
-    }
-    const trimmed = text.trim();
-    if (trimmed) {
-      phrases.push(trimmed);
-    }
+    (instruction.frames?.length ? realizeAdviceFramesThai(instruction.frames) : undefined) ??
+    (instruction.text ? THAI_ADMINISTRATION_WINDOW_TRANSLATIONS.get(instruction.text.toLowerCase().trim()) : undefined) ??
+    (instruction.text ? translateCoordinatedActivityWindowThai(instruction.text) : undefined) ??
+    (instruction.text ? reconstructAdditionalInstructionThai(instruction.text) : undefined) ??
+    instruction.text ?? instruction.coding?.display;
+  if (!instruction.i18n?.th && instruction.coding?.code) {
+    const concept = getMedicationInstructionConcept(instruction.coding.code, instruction.coding.system);
+    const definition = findAdditionalInstructionDefinitionByCoding(
+      instruction.coding.system ?? "http://snomed.info/sct",
+      instruction.coding.code
+    );
+    text = concept?.i18n?.th ?? definition?.i18n?.th ?? text;
   }
-  if (!phrases.length) {
-    return undefined;
-  }
-  return phrases.map((phrase) => (/[.!?]$/.test(phrase) ? phrase : `${phrase}.`)).join(" ").trim();
+  const trimmed = text?.trim();
+  return trimmed ? /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.` : undefined;
 }
 
-function formatPatientInstructionSentence(text: string | undefined): string | undefined {
+function formatPatientInstructionSentence(text: string | undefined, capitalize = true): string | undefined {
   const trimmed = text?.trim();
   if (!trimmed) {
     return undefined;
   }
   const sentence = /^[.!?]$/.test(trimmed.slice(-1)) ? trimmed : `${trimmed}.`;
-  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+  // Mixed shared output already contains locale-presented graph actions and
+  // caller/source-owned direct rows; do not recase that complete block.
+  return capitalize ? sentence.charAt(0).toUpperCase() + sentence.slice(1) : sentence;
 }
