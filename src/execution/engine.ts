@@ -6469,8 +6469,11 @@ function generateDayFilteredPeriodSeries(options: DayFilteredPeriodSeriesOptions
 function firstClockAnchorDay(
   from: Date, entries: readonly ExpandedTime[], zone: string, orderedAt?: Date | null
 ): Date {
-  const day = startOfLocalDay(from, zone);
   const shift = entries[entries.length - 1]?.dayShift ?? 0;
+  // Unshifted clocks need only the query's civil date. Their consumers bound
+  // each instant and use addLocalDays to normalize the following date.
+  if (shift === 0 && entries[0]?.dayShift === 0) return from;
+  const day = startOfLocalDay(from, zone);
   if (shift <= 0) return day;
   const first = addLocalDays(day, -shift, zone);
   const treatmentDay = orderedAt ? startOfLocalDay(orderedAt, zone) : undefined;
