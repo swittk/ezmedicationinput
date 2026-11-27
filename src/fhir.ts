@@ -2463,7 +2463,6 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
       timingTextIsLiteral,
       count: repeat?.count,
       countMax: repeat?.countMax,
-      ...(sharedCount ? { sharedCount } : undefined),
       duration: timingBounds.duration,
       durationMax: timingBounds.durationMax,
       durationIsRange: timingBounds.durationIsRange,
@@ -2502,6 +2501,7 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
         ?.map((value, index) => calendarEventFromFhir(value, dosage.timing?._event?.[index]))
         .filter((event): event is CanonicalCalendarEventExpr => Boolean(event))
     };
+    if (sharedCount) clause.schedule.sharedCount = sharedCount;
     clause.warnings = appendWarning(clause.warnings, timingBounds.warning);
   }
 
