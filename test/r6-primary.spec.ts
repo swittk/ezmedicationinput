@@ -1,7 +1,7 @@
 import { parseAdditionalInstructions } from "../src/advice";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL, parseBodySiteSpatialRelationExtension, buildBodySiteSpatialRelationExtension } from "../src/body-site-spatial";
 import { encodeR6SourceMetadata, decodeR6SourceMetadata } from "../src/dosage-course";
-import { R6_SCOPED_SAFETY_MODIFIER_URL } from "../src/adapters/r6-editable-metadata";
+import { R6_SCOPED_SAFETY_MODIFIER_URL, retainedSingleStepSafety } from "../src/adapters/r6-editable-metadata";
 import { ENGLISH_COURSE } from "../src/locales/course/en";
 import { decodeR5RetainedFields, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
 import { equalStructuredValues, cloneStructuredValue } from "../src/stable-structure";
@@ -8597,6 +8597,89 @@ describe("current FHIR condition and annotation meaning", () => {
     const before = cloneStructuredValue(source), native = importCanonicalCourse(source);
     expect(courseToR6(native).step![0].start).toEqual(source.step[0].start);
     expect(toDosageDetails(toFhirR5Dosages(source)).step[0].start).toEqual(source.step[0].start);
+    expect(source).toEqual(before);
+  });
+});
+
+describe("fresh typed annotation ownership", () => {
+  it("converts active protocol quantities inside a CodeableConcept", () => {
+    const threshold: FhirR6Extension = { url: "urn:test:priming-volume", valueQuantity: {
+      value: 5, unit: "mL", code: "mL", comparator: "~",
+      extension: [{ url: "urn:test:threshold-note", valueString: "retain threshold" }]
+    } };
+    const concept = { id: "pump-protocol", text: "Local priming protocol", extension: [threshold],
+      _text: { id: "protocol-label" }, coding: [{ system: "urn:test:protocol", code: "priming", extension: [threshold] }] };
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [{ rateQuantity: {
+      value: 25, unit: "mL/h", code: "mL/h", extension: [{ url: "urn:test:protocol", valueCodeableConcept: concept }]
+    } }] }] }] };
+    const before = cloneStructuredValue(source), rows = toFhirR5Dosages(source);
+    const saved = rows[0].doseAndRate![0].rateQuantity!.extension![0].valueCodeableConcept!;
+    expect(saved).toMatchObject({ id: concept.id, text: concept.text, _text: concept._text,
+      coding: [{ system: "urn:test:protocol", code: "priming" }] });
+    for (const annotation of [saved.extension![0], saved.coding![0].extension![0]]) {
+      expect(annotation.valueQuantity).toMatchObject({ value: 5, unit: "mL", code: "mL" });
+      expect(annotation.valueQuantity!.comparator).toBeUndefined();
+      expect(getEmaQuantityComparator(annotation.valueQuantity)).toBe("~");
+      expect(annotation.valueQuantity!.extension).toContainEqual(threshold.valueQuantity!.extension![0]);
+    }
+    const restored = toDosageDetails(rows).step[0].component[0].doseAndRate![0].rateQuantity!.extension![0].valueCodeableConcept!;
+    expect(restored).toEqual(concept);
+    expect(source).toEqual(before);
+  });
+
+  it("keeps a translated phase action companion with its phase policy", () => {
+    const companion = { id: "phase-response", extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/translation", extension: [
+        { url: "lang", valueCode: "th" }, { url: "content", valueString: "ติดต่อคลินิก" }
+      ]
+    }] };
+    const source: FhirR6DosageInstruction = {
+      safety: { doseLimit: [{ scope: "dosage", valueQuantity: { value: 10, unit: "mg" } }] },
+      step: [{ safety: { ifExceeded: "Contact the clinic", _ifExceeded: companion },
+        component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "mg" } }] }] }]
+    };
+    const before = cloneStructuredValue(source);
+    const lifted = toDosageDetails(toFhirR5Dosages(source));
+    const owned = retainedSingleStepSafety(lifted)!;
+    expect(owned.course?.doseLimit).toEqual(source.safety!.doseLimit);
+    expect(owned.course?.ifExceeded).toBeUndefined();
+    expect(owned.course?._ifExceeded).toBeUndefined();
+    expect(owned.step.ifExceeded).toBe("Contact the clinic");
+    expect(owned.step._ifExceeded).toEqual(companion);
+    const native = importCanonicalCourse(lifted);
+    expect(native.safety?.ifExceeded).toBeUndefined();
+    expect(native.stages[0].safety?.ifExceeded).toBe("Contact the clinic");
+    expect(source).toEqual(before);
+  });
+
+  it("retains an annotation-only spatial relation Coding without inventing a code", () => {
+    const coding = { id: "uncoded-relation", _code: { extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+    }] } };
+    const source = { extension: [{ url: BODY_SITE_SPATIAL_RELATION_EXTENSION_URL, extension: [
+      { url: "relation", valueCoding: coding }, { url: "relationText", valueString: "around" },
+      { url: "target", valueCodeableConcept: { text: "left eye" } },
+      { url: "sourceText", valueString: "around the left eye" }
+    ] }] };
+    const before = cloneStructuredValue(source), relation = parseBodySiteSpatialRelationExtension(source)!;
+    expect(relation.relationCoding).toEqual(coding);
+    expect(relation.relationCoding?.code).toBeUndefined();
+    expect(relation.targetText).toBe("left eye");
+    const rebuilt = buildBodySiteSpatialRelationExtension(relation)!;
+    expect(rebuilt.extension!.find(field => field.url === "relation")!.valueCoding).toEqual(coding);
+    expect(parseBodySiteSpatialRelationExtension({ extension: [rebuilt] })).toEqual(relation);
+    expect(source).toEqual(before);
+  });
+
+  it("accepts and retains primitive companions on a fresh dose expression", () => {
+    const expression = { description: "Weight-based dose", _description: { id: "dose-description" },
+      name: "weightDose", _name: { id: "dose-name" }, language: "text/fhirpath", _language: { id: "dose-language" },
+      expression: "%patient.weight * 0.5", _expression: { id: "dose-formula" },
+      reference: "https://example.org/protocol/dose", _reference: { id: "dose-reference" } };
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [{ doseExpression: expression }] }] }] };
+    const before = cloneStructuredValue(source);
+    expect(courseToR6(importCanonicalCourse(source)).step[0].component[0].doseAndRate![0].doseExpression).toEqual(expression);
+    expect(toDosageDetails(toFhirR5Dosages(source)).step[0].component[0].doseAndRate![0].doseExpression).toEqual(expression);
     expect(source).toEqual(before);
   });
 });

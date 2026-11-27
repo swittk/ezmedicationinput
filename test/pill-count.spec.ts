@@ -1844,7 +1844,10 @@ describe("recognized duration labels and qualified scheduling quantities", () =>
     expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
       period: 6, periodUnit: "h", maxDosePerPeriod: [{ amount: 4, unit: "tab", period: 1, periodUnit: "d" }]
     });
-    for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+    const projected = toFhirR5Dosages(parsed.fhirNext);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(projected).toHaveLength(1);
+    for (const row of [...parsed.fhir, ...projected]) {
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
       expect(row.asNeeded).toBe(true);
       expect(row.maxDosePerPeriod).toMatchObject([
@@ -1864,7 +1867,10 @@ describe("recognized duration labels and qualified scheduling quantities", () =>
     expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 5, unit: "mg" });
     expect(parsed.meta.canonical.clauses[0].schedule?.maxDosePerPeriod)
       .toEqual([{ amount: 10, unit: "mg", period: 2, periodUnit: "h" }]);
-    for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+    const projected = toFhirR5Dosages(parsed.fhirNext);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(projected).toHaveLength(1);
+    for (const row of [...parsed.fhir, ...projected]) {
       expect(row.asNeeded).toBe(true);
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 5, unit: "mg" });
       expect(row.doseAndRate?.[0].rateQuantity).toBeUndefined();

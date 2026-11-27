@@ -17,7 +17,7 @@
 export const DOSAGE_RECONCILIATION_SOURCE_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source";
 import type { FhirQuantity, FhirR6Quantity, FhirSimpleQuantity,
-  FhirR6SimpleQuantity, FhirR6Extension, FhirPrimitiveElement, FhirR6PrimitiveElement } from "./types";
+  FhirR6SimpleQuantity, FhirR6Coding, FhirR6Extension, FhirPrimitiveElement, FhirR6PrimitiveElement } from "./types";
 
 export const EMA_QUANTITY_COMPARATOR_EXTENSION_URL =
   "http://ema.europa.eu/fhir/extension/comparator";
@@ -124,7 +124,7 @@ function editedOperator(
 }
 
 /** Quantity annotations and typed Ratio/Range endpoints share their owner's operator bridge.
- * Coding annotations use that same bridge without interpreting the Coding.
+ * Coding and CodeableConcept annotations use that bridge without interpreting their terminology.
  * Other Extension value choices remain opaque. */
 const codingPrimitiveFields = ["_system", "_version", "_code", "_display", "_userSelected"] as const;
 const extensionPrimitiveFields = ["_valueCode", "_valueString", "_valueDecimal", "_valueTime", "_valueInteger", "_valueBoolean"] as const;
@@ -164,24 +164,33 @@ export function quantityAnnotationExtensions(
         ...(extension !== range.extension ? { extension } : {})
       };
     }
-    let coding = item.valueCoding;
-    if (coding) {
-      const extension = coding.extension ? quantityAnnotationExtensions(coding.extension, target) : undefined;
-      if (extension !== coding.extension) coding = { ...coding, extension };
-      for (const field of codingPrimitiveFields) {
-        const primitive = quantityPrimitiveForWire(coding[field], target);
-        if (primitive === coding[field]) continue;
-        if (coding === item.valueCoding) coding = { ...coding };
-        coding[field] = primitive;
+    const coding = quantityCodingForWire(item.valueCoding, target);
+    let concept = item.valueCodeableConcept;
+    if (concept) {
+      const extension = concept.extension ? quantityAnnotationExtensions(concept.extension, target) : undefined;
+      const text = quantityPrimitiveForWire(concept._text, target);
+      let codings: FhirR6Coding[] | undefined;
+      for (let index = 0; index < (concept.coding?.length ?? 0); index++) {
+        const current = quantityCodingForWire(concept.coding![index], target)!;
+        if (current !== concept.coding![index]) codings ??= concept.coding!.slice(0, index);
+        codings?.push(current);
       }
+      if (extension !== concept.extension || text !== concept._text || codings) concept = {
+        ...concept,
+        ...(extension !== concept.extension ? { extension } : {}),
+        ...(text !== concept._text ? { _text: text } : {}),
+        ...(codings ? { coding: codings } : {})
+      };
     }
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
     let current = quantity === item.valueQuantity && ratio === item.valueRatio &&
-      range === item.valueRange && coding === item.valueCoding && children === item.extension ? item : {
+      range === item.valueRange && coding === item.valueCoding && concept === item.valueCodeableConcept &&
+      children === item.extension ? item : {
       ...item, ...(quantity !== item.valueQuantity ? { valueQuantity: quantity } : {}),
       ...(ratio !== item.valueRatio ? { valueRatio: ratio } : {}),
       ...(range !== item.valueRange ? { valueRange: range } : {}),
       ...(coding !== item.valueCoding ? { valueCoding: coding } : {}),
+      ...(concept !== item.valueCodeableConcept ? { valueCodeableConcept: concept } : {}),
       ...(children !== item.extension ? { extension: children } : {}),
     };
     for (const field of extensionPrimitiveFields) {
@@ -194,6 +203,20 @@ export function quantityAnnotationExtensions(
     result?.push(current);
   }
   return result ?? source;
+}
+function quantityCodingForWire(
+  coding: FhirR6Coding | undefined, target: "r5" | "r6"
+): FhirR6Coding | undefined {
+  if (!coding) return coding;
+  const extension = coding.extension ? quantityAnnotationExtensions(coding.extension, target) : undefined;
+  let result = extension === coding.extension ? coding : { ...coding, extension };
+  for (const field of codingPrimitiveFields) {
+    const primitive = quantityPrimitiveForWire(coding[field], target);
+    if (primitive === coding[field]) continue;
+    if (result === coding) result = { ...coding };
+    result[field] = primitive;
+  }
+  return result;
 }
 function quantityPrimitiveForWire(
   primitive: FhirR6PrimitiveElement | undefined, target: "r5" | "r6"

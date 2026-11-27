@@ -1,4 +1,5 @@
 import type { FhirR6Quantity } from "./types";
+import lexicalVocabulary from "./hpsg/lexical-classes.json";
 
 export type I18nRecord = Record<string, string>;
 
@@ -148,15 +149,9 @@ export function quantityComparatorText(
   comparator: FhirR6Quantity["comparator"], locale: string
 ): string {
   if (!comparator) return "";
-  const thai = baseLanguageTag(locale) === "th";
-  switch (comparator) {
-    case "~": return thai ? "ประมาณ " : "approximately ";
-    case ">=": return thai ? "อย่างน้อย " : "at least ";
-    case "<=": return thai ? "ไม่เกิน " : "at most ";
-    case ">": return thai ? "มากกว่า " : "more than ";
-    case "<": return thai ? "น้อยกว่า " : "less than ";
-    case "ad": return thai ? "ปริมาณเพียงพอสำหรับ " : "sufficient to achieve ";
-  }
+  const prefixes: Readonly<Record<string, Readonly<Record<NonNullable<FhirR6Quantity["comparator"]>, string>>>> =
+    lexicalVocabulary.quantityComparatorPrefixes;
+  return (prefixes[baseLanguageTag(locale) ?? "en"] ?? prefixes.en)[comparator];
 }
 
 /** Locale-owned realization of already-resolved course semantics.

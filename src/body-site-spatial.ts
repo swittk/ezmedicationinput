@@ -54,7 +54,7 @@ function sharedCodingFields(
   // Output values are immutable by caller contract. Keep existing coding
   // identity (including source annotations) rather than allocating a second
   // coding shell solely to protect a caller from mutating its result.
-  return coding?.code ? coding : undefined;
+  return coding;
 }
 
 /** Convert known Quantity annotations at the R5 Coding boundary. Plain
@@ -170,7 +170,7 @@ export function buildBodySiteSpatialRelationExtension(
   }
   const children: FhirExtension[] = [];
   const relationCoding = spatialCodingForR5(sharedCodingFields(relation.relationCoding));
-  if (relationCoding?.code) {
+  if (relationCoding) {
     children.push({ url: RELATION_URL, valueCoding: relationCoding });
   }
   if (relation.relationText) {
@@ -238,7 +238,7 @@ export function parseBodySiteSpatialRelationExtension(
   const retainedTarget = targetConcept && ((targetConcept.coding?.length ?? 0) > 1 ||
     !targetCoding && targetConcept.coding?.length ||
     Object.keys(targetConcept).some(key => key !== "coding" && key !== "text")) ? targetConcept : undefined;
-  if (!relationText && !relationCoding?.code && !targetText && !targetCoding?.code && !sourceText && !retainedTarget) {
+  if (!relationText && !relationCoding && !targetText && !targetCoding?.code && !sourceText && !retainedTarget) {
     return undefined;
   }
   return {

@@ -407,7 +407,8 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
       if (!Object.keys(course).length) course = undefined;
       if (retiredStepPolicy) return { ...saved, course, step: {}, owner: undefined };
     } else {
-      const { doseLimit: _limits, ifExceeded: _action, modifierExtension: _modifiers, ...metadata } = current;
+      const { doseLimit: _limits, ifExceeded: _action, _ifExceeded: _actionMetadata,
+        modifierExtension: _modifiers, ...metadata } = current;
       // The unchanged projection supplies annotations; the owning policy
       // supplies its scoped clinical fields, including a wrapper-only phase total.
       const policy = course ?? step;

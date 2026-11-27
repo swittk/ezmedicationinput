@@ -2105,6 +2105,12 @@ describe("round36 execution admission and actual-clock ownership", () => {
     const member = dose(); member.asNeeded = true; member.schedule!.recurrence = { count: 1 };
     member.predicate = { kind: "state", name: "pain", text: "pain", expected: true };
     const input = wire(member, version), before = JSON.stringify(input);
+    const reopened = version === "native" ? member
+      : importCanonicalCourse(input as FhirDosage[] | FhirR6DosageInstruction).stages[0].administrations[0];
+    expect(reopened.asNeeded).toBe(true);
+    expect(reopened.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(reopened.schedule?.recurrence?.count).toBe(1);
+    expect(reopened.predicate).toMatchObject({ kind: "state", name: "pain", expected: true });
     expect(nextDueDoses(input, { ...options, evaluateCondition: () => true, limit: 2 })).toEqual([]);
     expect(nextDueDoses(input, { ...options, evaluateCondition: () => false, limit: 2 })).toEqual([]);
     expect(nextDueDoses(input, { ...options, evaluateCondition: () => true, priorCount: 1, limit: 2 })).toEqual([]);

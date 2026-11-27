@@ -546,14 +546,26 @@ export interface FhirTiming extends FhirBackboneElement {
 /** FHIR Expression: enough structure to preserve external R6 dose/rate expressions. */
 export interface FhirExpression extends FhirElement {
   description?: string;
+  _description?: FhirPrimitiveElement;
   name?: string;
+  _name?: FhirPrimitiveElement;
   /** FHIR R5/R6 Expression.language is optional (0..1). */
   language?: string;
+  _language?: FhirPrimitiveElement;
   expression?: string;
+  _expression?: FhirPrimitiveElement;
   reference?: string;
+  _reference?: FhirPrimitiveElement;
 }
 
-export interface FhirR6Expression extends Omit<FhirExpression, "extension">, FhirR6Element {}
+export interface FhirR6Expression extends Omit<FhirExpression,
+  "extension" | "_description" | "_name" | "_language" | "_expression" | "_reference">, FhirR6Element {
+  _description?: FhirR6PrimitiveElement;
+  _name?: FhirR6PrimitiveElement;
+  _language?: FhirR6PrimitiveElement;
+  _expression?: FhirR6PrimitiveElement;
+  _reference?: FhirR6PrimitiveElement;
+}
 
 export interface FhirDoseAndRate extends FhirBackboneElement {
   type?: FhirCodeableConcept;

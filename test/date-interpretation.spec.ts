@@ -1662,7 +1662,7 @@ describe("monthly inferred clocks across a daylight-saving gap", () => {
   });
 
   it.each(["authored", "configured"] as const)("keeps %s clocks authoritative", owner => {
-    const dosage = monthly(owner === "authored" ? "09:15" : undefined);
+    const dosage = monthly(owner === "authored" ? "09:15:00" : undefined);
     const config = owner === "configured"
       ? { frequencyDefaults: { byFrequency: { "freq:2/per:1mo": ["09:15"] } } } : undefined;
     expect(nextDueDoses(dosage, { orderedAt, timeZone, config,
