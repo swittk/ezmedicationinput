@@ -7,6 +7,7 @@ import {projectNativeR5Course} from "./adapters/r5-course";
  * course, condition and edit metadata remain structured and independently editable. */
 import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
 import { findSymptomDefinitionByCoding } from "./symptom-terminology";
+import { getDoseQuantityUnit } from "./maps";
 import { DOSAGE_RECONCILIATION_SOURCE_URL, getEmaQuantityComparator, quantityFromR5, quantityForR6, quantityForR5 as generalQuantityForR5, simpleQuantityForR5, quantityAnnotationExtensions } from "./fhir-quantity-operator";
 import { FhirDayOfWeek, FhirDosage, FhirExtension, FhirR6Extension, FhirQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition, FhirR6DosageInstruction, FhirR6DosageStep, FhirR6DosageInstructionInput, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat, FhirTimingRepeat, MedicationCondition, EzDosage, EzCourseMetadata, EzCourseStep } from "./types";
 
@@ -768,7 +769,9 @@ function conditionFromR6(value: FhirR6DosageCondition): MedicationCondition {
     ["gt", "ge", "lt", "le", "eq", "ne"].indexOf(value.operation) >= 0) {
     return {
       kind: "measurement", name, operation: value.operation as "gt" | "ge" | "lt" | "le" | "eq" | "ne",
-      value: value.valueQuantity.value, unit: value.valueQuantity.unit, text: value.text ?? name
+      value: value.valueQuantity.value,
+      unit: value.valueQuantity.unit ?? (getDoseQuantityUnit(value.valueQuantity, false) || undefined),
+      text: value.text ?? name
     };
   }
   // Keep the actual condition in native fields/the retained course. A human
@@ -1102,7 +1105,7 @@ export function reconcileLiftedR5Safety(row: EzDosage): FhirR6DosageSafety | und
   }
   // Historical lifted rows did not carry a baseline. Their existing R5
   // maxima retain ownership; a safety-only input is independently authored.
-  const projected = r5SafetyBaseline(row);
+  const projected = toR6Safety(row, true);
   if (!projected || !row.safety) return row.safety;
   const dose = (row.safety.doseLimit?.length ?? 0) > 1 ? r5MaximumDoseBasis(row.doseAndRate) : undefined;
   return reconcileR5SafetyEdits(row.safety, projected, undefined, dose);

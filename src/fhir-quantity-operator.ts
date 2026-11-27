@@ -218,7 +218,7 @@ function quantityConceptForWire(
     ...(codings ? { coding: codings } : {})
   } : concept;
 }
-function quantityCodingForWire(
+export function quantityCodingForWire(
   coding: FhirR6Coding | undefined, target: "r5" | "r6"
 ): FhirR6Coding | undefined {
   if (!coding) return coding;

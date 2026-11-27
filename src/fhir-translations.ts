@@ -124,7 +124,8 @@ export function mergeTranslationPrimitiveElement(
         // variants in that locale. A different supplied translation does.
         if (replacement && replacement !== selected?.[locale] && replacement !== content)
           current = { ...extension, extension: extension.extension?.map(part =>
-            part.url === TRANSLATION_CONTENT_EXTENSION_URL ? { ...part, valueString: replacement } : part) };
+            part.url === TRANSLATION_CONTENT_EXTENSION_URL
+              ? { ...part, [part.valueMarkdown !== undefined ? "valueMarkdown" : "valueString"]: replacement } : part) };
       }
     }
     nextExtensions.push(current);
@@ -147,7 +148,7 @@ function getTranslationParts(
         locale = normalizeLocaleKey(part.valueCode);
         break;
       case TRANSLATION_CONTENT_EXTENSION_URL:
-        content = part.valueString?.trim() || undefined;
+        content = (part.valueString ?? part.valueMarkdown)?.trim() || undefined;
         break;
       default:
         break;

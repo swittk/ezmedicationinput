@@ -262,11 +262,12 @@ export function parseTimingAdministrationDuration(
   if (current?.duration !== undefined) return undefined;
   const quantity = extension?.valueQuantity;
   const unit = getQuantityDurationUnit(quantity);
-  if (quantity?.value === undefined || !unit) return undefined;
+  if (quantity?.value === undefined) return undefined;
   if (current?.durationMax !== undefined) {
     const upperUnit = current.durationUnit ?? unit;
     return { range: { low: quantityFromR5(quantity), high: {
-      value: current.durationMax, unit: upperUnit, code: upperUnit, system: "http://unitsofmeasure.org",
+      value: current.durationMax,
+      ...(upperUnit ? { unit: upperUnit, code: upperUnit, system: "http://unitsofmeasure.org" } : {}),
     } } };
   }
   const comparator = getQuantityComparator(quantity);
@@ -295,9 +296,12 @@ export function getAnchoredCourseDuration(
     timing?: { repeat?: { boundsRange?: FhirR6Range; boundsDuration?: FhirR6Quantity } }
   }
 ): Pick<FhirR6Extension, "valueQuantity" | "valueRange"> | undefined {
-  const marker = dosage.modifierExtension?.find(extension =>
+  const source = dosage.modifierExtension?.find(extension =>
     extension.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
-  if (!marker) return undefined;
+  if (!source) return undefined;
+  // A native recurrence length keeps its member origin when calendar bounds
+  // occupy the core bounds[x] slot. The outer modifier retains that ownership.
+  const marker = source.extension?.find(child => child.url === "courseLength") ?? source;
   const repeat = dosage.timing?.repeat;
   const projectedMarker = marker.extension?.find(child => child.url === "projectedRange");
   const low = marker.extension?.find(child => child.url === "low")?.valueQuantity;

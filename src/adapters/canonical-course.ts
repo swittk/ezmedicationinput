@@ -310,11 +310,6 @@ function timingAnnotations(
             if (duration.range) out.occurrenceDurationRange = duration.range;
             out.occurrenceDurationUnit = duration.unit;
             out.occurrenceDurationComparator = duration.comparator;
-          } else if (r?.duration === undefined && e.valueQuantity?.value !== undefined) {
-            // Preserve numeric duration presence without interpreting a local
-            // unit. Its original quantity remains in the timing provenance.
-            out.occurrenceDuration = e.valueQuantity.value;
-            out.occurrenceDurationComparator = getQuantityComparator(e.valueQuantity);
           }
         }
         break;
@@ -752,7 +747,14 @@ function baseAdministration(
     }
   }
   const duration = anchored ? getAnchoredCourseDuration(raw) : undefined;
+  const memberLength = anchored?.extension?.some(child => child.url === "courseLength");
   let schedule = timing(raw.timing, format === "r5");
+  if (memberLength && duration) {
+    schedule ??= {};
+    const recurrence = schedule.recurrence ??= {};
+    recurrence.courseLength = measureFromWire(duration.valueQuantity);
+    recurrence.courseLengthRange = rangeFromFhir(duration.valueRange);
+  }
   const denominator = raw.doseAndRate?.[0]?.rateRatio?.denominator;
   if (denominator && schedule?.recurrence?.occurrenceDuration === undefined &&
       raw.timing?.repeat?.duration === undefined && raw.timing?.repeat?.durationMax === undefined &&
@@ -803,7 +805,7 @@ function baseAdministration(
     delayMinutes: delayMarker
       ? getAdministrationOffsetMinutes({ modifierExtension: [delayMarker] })
       : undefined,
-    anchoredLength: duration && !raw.timing?.repeat?.boundsRange
+    anchoredLength: duration && !memberLength && !raw.timing?.repeat?.boundsRange
       ? { quantity: measureFromWire(duration.valueQuantity), range: rangeFromFhir(duration.valueRange) }
       : undefined,
     cycleDays: cycleMarker ? getCycleDayConstraint({ modifierExtension: [cycleMarker] }) : undefined,
@@ -1611,6 +1613,9 @@ function administrationToWire(
     (anchoredRange ? serializeRange(anchoredRange, target, Boolean(clause)) : undefined);
   const modifiers = output.modifierExtension as FhirR6Extension[] | undefined;
   const oldDuration = modifiers?.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
+  const oldMemberLength = oldDuration?.extension?.find(child => child.url === "courseLength");
+  const memberLength = calendarBounds && !a.anchoredLength &&
+    (a.schedule?.recurrence?.courseLength || a.schedule?.recurrence?.courseLengthRange);
   const projection = currentRange ? projectCourseDurationRange(currentRange) : undefined;
   if (projection?.source || oldDuration && (wireTiming?.repeat?.boundsRange || wireTiming?.repeat?.boundsDuration) ||
       oldDuration?.extension?.some(child => child.url === "projectedRange") ||
@@ -1626,7 +1631,7 @@ function administrationToWire(
           : undefined;
     const next = modifiers?.filter(item => item !== oldDuration) ?? [];
     if (replacement) {
-      const { valueRange: _oldRange, valueQuantity: _oldQuantity, extension: priorChildren, ...metadata } = oldDuration ?? {};
+      const { valueRange: _oldRange, valueQuantity: _oldQuantity, extension: priorChildren, ...metadata } = oldMemberLength ?? oldDuration ?? {};
       const unknown = priorChildren?.filter(child => child.url !== "low" && child.url !== "high" &&
         child.url !== "projectedRange" && child.url !== "rangeMetadata");
       let children = replacement.extension;
@@ -1639,8 +1644,13 @@ function administrationToWire(
         }
         children = retained;
       }
-      next.push({ ...metadata, ...replacement,
-        ...(children ? { extension: unknown?.length ? [...children, ...unknown] : children } : {}) });
+      const length = { ...metadata, ...replacement,
+        ...(children ? { extension: unknown?.length ? [...children, ...unknown] : children } : {}) };
+      if (memberLength) {
+        const siblings = oldMemberLength ? oldDuration!.extension!.filter(child => child !== oldMemberLength) : [];
+        next.push({ ...(oldMemberLength ? oldDuration : {}), url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
+          extension: [{ ...length, url: "courseLength" }, ...siblings] });
+      } else next.push(length);
     } else if (oldDuration) output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
       { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [oldDuration] }];
     assign(output, "modifierExtension", next.length ? next : undefined);

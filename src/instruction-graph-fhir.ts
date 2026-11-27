@@ -1,5 +1,5 @@
 import { equalStructuredValues } from "./stable-structure";
-import { DOSAGE_RECONCILIATION_SOURCE_URL, getEmaQuantityComparator, QUANTITY_OPERATOR_SOURCE_URL, quantityFromWire, simpleQuantityForR5 } from "./fhir-quantity-operator";
+import { DOSAGE_RECONCILIATION_SOURCE_URL, getEmaQuantityComparator, QUANTITY_OPERATOR_SOURCE_URL, quantityCodingForWire, quantityFromWire, simpleQuantityForR5 } from "./fhir-quantity-operator";
 import {
   AdviceArgument,
   AdviceArgumentRole,
@@ -79,7 +79,7 @@ function wireCoding(value: FhirCoding): FhirCoding {
   let displayPrimitive = value._display;
   if (value.i18n) displayPrimitive = mergeTranslationPrimitiveElement(displayPrimitive, value.i18n);
   // Keep supplied Coding fields, including unknown wire annotations, while
-  // the translated display primitive remains the only rewritten field.
+  // translations and known Quantity annotations use their existing codecs.
   const source = value as FhirCoding & Record<string, unknown>;
   const result: FhirCoding & Record<string, unknown> = {};
   for (const key in source) {
@@ -87,7 +87,7 @@ function wireCoding(value: FhirCoding): FhirCoding {
     if (source[key] !== undefined) result[key] = source[key];
   }
   if (displayPrimitive) result._display = displayPrimitive;
-  return result;
+  return quantityCodingForWire(result, "r5") as FhirCoding;
 }
 
 function readCoding(value: FhirCoding | undefined): FhirCoding | undefined {

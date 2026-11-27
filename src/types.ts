@@ -69,6 +69,7 @@ export interface FhirExtension {
   valueUnsignedInt?: number;
   valueRange?: FhirRange;
   valueRatio?: FhirRatio;
+  valuePeriod?: FhirPeriod;
   valueExpression?: FhirExpression;
   valueReference?: NonNullable<FhirCodeableReference["reference"]>;
   valueCodeableReference?: FhirCodeableReference;
@@ -77,7 +78,7 @@ export interface FhirExtension {
 
 /** R6 Extension values retain their native datatype contracts. */
 export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity" | "valueRatio" | "valueTiming" | "valueReference" | "valueCodeableReference" |
-  "valueCoding" | "valueCodeableConcept" | "valueRange" | "valueExpression" |
+  "valueCoding" | "valueCodeableConcept" | "valueRange" | "valueExpression" | "valuePeriod" |
   "_valueCode" | "_valueString" | "_valueMarkdown" | "_valueDecimal" | "_valueTime" | "_valueInteger" | "_valueBoolean"> {
   _valueBoolean?: FhirR6PrimitiveElement;
   _valueCode?: FhirR6PrimitiveElement;
@@ -93,6 +94,7 @@ export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valu
   valueRange?: FhirR6Range;
   valueExpression?: FhirR6Expression;
   valueRatio?: FhirR6Ratio;
+  valuePeriod?: FhirR6Period;
   valueTiming?: FhirR6Timing;
   valueReference?: FhirR6Reference;
   valueCodeableReference?: FhirR6CodeableReference;
