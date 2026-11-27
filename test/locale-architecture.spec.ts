@@ -957,3 +957,31 @@ describe("published course providers with shared schedule limits", () => {
     expect("sharedAdministration" in course).toBe(false);
   });
 });
+
+
+describe("scoped warning ownership with a registered course provider", () => {
+  it("keeps conditional warnings and the customized shared total through native and wire views", () => {
+    const locale = "x-clinic-warning";
+    const course: CourseLanguage = {
+      ...resolveSigLocalization("en")!.course!,
+      administrations: count => count + " clinic administrations"
+    };
+    registerSigLocalization({ locale, inherit: "en", course });
+    const warning = "If dizzy, do not take the 1-tablet morning dose";
+    const source = "Take 1 tablet at 08:00 and 20:00 for 4 doses. " + warning + ".";
+    const parsed = parseSig(source);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(text.match(/4 clinic administrations/gu)).toHaveLength(1);
+      expect(text.split(warning)).toHaveLength(3);
+      expect(text).not.toContain("Do not take the 1 tablet morning dose");
+      expect(text).toContain("1 tablet orally at 8:00 am unless dizzy");
+      expect(text).toContain("1 tablet orally at 8:00 pm");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+});

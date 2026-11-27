@@ -9078,3 +9078,103 @@ describe("current cadence and authored dose condition ownership", () => {
     expect({ row, r6 }).toEqual(before);
   });
 });
+
+
+describe("conditional warning ownership on fresh projections", () => {
+  it.each(["If dizzy", "If systolic BP is below 90"])(
+    "keeps the complete %s warning without an unconditional generated daughter",
+    condition => {
+      const warning = condition + ", do not take the 1-tablet morning dose";
+      const source = "Take 1 tablet at 08:00 and 20:00 for 4 doses. " + warning + ".";
+      const parsed = parseSig(source);
+      const native = parsed.meta.canonical!.course!;
+      const rows: FhirDosage[] = JSON.parse(JSON.stringify(parsed.fhir));
+      const r6: FhirR6DosageInstruction = JSON.parse(JSON.stringify(parsed.fhirNext));
+      const before = structuredClone({ native, rows, r6 });
+      for (const input of [native, rows, r6]) {
+        const course = importCanonicalCourse(input);
+        const members = course.stages.flatMap(stage => stage.administrations);
+        expect(members).toHaveLength(2);
+        expect(members.map(member => member.schedule?.recurrence?.clocks?.[0]).sort())
+          .toEqual(["08:00:00", "20:00:00"]);
+        for (const member of members) {
+          expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+          expect(member.schedule?.recurrence?.sharedCount?.count).toBe(4);
+          expect(member.schedule?.recurrence?.count).toBeUndefined();
+          expect(member.additionalInstructions?.map(instruction => instruction.text)).toEqual([warning]);
+          expect(member.syntax?.additionalInstructions?.map(instruction => instruction.text)).toEqual([warning]);
+          const graph = member.syntax?.instructionGraph;
+          expect(graph?.actions).toHaveLength(1);
+          expect(graph?.actions[0].polarity).toBe(AdvicePolarity.Negate);
+          expect(graph?.relations).toMatchObject([{ kind: AdviceRelation.If, toActionIndex: 0 }]);
+        }
+        const morning = members.find(member => member.schedule?.recurrence?.clocks?.[0] === "08:00:00")!;
+        const evening = members.find(member => member.schedule?.recurrence?.clocks?.[0] === "20:00:00")!;
+        expect(morning.predicate?.kind).toBe("not");
+        expect(evening.predicate).toBeUndefined();
+        const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+        expect(en.split(warning)).toHaveLength(3);
+        expect(en).not.toContain("Do not take the 1 tablet morning dose");
+        expect(en).toContain("1 tablet orally at 8:00 am unless");
+        expect(en).toContain("1 tablet orally at 8:00 pm");
+        expect(th.match(/ห้ามรับประทาน/gu)).toHaveLength(2);
+        expect(th).not.toContain("ห้ามรับประทาน the 1 tablet morning dose");
+        expect(th).toContain("1 เม็ด เวลา 08:00");
+        expect(th).toContain("1 เม็ด เวลา 20:00");
+        expect(th).toContain(condition === "If dizzy" ? "ถ้าเวียนศีรษะห้ามรับประทาน" :
+          "If systolic BP is below 90ห้ามรับประทาน");
+      }
+      for (const clause of parsed.meta.canonical!.clauses!) {
+        expect(canonicalToFhir(clause).additionalInstruction?.map(instruction => instruction.text))
+          .toEqual([warning]);
+      }
+      expect(parsed.input).toBe(source);
+      expect(r6.renderedInstruction).toBe(source);
+      expect({ native, rows, r6 }).toEqual(before);
+    }
+  );
+
+  it("retains independently supplied annotated advice beside a conditional graph warning", () => {
+    const warning = "If dizzy, do not take the 1-tablet morning dose";
+    const actionStart = warning.indexOf("do not");
+    const note = { url: "urn:clinic:warning-note", valueString: "Independently supplied" };
+    const graph: CanonicalInstructionGraph = {
+      sourceText: warning, sourceLocale: "en", primaryOwnership: {},
+      actions: [{ force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
+        predicate: { lemma: "take", display: "Take", semanticClass: "administration" },
+        args: [{ role: AdviceArgumentRole.Object, text: "the 1-tablet morning dose",
+          normalized: "the 1-tablet morning dose", i18n: { th: "ยาเช้า 1 เม็ด" } }],
+        span: { start: actionStart, end: warning.length }, sourceText: warning.slice(actionStart)
+      }],
+      relations: [{ kind: AdviceRelation.If, toActionIndex: 0, text: "If dizzy,",
+        span: { start: 0, end: "If dizzy,".length }, sourceExtensions: [note] }]
+    };
+    const additionalInstruction = [
+      { text: warning },
+      { id: "separate-prohibition", text: "Do not take the 1 tablet morning dose",
+        _text: { id: "supplied-label", extension: [note] }, extension: [note] }
+    ];
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } },
+      additionalInstruction,
+      extension: [note, buildInstructionGraphExtension(graph)!]
+    };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [structuredClone(row)] }] };
+    const before = structuredClone({ row, r6 });
+    for (const input of [row, r6, importCanonicalCourse(r6)]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(en).toContain("Do not take the 1 tablet morning dose.");
+      expect(en).toContain(warning);
+      const course = importCanonicalCourse(input);
+      expect(course.stages[0].administrations[0].additionalInstructions).toEqual(additionalInstruction);
+    }
+    const returned = toFhirR5Dosages(r6)[0];
+    expect(returned.additionalInstruction).toEqual(additionalInstruction);
+    expect(returned.extension).toContainEqual(note);
+    expect(parseInstructionGraphExtension(returned.extension)?.relations?.[0].sourceExtensions).toEqual([note]);
+    expect(toDosageDetails([row]).step[0].component[0].additionalInstruction).toEqual(additionalInstruction);
+    expect({ row, r6 }).toEqual(before);
+  });
+});

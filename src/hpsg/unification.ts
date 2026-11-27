@@ -698,20 +698,22 @@ function mergeScopeRequirements(
   return result.length ? result : undefined;
 }
 
-function normalizedInstruction(value: string | undefined): string {
-  return (value ?? "").toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
-}
-
 function scopedInstruction(
   condition: HpsgConditionFeature,
   target: HpsgSynsem
 ): HpsgInstructionFeature[] | undefined {
   if (!condition.safety) return target.valence.instructions;
-  const full = normalizedInstruction(condition.fullText);
-  const targetInstructions = (target.valence.instructions ?? []).filter((instruction) => {
-    const candidate = normalizedInstruction(instruction.text);
-    return !candidate || !full.includes(candidate);
-  });
+  // The selected condition owns these action daughters regardless of their
+  // surface normalization. Keep unrelated or unframed instructions separate.
+  const targetInstructions = (target.valence.instructions ?? []).filter((instruction) =>
+    !instruction.frames?.length || !instruction.frames.every(frame =>
+      condition.frames.some(selected =>
+        selected.predicate.lemma === frame.predicate.lemma &&
+        selected.polarity === frame.polarity &&
+        selected.span.start <= frame.span.start && frame.span.end <= selected.span.end
+      )
+    )
+  );
   return mergeInstructions(
     [{ text: condition.fullText, frames: condition.frames }],
     targetInstructions
