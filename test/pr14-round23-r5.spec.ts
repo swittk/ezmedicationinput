@@ -12,7 +12,7 @@ import {
   buildBodySiteSpatialRelationExtension, parseBodySiteSpatialRelationExtension,
   registerSigLocalization, getMedicationInstructionAction,
   formatCanonicalCourse, formatCanonicalAdministration, formatSigBatch, formatParseBatch, suggestSig,
-  buildInstructionGraphExtension, parseInstructionGraphExtension, AdviceForce, AdviceArgumentRole, AdviceRelation,
+  buildInstructionGraphExtension, parseInstructionGraphExtension, AdviceForce, AdvicePolarity, AdviceArgumentRole, AdviceRelation,
   type CanonicalInstructionGraph,
 } from "../src/index";
 import {
@@ -3845,17 +3845,68 @@ describe("round72 reviewed interchange source families", () => {
     expect(source).toEqual(before);
   });
 
-  it.each([false, true])("projects negated graph advice in the standard field once (represented %s)", represented => {
+  it.each([false, true])("projects a relation-free typed warning once beside independently supplied advice (supplied %s)", represented => {
     const graph = parseSig("Take 1 tablet daily; do not crush").meta.canonical.clauses[0].instructionGraph!;
     const row: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily },
       extension: [buildInstructionGraphExtension(graph)!],
       ...(represented ? { additionalInstruction: [{ id: "current-advice", text: "Do not crush.", extension: [note] }] } : {}) };
     const before = persist(row), projected = projectCanonicalCourse(importCanonicalCourse([row]));
+    const expectedGraph = parseInstructionGraphExtension(row.extension)!;
+    expect(expectedGraph.actions).toHaveLength(1);
+    expect(expectedGraph.actions[0]).toMatchObject({ polarity: AdvicePolarity.Negate, predicate: { lemma: "crush" } });
+    expect(expectedGraph.relations?.length ?? 0).toBe(0);
     for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
-      expect(output.additionalInstruction).toHaveLength(1);
-      expect(output.additionalInstruction![0].text!.toLowerCase().replace(/[.]/gu, "")).toBe("do not crush");
-      if (represented) expect(output.additionalInstruction![0]).toMatchObject({ id: "current-advice", extension: [note] });
+      // Unframed supplied text remains independent; identical wording is not a typed ownership proof.
+      expect(output.additionalInstruction).toHaveLength(represented ? 2 : 1);
+      expect(output.additionalInstruction![represented ? 1 : 0]).toEqual({ text: "Do not crush" });
+      if (represented) expect(output.additionalInstruction![0]).toEqual(row.additionalInstruction![0]);
+      expect(output.doseAndRate).toEqual(row.doseAndRate);
+      expect(output.timing).toEqual(row.timing);
+      expect(parseInstructionGraphExtension(output.extension)).toEqual(expectedGraph);
     }
+    expect(row).toEqual(before);
+  });
+
+  it.each([
+    ["Take 1 tablet daily; do not crush", "Do not crush"],
+    ["รับประทาน 1 เม็ด วันละครั้ง ห้ามบด", "ห้ามบด"],
+  ])("preserves selected and independently imported standalone warnings: %s", (source, warning) => {
+    const parsed = parseSig(source);
+    const before = persist(parsed.fhir);
+    const projected = projectCanonicalCourse(importCanonicalCourse(persist(parsed.fhir)));
+    expect(parsed.fhir[0].additionalInstruction).toHaveLength(1);
+    for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
+      expect(output.additionalInstruction).toHaveLength(2);
+      expect(output.additionalInstruction![0]).toEqual(parsed.fhir[0].additionalInstruction![0]);
+      expect(output.additionalInstruction![1]).toEqual({ text: warning });
+      expect(output.doseAndRate?.[0].doseQuantity?.value).toBe(1);
+      expect(output.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day });
+      expect(parseInstructionGraphExtension(output.extension)?.actions[0].polarity).toBe(AdvicePolarity.Negate);
+    }
+    expect(parsed.fhir).toEqual(before);
+  });
+
+  it.each([false, true])("keeps complete typed warning qualifiers beside generic annotated coding (qualified %s)", qualified => {
+    const text = qualified ? "Do not shake after adding water" : "Do not shake";
+    const graph: CanonicalInstructionGraph = { sourceText: text, sourceLocale: "en", actions: [{
+      force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "shake", semanticClass: "prepare" },
+      args: qualified ? [{ role: AdviceArgumentRole.Activity, relation: AdviceRelation.After,
+        text: "adding water", normalized: "adding water" }] : [],
+      span: { start: 0, end: text.length }, sourceText: text,
+    }] };
+    const advice = { id: "handling-warning", text: "Do not shake", extension: [note],
+      coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-EntityHandling", code: "PSA" }] };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 5, unit: "mL" } }],
+      additionalInstruction: [advice], extension: [buildInstructionGraphExtension(graph)!] };
+    const before = persist(row), projected = projectCanonicalCourse(importCanonicalCourse([row]));
+    for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
+      expect(output.additionalInstruction).toEqual(qualified ? [advice, { text }] : [advice]);
+      expect(output.doseAndRate).toEqual(row.doseAndRate);
+      expect(parseInstructionGraphExtension(output.extension)).toEqual(parseInstructionGraphExtension(row.extension));
+    }
+    const direct = canonicalToFhir(canonicalFromFhir(row));
+    expect(direct.additionalInstruction?.map(value => value.text)).toEqual(qualified ? ["Do not shake", text] : [text]);
     expect(row).toEqual(before);
   });
 
@@ -3950,16 +4001,23 @@ describe("round74 reviewed interchange directions", () => {
     expect(source).toEqual(before);
   });
 
-  it("retains a complete graph warning beside a shorter current warning", () => {
+  it("retains graph source wording separately from the current typed warning and annotated advice", () => {
     const graph = persist(parseSig("Take 1 tablet daily; do not crush").meta.canonical.clauses[0].instructionGraph!);
     graph.actions[0].sourceText = "Do not crush or chew";
+    const annotation: FhirExtension = { url: "urn:clinic:warning-source", valueString: "Keep the supplied warning" };
     const source: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }],
-      additionalInstruction: [{ id: "short-warning", text: "Do not crush" }],
+      additionalInstruction: [{ id: "short-warning", text: "Do not crush", extension: [annotation] }],
       extension: [buildInstructionGraphExtension(graph)!] };
     const before = persist(source), projected = projectCanonicalCourse(importCanonicalCourse([source]));
+    const expectedGraph = parseInstructionGraphExtension(source.extension)!;
     for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
-      expect(output.additionalInstruction).toContainEqual({ id: "short-warning", text: "Do not crush" });
-      expect(output.additionalInstruction?.map(item => item.text)).toContain("Do not crush or chew");
+      expect(output.additionalInstruction).toEqual([...source.additionalInstruction!, { text: "Do not crush" }]);
+      expect(output.additionalInstruction?.map(item => item.text)).not.toContain("Do not crush or chew");
+      expect(output.doseAndRate).toEqual(source.doseAndRate);
+      const retained = parseInstructionGraphExtension(output.extension);
+      expect(retained).toEqual(expectedGraph);
+      expect(retained?.actions[0]).toMatchObject({ polarity: AdvicePolarity.Negate,
+        predicate: { lemma: "crush" }, sourceText: "Do not crush or chew" });
     }
     expect(source).toEqual(before);
   });

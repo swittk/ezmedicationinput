@@ -14,6 +14,7 @@ import {
   findAdditionalInstructionDefinitionByCoding
 } from "./advice";
 import { realizeInstructionAction } from "./instruction-graph";
+import { getAdviceLocaleAdapter } from "./advice-locale-adapter";
 import { localeKeys } from "./localization";
 import {
   buildBodySiteAdministrationTargetCountExtension,
@@ -53,7 +54,11 @@ import {
   getDoseQuantityUnit
 } from "./maps";
 import {
+  AdviceFrame,
+  AdviceForce,
   AdvicePolarity,
+  CanonicalAdditionalInstructionExpr,
+  CanonicalInstructionGraph,
   CanonicalActivityTimingExpr,
   CanonicalCalendarEventExpr,
   CanonicalCycleDayConstraint,
@@ -2061,6 +2066,54 @@ export function serializeCanonicalSchedule(
   return dosage;
 }
 
+/** Complete typed warning equivalence; source wording is not instruction identity. */
+function sameTypedWarning(left: AdviceFrame, right: AdviceFrame): boolean {
+  return left.predicate.lemma === right.predicate.lemma &&
+    left.predicate.semanticClass === right.predicate.semanticClass &&
+    (left.polarity ?? AdvicePolarity.Affirm) === (right.polarity ?? AdvicePolarity.Affirm) &&
+    (right.polarity === AdvicePolarity.Negate || left.force === right.force) &&
+    left.modality === right.modality && left.relation === right.relation &&
+    equalStructuredValues(left.predicate.semanticComponents, right.predicate.semanticComponents) &&
+    equalStructuredValues(left.args, right.args);
+}
+
+/** Project only independent typed warnings; related actions keep their graph scope.
+ * Existing standard entries are never rewritten or removed. Generated wording
+ * comes from the selected action/arguments, not the graph's authored source.
+ */
+export function independentGraphWarningAdvice(
+  graph: CanonicalInstructionGraph | undefined,
+  typed: readonly CanonicalAdditionalInstructionExpr[] | undefined
+): FhirCodeableConcept[] | undefined {
+  if (!graph?.actions.length) return undefined;
+  let referenced: Set<number> | undefined;
+  let projected: FhirCodeableConcept[] | undefined;
+  for (let index = 0; index < graph.actions.length; index += 1) {
+    const action = graph.actions[index];
+    if (action.polarity !== AdvicePolarity.Negate && action.force !== AdviceForce.Warning) continue;
+    if (graph.relations?.length) {
+      if (!referenced) {
+        referenced = new Set();
+        for (const relation of graph.relations) {
+          referenced.add(relation.toActionIndex);
+          if (relation.fromActionIndex !== undefined) referenced.add(relation.fromActionIndex);
+        }
+      }
+      if (referenced.has(index)) continue;
+    }
+    // Coded advice already has frames from its existing import/grammar owner.
+    // Uncoded parser advice must own this exact occurrence as well as all facts.
+    if (typed?.some(instruction => instruction.frames?.some(frame =>
+      (instruction.coding?.code || frame.span.start === action.span.start && frame.span.end === action.span.end) &&
+      sameTypedWarning(frame, action)))) continue;
+    const locale = graph.sourceLocale ?? "en";
+    const text = getAdviceLocaleAdapter(locale).finalize(
+      realizeInstructionAction({ ...action, sourceText: "" }, locale));
+    if (text) (projected ??= []).push({ text });
+  }
+  return projected;
+}
+
 export function canonicalToFhir(
   clause: CanonicalSigClause,
   textOverride?: string,
@@ -2069,6 +2122,8 @@ export function canonicalToFhir(
   const dosage: FhirDosage = { ...serializeCanonicalContext(clause, options),
     ...(options?.sequence !== undefined ? { sequence: options.sequence } : {})
   };
+  const warnings = independentGraphWarningAdvice(clause.instructionGraph, clause.additionalInstructions);
+  if (warnings) dosage.additionalInstruction = [...(dosage.additionalInstruction ?? []), ...warnings];
   const schedule = clause.schedule;
   Object.assign(dosage, serializeCanonicalSchedule(schedule, options, clause.clinicalQuantity, clause.prn?.enabled));
   if (schedule?.countMax !== undefined && dosage.timing?.repeat)

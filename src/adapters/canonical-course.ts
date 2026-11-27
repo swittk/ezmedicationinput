@@ -91,6 +91,7 @@ import {
 } from "../dosage-course";
 import {
   serializeCanonicalContext,
+  independentGraphWarningAdvice,
   serializeCanonicalSchedule,
   getTimingClocks,
   getTimingEvents, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL,
@@ -1656,6 +1657,9 @@ function administrationToWire(
       return projected;
     });
   }
+  const warnings = independentGraphWarningAdvice((clause ?? a.syntax)?.instructionGraph,
+    (clause ?? a.syntax)?.additionalInstructions);
+  if (warnings) additionalInstructions = [...(additionalInstructions ?? []), ...warnings];
   assign(output, "additionalInstruction", additionalInstructions);
   // A supplied indication already expresses PRN meaning. Keep an absent
   // external boolean absent while execution consumes the typed native fact.
