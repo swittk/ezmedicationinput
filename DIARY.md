@@ -16432,3 +16432,10 @@ Fasting coding and the affirmative preview shortcut require affirmative meaning.
 Selected action labels and configured locale realization remain authoritative.
 Weekday Time arguments use the existing locale day labels and relation wording
 without changing the registered callback contract or the executable schedule.
+
+
+## 2026-11-27 — Optional schedule metadata allocation
+
+R5 and R6 import retain plain schedule object construction. Optional shared
+allowance records are assigned only when present, preserving decoded facts and
+the existing property shape without copying descriptors for ordinary inputs.
