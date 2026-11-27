@@ -13,7 +13,7 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { ParserState, Token } from "./parser-state";
-import { buildInstructionGraph, realizeInstructionAction } from "./instruction-graph";
+import { buildInstructionGraph, instructionGraphAdviceAssociation, realizeInstructionAction } from "./instruction-graph";
 import { resolveMedicationAdministrationMethod } from "./hpsg/method-lexicon";
 export {
   applyPrnReasonCoding,
@@ -309,90 +309,37 @@ function cleanupClause(state: ParserState): void {
   }
 }
 
-function normalizedSafetyText(value: string): string {
-  return value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
-}
-
 function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClause): void {
   const graph = clause.instructionGraph;
-  const primary = graph?.primaryAdministrationSpan;
-  const directives = graph?.actions.filter((frame) => {
-    if (!frame.sourceText.trim()) return false;
-    if (frame.polarity === AdvicePolarity.Negate) return true;
-    if (!frame.modality || !primary) return false;
-    return frame.span.end <= primary.start || frame.span.start >= primary.end;
-  }) ?? [];
-  if (!directives.length) return;
-  const instructions = clause.additionalInstructions ?? (clause.additionalInstructions = []);
-  for (const warning of directives) {
+  if (!graph) return;
+  const primary = graph.primaryAdministrationSpan;
+  let instructions = clause.additionalInstructions;
+  let represented: Set<number> | undefined;
+  for (let index = 0; index < graph.actions.length; index += 1) {
+    const warning = graph.actions[index];
     const sourceText = warning.sourceText.trim();
-    // The shared polarity of a coordinated verb belongs to the COMPOSED
-    // typed directive. Its raw daughter source ("drink ...") has no "not".
+    if (!sourceText || (warning.polarity !== AdvicePolarity.Negate &&
+        (!warning.modality || !primary ||
+          warning.span.end > primary.start && warning.span.start < primary.end))) continue;
+    if (!represented) {
+      represented = new Set();
+      for (const instruction of instructions ?? []) {
+        for (const actionIndex of instructionGraphAdviceAssociation(graph, instruction).representedActionIndices)
+          represented.add(actionIndex);
+      }
+    }
+    if (represented.has(index)) continue;
+    // Shared polarity belongs to the selected composed directive, so its raw
+    // daughter source cannot supply the complete negative wording.
     const sharedNegation = warning.polaritySource === "shared";
-    const composedWording = sharedNegation;
-    const text = composedWording
+    const text = sharedNegation
       ? realizeInstructionAction(warning, "en")
-      : sourceText
-        ? sourceText.charAt(0).toUpperCase() + sourceText.slice(1)
-        : sourceText;
-    const translated = composedWording ? realizeInstructionAction(warning, "th") : undefined;
-    const normalized = normalizedSafetyText(text);
-    if (!normalized) continue;
-    const representedIndex = instructions.findIndex((instruction) =>
-      instruction.frames?.some((frame) =>
-        frame.predicate.lemma === warning.predicate.lemma &&
-        frame.polarity === warning.polarity &&
-        frame.span.start < warning.span.end &&
-        warning.span.start < frame.span.end
-      )
-    );
-    if (representedIndex >= 0) {
-      // A coded combined safety instruction already semantically owns the
-      // daughter action. Keep that compound meaning instead of generating a
-      // redundant "do not chew" directive beside its coded equivalent.
-      const previous = instructions[representedIndex];
-      if (composedWording && !previous.coding?.code) {
-        instructions[representedIndex] = {
-          ...previous, text,
-          i18n: { ...(previous.i18n ?? {}), ...(translated ? { th: translated } : {}) }
-        };
-      } else if (warning.modality && !previous.coding?.code &&
-          normalizedSafetyText(sourceText).length > normalizedSafetyText(previous.text ?? "").length) {
-        // The typed modal owns the fuller source phrase. Preserve its
-        // relation and condition verbatim rather than realizing the partial
-        // daughter ("take with food" instead of "should take with food").
-        instructions[representedIndex] = {
-          ...previous,
-          text: sourceText.charAt(0).toUpperCase() + sourceText.slice(1)
-        };
-      }
-      continue;
-    }
-    const overlapIndex = instructions.findIndex((instruction) => {
-      const existing = normalizedSafetyText(instruction.text ?? "");
-      return Boolean(existing && (existing === normalized || existing.includes(normalized) || normalized.includes(existing)));
+      : sourceText.charAt(0).toUpperCase() + sourceText.slice(1);
+    if (!text.trim()) continue;
+    const translated = sharedNegation ? realizeInstructionAction(warning, "th") : undefined;
+    (instructions ??= clause.additionalInstructions = []).push({
+      text, ...(translated ? { i18n: { th: translated } } : {}), frames: [warning]
     });
-    if (overlapIndex >= 0) {
-      const existing = instructions[overlapIndex];
-      const frames = [...(existing.frames ?? [])];
-      if (!frames.some((frame) =>
-        frame.predicate.lemma === warning.predicate.lemma &&
-        frame.polarity === warning.polarity &&
-        frame.span.start < warning.span.end && warning.span.start < frame.span.end
-      )) {
-        frames.push(warning);
-      }
-      const shouldUseWarningText = !existing.coding?.code &&
-        normalizedSafetyText(existing.text ?? "").length < normalized.length;
-      instructions[overlapIndex] = {
-        ...existing,
-        ...(shouldUseWarningText || composedWording ? { text } : {}),
-        ...(composedWording && translated ? { i18n: { ...(existing.i18n ?? {}), th: translated } } : {}),
-        frames
-      };
-      continue;
-    }
-    instructions.push({ text, ...(translated ? { i18n: { th: translated } } : {}), frames: [warning] });
   }
 }
 

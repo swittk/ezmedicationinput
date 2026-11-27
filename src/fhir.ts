@@ -13,7 +13,7 @@ import {
   additionalInstructionFallbackText,
   findAdditionalInstructionDefinitionByCoding
 } from "./advice";
-import { realizeInstructionAction, instructionGraphAdministrationTechnique, sameTypedWarning, instructionHasCompleteFrameEvidence, buildInstructionCoverage } from "./instruction-graph";
+import { realizeInstructionAction, instructionGraphAdministrationTechnique, instructionGraphAdviceAssociation, sameTypedWarning, instructionHasCompleteFrameEvidence, buildInstructionCoverage } from "./instruction-graph";
 import { getAdviceLocaleAdapter } from "./advice-locale-adapter";
 import { localeKeys } from "./localization";
 import {
@@ -2047,6 +2047,7 @@ export function independentGraphWarningAdvice(
 ): FhirCodeableConcept[] | undefined {
   if (!graph?.actions.length) return undefined;
   let referenced: Set<number> | undefined;
+  let represented: Set<number> | undefined;
   let projected: FhirCodeableConcept[] | undefined;
   for (let index = 0; index < graph.actions.length; index += 1) {
     const action = graph.actions[index];
@@ -2061,11 +2062,14 @@ export function independentGraphWarningAdvice(
       }
       if (referenced.has(index)) continue;
     }
-    // Coded advice already has frames from its existing import/grammar owner.
-    // Uncoded parser advice must own this exact occurrence as well as all facts.
-    if (typed?.some(instruction => instruction.frames?.some(frame =>
-      (instruction.coding?.code || frame.span.start === action.span.start && frame.span.end === action.span.end) &&
-      sameTypedWarning(frame, action)))) continue;
+    if (!represented) {
+      represented = new Set();
+      for (const instruction of typed ?? []) {
+        for (const actionIndex of instructionGraphAdviceAssociation(graph, instruction).representedActionIndices)
+          represented.add(actionIndex);
+      }
+    }
+    if (represented.has(index)) continue;
     const locale = graph.sourceLocale ?? "en";
     const text = getAdviceLocaleAdapter(locale).finalize(
       realizeInstructionAction({ ...action, sourceText: "" }, locale));
