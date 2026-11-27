@@ -2252,7 +2252,7 @@ export function formatNativeCanonicalClause(
       schedule: { ...clause.schedule, sharedCount: undefined }
     }, style, localization, options, authoredPrimary, deferredDirections);
     return sharedCountAlreadyDisplayed ? rendered
-      : words.sharedAdministration(rendered, count === undefined ? undefined : words.administrations(count));
+      : native.timing.sharedAdministration(rendered, count === undefined ? undefined : words.administrations(count));
   }
   const cycle = clause.schedule?.cycleDayConstraint;
   if (cycle) {

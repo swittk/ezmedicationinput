@@ -75,7 +75,6 @@ export const THAI_COURSE: CourseLanguage = {
   expression: (kind, detail) => `unevaluated ${kind} expression${detail ? ": " + detail : ""}`,
   upTo: (value) => "ไม่เกิน " + value,
   administrations: (frequency, period) => `ให้ยา ${frequency} ครั้ง${period ? "ต่อช่วง " + period : ""}`,
-  sharedAdministration: (body, total) => `ตารางให้ยาที่ใช้ข้อจำกัดร่วมกัน${total ? " และ" + total + "รวมทั้งชุด" : ""}: ${body}`,
   dosingPeriod: (period) => `ช่วงเวลาการให้ยา ${period}`,
   periodContext: (period) => ` (รอบละ ${period})`,
   startsWithinPeriod: (offset, context) => `เริ่มให้ยาหลังเริ่มรอบ ${offset}${context}`,
@@ -117,6 +116,7 @@ export const THAI_COURSE: CourseLanguage = {
 
 /** Native clause timing wording; shared formatting supplies resolved clock shifts. */
 export const THAI_CLAUSE_TIMING = {
+  sharedAdministration: (body: string, total?: string) => `ตารางให้ยาที่ใช้ข้อจำกัดร่วมกัน${total ? " และ" + total + "รวมทั้งชุด" : ""}: ${body}`,
   clockWindow: (start: string, end: string, inclusive: boolean) =>
     `เฉพาะช่วงเวลา ${start}–${end} ทุกวัน${inclusive ? "" : " (ไม่รวมเวลาสิ้นสุด)"}`,
   offset: (minutes: number) => (minutes < 0 ? "เร็วกว่าเวลาเดิมแต่ละครั้ง " : "ช้ากว่าเวลาเดิมแต่ละครั้ง ") + Math.abs(minutes) + " นาที",

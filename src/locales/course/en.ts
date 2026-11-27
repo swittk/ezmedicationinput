@@ -75,7 +75,6 @@ export const ENGLISH_COURSE: CourseLanguage = {
   expression: (kind, detail) => `unevaluated ${kind} expression${detail ? ": " + detail : ""}`,
   upTo: (value) => "up to " + value,
   administrations: (frequency, period) => `${frequency} ${frequency === "1" ? "administration" : "administrations"}${period ? " per " + period : ""}`,
-  sharedAdministration: (body, total) => `Schedule sharing its limits${total ? " and a total of " + total : ""}: ${body}`,
   dosingPeriod: (period) => `Dosing period: ${period}`,
   periodContext: (period) => ` (each period lasts ${period})`,
   startsWithinPeriod: (offset, context) => `Dosing starts ${offset} after the period begins${context}`,
@@ -111,6 +110,7 @@ export const ENGLISH_COURSE: CourseLanguage = {
 
 /** Native clause timing wording; shared formatting supplies resolved clock shifts. */
 export const ENGLISH_CLAUSE_TIMING = {
+  sharedAdministration: (body: string, total?: string) => `Schedule sharing its limits${total ? " and a total of " + total : ""}: ${body}`,
   clockWindow: (start: string, end: string, inclusive: boolean) =>
     `only between ${start} and ${end} each day${inclusive ? "" : " (end excluded)"}`,
   offset: (minutes: number) => Math.abs(minutes) + (minutes < 0 ? " minutes earlier each time" : " minutes later each time"),

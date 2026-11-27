@@ -1,5 +1,5 @@
 import { cycleDayConstraintExtension, TIMING_CLOCK_WINDOW_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src/fhir";
-import { fromFhir, importCanonicalCourse, toFhirR5Dosages, toDosageDetails } from "../src/index";
+import { fromFhir, importCanonicalCourse, toFhirR5Dosages, toDosageDetails, type CourseLanguage } from "../src/index";
 import { describe, expect, it } from "vitest";
 import { resolveSigLocalization, registerSigLocalization } from "../src/i18n";
 import { formatCanonicalClause } from "../src/format";
@@ -923,5 +923,37 @@ describe("native timing realization uses selected language and event owners", ()
     expect(converted[0].timing?.code).toEqual(timing.code);
     expect(raw.step[0].component[0].timing?.code).toEqual(timing.code);
     expect(JSON.stringify(raw)).toBe(before);
+  });
+});
+
+
+describe("published course providers with shared schedule limits", () => {
+  it.each(["en", "th"])("inherits native %s shared wording with a plain customized count provider", inherit => {
+    // An existing provider implements the published course facet, without a
+    // newly required method for an internally introduced shared-schedule view.
+    const { sharedAdministration: _unpublished, ...published } = resolveSigLocalization(inherit)!.course! as
+      CourseLanguage & { sharedAdministration?: unknown };
+    const course: CourseLanguage = { ...published, administrations: count => count + " clinic administrations" };
+    const i18n = { locale: "x-clinic-" + inherit, inherit, course };
+    const source = "Take 1 tablet at 08:00 and 20:00 for 4 doses. On Mondays, do not take the 1-tablet morning dose.";
+    const parsed = parseSig(source), original = JSON.stringify(parsed);
+    const localized = parseSig(source, { i18n });
+    expect(localized.longText.match(/4 clinic administrations/gu)).toHaveLength(1);
+    expect(localized.fhirNext.renderedInstruction).toBe(source);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const text = formatSig(input, "long", { i18n, realizationMode: "normalized" });
+      expect(text.match(/4 clinic administrations/gu)).toHaveLength(1);
+      expect(text).toContain(inherit === "en" ? "Schedule sharing its limits" : "ตารางให้ยาที่ใช้ข้อจำกัดร่วมกัน");
+      expect(text).toMatch(inherit === "en" ? /8:00 am/u : /08:00/u);
+      expect(text).toMatch(inherit === "en" ? /8:00 pm/u : /20:00/u);
+      expect(text).toContain(inherit === "en" ? "except Monday" : "ยกเว้นวันจันทร์");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const ordinary = parseSig("Take 1 tablet at 08:00 daily.").meta.canonical.course!;
+    expect(formatSig(ordinary, "long", { i18n })).toBe(formatSig(ordinary, "long", { locale: inherit }));
+    expect(JSON.stringify(parsed)).toBe(original);
+    expect(course.administrations("4")).toBe("4 clinic administrations");
+    expect("sharedAdministration" in course).toBe(false);
   });
 });
