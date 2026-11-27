@@ -15,6 +15,7 @@ import {
   TextRange
 } from "./types";
 import { normalizeLoosePhraseKey } from "./utils/text";
+import { equalStructuredValues } from "./stable-structure";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { resolveMedicationInstructionAction } from "./instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "./instruction-concept-terminology";
@@ -31,6 +32,116 @@ import {
 } from "./relation-terminology";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
+
+/** Directed clinical Coding identity; presentation and Element annotations stay on their owner. */
+export function preservesAdviceCoding(selected: FhirCoding | undefined, actual: FhirCoding | undefined): boolean {
+  if (!selected) return true;
+  if (!actual) return !selected.code && !selected.system && !selected.version;
+  const system = selected.system || (selected.code ? SNOMED_SYSTEM : undefined);
+  return (!selected.code || selected.code === actual.code) &&
+    (!system || system === (actual.system || SNOMED_SYSTEM)) &&
+    (!selected.version || selected.version === actual.version);
+}
+
+export function preservesAdviceCodings(
+  selected: readonly FhirCoding[] | undefined,
+  actual: readonly FhirCoding[] | undefined
+): boolean {
+  if (!selected?.length) return true;
+  return Boolean(actual && selected.length <= actual.length &&
+    selected.every((coding, index) => preservesAdviceCoding(coding, actual[index])));
+}
+
+export function preservesAdviceComponents(
+  selected: readonly { role: string; text?: string; coding?: FhirCoding }[] | undefined,
+  actual: readonly { role: string; text?: string; coding?: FhirCoding }[] | undefined
+): boolean {
+  if (!selected?.length) return true;
+  return Boolean(actual && selected.length <= actual.length && selected.every((component, index) =>
+    component.role === actual[index].role &&
+    (component.text === undefined || component.text === actual[index].text) &&
+    preservesAdviceCoding(component.coding, actual[index].coding)));
+}
+
+function preservesAdviceTranslations(
+  selected: Record<string, string> | undefined,
+  actual: Record<string, string> | undefined
+): boolean {
+  if (selected) for (const locale in selected) {
+    if (selected[locale] !== actual?.[locale]) return false;
+  }
+  return true;
+}
+
+/** Text, source spans and retained Element annotations are not typed argument facts. */
+export function hasAdviceArgumentFacts(argument: AdviceArgument): boolean {
+  return Boolean(argument.conceptId !== undefined || argument.relation !== undefined ||
+    argument.administrationTargetCount !== undefined || argument.quantity || argument.coding ||
+    argument.codings?.length || argument.components?.length || argument.i18n || argument.sourceRelationCoding);
+}
+
+export function preservesAdviceArgumentFacts(selected: AdviceArgument, actual: AdviceArgument): boolean {
+  if (selected.role !== actual.role ||
+      selected.relation !== undefined && selected.relation !== actual.relation ||
+      selected.conceptId !== undefined && selected.conceptId !== actual.conceptId ||
+      selected.administrationTargetCount !== undefined &&
+        selected.administrationTargetCount !== actual.administrationTargetCount ||
+      !preservesAdviceCoding(selected.coding, actual.coding) ||
+      !preservesAdviceCodings(selected.codings, actual.codings) ||
+      !preservesAdviceCoding(selected.sourceRelationCoding, actual.sourceRelationCoding) ||
+      !preservesAdviceComponents(selected.components, actual.components) ||
+      !preservesAdviceTranslations(selected.i18n, actual.i18n)) return false;
+  const quantity = selected.quantity;
+  if (!quantity) return true;
+  const candidate = actual.quantity;
+  return Boolean(candidate &&
+    (quantity.value === undefined || quantity.value === candidate.value) &&
+    (quantity.unit === undefined || quantity.unit === candidate.unit) &&
+    (quantity.comparator === undefined || quantity.comparator === candidate.comparator) &&
+    (quantity.range?.low === undefined || quantity.range.low === candidate.range?.low) &&
+    (quantity.range?.high === undefined || quantity.range.high === candidate.range?.high));
+}
+
+/**
+ * Preserve selected typed facts while a caller licenses the same occurrence/head.
+ * Source/value correspondence and provisional opaque valence remain caller-owned.
+ */
+export function preservesAdviceFrameFacts(selected: AdviceFrame, actual: AdviceFrame): boolean {
+  const predicate = selected.predicate;
+  const candidate = actual.predicate;
+  if ((selected.polarity ?? AdvicePolarity.Affirm) !== (actual.polarity ?? AdvicePolarity.Affirm) ||
+      selected.force !== actual.force &&
+        !(selected.force === AdviceForce.Instruction && actual.force === AdviceForce.Sequence) ||
+      selected.modality !== undefined && selected.modality !== actual.modality ||
+      selected.relation !== undefined && selected.relation !== actual.relation ||
+      selected.polaritySource !== undefined && selected.polaritySource !== actual.polaritySource ||
+      predicate.semanticClass !== undefined && predicate.semanticClass !== candidate.semanticClass ||
+      predicate.display !== undefined && predicate.display !== candidate.display ||
+      predicate.realizer !== undefined && predicate.realizer !== candidate.realizer ||
+      predicate.realizerConfig !== undefined && !equalStructuredValues(predicate.realizerConfig, candidate.realizerConfig) ||
+      !preservesAdviceTranslations(predicate.i18n, candidate.i18n) ||
+      !preservesAdviceCodings(predicate.codings, candidate.codings) ||
+      !preservesAdviceComponents(predicate.semanticComponents, candidate.semanticComponents) ||
+      !preservesAdviceCoding(selected.coding, actual.coding) ||
+      !preservesAdviceCoding(selected.sourceRelationCoding, actual.sourceRelationCoding)) return false;
+  for (let index = 0; index < selected.args.length; index += 1) {
+    const argument = selected.args[index];
+    if (!hasAdviceArgumentFacts(argument)) continue;
+    let ordinal = 0;
+    for (let prior = 0; prior < index; prior += 1) {
+      if (selected.args[prior].role === argument.role) ordinal += 1;
+    }
+    let matched = false;
+    for (const value of actual.args) {
+      if (value.role !== argument.role) continue;
+      if (ordinal-- !== 0) continue;
+      matched = preservesAdviceArgumentFacts(argument, value);
+      break;
+    }
+    if (!matched) return false;
+  }
+  return true;
+}
 
 interface AdviceLexemeEntry {
   surface: string;
@@ -734,7 +845,7 @@ function framesShareMaterialReferent(
 
 /** Validate shared-reference constraints declared on the existing matcher. */
 function matchingFramesShareReferent(
-  frames: AdviceFrame[],
+  frames: readonly AdviceFrame[],
   members: readonly AdviceMatcher[]
 ): boolean {
   const frameMatchers = members.filter(
@@ -762,7 +873,7 @@ function matchingFramesShareReferent(
 }
 
 function matchesAdviceMatcher(
-  frames: AdviceFrame[],
+  frames: readonly AdviceFrame[],
   normalizedText: string,
   matcher: AdviceMatcher
 ): boolean {
@@ -829,7 +940,7 @@ export function matchComposedAdviceCodings(
   if (!frames.length) return [];
   return ADDITIONAL_INSTRUCTION_RULES
     .filter((rule) => adviceMatcherRequiresComposedFrames(rule.matcher) &&
-      matchesAdviceMatcher([...frames], "", rule.matcher))
+      matchesAdviceMatcher(frames, "", rule.matcher))
     .map((rule) => ({
       ...rule.definition,
       coding: rule.definition.coding ? { ...rule.definition.coding } : undefined,
@@ -880,11 +991,11 @@ function supportingFramesForMatcher(
   if ("frame" in matcher) return frames.filter((frame) => frameMatches(frame, matcher.frame));
   if ("argConcept" in matcher) return frames.filter((frame) => frameHasArgConcept(frame, matcher.argConcept));
   if ("anyOf" in matcher) {
-    const branch = matcher.anyOf.find((item) => matchesAdviceMatcher([...frames], "", item));
+    const branch = matcher.anyOf.find((item) => matchesAdviceMatcher(frames, "", item));
     return branch ? supportingFramesForMatcher(frames, branch) : [];
   }
   if ("allOf" in matcher) {
-    if (!matchesAdviceMatcher([...frames], "", matcher)) return [];
+    if (!matchesAdviceMatcher(frames, "", matcher)) return [];
     const supporting: AdviceFrame[] = [];
     for (const item of matcher.allOf) {
       supporting.push(...supportingFramesForMatcher(frames, item));
@@ -906,7 +1017,7 @@ export function composedCodedAdviceActions(
 ): AdviceFrame[] {
   if (!coding?.code) return [];
   const rule = findRuleByCoding(coding.system ?? SNOMED_SYSTEM, coding.code);
-  if (!rule || !matchesAdviceMatcher([...frames], "", rule.matcher)) return [];
+  if (!rule || !matchesAdviceMatcher(frames, "", rule.matcher)) return [];
   const supporting = supportingFramesForMatcher(frames, rule.matcher);
   return supporting.filter((frame, index) => supporting.indexOf(frame) === index);
 }

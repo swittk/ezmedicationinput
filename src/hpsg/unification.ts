@@ -1,3 +1,6 @@
+import { hasAdviceArgumentFacts, preservesAdviceFrameFacts } from "../advice";
+import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
+import { normalizeLoosePhraseKey } from "../utils/text";
 import { formBodySiteRestriction } from "../body-site-grammar";
 import { EVENT_TIMING_TOKENS } from "../maps";
 import { composeLocalizedRecords } from "../localization";
@@ -24,7 +27,7 @@ import {
 } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
 import { selectHpsgConstruction } from "./constructions";
-import { BodySiteSpatialRelation, EventTiming, FhirCoding, FhirPeriodUnit, PrnReasonLookupRequest, RouteCode } from "../types";
+import { AdviceArgumentRole, AdviceFrame, BodySiteSpatialRelation, EventTiming, FhirCoding, FhirPeriodUnit, PrnReasonLookupRequest, RouteCode } from "../types";
 
 export interface HpsgUnificationContext {
   normalizeSiteText(text: string): string;
@@ -359,12 +362,64 @@ export function sameInstructionSourceOccurrence(
   );
 }
 
+function instructionFrameRefines(rich: AdviceFrame, weak: AdviceFrame): boolean {
+  if (rich.predicate.lemma !== weak.predicate.lemma ||
+      rich.predicate.semanticClass !== weak.predicate.semanticClass ||
+      rich.force !== weak.force || !preservesAdviceFrameFacts(weak, rich)) return false;
+  for (let index = 0; index < weak.args.length; index += 1) {
+    const argument = weak.args[index];
+    let ordinal = 0;
+    for (let prior = 0; prior < index; prior += 1) {
+      if (weak.args[prior].role === argument.role) ordinal += 1;
+    }
+    let candidate;
+    for (const actual of rich.args) {
+      if (actual.role === argument.role && ordinal-- === 0) { candidate = actual; break; }
+    }
+    const value = normalizeLoosePhraseKey(argument.normalized ?? argument.text);
+    if (candidate) {
+      if (value !== normalizeLoosePhraseKey(candidate.normalized ?? candidate.text)) return false;
+      continue;
+    }
+    // The selected indexed action may resolve a provisional Object into its
+    // typed valence, but only for that same source-local nominal value.
+    const predicate = weak.predicate;
+    if (hasAdviceArgumentFacts(argument) || argument.role !== AdviceArgumentRole.Object ||
+        predicate.display || predicate.realizer ||
+        predicate.realizerConfig || predicate.codings?.length || predicate.i18n ||
+        predicate.semanticComponents?.length || !rich.predicate.display ||
+        !resolveMedicationInstructionAction(rich.predicate.lemma)?.acceptsAmount ||
+        !rich.args.some(actual => actual.role === AdviceArgumentRole.Amount && actual.quantity && actual.span &&
+          actual.span.start >= weak.span.start && actual.span.end <= weak.span.end &&
+          value === normalizeLoosePhraseKey(actual.text))) return false;
+  }
+  return true;
+}
+
+function instructionRefines(rich: HpsgInstructionFeature, weak: HpsgInstructionFeature): boolean {
+  if (rich.coding?.code || weak.coding?.code || !rich.frames?.length || !weak.frames?.length) return false;
+  for (const frame of weak.frames) {
+    let overlapping: AdviceFrame | undefined;
+    for (const candidate of rich.frames) {
+      if (candidate.span.end <= frame.span.start || frame.span.end <= candidate.span.start) continue;
+      if (overlapping) return false;
+      overlapping = candidate;
+    }
+    if (!overlapping || !instructionFrameRefines(overlapping, frame)) return false;
+  }
+  return true;
+}
+
 function mergeInstructions(
   left: HpsgInstructionFeature[] | undefined,
   right: HpsgInstructionFeature[] | undefined
 ): HpsgInstructionFeature[] | undefined {
   const result: HpsgInstructionFeature[] = [];
   for (const instruction of [...(left ?? []), ...(right ?? [])]) {
+    if (result.some(candidate => instructionRefines(candidate, instruction))) continue;
+    for (let index = result.length - 1; index >= 0; index -= 1) {
+      if (instructionRefines(instruction, result[index])) result.splice(index, 1);
+    }
     if (
       !result.some((candidate) =>
         candidate.text === instruction.text &&

@@ -1,6 +1,6 @@
 import { CALENDAR_WEEKDAY_LEXEMES } from "../src/hpsg/lexical-classes";
 import { siteLexicalRule } from "../src/hpsg/rules/site-rules";
-import { EventTiming, FhirDayOfWeek, RouteCode } from "../src/types";
+import { AdviceArgumentRole, AdviceForce, AdviceModality, AdvicePolarity, AdviceRelation, AdviceFrame, EventTiming, FhirDayOfWeek, RouteCode } from "../src/types";
 import { parseSigSegments as parseHpsgSegments } from "../src/hpsg/segmenter";
 import { describe, expect, it } from 'vitest';
 import {
@@ -21,7 +21,7 @@ import {
 import { applyCoordinatedCadenceScopes } from '../src/regimen/coordination-scope';
 import { createBoundaryPlan, takeBoundaryParsedState } from '../src/regimen/planner';
 import { unifySynsem } from "../src/hpsg/unification";
-import type { BoundaryPlan, HpsgClinicalAdjunctFeature } from '../src/hpsg/signature';
+import type { BoundaryPlan, HpsgClinicalAdjunctFeature, HpsgInstructionFeature } from '../src/hpsg/signature';
 import { parseMedicationGuard, selectHpsgCoordinationScopeConstruction } from '../src/hpsg/constructions';
 import type { CoordinationScopeFacts } from '../src/hpsg/signature';
 import { parseSig, parseSigAsync } from './helpers/r5-parser';
@@ -4275,4 +4275,85 @@ describe("clinical guard complement ownership", () => {
   });
 
 
+});
+
+describe("selected instruction refinement at HPSG unification", () => {
+  const standing = "Take 5 mL at 08:00 and 10 mL at 20:00 daily for 2 days. ";
+  const merge = (left: HpsgInstructionFeature, right: HpsgInstructionFeature) => unifySynsem(
+    { head: {}, valence: { instructions: [left] }, cont: {} },
+    { head: {}, valence: { instructions: [right] }, cont: {} },
+    { normalizeSiteText: text => text, isCompatibleRouteRefinement: (a, b) => a === b }
+  )?.valence.instructions;
+
+  it.each([
+    "If dizzy, do not take 5 mL, and do not take 10 mL.",
+    "If dizzy, do not take 5 mL at 20:00, and do not take 10 mL at 08:00."
+  ])("selects the complete quantified withholding instruction before graph construction: %s", tail => {
+    const source = standing + tail;
+    const instructions = parseClauseSign(source)?.synsem.valence.instructions;
+    expect(instructions).toHaveLength(1);
+    expect(instructions![0].text).toBe(tail.slice(0, -1));
+    expect(instructions![0].frames).toHaveLength(2);
+    expect(instructions![0].frames!.map(frame => frame.args.find(arg => arg.quantity)?.quantity))
+      .toEqual([{ value: 5, unit: "mL" }, { value: 10, unit: "mL" }]);
+    expect(instructions![0].frames!.map(frame => source.slice(frame.span.start, frame.span.end)))
+      .toEqual(tail.includes("20:00")
+        ? ["do not take 5 mL at 20:00", "do not take 10 mL at 08:00"]
+        : ["do not take 5 mL", "do not take 10 mL"]);
+  });
+
+  it("keeps the richer selected valence in either merge order without merging distinct or coded occurrences", () => {
+    const source = standing + "If dizzy, do not take 5 mL at 20:00, and do not take 10 mL at 08:00.";
+    const rich = parseClauseSign(source)!.synsem.valence.instructions![0];
+    const action = rich.frames![1];
+    const amount = action.args.find(arg => arg.role === AdviceArgumentRole.Amount)!;
+    const weak: HpsgInstructionFeature = { text: "Do not take 10 ml", frames: [{
+      force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "take", semanticClass: "administration" },
+      args: [{ role: AdviceArgumentRole.Object, text: "10 ml", normalized: "10 ml" }],
+      span: { start: action.span.start - 4, end: amount.span!.end },
+      sourceText: "and do not take 10 mL"
+    }] };
+    const before = JSON.stringify([rich, weak]);
+    expect(merge(rich, weak)).toEqual([rich]);
+    expect(merge(weak, rich)).toEqual([rich]);
+    const separate = { ...weak, frames: weak.frames!.map(frame => ({ ...frame,
+      span: { start: source.length + 1, end: source.length + 22 } })) };
+    expect(merge(rich, separate)).toEqual([rich, separate]);
+    const coded = { ...weak, coding: { system: "http://snomed.info/sct", code: "418693002" } };
+    expect(merge(rich, coded)).toEqual([rich, coded]);
+    expect(merge(coded, rich)).toEqual([coded, rich]);
+    expect(JSON.stringify([rich, weak])).toBe(before);
+  });
+
+  it("retains explicit argument, qualifier and same-role order differences", () => {
+    const frame: AdviceFrame = {
+      force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "take", semanticClass: "administration" },
+      args: [{ role: AdviceArgumentRole.Object, text: "water", normalized: "water" }],
+      span: { start: 0, end: 20 }, sourceText: "Do not take water"
+    };
+    const left = { text: "Do not take water", frames: [frame] };
+    const nominal = { text: "Do not take milk", frames: [{ ...frame,
+      args: [{ role: AdviceArgumentRole.Object, text: "milk", normalized: "milk" }] }] };
+    expect(merge(left, nominal)).toEqual([left, nominal]);
+    const typed = { ...frame, args: [
+      { role: AdviceArgumentRole.Amount, text: "5 mL", quantity: { value: 5, unit: "mL" } },
+      { role: AdviceArgumentRole.Amount, text: "10 mL", quantity: { value: 10, unit: "mL" } }
+    ] };
+    const selected = { text: "selected amounts", frames: [typed] };
+    const reordered = { text: "reordered amounts", frames: [{ ...typed, args: [...typed.args].reverse() }] };
+    expect(merge(selected, reordered)).toEqual([selected, reordered]);
+    const morning = { text: "Do not take at 08:00", frames: [{ ...frame, args: [{
+      role: AdviceArgumentRole.Time, relation: AdviceRelation.On, text: "08:00", normalized: "08:00:00"
+    }] }] };
+    const evening = { text: "Do not take at 20:00", frames: [{ ...frame, args: [{
+      role: AdviceArgumentRole.Time, relation: AdviceRelation.On, text: "20:00", normalized: "20:00:00"
+    }] }] };
+    expect(merge(morning, evening)).toEqual([morning, evening]);
+    expect(merge(evening, morning)).toEqual([evening, morning]);
+    const modal = { ...left, text: "May not take water", frames: [{ ...frame, modality: AdviceModality.May }] };
+    const different = { ...left, text: "Should not take water", frames: [{ ...frame, modality: AdviceModality.Should }] };
+    expect(merge(modal, different)).toEqual([modal, different]);
+  });
 });
