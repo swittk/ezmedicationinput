@@ -13,9 +13,10 @@ import { ParserState } from "./parser-state";
 import { appendClinicalConditionText, resolveNativeClauseRendering, type SigLocalization, type SigLongContext, type SigShortContext, type SigDoseScope } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
-import { composedCodedWarningActionSources } from "./advice";
+import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding } from "./advice";
+import { getPrimitiveTranslation } from "./fhir-translations";
 import { EN_POSITIVE_MODALITY_PREFIX } from "./instruction-action-locale-adapter";
-import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "./instruction-action-terminology";
+import { getMedicationInstructionAction, medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "./instruction-action-terminology";
 import { baseLanguageTag, quantityComparatorText } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
 import {
@@ -295,7 +296,23 @@ function resolveRouteGrammar(clause: CanonicalSigClause): RouteGrammar {
   return (textRoute ? ROUTE_GRAMMAR[textRoute] : undefined) ?? DEFAULT_ROUTE_GRAMMAR;
 }
 
-function resolveMethodVerb(clause: CanonicalSigClause, grammar: RouteGrammar): string {
+/** A method can name a registered manner rather than an action head. */
+export function registeredMethodManner(
+  method: CanonicalSigClause["method"],
+  resolvedMethod?: SigLongContext["resolvedMethod"]
+) {
+  if (resolvedMethod && resolvedMethod !== getMedicationInstructionAction(resolvedMethod.code)) return undefined;
+  const coding = method?.coding;
+  if (!coding?.code || getMedicationInstructionConcept(coding.code, coding.system)?.role !== AdviceArgumentRole.Manner)
+    return undefined;
+  return findAdditionalInstructionDefinitionByCoding(coding.system ?? "http://snomed.info/sct", coding.code);
+}
+
+function resolveMethodVerb(clause: CanonicalSigClause, grammar: RouteGrammar,
+  resolvedMethod?: SigLongContext["resolvedMethod"]): string {
+  const manner = registeredMethodManner(clause.method, resolvedMethod);
+  if (manner?.text) return getPrimitiveTranslation(clause.method?._text, "en") ??
+    clause.method?.coding?.i18n?.en ?? getPrimitiveTranslation(clause.method?.coding?._display, "en") ?? manner.text;
   const methodText = clause.method?.text?.trim();
   if (methodText) {
     return methodText;
@@ -1805,7 +1822,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const hasCalendarQualifiers = Boolean(clause.clinicalAdjuncts?.excludedDates?.length || clause.clinicalAdjuncts?.excludedWeekdays?.length);
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
-  const baseVerb = resolveMethodVerb(clause, grammar);
+  const baseVerb = resolveMethodVerb(clause, grammar, resolvedMethod);
   const verb = applyEnglishAdministrationModality(baseVerb, clause);
   const preparationSuppliesDose = instructionGraphPreparationOwnsDose(clause, options);
   const explicitDosePart = preparationSuppliesDose ? undefined : formatDoseLong(clause.dose);

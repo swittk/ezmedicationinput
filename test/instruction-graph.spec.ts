@@ -6365,3 +6365,26 @@ describe("current graph realization families", () => {
       args: [{ role: AdviceArgumentRole.Object, text: "grapefruit", normalized: "grapefruit", conceptId: "grapefruit" }] }])).toBe(false);
   });
 });
+
+describe("negative material accompaniment realization", () => {
+  it("keeps the dressing as a material when negating the complete cover body", () => {
+    const source = "Apply a thin layer to affected area twice daily; do not cover with an occlusive dressing.";
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    const frame = clause.instructionGraph!.actions.find(action => action.predicate.lemma === "cover")!;
+    expect(frame.polarity).toBe(AdvicePolarity.Negate);
+    expect(frame.relation).toBe(AdviceRelation.With);
+    expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Material, conceptId: "occlusive_dressing" }));
+    expect(realizeInstructionAction(frame, "en")).toBe("Do not cover with an occlusive dressing");
+    expect(realizeInstructionAction(frame, "th")).toBe("ห้ามปิดคลุมด้วยแผ่นปิดแบบทึบ");
+    const before = structuredClone({ fhir: parsed.fhir, r6: parsed.fhirNext, graph: clause.instructionGraph });
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain("ห้ามปิดคลุมด้วยแผ่นปิดแบบทึบ");
+      expect(thai).toContain("บางๆ");
+      expect(thai).toContain("วันละ 2 ครั้ง");
+    }
+    expect(clause.instructionGraph!.sourceText).toBe(source);
+    expect({ fhir: parsed.fhir, r6: parsed.fhirNext, graph: clause.instructionGraph }).toEqual(before);
+  });
+});

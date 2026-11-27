@@ -8864,3 +8864,52 @@ describe("complete relation-led advice ownership", () => {
     expect(JSON.stringify([row, r6])).toBe(before);
   });
 });
+
+describe("current topical method and independent dressing directions", () => {
+  it("retains a registered thin application method in fresh R5 and R6 Thai directions", () => {
+    const source = "Apply a thin layer to affected area twice daily; do not cover with an occlusive dressing.";
+    const note = { url: "https://example.org/topical-plan", valueString: "retain current plan" };
+    const method = { coding: [{ system: "http://snomed.info/sct", code: "420162004", display: "To be spread thinly" }] };
+    const row: FhirDosage = {
+      id: "thin-method", text: source, method,
+      route: { coding: [{ system: "http://snomed.info/sct", code: "6064005" }] },
+      site: { text: "affected area" },
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      additionalInstruction: [{ text: "Do not cover with an occlusive dressing." }], extension: [note]
+    };
+    const native: FhirR6DosageInstruction = { step: [{ component: [{ ...structuredClone(row), site: { concept: { text: "affected area" } } }] }] };
+    const generic: FhirDosage = { ...structuredClone(row), method: { ...structuredClone(method), text: "Apply" } };
+    const before = structuredClone({ row, native, generic });
+    for (const { input, r6 } of [{ input: row, r6: toDosageDetails([row]) }, { input: native, r6: native },
+      { input: generic, r6: toDosageDetails([generic]) }]) {
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(english.split("; original directions:")[0]).toContain("Apply thinly");
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      const current = thai.split("; ข้อความเดิม:")[0];
+      expect(current).toContain("บางๆ");
+      expect(current).toContain("วันละ 2 ครั้ง");
+      expect(current).toContain("บริเวณที่มีอาการ");
+      expect(thai).toContain(source);
+      const reopened = toFhirR5Dosages(r6)[0];
+      expect(reopened.method).toMatchObject(method);
+      expect(reopened.timing?.repeat).toMatchObject(row.timing!.repeat!);
+      expect(reopened.extension).toContainEqual(note);
+      expect(reopened.doseAndRate ?? []).toHaveLength(0);
+    }
+    const translated: FhirDosage = { ...structuredClone(row), method: { ...structuredClone(method), text: "Apply thinly",
+      _text: { extension: [{ url: "http://hl7.org/fhir/StructureDefinition/translation", extension: [
+        { url: "lang", valueCode: "th" }, { url: "content", valueString: "ทาบางเฉพาะบริเวณ" }
+      ] }] }
+    } };
+    const overridden = formatSig(translated, "long", { locale: "th", realizationMode: "normalized" }).split("; ข้อความเดิม:")[0];
+    expect(overridden).toContain("ทาบางเฉพาะบริเวณ");
+    expect(overridden).not.toContain("บางๆ");
+    const custom: FormatOptions = { realizationMode: "normalized", instructionActionMap: { apply: {
+      code: "clinic-apply", semanticClass: "administration", display: "Apply by clinic plan", i18n: { th: "ทาตามแผนคลินิก" },
+      administrationMethod: { system: "http://snomed.info/sct", code: "420162004", display: "To be spread thinly" }
+    } } };
+    expect(formatSig(generic, "long", { ...custom, locale: "en" }).split("; original directions:")[0]).toContain("Apply by clinic plan");
+    expect(formatSig(generic, "long", { ...custom, locale: "th" }).split("; ข้อความเดิม:")[0]).toContain("ทาตามแผนคลินิก");
+    expect({ row, native, generic }).toEqual(before);
+  });
+});

@@ -25,7 +25,7 @@ import {
   isEmptyStomachInstruction,
   stripTrailingZero,
   routeCodeFromDisplayText,
-  frequencyDisplay
+  frequencyDisplay, registeredMethodManner
 } from "./format";
 import { findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { TH_POSITIVE_MODALITY_PREFIX } from "./instruction-action-locale-adapter";
@@ -874,6 +874,13 @@ function resolveThaiMethodVerb(
     return translatedText;
   }
 
+  const translatedDisplay =
+    clause.method?.coding?.i18n?.th ??
+    getPrimitiveTranslation(clause.method?.coding?._display, "th");
+  const manner = registeredMethodManner(clause.method, resolvedMethod);
+  const localizedManner = manner && localizedValue(manner.i18n, "th");
+  if (localizedManner) return translatedDisplay ?? localizedManner;
+
   if (resolvedMethod) return localizedValue(resolvedMethod.i18n, "th") ?? resolvedMethod.display;
   const methodText = clause.method?.text?.trim();
   if (methodText) {
@@ -887,9 +894,6 @@ function resolveThaiMethodVerb(
     }
   }
 
-  const translatedDisplay =
-    clause.method?.coding?.i18n?.th ??
-    getPrimitiveTranslation(clause.method?.coding?._display, "th");
   if (translatedDisplay) {
     return translatedDisplay;
   }

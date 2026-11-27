@@ -4226,7 +4226,7 @@ function realizeAction(
     : undefined;
   const realized = negated ? adapter.renderNegated(input, genericText ??
       (realizerKey === "mix-substance" || realizerKey === "amount-duration" || realizerKey === "site-relation" ||
-        realizerKey === "relation-duration" && firstArguments[AdviceArgumentRole.Amount]?.quantity
+        realizerKey === "object-amount-material" || realizerKey === "relation-duration" && firstArguments[AdviceArgumentRole.Amount]?.quantity
           ? adapter.render(realizerKey, input) : undefined))
     : genericText ?? adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
