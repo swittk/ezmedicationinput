@@ -317,13 +317,9 @@ function applyClinicalAdjunct(
     hasRecurringSchedule(clause.schedule)
   );
   if (hasAdministration && adjunct.conditionTarget) {
-    clinical.conditionTarget = {
-      ...adjunct.conditionTarget,
-      when: adjunct.conditionTarget.when ? [...adjunct.conditionTarget.when] : undefined,
-      timeOfDay: adjunct.conditionTarget.timeOfDay ? [...adjunct.conditionTarget.timeOfDay] : undefined,
-      clockRange: adjunct.conditionTarget.clockRange ? { ...adjunct.conditionTarget.clockRange } : undefined
-    };
-    if (adjunct.conditionTarget.excludedWeekdays?.length || adjunct.conditionTarget.excludedDates?.length)
+    clinical.conditionTarget = adjunct.conditionTarget;
+    if ((adjunct.conditionTarget.members ?? [adjunct.conditionTarget]).some(target =>
+      target.excludedWeekdays?.length || target.excludedDates?.length))
       acceptedKinds.add("calendar-exclusion");
   }
   if (adjunct.treatmentPause && hasAdministration) {

@@ -683,7 +683,11 @@ function targetedWithholdingCalendarAt(context: HpsgClauseContext, start: number
     return clinicalAdjunctSign("hpsg.cx.medication-withholding-calendar-target", context, members, {
       conditionTarget: { ...target, excludedWeekdays: excluded }, localRanges: [range],
       evidence: [{ rule: "hpsg.cx.medication-withholding-calendar-target", kind: "calendar-exclusion", ranges: [range] }]
-    }, members, undefined, calendarSpan ? [{ text: selectedFrame.sourceText!, frames: [selectedFrame] }] : undefined);
+    }, members, undefined, calendarSpan ? [{
+      text: selectedFrame.sourceText!, frames: [selectedFrame],
+      evidence: [{ rule: "hpsg.cx.medication-withholding-calendar-target", lexicalCategory: "instruction",
+        spans: [{ ...range, text: selectedFrame.sourceText! }] }]
+    }] : undefined);
   }
   return undefined;
 }

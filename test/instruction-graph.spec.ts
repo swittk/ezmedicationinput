@@ -2,7 +2,7 @@ import { buildAdditionalInstructionFramesFromCoding, matchComposedAdviceCodings,
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
 import { deserializeCanonicalContext, parserStateFromFhir, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
 import { courseFromR6 } from "../src/adapters/canonical-course";
-import { AdviceArgumentRole, AdviceForce, AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirPeriodUnit, type AdviceFrame, type CanonicalInstructionGraph, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
+import { AdviceArgumentRole, AdviceForce, AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirPeriodUnit, type AdviceFrame, type CanonicalInstructionGraph, type CanonicalAdditionalInstructionExpr, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { getMedicationLexerLocalePack, registerMedicationLexerLocalePack } from "../src/lexer/locale";
 import { getInstructionActionLocaleAdapter, registerInstructionActionLocaleAdapter } from "../src/index";
@@ -11,7 +11,7 @@ import adviceRulesSource from "../src/advice-rules.json";
 import adviceTerminology from "../src/advice-terminology.json";
 import { setDosageCondition, withDosageEditProvenance, getDosageSourceOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
 import { buildInstructionGraph, realizeInstructionAction, instructionGraphRichPrimaryAction,
-  instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose, instructionGraphCoversTypedWarnings
+  instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose, instructionGraphCoversTypedWarnings, instructionGraphFullyOwnsAdvice
 } from "../src/instruction-graph";
 import { formatCanonicalClause } from "../src/format";
 import { formatCanonicalCourse } from "../src/canonical/format-course";
@@ -2061,6 +2061,47 @@ describe("selected optional action meaning", () => {
       }
       expect(JSON.stringify(input)).toBe(snapshot);
     }
+  });
+
+  it("keeps incomplete instruction ranges and distinct typed occurrences outside graph ownership", () => {
+    const source = "Instill 1 drop in the left eye daily. Skip the drops in the left eye on Mondays.";
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses.find(value => value.additionalInstructions?.some(
+      instruction => instruction.frames?.some(frame => frame.predicate.lemma === "withhold-administration")
+    ))!;
+    const instruction = clause.additionalInstructions!.find(value => value.frames?.some(
+      frame => frame.predicate.lemma === "withhold-administration"
+    ))!;
+    const graph = clause.instructionGraph!;
+    expect(instructionGraphFullyOwnsAdvice(graph, instruction)).toBe(true);
+    const frame = instruction.frames![0];
+    const opaqueText = `${instruction.text}; follow the supplied clinic card`;
+    const partial: CanonicalAdditionalInstructionExpr = {
+      text: opaqueText, frames: [frame], evidence: [{
+        rule: "selected-partial-instruction", lexicalCategory: "instruction", spans: [{
+          start: frame.span.start, end: frame.span.start + opaqueText.length, text: opaqueText
+        }]
+      }]
+    };
+    expect(instructionGraphFullyOwnsAdvice(graph, partial)).toBe(false);
+    const rendered = formatCanonicalClause({ ...clause, additionalInstructions: [partial] },
+      "long", { locale: "en" }, { realizationMode: "normalized" });
+    expect(rendered).toContain("follow the supplied clinic card");
+    const other = { ...frame, span: { start: frame.span.end + 1, end: frame.span.end + 1 + frame.sourceText.length } };
+    const selected: CanonicalAdditionalInstructionExpr = {
+      text: frame.sourceText, frames: [other], evidence: [{
+        rule: "independent-selected-instruction", lexicalCategory: "instruction", spans: [{
+          ...other.span, text: other.sourceText
+        }]
+      }]
+    };
+    expect(instructionGraphFullyOwnsAdvice(graph, selected)).toBe(false);
+    for (const distinct of [
+      { ...frame, force: AdviceForce.Caution },
+      { ...frame, predicate: { ...frame.predicate, codings: [{ system: "urn:clinic:actions", code: "independent" }] } },
+      { ...frame, predicate: { ...frame.predicate, display: "Clinic-selected holding instruction" } },
+      { ...frame, predicate: { ...frame.predicate, i18n: { en: "Clinic-selected holding instruction" } } }
+    ]) expect(instructionGraphFullyOwnsAdvice(graph, { ...instruction, frames: [distinct] })).toBe(false);
   });
 
   it("retains advice annotations and the code-only template beside an uncoded selected frame", () => {

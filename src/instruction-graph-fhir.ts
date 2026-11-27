@@ -364,6 +364,17 @@ export function buildActionExtension(frame: AdviceFrame): FhirExtension {
   return result;
 }
 
+export function buildInstructionCoverageExtension(coverage: CanonicalInstructionCoverage): FhirExtension {
+  const fields: FhirExtension[] = [];
+  add(fields, valueInteger("understoodCharacters", coverage.understoodCharacters));
+  add(fields, valueInteger("opaqueCharacters", coverage.opaqueCharacters));
+  add(fields, valueDecimal("ratio", coverage.ratio));
+  add(fields, valueBoolean("complete", coverage.complete));
+  addFieldSources(fields, coverage.sourceExtensions);
+  return { url: "coverage", ...(coverage.sourceId !== undefined ? { id: coverage.sourceId } : {}),
+    extension: fields };
+}
+
 export function buildInstructionGraphExtension(
   graph: CanonicalInstructionGraph | undefined
 ): FhirExtension | undefined {
@@ -424,16 +435,7 @@ export function buildInstructionGraphExtension(
     nested.push({ url: "graphRelation", ...(relation.sourceId !== undefined ? { id: relation.sourceId } : {}),
       extension: relationNested });
   }
-  if (graph.coverage) {
-    const coverage: FhirExtension[] = [];
-    add(coverage, valueInteger("understoodCharacters", graph.coverage.understoodCharacters));
-    add(coverage, valueInteger("opaqueCharacters", graph.coverage.opaqueCharacters));
-    add(coverage, valueDecimal("ratio", graph.coverage.ratio));
-    add(coverage, valueBoolean("complete", graph.coverage.complete));
-    addFieldSources(coverage, graph.coverage.sourceExtensions);
-    nested.push({ url: "coverage", ...(graph.coverage.sourceId !== undefined ? { id: graph.coverage.sourceId } : {}),
-      extension: coverage });
-  }
+  if (graph.coverage) nested.push(buildInstructionCoverageExtension(graph.coverage));
   for (const opaque of graph.opaqueSpans ?? []) {
     const opaqueNested: FhirExtension[] = [
       { url: "start", valueInteger: opaque.start },

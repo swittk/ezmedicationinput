@@ -13,7 +13,7 @@ import {
   additionalInstructionFallbackText,
   findAdditionalInstructionDefinitionByCoding
 } from "./advice";
-import { realizeInstructionAction, instructionGraphAdministrationTechnique, sameTypedWarning } from "./instruction-graph";
+import { realizeInstructionAction, instructionGraphAdministrationTechnique, sameTypedWarning, instructionHasCompleteFrameEvidence, buildInstructionCoverage } from "./instruction-graph";
 import { getAdviceLocaleAdapter } from "./advice-locale-adapter";
 import { localeKeys } from "./localization";
 import {
@@ -41,7 +41,7 @@ import { formatCanonicalClause } from "./format";
 import {
   getQuantityComparator, simpleQuantityForR5, quantityPrimitiveForR5, quantityForR5, quantityFromR5
 } from "./fhir-quantity-operator";
-import { buildActionExtension, buildInstructionGraphExtension, parseInstructionGraphExtension, MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-fhir";
+import { buildActionExtension, buildInstructionCoverageExtension, buildInstructionGraphExtension, parseInstructionGraphExtension, MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-fhir";
 import { ParserState } from "./parser-state";
 import { getQuantityDurationUnit } from "./unit-lexicon";
 import { joinCanonicalPrnReasonTexts } from "./prn";
@@ -59,6 +59,7 @@ import {
   AdviceForce,
   AdvicePolarity,
   CanonicalAdditionalInstructionExpr,
+  CanonicalInstructionCoverage,
   CanonicalInstructionGraph,
   CanonicalActivityTimingExpr,
   CanonicalCalendarEventExpr,
@@ -1664,6 +1665,7 @@ export function serializeCanonicalContext(
     coding?: { system?: string; code?: string; display?: string };
     hasTypedEvidence?: boolean;
     frames?: AdviceFrame[];
+    coverage?: CanonicalInstructionCoverage;
   }> = [];
   for (const instruction of clause.additionalInstructions ?? []) {
     const text = instruction.text?.trim();
@@ -1690,13 +1692,21 @@ export function serializeCanonicalContext(
       if (!recovered || instruction.frames.some(selected =>
           !recovered.some(template => sameTypedWarning(selected, template)))) frames = instruction.frames;
     }
-    additionalInstructions.push({
+    let coverage: CanonicalInstructionCoverage | undefined;
+    if (!instruction.coding?.code && instruction.frames?.length &&
+        instructionHasCompleteFrameEvidence(instruction)) {
+      frames = instruction.frames;
+      coverage = buildInstructionCoverage(frames, [], []);
+    }
+    const selected: typeof additionalInstructions[number] = {
       text,
       i18n,
       coding: instruction.coding,
       hasTypedEvidence: Boolean(instruction.evidence?.length),
       frames
-    });
+    };
+    if (coverage) selected.coverage = coverage;
+    additionalInstructions.push(selected);
   }
   if (additionalInstructions.length) {
     dosage.additionalInstruction = [];
@@ -1719,10 +1729,11 @@ export function serializeCanonicalContext(
       // Retain selected warning facts that the coding template cannot recover.
       // The dosage graph owns the clause source; this row carries only its
       // own selected frames, including their exact modality and arguments.
-      if (instruction.frames?.length) projected.extension = [{
-        url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL,
-        extension: instruction.frames.map(buildActionExtension)
-      }];
+      if (instruction.frames?.length) {
+        const fields = instruction.frames.map(buildActionExtension);
+        if (instruction.coverage) fields.push(buildInstructionCoverageExtension(instruction.coverage));
+        projected.extension = [{ url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: fields }];
+      }
       dosage.additionalInstruction.push(projected);
     }
   }
@@ -2304,9 +2315,10 @@ export function deserializeCanonicalContext(
     for (const instruction of dosage.additionalInstruction) {
       const coding = instruction.coding?.find((code) => Boolean(code.code));
       const text = additionalInstructionFallbackText(instruction, coding);
-      const ownedFrames = instruction.extension
-        ? parseInstructionGraphExtension(instruction.extension)?.actions : undefined;
-      clause.additionalInstructions.push({
+      const ownedGraph = instruction.extension
+        ? parseInstructionGraphExtension(instruction.extension) : undefined;
+      const ownedFrames = ownedGraph?.actions;
+      const selected: CanonicalAdditionalInstructionExpr = {
         text,
         i18n: codeableConceptTranslationI18n(instruction, coding).text,
         coding: coding?.code
@@ -2325,7 +2337,10 @@ export function deserializeCanonicalContext(
             clause.raw
           )
           : undefined
-      });
+      };
+      const evidence = rowInstructionEvidence(ownedGraph);
+      if (evidence) selected.evidence = evidence;
+      clause.additionalInstructions.push(selected);
     }
   }
 
@@ -2334,6 +2349,16 @@ export function deserializeCanonicalContext(
   }
 
   return clause;
+}
+
+/** The row codec carries current selected frames and their complete coverage. */
+function rowInstructionEvidence(graph: CanonicalInstructionGraph | undefined): CanonicalAdditionalInstructionExpr["evidence"] {
+  if (!graph?.coverage?.complete || !graph.actions.length) return undefined;
+  return [{
+    rule: "fhir.additional-instruction-graph",
+    lexicalCategory: "instruction",
+    spans: graph.actions.map(frame => ({ ...frame.span, text: frame.sourceText }))
+  }];
 }
 
 export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): CanonicalSigClause {
@@ -2690,8 +2715,9 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
       const coding = selectFirstCodingWithCode(concept);
       const text = additionalInstructionFallbackText(concept, coding);
       const sourceText = text ?? coding?.display ?? "";
-      const ownedFrames = concept.extension
-        ? parseInstructionGraphExtension(concept.extension)?.actions : undefined;
+      const ownedGraph = concept.extension
+        ? parseInstructionGraphExtension(concept.extension) : undefined;
+      const ownedFrames = ownedGraph?.actions;
       const defaultDef = coding?.code
         ? findAdditionalInstructionDefinitionByCoding(
           coding.system ?? SNOMED_SYSTEM,
@@ -2699,7 +2725,7 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
         )
         : undefined;
 
-      return {
+      const selected: CanonicalAdditionalInstructionExpr = {
         text,
         coding: coding?.code
           ? {
@@ -2718,6 +2744,9 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
           )
           : undefined
       };
+      const evidence = rowInstructionEvidence(ownedGraph);
+      if (evidence) selected.evidence = evidence;
+      return selected;
     });
   }
 

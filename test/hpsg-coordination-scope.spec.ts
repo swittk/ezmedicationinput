@@ -1,6 +1,6 @@
 import { CALENDAR_WEEKDAY_LEXEMES } from "../src/hpsg/lexical-classes";
 import { siteLexicalRule } from "../src/hpsg/rules/site-rules";
-import { EventTiming, RouteCode } from "../src/types";
+import { EventTiming, FhirDayOfWeek, RouteCode } from "../src/types";
 import { parseSigSegments as parseHpsgSegments } from "../src/hpsg/segmenter";
 import { describe, expect, it } from 'vitest';
 import {
@@ -19,7 +19,8 @@ import {
 } from '../src/parser';
 import { applyCoordinatedCadenceScopes } from '../src/regimen/coordination-scope';
 import { createBoundaryPlan, takeBoundaryParsedState } from '../src/regimen/planner';
-import type { BoundaryPlan } from '../src/hpsg/signature';
+import { unifySynsem } from "../src/hpsg/unification";
+import type { BoundaryPlan, HpsgClinicalAdjunctFeature } from '../src/hpsg/signature';
 import { parseMedicationGuard, selectHpsgCoordinationScopeConstruction } from '../src/hpsg/constructions';
 import type { CoordinationScopeFacts } from '../src/hpsg/signature';
 import { parseSig, parseSigAsync } from './helpers/r5-parser';
@@ -3267,6 +3268,155 @@ describe("registered withholding calendar and maximum constituents", () => {
 
 
 describe("withholding target identity", () => {
+  it.each([
+    ["Skip the drops in the left eye on Mondays. Skip the drops in the right eye on Fridays.", ["fri"], ["mon"]],
+    ["Skip the drops in the right eye on Fridays. Skip the drops in the left eye on Mondays.", ["fri"], ["mon"]],
+    ["Skip the drops in the left eye on Mondays. Skip the drops in the left eye on Fridays.", [], ["mon", "fri"]],
+    ["Skip the drops in the left eye on Mondays. Skip the drops in the left eye on Mondays.", [], ["mon"]]
+  ] as const)("composes independent site weekday targets without crossing them: %s", (advice, rightDays, leftDays) => {
+    const source = "Instill 1 drop in the right eye at 08:00 and 1 drop in the left eye at 20:00 daily for 7 days. " + advice;
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const query = { from: "2026-11-23T00:00:00Z", orderedAt: "2026-11-23T00:00:00Z", timeZone: "UTC", limit: 20 };
+    const all = [
+      "2026-11-23T08:00:00+00:00", "2026-11-23T20:00:00+00:00",
+      "2026-11-24T08:00:00+00:00", "2026-11-24T20:00:00+00:00",
+      "2026-11-25T08:00:00+00:00", "2026-11-25T20:00:00+00:00",
+      "2026-11-26T08:00:00+00:00", "2026-11-26T20:00:00+00:00",
+      "2026-11-27T08:00:00+00:00", "2026-11-27T20:00:00+00:00",
+      "2026-11-28T08:00:00+00:00", "2026-11-28T20:00:00+00:00",
+      "2026-11-29T08:00:00+00:00", "2026-11-29T20:00:00+00:00"
+    ];
+    // Monday evening is always withheld; Friday belongs only to its named eye.
+    const omitted = [all[1], ...(rightDays.length ? [all[8]] : leftDays.length === 2 ? [all[9]] : [])];
+    const expected = all.filter(at => omitted.indexOf(at) === -1);
+    const currentSign = parseClauseSign(parsed.meta.canonical.clauses[1].rawText);
+    const target = currentSign?.synsem.cont.clinicalAdjunct?.conditionTarget;
+    if (advice.endsWith("Mondays. Skip the drops in the left eye on Mondays.")) {
+      expect(target?.members).toBeUndefined();
+      expect(target?.excludedWeekdays).toEqual(["mon"]);
+    } else {
+      expect(target?.members).toHaveLength(2);
+      expect(target?.members?.every(member => !member.members)).toBe(true);
+    }
+    const previews = {
+      en: formatSig(parsed.meta.canonical.course!, "long", { locale: "en", realizationMode: "normalized" }),
+      th: formatSig(parsed.meta.canonical.course!, "long", { locale: "th", realizationMode: "normalized" })
+    };
+    expect(previews.en.match(/withhold administration/gi)).toHaveLength(2);
+    expect(previews.th.match(/Skip the drops/g)).toHaveLength(2);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const inputBefore = JSON.stringify(input);
+      for (const locale of ["en", "th"] as const) {
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toBe(previews[locale]);
+      }
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(2);
+      expect(members.map(member => member.target?.coding?.[0]?.code)).toEqual(["1290032005", "1290031003"]);
+      expect(members.map(member => member.amounts?.[0].quantity)).toMatchObject([
+        { value: 1, unit: "drop" }, { value: 1, unit: "drop" }
+      ]);
+      expect(members.map(member => member.schedule?.recurrence?.clocks)).toEqual([["08:00:00"], ["20:00:00"]]);
+      expect(members[0].excludedWeekdays ?? []).toEqual(rightDays);
+      expect((members[1].excludedWeekdays ?? []).slice().sort()).toEqual([...leftDays].sort());
+      expect(members.some(member => member.predicate)).toBe(false);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: expected.length, unit: "drop" });
+      const actions = members.flatMap(member => member.syntax?.instructionGraph?.actions ?? [])
+        .filter(action => action.predicate.lemma === "withhold-administration");
+      expect(actions).toHaveLength(2);
+      expect(actions.map(action => action.sourceText + ".").join(" ")).toBe(advice);
+      for (const action of actions) {
+        expect(action.args.some(argument => argument.role === "site" && argument.coding?.code)).toBe(true);
+        expect(action.args.some(argument => argument.role === "time" && argument.relation === "on")).toBe(true);
+      }
+      expect(JSON.stringify(input)).toBe(inputBefore);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("retains complete current row occurrences and nested annotations through both wire forms", () => {
+    const source = "Instill 1 drop in the right eye at 08:00 and 1 drop in the left eye at 20:00 daily for 7 days. " +
+      "Skip the drops in the left eye on Mondays. Skip the drops in the left eye on Mondays.";
+    const parsed = parsePublicSig(source);
+    const graphUrl = "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph";
+    const rowNote = { url: "https://example.org/row-note", valueString: "current advice" };
+    const coverageNote = { url: "https://example.org/coverage-note", valueString: "current coverage" };
+    const textElement = { id: "owned-text", extension: [
+      { url: "https://example.org/text-note", valueString: "text annotation" }
+    ] };
+    const labelCoding = [{ system: "urn:clinic:labels", display: "Selected calendar instruction",
+      id: "label-id", _display: { id: "label-display" }, extension: [
+        { url: "https://example.org/code-note", valueString: "nonsemantic coding annotation" }
+      ] }];
+    for (const input of [JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const rows = Array.isArray(input) ? input : input.step.flatMap((step: any) => step.component ?? []);
+      const advice = rows.flatMap((row: any) => row.additionalInstruction ?? [])[0];
+      advice.id = "owned-row";
+      advice._text = textElement;
+      advice.coding = labelCoding;
+      advice.extension.push(rowNote);
+      const carrier = advice.extension.find((field: any) => field.url === graphUrl);
+      expect(carrier.extension.map((field: any) => field.url)).toEqual(["action", "coverage"]);
+      const coverage = carrier.extension.find((field: any) => field.url === "coverage");
+      coverage.id = "owned-coverage";
+      coverage.extension.push(coverageNote);
+      coverage.extension.find((field: any) => field.url === "complete").id = "complete-annotation";
+      const before = JSON.stringify(input);
+      const projected = projectCanonicalCourse(importCanonicalCourse(input));
+      for (const current of [projected.fhir, projected.fhirNext]) {
+        const normalized = formatSig(current, "long", { locale: "en", realizationMode: "normalized" });
+        expect(normalized.match(/withhold administration/gi)).toHaveLength(2);
+        const rebuilt = projectCanonicalCourse(importCanonicalCourse(JSON.parse(JSON.stringify(current))));
+        for (const row of rebuilt.fhir) for (const instruction of row.additionalInstruction ?? []) {
+          expect(instruction).toMatchObject({ id: "owned-row", _text: textElement, coding: labelCoding });
+          expect(instruction.extension).toContainEqual(rowNote);
+          const retained = instruction.extension?.find(field => field.url === graphUrl)?.extension
+            ?.find(field => field.url === "coverage");
+          expect(retained?.id).toBe("owned-coverage");
+          expect(retained?.extension).toContainEqual(coverageNote);
+          expect(retained?.extension?.find(field => field.url === "complete"))
+            .toMatchObject({ id: "complete-annotation", valueBoolean: true });
+        }
+        expect(formatSig(rebuilt.fhirNext, "long", { locale: "th", realizationMode: "normalized" }))
+          .toBe(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }));
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("flattens calendar target leaves while retaining scalar, duplicate and predicate boundaries", () => {
+    const left: HpsgClinicalAdjunctFeature = {
+      conditionTarget: { site: { text: "left eye" }, excludedWeekdays: [FhirDayOfWeek.Monday] },
+      localRanges: [{ start: 0, end: 10 }],
+      evidence: [{ rule: "calendar-target", kind: "calendar-exclusion", ranges: [{ start: 0, end: 10 }] }]
+    };
+    const right: HpsgClinicalAdjunctFeature = {
+      conditionTarget: { site: { text: "right eye" }, excludedWeekdays: [FhirDayOfWeek.Friday] },
+      localRanges: [{ start: 20, end: 30 }],
+      evidence: [{ rule: "calendar-target", kind: "calendar-exclusion", ranges: [{ start: 20, end: 30 }] }]
+    };
+    const merge = (a: HpsgClinicalAdjunctFeature, b: HpsgClinicalAdjunctFeature) => unifySynsem(
+      { head: {}, valence: {}, cont: { clinicalAdjunct: a } },
+      { head: {}, valence: {}, cont: { clinicalAdjunct: b } },
+      { normalizeSiteText: text => text, isCompatibleRouteRefinement: (a, b) => a === b }
+    )?.cont.clinicalAdjunct;
+    expect(merge(left, left)).toEqual(left);
+    const composite = merge(left, right)!;
+    expect(composite.conditionTarget).toEqual({ members: [left.conditionTarget, right.conditionTarget] });
+    expect(merge(composite, left)).toEqual(composite);
+    const nested = { ...left, conditionTarget: { members: [left.conditionTarget!, { members: [right.conditionTarget!] }] } };
+    expect(merge(nested, right)?.conditionTarget).toEqual(composite.conditionTarget);
+    const predicate = { kind: "state" as const, name: "dizzy", expected: true };
+    expect(merge(left, { ...right, condition: predicate,
+      conditionTarget: { site: right.conditionTarget!.site } })).toBeUndefined();
+    expect(merge({ ...left, condition: predicate },
+      { ...right, condition: { ...predicate, name: "nauseated" } })).toBeUndefined();
+  });
+
   it.each([
     "Skip the drops in the left eye on Mondays.",
     "On Mondays skip the drops in the left eye."

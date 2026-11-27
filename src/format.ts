@@ -1572,12 +1572,16 @@ export function collectGraphInstructionOwnership(
   const codedWarningSources: string[] = [];
   const codedWarningSourcesByInstruction: string[][] = [];
   const graphOwnedAdditional: CanonicalAdditionalInstructionExpr[] = [];
-  for (const instruction of clause.additionalInstructions ?? []) {
+  const instructions = clause.additionalInstructions ?? [];
+  // A mixed collection retains its existing ordering and realization owner.
+  const ownsTypedCollection = Boolean(graph && instructions.length && instructions.every(instruction =>
+    !instruction.coding?.code && instruction.frames?.length && instructionGraphFullyOwnsAdvice(graph, instruction)));
+  for (const instruction of instructions) {
     const sources = composedCodedWarningActionSources(actions, instruction.coding);
     codedWarningSourcesByInstruction.push(sources);
     codedWarningSources.push(...sources);
     if (!instruction.text || !graph) continue;
-    let owned = instructionGraphFullyOwnsAdvice(graph, instruction);
+    let owned = ownsTypedCollection || !instruction.frames?.length && instructionGraphFullyOwnsAdvice(graph, instruction);
     if (!owned && instruction.coding?.code) {
       owned = !sources.length && instructionGraphEntailsAdviceCoding(graph, instruction.coding);
     } else if (!owned) {

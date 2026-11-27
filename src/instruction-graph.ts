@@ -4610,7 +4610,7 @@ export function instructionGraphSingleActionRepresentsText(
 }
 
 
-/** Complete typed warning equivalence; source wording is not instruction identity. */
+/** Typed warning equivalence retains the established negative-force tolerance. */
 export function sameTypedWarning(left: AdviceFrame, right: AdviceFrame): boolean {
   return left.predicate.lemma === right.predicate.lemma &&
     left.predicate.semanticClass === right.predicate.semanticClass &&
@@ -4621,6 +4621,17 @@ export function sameTypedWarning(left: AdviceFrame, right: AdviceFrame): boolean
     equalStructuredValues(left.args, right.args);
 }
 
+
+/** Full current action identity for selected instruction ownership. */
+function sameTypedAdviceFrame(left: AdviceFrame, right: AdviceFrame): boolean {
+  return sameTypedWarning(left, right) && left.force === right.force &&
+    left.predicate.display === right.predicate.display &&
+    equalStructuredValues(left.predicate.i18n, right.predicate.i18n) &&
+    left.predicate.realizer === right.predicate.realizer &&
+    equalStructuredValues(left.predicate.codings, right.predicate.codings) &&
+    equalStructuredValues(left.predicate.realizerConfig, right.predicate.realizerConfig) &&
+    equalStructuredValues(left.coding, right.coding);
+}
 
 /**
  * Non-coded advice is redundant only when the grammar already owns every
@@ -4708,6 +4719,20 @@ export function instructionGraphSourceOwnedByAdvice(
     .map((action) => action.sourceText);
 }
 
+/** Selected instruction evidence covers exactly its complete typed frames. */
+export function instructionHasCompleteFrameEvidence(
+  instruction: CanonicalAdditionalInstructionExpr
+): boolean {
+  const frames = instruction.frames;
+  const evidence = instruction.evidence;
+  return Boolean(frames?.length && evidence?.length &&
+    evidence.every(item => item.lexicalCategory === "instruction" && item.spans.length &&
+      item.spans.every(span => frames.some(frame =>
+        frame.span.start === span.start && frame.span.end === span.end))) &&
+    frames.every(frame => evidence.some(item => item.spans.some(span =>
+      span.start === frame.span.start && span.end === frame.span.end))));
+}
+
 /**
  * A source-backed additional fragment is fully represented when every
  * lexical constituent belongs to a composed action or its licensed
@@ -4717,7 +4742,15 @@ export function instructionGraphFullyOwnsAdvice(
   graph: CanonicalInstructionGraph,
   instruction: CanonicalAdditionalInstructionExpr
 ): boolean {
-  if (!instruction.text?.trim() || instruction.coding?.code || instruction.frames?.length) return false;
+  if (!instruction.text?.trim() || instruction.coding?.code) return false;
+  if (instruction.frames?.length) {
+    // A complete selected instruction can delegate realization to its graph
+    // occurrence. Partial evidence cannot hide an additional opaque tail.
+    return instructionHasCompleteFrameEvidence(instruction) && instruction.frames.every(frame =>
+      graph.actions.some(action => action.span.start === frame.span.start &&
+        action.span.end === frame.span.end && sameTypedAdviceFrame(frame, action))
+    );
+  }
   const source = graph.sourceText.toLocaleLowerCase("en");
   const phrase = instruction.text.trim().toLocaleLowerCase("en");
   const start = source.indexOf(phrase);

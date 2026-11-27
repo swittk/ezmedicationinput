@@ -647,6 +647,29 @@ function mergeCondition(
   return sameCondition(left, right) ? left : undefined;
 }
 
+function mergeConditionTargets(
+  left: HpsgClinicalAdjunctFeature["conditionTarget"],
+  right: HpsgClinicalAdjunctFeature["conditionTarget"]
+): HpsgClinicalAdjunctFeature["conditionTarget"] {
+  if (!left) return right;
+  if (!right || equalStructuredValues(left, right)) return left;
+  const members: NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]>[] = [];
+  const append = (target: NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]>) => {
+    if (target.members) {
+      for (const member of target.members) append(member);
+    } else if (!members.some(member => equalStructuredValues(member, target))) {
+      members.push(target);
+    }
+  };
+  append(left);
+  append(right);
+  if (members.length === 1) return members[0];
+  // Calendar restrictions belong to their individual selectors. Predicate
+  // targets still require the existing single shared condition owner.
+  return members.every(member => member.excludedDates?.length || member.excludedWeekdays?.length)
+    ? { members } : undefined;
+}
+
 function mergeClinicalAdjunct(
   left: HpsgClinicalAdjunctFeature | undefined,
   right: HpsgClinicalAdjunctFeature | undefined
@@ -657,8 +680,8 @@ function mergeClinicalAdjunct(
       !equalStructuredValues(left.condition, right.condition)) {
     return undefined;
   }
-  if (left.conditionTarget && right.conditionTarget &&
-      !equalStructuredValues(left.conditionTarget, right.conditionTarget)) return undefined;
+  const conditionTarget = mergeConditionTargets(left.conditionTarget, right.conditionTarget);
+  if (!conditionTarget && left.conditionTarget && right.conditionTarget) return undefined;
   if (left.calendarDayCondition && right.calendarDayCondition &&
       !equalStructuredValues(left.calendarDayCondition, right.calendarDayCondition)) return undefined;
   if (left.treatmentPause && right.treatmentPause &&
@@ -667,7 +690,7 @@ function mergeClinicalAdjunct(
     treatmentPause: left.treatmentPause ?? right.treatmentPause,
     condition: left.condition ?? right.condition,
     calendarDayCondition: left.calendarDayCondition ?? right.calendarDayCondition,
-    conditionTarget: left.conditionTarget ?? right.conditionTarget,
+    conditionTarget,
     excludedDates: appendUnique(left.excludedDates, right.excludedDates),
     excludedWeekdays: appendUnique(left.excludedWeekdays, right.excludedWeekdays),
     unresolved: left.unresolved || right.unresolved ? true : undefined,
