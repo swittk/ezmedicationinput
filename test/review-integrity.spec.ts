@@ -2380,6 +2380,7 @@ describe("clinical Thai directive polarity", () => {
     {
       source: "Take 1 tablet orally twice daily after breakfast and dinner. กินหลังอาหารทันที ดื่มน้ำตามมากๆ ไม่ควรจะนอนราบทันทีหลังกินยา กินต่อเนื่องจนหมด.",
       fragment: "ไม่ควรจะนอนราบ", lemma: "lie-down", modality: "should",
+      authoredWarning: "ไม่ควรจะนอนราบทันทีหลังกินยา",
       english: "Should not lie down", supply: 56
     },
     {
@@ -2443,6 +2444,13 @@ describe("clinical Thai directive polarity", () => {
       }
       expect(rows.map(row => formatSig(row, "long", { locale: "en" })).join(" ")).toContain(entry.english);
       expect(rows.map(row => formatSig(row, "long", { locale: "th" })).join(" ")).toContain(entry.fragment);
+      if (entry.authoredWarning) {
+        expect(copied?.sourceText).toBe(entry.authoredWarning);
+        expect(rows.flatMap(row => row.additionalInstruction ?? [])
+          .filter(instruction => instruction.text === entry.authoredWarning)).toHaveLength(1);
+        expect(rows.map(row => formatSig(row, "long", { locale: "th" })).join(" "))
+          .toContain(entry.authoredWarning);
+      }
     }
     if (entry.lemma === "touch") {
       expect(action?.args[0]).toMatchObject({ role: "theme" });

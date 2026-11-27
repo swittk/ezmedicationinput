@@ -346,13 +346,15 @@ function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClau
     const wordingRange = range ?? warning.span;
     const composedSource = warning.polaritySource === "shared" || warning.args.some(argument =>
       argument.span && (argument.span.start < wordingRange.start || argument.span.end > wordingRange.end));
-    const realizeSelected = composedSource || warning.modality !== undefined;
+    const completeModalSource = previous?.frames?.[0].modality === warning.modality &&
+      range?.start === warning.span.start && range.end === warning.span.end;
+    const realizeSelected = composedSource || warning.modality !== undefined && !completeModalSource;
     if (previous && !realizeSelected) {
       if (previous.frames![0] !== warning) instructions![rowIndex] = { ...previous, frames: [warning] };
       continue;
     }
-    // Selected modality and inherited facts own the native row wording. Use
-    // that realization directly, without comparing it to preliminary prose.
+    // Preserve a complete authored occurrence. Generated or shorter rows need
+    // the selected modality and inherited facts realized in their wording.
     const text = realizeSelected
       ? realizeInstructionAction(warning, "en")
       : sourceText.charAt(0).toUpperCase() + sourceText.slice(1);
