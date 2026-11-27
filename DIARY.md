@@ -16416,3 +16416,19 @@ forms retain their contextual license, and calendar exclusion groups retain thei
 established vocabulary while sharing its weekday meaning. Workday and holiday
 exclusions remain unresolved where no fixed calendar interpretation is licensed.
 The boundary planner reuses the existing calendar cue and explicit guard lead.
+
+
+## 2026-11-27 — Independent warnings and typed nominal arguments
+
+Independent graph warnings project from their complete typed action facts.
+Actions referenced by graph relations retain that scope, and supplied standard
+advice and annotations remain intact. Conditional coded warnings retain their
+modality and qualifiers, so they cannot stand in for an independent unconditional
+warning. Known advice terminology supplies missing English labels, with existing
+authored labels taking precedence and typed coverage owning omissions.
+
+Procedural advice retains the selected action and its known nominal arguments.
+Fasting coding and the affirmative preview shortcut require affirmative meaning.
+Selected action labels and configured locale realization remain authoritative.
+Weekday Time arguments use the existing locale day labels and relation wording
+without changing the registered callback contract or the executable schedule.
