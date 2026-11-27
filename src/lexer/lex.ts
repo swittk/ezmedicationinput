@@ -402,6 +402,12 @@ function tryFractionToken(
   const slash = surfaces[index + 1];
   const right = surfaces[index + 2];
 
+  if (isSurfaceText(left) && isSurfaceText(slash) && slash.original.startsWith("/") && slash.original.length > 1) {
+    const separator = { ...slash, original: "/", lower: "/", end: slash.start + 1 };
+    const denominator = { ...slash, original: slash.original.slice(1), lower: slash.lower.slice(1), start: slash.start + 1 };
+    const tokens = buildFractionTokens(left, separator, denominator, input);
+    if (tokens) return { tokens, nextIndex: index + 2 };
+  }
   if (!isSurfaceText(left) || !slash || slash.original !== "/" || !isSurfaceText(right)) {
     return undefined;
   }

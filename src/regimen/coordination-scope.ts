@@ -1490,6 +1490,7 @@ export function scopeMedicationConditionTargets(
       const explicitTarget = hasExplicitConditionTarget(member);
       if (explicitTarget && !paths && terminal !== undefined) paths = relationPathsTo(plan, terminal);
       const selected: number[] = [];
+      let opportunities = 0;
       for (let index = 0; index <= donorIndex; index += 1) {
         if (!explicitTarget && index !== donorIndex) continue;
         if (index !== donorIndex) {
@@ -1501,12 +1502,16 @@ export function scopeMedicationConditionTargets(
         if (!matchesConditionTarget(clause, member)) continue;
         if (member.when?.length || member.timeOfDay?.length || member.clockRange) {
           const anchors = selectedConditionAnchors(clause.schedule, member);
-          if (!anchors.times.length && !anchors.events.length) continue;
+          const count = anchors.times.length + anchors.events.length;
+          if (!count) continue;
+          opportunities += count;
+        } else {
+          opportunities += Math.max(1, (clause.schedule?.timeOfDay?.length ?? 0) + (clause.schedule?.when?.length ?? 0));
         }
         selected.push(index);
       }
       if (!selected.length && (member.dose || member.site)) continue;
-      if (!selected.length || member.quantifier === 'both' && selected.length !== 2) {
+      if (!selected.length || member.quantifier === 'both' && opportunities !== 2) {
         unresolved = true;
         continue;
       }

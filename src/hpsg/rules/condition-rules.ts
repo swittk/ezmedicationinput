@@ -18,7 +18,7 @@ import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt,
 import { hasSymptomOnsetPrnAt, prnAt } from "./prn-rules";
 import { LIST_SEPARATORS, coordinationConnectorKind, CALENDAR_WEEKDAY_LEXEMES, CALENDAR_WEEKDAY_GROUPS, CALENDAR_DAY_LIST_CONNECTORS, CALENDAR_EXCLUSION_CUE, CALENDAR_EXCLUSION_DAY_HEADS, NEGATIVE_ACTION_DIRECTIVE_LEADS, SUPPLEMENTAL_DOSE_MODIFIERS, CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../../maps";
-import { countAndDurationRule, countFrequencyRule, timeOfDayRule, timingLexicalRule, dayRangeLexicalRule, maximumOccurrenceAt, isIndependentMaximum } from "./timing-rules";
+import { countAndDurationRule, countFrequencyRule, timingLexicalRule, dayRangeLexicalRule, maximumOccurrenceAt, isIndependentMaximum } from "./timing-rules";
 import { LexKind } from "../../lexer/token-types";
 import { hasPrnMeaning } from "../../lexer/meaning";
 import { normalizeUnit } from "../../unit-lexicon";
@@ -32,6 +32,7 @@ import {
   maximumDosePerPeriodAt,
   maximumCountLeadAt,
   normalizeTokenLower,
+  parseClockToken,
   startsMedicationGuard,
   isMedicationGuardMarker
 } from "../rule-context";
@@ -388,9 +389,9 @@ function withholdingDoseTarget(
       if (token.sourceStart < span.start || token.sourceEnd > span.end) continue;
       const word = normalizeTokenLower(token);
       if (token.kind === LexKind.TimeLike) {
-        const typedClock = timeOfDayRule().match(context, token.index).find(sign =>
-          sign.synsem.head.schedule?.timeOfDay?.length === 1)?.synsem.head.schedule?.timeOfDay;
-        if (typedClock) target.timeOfDay = [...new Set([...(target.timeOfDay ?? []), ...typedClock])];
+        const next = context.tokens[token.index + 1];
+        const clock = parseClockToken(token, next && next.sourceEnd <= span.end ? next : undefined);
+        if (clock) target.timeOfDay = [...new Set([...(target.timeOfDay ?? []), clock.value])];
       }
       const meridiemRange = DOSE_TARGET_MERIDIEM_CLOCK_RANGES.get(word);
       if (meridiemRange) target.clockRange = { ...meridiemRange };

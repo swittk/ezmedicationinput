@@ -5,7 +5,7 @@ import { AdviceArgumentRole, AdviceForce, AdviceModality, AdvicePolarity, Advice
 import { parseSigSegments as parseHpsgSegments } from "../src/hpsg/segmenter";
 import { describe, expect, it } from 'vitest';
 import {
-  calculateTotalUnits, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
+  calculateTotalUnits, evaluateMedicationCondition, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
   formatSig, importCanonicalCourse, projectCanonicalCourse, lintSig, nextDueDoses, toDosageDetails, toFhirR5Dosages, getMedicationInstructionAction, parseSig as parsePublicSig
 } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
@@ -3075,7 +3075,10 @@ describe("quantified withholding target ownership", () => {
         const courseLength = member.schedule?.recurrence?.courseLength;
         expect(courseLength?.value).toBe(2);
         expect(courseLength?.code ?? courseLength?.unit).toBe("d");
-        expect(member.predicate?.kind).toBe(guarded[index] ? "not" : undefined);
+        if (guarded[index]) expect(member.predicate).toMatchObject({ kind: "not", condition: calendar
+          ? { kind: "text", text: "it is a dialysis day" }
+          : { kind: "state", name: "dizzy", expected: true } });
+        else expect(member.predicate).toBeUndefined();
         expect(member.calendarPredicate).toEqual(calendar && guarded[index] ? member.predicate : undefined);
       }
       expect(nextDueDoses(input, { ...query, evaluateCondition: () => true })).toEqual(allTimes);
@@ -4394,5 +4397,39 @@ describe("selected instruction refinement at HPSG unification", () => {
     const modal = { ...left, text: "May not take water", frames: [{ ...frame, modality: AdviceModality.May }] };
     const different = { ...left, text: "Should not take water", frames: [{ ...frame, modality: AdviceModality.Should }] };
     expect(merge(modal, different)).toEqual([modal, different]);
+  });
+});
+
+
+describe("both dose-opportunity withholding targets", () => {
+  const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 10 };
+  it.each([false, true])("binds two selected clocks within one state; extra midday slot %s", midday => {
+    const source = "Take 1 tablet at " + (midday ? "08:00, 14:00 and 20:00" : "08:00 and 20:00") +
+      " daily for 2 days. Hold both the 08:00 and 20:00 doses if dizzy.";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    expect(parsed.warnings).not.toContain("Unresolved medication-condition target: confirm which administration the instruction refers to.");
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const inputBefore = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      const held = members.find(member => member.schedule?.recurrence?.clocks?.includes("08:00:00"))!;
+      expect(held.schedule?.recurrence?.clocks).toEqual(["08:00:00", "20:00:00"]);
+      expect(held.predicate).toMatchObject({ kind: "not", condition: { kind: "state", name: "dizzy", expected: true } });
+      const unaffected = members.find(member => member.schedule?.recurrence?.clocks?.includes("14:00:00"));
+      expect(unaffected?.predicate).toBeUndefined();
+      expect(members).toHaveLength(midday ? 2 : 1);
+      for (const dizzy of [false, true]) {
+        const options = { ...query, evaluateCondition: (condition: Parameters<typeof evaluateMedicationCondition>[0]) =>
+          evaluateMedicationCondition(condition, { dizzy, nausea: !dizzy }) };
+        const expected = ["2026-12-01", "2026-12-02"].flatMap(date =>
+          (dizzy ? midday ? ["14:00"] : [] : midday ? ["08:00", "14:00", "20:00"] : ["08:00", "20:00"])
+            .map(clock => date + "T" + clock + ":00+00:00"));
+        expect(nextDueDoses(input, options)).toEqual(expected);
+        expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 2, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: expected.length, unit: "tab" });
+      }
+      expect(JSON.stringify(input)).toBe(inputBefore);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
   });
 });

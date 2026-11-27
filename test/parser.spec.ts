@@ -6128,10 +6128,11 @@ describe("round77 independent advice and selected Time ownership", () => {
     expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Time)).toHaveLength(0);
     expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Activity, text: "breakfast or dinner" }));
     expect(frame.relation).toBe(AdviceRelation.After);
-    expect(parsed.meta.canonical.clauses[0].schedule?.when ?? []).not.toContain(EventTiming["After Breakfast"]);
+    expect(parsed.meta.canonical.clauses[0].schedule?.when ?? []).toEqual([]);
     for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext), persist(toFhirR5Dosages(parsed.fhirNext))]) {
       for (const locale of ["en", "th"] as const) {
         const text = current(formatSig(input, "long", { locale, realizationMode: "normalized" }), locale);
+        expect(importCanonicalCourse(input).stages[0].administrations[0].schedule?.recurrence?.anchors ?? []).toEqual([]);
         expect(text).toContain((locale === "en" ? "after " : "หลัง") + "breakfast or dinner");
         expect(text).toContain(locale === "en" ? "15 mL" : "15 มิลลิลิตร");
       }
@@ -9370,3 +9371,34 @@ describe("round74 shared source owners", () => {
 });
 }
 }
+
+
+describe("relative meal course-end ownership", () => {
+  it.each(["before breakfast", "after dinner"])("keeps until %s the next day as an end complement", meal => {
+    const source = "Take 1 tablet every 6 hours until " + meal + " the next day";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const course = importCanonicalCourse(input), administration = course.stages[0].administrations[0];
+      expect(administration.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(administration.schedule?.recurrence).toMatchObject({ period: 6, periodUnit: "h" });
+      expect(administration.schedule?.recurrence?.anchors).toBeUndefined();
+      expect(administration.onsetDays).toBeUndefined();
+      expect(administration.onsetReference).toBeUndefined();
+      expect(administration.phaseEnd).toMatchObject({ anchor: "unresolved", description: "until " + meal + " the next day" });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("until " + meal + " the next day");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("retains next-day onset for a meal dose with no end governor", () => {
+    const source = "Take 1 tablet once before breakfast the next day", parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const stage = importCanonicalCourse(input).stages[0], administration = stage.administrations[0];
+      expect(stage.start).toMatchObject({ anchor: "treatment-day-start", displacement: { value: 1, unit: "d" } });
+      expect(administration.schedule?.recurrence).toMatchObject({ count: 1, anchors: [EventTiming["Before Breakfast"]] });
+      expect(administration.phaseEnd).toBeUndefined();
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+});

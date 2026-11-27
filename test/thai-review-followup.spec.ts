@@ -394,6 +394,38 @@ describe("round78 saved action and cycle locale ownership", () => {
     }
   });
 
+  it.each([AdviceRelation.On, AdviceRelation.Before, undefined])("retains the typed patch object with saved Time relation %s", relation => {
+    const frame = parseInstructionActions("Apply the patch in the morning")[0];
+    const object = frame.args.find(argument => argument.role === AdviceArgumentRole.Object)!;
+    expect(object).toMatchObject({ normalized: "patch", i18n: { en: "patch", th: "แผ่นแปะ" } });
+    const clocked = relation !== undefined;
+    const sourceText = relation === AdviceRelation.On ? "Apply the patch at 08:00" : relation === AdviceRelation.Before
+      ? "Apply the patch before 08:00" : "Apply the patch in the morning";
+    const graph: CanonicalInstructionGraph = { sourceText, sourceLocale: "en", actions: [{
+      ...frame, sourceText, span: { start: 0, end: sourceText.length }, relation,
+      args: [object, { role: AdviceArgumentRole.Time, text: clocked ? "08:00" : "morning",
+        normalized: clocked ? "08:00" : "MORN",
+        ...(clocked ? { relation } : { i18n: { en: "the morning", th: "ตอนเช้า" } }) }]
+    }] };
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension(graph)!] };
+    const r6 = toDosageDetails([persist(row)]);
+    for (const input of [[row], persist(r6), persist(toFhirR5Dosages(r6))]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe(relation === AdviceRelation.On ? "Apply patch at 08:00." : relation === AdviceRelation.Before
+          ? "Apply patch before 08:00." : "Apply patch in the morning.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe(relation === AdviceRelation.On ? "ทาแผ่นแปะ เวลา 08:00." : relation === AdviceRelation.Before
+          ? "ทาแผ่นแปะก่อน08:00." : "ทาแผ่นแปะตอนเช้า.");
+      const args = parseInstructionGraphExtension(toFhirR5Dosages(input)[0].extension)?.actions[0].args;
+      expect(args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Object,
+        normalized: "patch", i18n: { en: "patch", th: "แผ่นแปะ" } }));
+      expect(args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Time,
+        text: clocked ? "08:00" : "morning" }));
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
   it("matches an imported method to the configured primary action Coding", () => {
     const coding = { system: "urn:clinic:action", code: "coat-lightly", id: "authored-action",
       extension: [{ url: "urn:clinic:note", valueString: "retain" }] };

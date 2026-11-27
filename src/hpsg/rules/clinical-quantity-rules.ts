@@ -596,14 +596,15 @@ function fixedTimeQuantity(
     ...(head.marker !== undefined ? [head.marker] : []),
     ...Array.from({ length: expression.end - start }, (_, offset) => start + offset)
   ];
-  // A civil daily amount belongs to the dose unless an explicit rate marker
-  // or the selected method's runtime valence owns it as an infusion rate.
-  // Generic administration and a separately admitted maximum keep their owners.
-  if (!maximum && !head.rateSpecific && denominator.value === 1 && denominator.unit === FhirPeriodUnit.Day) {
+  // A daily amount belongs to the dose unless an explicit rate marker or the
+  // selected method's runtime valence owns it as an infusion rate. Keep an
+  // authored elapsed 24-hour denominator distinct from a civil day.
+  if (!maximum && !head.rateSpecific && (denominator.value === 1 && denominator.unit === FhirPeriodUnit.Day ||
+      denominator.value === 24 && denominator.unit === FhirPeriodUnit.Hour)) {
     const dose = { ...(range ? { range } : { value }), unit: numerator.unit };
     return clinicalSign(context, "hpsg.lex.clinicalQuantity.dailyDose", indices, range ? undefined : {
       representation: "dose", status: "resolved", numerator, denominators: [], projectedDose: { value, unit: numerator.unit }
-    }, dose, { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day });
+    }, dose, { frequency: 1, period: denominator.value, periodUnit: denominator.unit });
   }
   if (range || !clinicalRatePeriodUnit(denominator.unit)) return undefined;
   const duration = durationAfter(context, expression.end);

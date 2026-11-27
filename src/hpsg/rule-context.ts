@@ -341,9 +341,9 @@ export function medicationAmountAt(context: QuantityLexicalContext, index: numbe
   const token = context.tokens[index];
   if (!token) return false;
   const lower = normalizeTokenLower(token);
-  if ((token.kind === LexKind.Number || token.kind === LexKind.NumberRange ||
-      DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) &&
-      directDoseUnitAfter(context, index + 1)) return true;
+  const number = plainClinicalNumberAt(context, index);
+  if ((number || token.kind === LexKind.NumberRange) &&
+      directDoseUnitAfter(context, (number?.numericIndex ?? index) + 1)) return true;
   if (token.kind !== LexKind.Word) return false;
   const rawUnit = attachedNumberUnitAt(lower)?.rawUnit ??
     doseComparatorNumberAt(context.tokens, index, context.limit ?? context.tokens.length, lower)?.rawUnit;
@@ -568,6 +568,16 @@ export function courseEndClockAt(tokens: readonly Token[], start: number, limit 
   const next = start + 1 < limit ? tokens[start + 1] : undefined;
   const numeric = parseClockToken(first, next);
   if (numeric) return numeric;
+  const relation = MEAL_RELATION_BY_TOKEN.get(normalizeTokenLower(first));
+  const endLead = tokens[start - 1];
+  if (relation && endLead && RELATIVE_TIME_END_LEADS.has(normalizeTokenLower(endLead))) {
+    const eventParts: string[] = [];
+    for (let index = start + 1; index < limit && eventParts.length < MAX_EVENT_TIMING_EXPRESSION_PARTS; index++)
+      eventParts.push(normalizeTokenLower(tokens[index]));
+    const event = resolveEventTimingExpression(eventParts);
+    const timing = event && MEAL_TIMING_BY_RELATION.get(relation)?.get(event.timing);
+    if (event && timing) return { tokens: tokens.slice(start, start + 1 + event.length), event: timing };
+  }
   const parts: string[] = [];
   for (let index = start; index < limit && parts.length < MAX_EVENT_TIMING_EXPRESSION_PARTS; index++)
     parts.push(normalizeTokenLower(tokens[index]));
