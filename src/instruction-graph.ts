@@ -119,6 +119,7 @@ import {
   CanonicalSourceSpan,
   EventTiming,
   FhirCoding,
+  FhirCodeableConcept,
   MedicationCondition,
   MedicationInstructionActionArgumentParser,
   MedicationInstructionActionDefinition,
@@ -3230,6 +3231,19 @@ function pushActionIfUnique(
   );
   if (existingIndex >= 0) {
     const existing = target[existingIndex];
+    // A selected modal head owns the complete action occurrence, including
+    // the qualifier before a richer lexical action recovered inside it.
+    const modal = frame.polarity !== existing.polarity ? undefined :
+      frame.modality !== undefined && existing.modality === undefined &&
+        frame.span.start <= existing.span.start && existing.span.end <= frame.span.end ? frame :
+      existing.modality !== undefined && frame.modality === undefined &&
+        existing.span.start <= frame.span.start && frame.span.end <= existing.span.end ? existing : undefined;
+    if (modal) {
+      const semantic = actionSemanticScore(frame) > actionSemanticScore(existing) ? frame : existing;
+      target[existingIndex] = { ...semantic, force: modal.force, modality: modal.modality,
+        span: modal.span, sourceText: modal.sourceText };
+      return false;
+    }
     // A selected temporal daughter can extend or refine the recovered
     // action. Other preliminary instruction frames keep their existing owner.
     if (!appendIfNew && !frame.args.some(argument => argument.role === AdviceArgumentRole.Time &&
@@ -3503,6 +3517,15 @@ function reconcileComposedAdviceCoding(
     );
     if (supersededLocalParaphrase) return undefined;
     if (!coding?.code || !adviceCodingNeedsComposedScope(coding.system ?? SNOMED_SYSTEM, coding.code)) {
+      // The selected modal occurrence now includes the action definition's
+      // richer arguments. Advice and graph projection share that one frame.
+      if (instruction.frames?.some(frame => frame.modality !== undefined)) {
+        const frames = instruction.frames.map(frame => frame.modality === undefined ? frame :
+          actionProgram.find(semantic => semantic.predicate.lemma === frame.predicate.lemma &&
+            semantic.polarity === frame.polarity && semantic.modality === frame.modality &&
+            semantic.span.start === frame.span.start && semantic.span.end === frame.span.end) ?? frame);
+        if (frames.some((frame, index) => frame !== instruction.frames![index])) return { ...instruction, frames };
+      }
       return instruction;
     }
     if (provenCodes.has(`${coding.system ?? SNOMED_SYSTEM}|${coding.code}`)) return instruction;
@@ -3767,6 +3790,57 @@ export function buildInstructionGraph(
   refreshInstructionGraphDerivedState(graph);
   graph.primaryOwnership = inferPrimaryOwnership(graph, clause, options);
   return graph;
+}
+
+
+/** Select complete administration techniques from the already-composed clause
+ * and action program. Interchange only projects these selected codings. */
+export function instructionGraphAdministrationTechnique(
+  clause: CanonicalSigClause
+): { route?: FhirCodeableConcept; method?: FhirCodeableConcept } | undefined {
+  const graph = clause.instructionGraph;
+  const actions = graph?.actions;
+  if (!actions?.length) return undefined;
+  const occlusiveTopical = clause.route?.code === "6064005" &&
+    clause.method?.coding?.code === "738991002" && actions.some((action, index) =>
+      action.predicate.lemma === "cover" && action.polarity !== AdvicePolarity.Negate &&
+      action.modality === undefined &&
+      !graph?.relations?.some(relation => relation.toActionIndex === index &&
+        relationHasGrammarFeature(relation.kind, "conditionScope")) &&
+      action.args.some(arg => arg.conceptId === "occlusive_dressing"));
+  if (occlusiveTopical) return {
+    route: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+      code: "OCDRESTA", display: "Occlusive dressing technique" }] },
+    method: { coding: [
+      { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+        code: "C38286", display: "Occlusive Dressing Technique" },
+      { system: SNOMED_SYSTEM, code: "447056002", display: "Occlusive dressing technique" }
+    ] }
+  };
+  // Preserve the existing ordered oral-rinse technique decision. A separately
+  // administered tablet or lotion does not acquire the rinse's route.
+  const swishIndex = actions.findIndex(action =>
+    action.predicate.lemma === "swish" && action.polarity !== AdvicePolarity.Negate);
+  const swishSpit = swishIndex >= 0 && !clause.route?.code && !clause.method?.coding?.code &&
+    !actions.some(action => action.predicate.lemma === "swallow" && action.polarity !== AdvicePolarity.Negate) &&
+    actions.some((action, index) => index > swishIndex && action.predicate.lemma === "spit" &&
+      action.polarity !== AdvicePolarity.Negate);
+  const swishSwallow = swishIndex >= 0 && !swishSpit &&
+    clause.route?.code === "26643006" && clause.method?.coding?.code === "738995006" &&
+    clause.dose?.unit === "mL" &&
+    !actions.some(action => action.predicate.lemma === "spit" && action.polarity !== AdvicePolarity.Negate) &&
+    actions.some((action, index) => index > swishIndex && action.predicate.lemma === "swallow" &&
+      action.polarity !== AdvicePolarity.Negate && !action.args.some(arg =>
+        arg.conceptId === "medication-tablet" || arg.conceptId === "medication-capsule"));
+  if (!swishSpit && !swishSwallow) return undefined;
+  return { route: { text: "swish and spit, oromucosal", coding: [
+    { system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+      code: swishSpit ? "SWISHSPIT" : "SWISHSWAL",
+      display: swishSpit ? "Swish and spit out, oromucosal" : "Swish and swallow, oromucosal" },
+    { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+      code: swishSpit ? "C38302" : "C38303",
+      display: swishSpit ? "Swish and Spit Route of Administration" : "Swish and Swallow Route of Administration" }
+  ] } };
 }
 
 function translatedQuantity(

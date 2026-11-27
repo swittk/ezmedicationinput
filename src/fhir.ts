@@ -13,7 +13,7 @@ import {
   additionalInstructionFallbackText,
   findAdditionalInstructionDefinitionByCoding
 } from "./advice";
-import { realizeInstructionAction } from "./instruction-graph";
+import { realizeInstructionAction, instructionGraphAdministrationTechnique } from "./instruction-graph";
 import { getAdviceLocaleAdapter } from "./advice-locale-adapter";
 import { localeKeys } from "./localization";
 import {
@@ -1572,42 +1572,7 @@ export function serializeCanonicalContext(
   if (instructionGraphExtension) {
     dosage.extension = [instructionGraphExtension];
   }
-  // The complete topical APPLY + COVER WITH OCCLUSIVE DRESSING program is
-  // a formally coded technique. A dressing OBJECT by itself is not that route.
-  // Keep the original route, method, action, object and all local codings.
-  const occlusiveTopicalTechnique =
-    clause.route?.code === "6064005" &&
-    clause.method?.coding?.code === "738991002" &&
-    Boolean(clause.instructionGraph?.actions.some(action =>
-      action.predicate.lemma === "cover" &&
-      action.polarity !== AdvicePolarity.Negate &&
-      action.args.some(arg => arg.conceptId === "occlusive_dressing")
-    ));
-  // An ordered oral swish followed by spit is a complete coded technique,
-  // not two independent equivalent actions. Exclude swallowing and negation.
-  const instructionActions = clause.instructionGraph?.actions ?? [];
-  const swishIndex = instructionActions.findIndex(action =>
-    action.predicate.lemma === "swish" && action.polarity !== AdvicePolarity.Negate);
-  const swishSpit = swishIndex >= 0 &&
-    // A single Dosage.route cannot claim that a separately administered
-    // tablet/lotion has the same route as the oral rinse in a mixed clause.
-    !clause.route?.code && !clause.method?.coding?.code &&
-    !instructionActions.some(action =>
-      action.predicate.lemma === "swallow" && action.polarity !== AdvicePolarity.Negate) &&
-    instructionActions.some((action, index) =>
-      index > swishIndex && action.predicate.lemma === "spit" &&
-      action.polarity !== AdvicePolarity.Negate);
-  const swishSwallow = swishIndex >= 0 && !swishSpit &&
-    clause.route?.code === "26643006" &&
-    clause.method?.coding?.code === "738995006" &&
-    clause.dose?.unit === "mL" &&
-    !instructionActions.some(action =>
-      action.predicate.lemma === "spit" && action.polarity !== AdvicePolarity.Negate) &&
-    instructionActions.some((action, index) =>
-      index > swishIndex && action.predicate.lemma === "swallow" &&
-      action.polarity !== AdvicePolarity.Negate &&
-      !action.args.some(arg =>
-        arg.conceptId === "medication-tablet" || arg.conceptId === "medication-capsule"));
+  const technique = instructionGraphAdministrationTechnique(clause);
   if (clause.route?.code || clause.route?.text) {
     const routeCode = clause.route?.code;
     const coding = routeCode ? ROUTE_SNOMED[routeCode] : undefined;
@@ -1621,11 +1586,7 @@ export function serializeCanonicalContext(
             system: SNOMED_SYSTEM,
             code: coding.code,
             display: coding.display
-          },
-          ...(occlusiveTopicalTechnique ? [{
-            system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
-            code: "OCDRESTA", display: "Occlusive dressing technique"
-          }] : [])
+          }
         ]
       };
     } else if (text) {
@@ -1633,19 +1594,11 @@ export function serializeCanonicalContext(
     }
   }
 
-  if (swishSpit || swishSwallow) {
+  if (technique?.route) {
     dosage.route = {
-      text: dosage.route?.text ?? "swish and spit, oromucosal",
-      coding: [
-        ...(dosage.route?.coding ?? []),
-        { system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
-          code: swishSpit ? "SWISHSPIT" : "SWISHSWAL",
-          display: swishSpit ? "Swish and spit out, oromucosal" : "Swish and swallow, oromucosal" },
-        { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
-          code: swishSpit ? "C38302" : "C38303",
-          display: swishSpit ? "Swish and Spit Route of Administration"
-            : "Swish and Swallow Route of Administration" }
-      ]
+      ...dosage.route,
+      text: dosage.route?.text ?? technique.route.text,
+      coding: [...(dosage.route?.coding ?? []), ...(technique.route.coding ?? [])]
     };
   }
 
@@ -1703,15 +1656,16 @@ export function serializeCanonicalContext(
             display: clause.method.coding.display,
             _display: clonePrimitiveElement(clause.method.coding._display) ??
               buildTranslationPrimitiveElement(clause.method.coding.i18n)
-          },
-          ...(occlusiveTopicalTechnique ? [
-            { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
-              code: "C38286", display: "Occlusive Dressing Technique" },
-            { system: SNOMED_SYSTEM,
-              code: "447056002", display: "Occlusive dressing technique" }
-          ] : [])
+          }
         ]
         : undefined
+    };
+  }
+
+  if (technique?.method) {
+    dosage.method = {
+      ...dosage.method,
+      coding: [...(dosage.method?.coding ?? []), ...(technique.method.coding ?? [])]
     };
   }
 

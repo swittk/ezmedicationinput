@@ -7,7 +7,7 @@ import { getInstructionActionLocaleAdapter, registerInstructionActionLocaleAdapt
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
 import { setDosageCondition, withDosageEditProvenance, getDosageSourceOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
-import { realizeInstructionAction, instructionGraphRichPrimaryAction,
+import { buildInstructionGraph, realizeInstructionAction, instructionGraphRichPrimaryAction,
   instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose, instructionGraphCoversTypedWarnings
 } from "../src/instruction-graph";
 import { formatCanonicalClause } from "../src/format";
@@ -1993,6 +1993,57 @@ describe("authoritative occlusive topical route and complete technique", () => {
       const dosage = parsePublicSig(source).fhir[0];
       expect(dosage.route?.coding?.some(c => c.code === "OCDRESTA")).not.toBe(true);
       expect(dosage.method?.coding?.some(c => c.code === "C38286")).not.toBe(true);
+    }
+  });
+});
+
+describe("selected optional action meaning", () => {
+  it("keeps optional covering distinct from an unconditional occlusive administration technique", () => {
+    const source = "Apply ointment; may cover with occlusive dressing";
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    const graph = clause.instructionGraph!;
+    expect(clause.prn?.enabled).not.toBe(true);
+    expect(graph.actions).toHaveLength(1);
+    expect(graph.actions[0]).toMatchObject({
+      modality: "may", predicate: { lemma: "cover", realizer: "object-amount-material" },
+      span: { start: 16, end: 49 }, sourceText: "may cover with occlusive dressing"
+    });
+    expect(graph.actions[0].args[0]).toMatchObject({
+      role: AdviceArgumentRole.Material, conceptId: "occlusive_dressing",
+      components: [{ coding: { code: "333453004" } }, { text: "occlusive" }]
+    });
+    expect(clause.additionalInstructions?.[0].frames?.[0].args).toEqual(graph.actions[0].args);
+    const lexical = parseInstructionActions(source).find(action => action.predicate.lemma === "cover")!;
+    const selected = clause.additionalInstructions![0].frames![0];
+    for (const candidates of [[lexical, selected], [selected, lexical]]) {
+      const composed = buildInstructionGraph(source, { ...clause, additionalInstructions: [] },
+        undefined, undefined, candidates)!;
+      expect(composed.actions).toHaveLength(1);
+      expect(composed.actions[0]).toMatchObject({ modality: "may", span: { start: 16, end: 49 },
+        predicate: { lemma: "cover", realizer: "object-amount-material" } });
+      expect(composed.actions[0].args).toEqual(lexical.args);
+    }
+    const native = parsed.meta.canonical.course!;
+    expect(formatSig(native, "long", { locale: "en" })).toBe(
+      "Apply the medication topically. May cover with an occlusive dressing.");
+    expect(formatSig(native, "long", { locale: "th" })).toBe("ทา. อาจปิดคลุมด้วยแผ่นปิดแบบทึบ.");
+    for (const input of [native, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const snapshot = JSON.stringify(input);
+      const projected = projectCanonicalCourse(importCanonicalCourse(input));
+      for (const row of [projected.fhir[0], toFhirR5Dosages(projected.fhirNext)[0]]) {
+        expect(row.route?.coding?.map(coding => coding.code)).toEqual(["6064005"]);
+        expect(row.method?.coding?.map(coding => coding.code)).toEqual(["738991002"]);
+        expect(row.asNeeded).not.toBe(true);
+        const actions = fromFhirDosage(row).meta.normalized.instructionGraph?.actions;
+        expect(actions).toHaveLength(1);
+        expect(actions?.[0]).toMatchObject({ modality: "may", predicate: { lemma: "cover" },
+          sourceText: "may cover with occlusive dressing" });
+        expect(actions?.[0].args[0].codings).toContainEqual(expect.objectContaining({
+          system: "https://www.nlm.nih.gov/mesh", code: "D009779"
+        }));
+      }
+      expect(JSON.stringify(input)).toBe(snapshot);
     }
   });
 });
