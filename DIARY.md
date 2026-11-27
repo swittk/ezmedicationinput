@@ -16471,3 +16471,10 @@ calendar selection. The authored annual unit and supplied annotations remain
 intact through current FHIR conversion. Ordinal weekday previews use the shared
 cadence rule, so a two-month recurrence no longer promises an occurrence every
 month. Execution dates for the supported monthly ordinal schedules are unchanged.
+
+
+## 2026-11-27 — Condition spacing and instruction parsing
+
+Thai previews preserve a word boundary before an English condition fallback, including conditions with a mixed-language opaque body. Thai condition wording retains its existing joining.
+
+Instruction parsing checks the existing following-site boundary before evaluating a style prefix whose result cannot otherwise end the instruction. Final instruction parsing and selected clinical meaning remain unchanged.
