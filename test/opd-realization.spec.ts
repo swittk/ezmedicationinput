@@ -1199,8 +1199,10 @@ describe("round37 action participant and method ownership", () => {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
         expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
         expect(text).toContain("folic acid");
-        if (relation) expect(text).toContain(locale === "en" ? "1 tablet" : "1 เม็ด");
-        else expect(text).not.toMatch(/1 (?:tablets?|เม็ด)(?![\p{L}\p{N}])/u);
+        if (relation) {
+          expect(text).toContain(locale === "en" ? "Take 2 tablets with" : "รับประทาน 2 เม็ดร่วมกับ");
+          expect(text).toContain(locale === "en" ? "with 1 tablet folic acid" : "ร่วมกับ1 เม็ดfolic acid");
+        } else expect(text).not.toMatch(/1 (?:tablets?|เม็ด)(?![\p{L}\p{N}])/u);
       }
       saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
     }
@@ -2605,7 +2607,7 @@ describe("round47 public saved graph conditions and partial quantities", () => {
         const english = formatSig(input, "long", { locale: "en", realizationMode });
         const thai = formatSig(input, "long", { locale: "th", realizationMode });
         expect(english).toBe(postposed ? "Swallow 1 tablet if able to swallow." : "If able to swallow, swallow 1 tablet.");
-        const administration = realizationMode === "roundtrip" ? "รับประทาน 1 เม็ด" : "รับประทานครั้งละ 1 เม็ด";
+        const administration = realizationMode === "roundtrip" ? "กลืน 1 เม็ด" : "กลืนครั้งละ 1 เม็ด";
         expect(thai).toBe(postposed ? `${administration} if able to swallow.` : `If able to swallow ให้${administration}.`);
       }
       expect(JSON.stringify(input)).toBe(before);

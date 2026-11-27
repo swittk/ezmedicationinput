@@ -806,7 +806,6 @@ const THAI_METHOD_TEXT_VERBS: Record<string, string> = {
   Rub: "ถู",
   Spray: "พ่น",
   Shampoo: "สระผม",
-  Swallow: "รับประทาน",
   Take: "รับประทาน",
   "Use shampoo": "สระผม",
   Wash: "ล้าง"

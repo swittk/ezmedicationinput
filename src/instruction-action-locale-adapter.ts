@@ -182,13 +182,22 @@ function renderEnglishAccompaniment(c: InstructionActionRealizationInput): strin
   return text;
 }
 
+function thaiAccompanimentRelation(relation: AdviceRelation, locale: string): string {
+  return relation === AdviceRelation.With ? "ด้วย"
+    : relation === AdviceRelation.Without ? "โดยไม่ใช้"
+      : localizeAdviceRelation(relation, locale, "complement") ?? relation;
+}
+
+function materialRelation(c: InstructionActionRealizationInput): AdviceRelation {
+  return c.frame.args.find(arg => arg.role === AdviceArgumentRole.Material)?.relation ??
+    (relationHasSemanticClass(c.frame.relation, "accompaniment") ? c.frame.relation! : AdviceRelation.With);
+}
+
 function renderThaiAccompaniment(c: InstructionActionRealizationInput): string {
   let text = "";
   for (const content of accompanimentContent(c)) {
     if (!content.text) continue;
-    const label = content.relation === AdviceRelation.With ? "ด้วย"
-      : content.relation === AdviceRelation.Without ? "โดยไม่ใช้"
-        : localizeAdviceRelation(content.relation, c.locale, "complement") ?? content.relation;
+    const label = thaiAccompanimentRelation(content.relation, c.locale);
     text += label + content.text;
   }
   return text;
@@ -475,7 +484,9 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     }
     case "object-amount-material": {
       const object = c.theme ?? c.container;
-      return `${c.label}${object ? ` ${object}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.material ? ` with ${c.material}` : ""}`;
+      const relation = c.material ? materialRelation(c) : undefined;
+      const lead = relation && (localizeAdviceRelation(relation, c.locale, "complement") ?? relation);
+      return `${c.label}${object ? ` ${object}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.material ? ` ${lead} ${c.material}` : ""}`;
     }
     case "prime": {
       const object = c.theme ?? c.container;
@@ -638,7 +649,8 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
     }
     case "object-amount-material": {
       const object = c.theme ?? c.container;
-      return `${c.label}${object ?? ""}${c.amount ? ` ${c.amount}` : ""}${c.material ? `ด้วย${c.material}` : ""}`;
+      const lead = c.material ? thaiAccompanimentRelation(materialRelation(c), c.locale) : undefined;
+      return `${c.label}${object ?? ""}${c.amount ? ` ${c.amount}` : ""}${c.material ? `${lead}${c.material}` : ""}`;
     }
     case "prime": {
       const object = c.theme ?? c.container;
@@ -753,15 +765,14 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
     }
     const temporalRelation = !c.activity && c.time ? c.timeRelation : c.frame.relation;
     if (relationTarget && relationHasGrammarFeature(temporalRelation, "negatedRelationTarget")) {
-      if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
+      if (c.timeWasRendered !== undefined && !c.activity && c.time) c.timeWasRendered = true;
       const relation = localizeAdviceRelation(temporalRelation, c.locale) ?? temporalRelation;
-      const localTime = c.time && c.activity ? ` ${c.time}` : "";
+      const renderedTime = c.activity ? realizeTimeArgument(c) : undefined;
+      const localTime = renderedTime ? ` ${renderedTime}` : "";
       return `${prefix}${c.label.toLowerCase()}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}${localTime} ${relation} ${relationTarget}`;
     }
     if (c.duration) return `${prefix}${c.label.toLowerCase()}${object ? ` ${object}` : ""} for ${c.duration}`;
-    if (c.timeWasRendered !== undefined && object === undefined && c.activity === undefined && c.time)
-      c.timeWasRendered = true;
-    const fallback = object ?? relationTarget;
+    const fallback = object ?? c.activity ?? realizeTimeArgument(c);
     return `${prefix}${c.label.toLowerCase()}${fallback ? ` ${fallback}` : ""}`;
   },
   applyPositiveModality(text, frame) {
@@ -840,15 +851,13 @@ const TH_ADAPTER: InstructionActionLocaleAdapter = {
     }
     const temporalRelation = !c.activity && c.time ? c.timeRelation : c.frame.relation;
     if (relationTarget && relationHasGrammarFeature(temporalRelation, "negatedRelationTarget")) {
-      if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
+      if (c.timeWasRendered !== undefined && !c.activity && c.time) c.timeWasRendered = true;
       const relation = localizeAdviceRelation(temporalRelation, c.locale) ?? temporalRelation;
-      const localTime = c.time && c.activity ? c.time : "";
+      const localTime = c.activity ? realizeTimeArgument(c) ?? "" : "";
       return `${prefix}${c.label}${object ?? ""}${c.duration ? `เป็นเวลา ${c.duration}` : ""}${localTime}${relation}${relationTarget}`;
     }
     if (c.duration) return `${prefix}${c.label}${object ?? ""}เป็นเวลา ${c.duration}`;
-    if (c.timeWasRendered !== undefined && object === undefined && c.activity === undefined && c.time)
-      c.timeWasRendered = true;
-    return `${prefix}${c.label}${object ?? relationTarget ?? ""}`;
+    return `${prefix}${c.label}${object ?? c.activity ?? realizeTimeArgument(c) ?? ""}`;
   },
   applyPositiveModality(text, frame) {
     if (!frame.modality) return text;

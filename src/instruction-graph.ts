@@ -625,9 +625,9 @@ function timeArgumentsFromParts(
   nominalComplement = false
 ): AdviceArgument[] | undefined {
   const members = argumentCoordinationMembers(parts, start, endExclusive);
-  // A choice is not a list of conjunctive event obligations. Preserve its
-  // complete source complement through the existing opaque argument owner.
-  if (members.some(member => coordinationConnectorKind(member.connector) === "disjunction")) return undefined;
+  const alternative = members.some(member => coordinationConnectorKind(member.connector) === "disjunction");
+  // Temporal activity relations already retain a complete opaque choice.
+  if (alternative && relationHasGrammarFeature(relation, "activityFallback")) return undefined;
   if (members.length > 1) {
     const times: AdviceArgument[] = [];
     let inheritedRelation = relation;
@@ -640,11 +640,21 @@ function timeArgumentsFromParts(
       if (!time) {
         // A later independently marked complement belongs to the caller's
         // next relation, not to this already complete temporal conjunction.
-        return member.start >= singleEnd && times.length ? times : undefined;
+        return !alternative && member.start >= singleEnd && times.length ? times : undefined;
       }
       times.push({ ...time, relation: inheritedRelation,
         span: { start: offset + parts[bounds.start].sourceStart,
           end: offset + parts[bounds.endExclusive - 1].sourceEnd } });
+    }
+    // A licensed choice is one complete temporal complement, never a list
+    // of conjunctive event obligations. Keep its original connective.
+    if (alternative) {
+      const bounds = semanticArgumentBounds(parts, start, endExclusive);
+      const complete = argumentFromParts(parts, bounds.start, bounds.endExclusive,
+        input, AdviceArgumentRole.Time, options);
+      return complete ? [{ ...complete, role: AdviceArgumentRole.Time, relation,
+        span: { start: offset + parts[bounds.start].sourceStart,
+          end: offset + parts[bounds.endExclusive - 1].sourceEnd } }] : undefined;
     }
     // Every daughter in this relation scope was consumed completely.
     return times;
@@ -5451,16 +5461,20 @@ export interface InstructionGraphPrimaryCondition {
  * instruction realization. Unknown condition wording stays source-preserved. */
 function instructionGraphCondition(
   relation: CanonicalInstructionRelation, target: AdviceFrame,
-  sourceLocale: string, targetLocale: string
+  sourceLocale: string, targetLocale: string, sourceReplayed = false
 ): InstructionGraphPrimaryCondition | undefined {
   if (!relation.text) return undefined;
-  const normalizedRelation = normalizedInstructionSurface(relation.text);
-  const representedByTarget = target.relation === relation.kind && target.args.some((arg) => {
-    const argSurface = normalizedInstructionSurface(arg.text ?? arg.normalized ?? "");
-    return Boolean(normalizedRelation && argSurface &&
-      (normalizedRelation.includes(argSurface) || argSurface.includes(normalizedRelation)));
-  });
-  if (representedByTarget) return undefined;
+  if (sourceReplayed) {
+    // Only the selected replay can cover a source-scoped edge. An argument
+    // retained in the frame is not evidence that its canonical renderer used it.
+    if (relation.span && target.span.start <= relation.span.start &&
+        relation.span.end <= target.span.end) return undefined;
+    if (!relation.span && target.relation === relation.kind) {
+      const body = conditionRelationBody(relation.text, relation.kind);
+      if (body && target.args.some(arg =>
+          arg.role === AdviceArgumentRole.Free && arg.text.trim() === body)) return undefined;
+    }
+  }
   const text = localizeConditionRelationText(relation, sourceLocale, targetLocale);
   return text ? {
     text,
@@ -5644,6 +5658,7 @@ export function realizeInstructionGraph(
     actionIndex?: number;
     conditionTargetActionIndex?: number;
     warning?: boolean;
+    sourceReplayed?: boolean;
   }> = [];
   const targetLanguage = baseLanguageTag(locale) ?? locale.toLowerCase();
   const sourceLocale = graph.sourceLocale ?? "en";
@@ -5692,6 +5707,7 @@ export function realizeInstructionGraph(
         text,
         understood: true,
         actionIndex,
+        sourceReplayed: Boolean(sourceFaithful),
         warning: isInstructionGraphDisplayWarning(frame) || frame.force === AdviceForce.Caution
       });
     }
@@ -5701,7 +5717,12 @@ export function realizeInstructionGraph(
     const target = conditionTargets.get(relation.toActionIndex);
     if (!target || !relation.text || relation.span &&
         !inRequestedPosition(relation.span.start, relation.span.end, relation.toActionIndex)) continue;
-    const condition = instructionGraphCondition(relation, target, graph.sourceLocale ?? "en", locale);
+    const mayReplayCondition = target.sourceText && (!relation.span ||
+      target.span.start <= relation.span.start && relation.span.end <= target.span.end);
+    const targetNode = !relation.span || mayReplayCondition
+      ? nodes.find(node => node.actionIndex === relation.toActionIndex) : undefined;
+    const condition = instructionGraphCondition(relation, target, graph.sourceLocale ?? "en", locale,
+      targetNode?.sourceReplayed);
     if (!condition) continue;
     const currentCondition = options?.omitCanonicalAdministration?.clinicalAdjuncts?.condition;
     if (currentCondition && relation.toActionIndex === coveredPrimaryAction &&
@@ -5720,7 +5741,6 @@ export function realizeInstructionGraph(
       continue;
     }
     if (!relation.span) {
-      const targetNode = nodes.find(node => node.actionIndex === relation.toActionIndex);
       if (targetNode) targetNode.text += localeAdapter.postposedCondition(condition.text);
       continue;
     }

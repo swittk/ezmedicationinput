@@ -6476,11 +6476,12 @@ describe("complete typed action participants", () => {
     }
   });
 
-  it("preserves the complete choice between explicitly marked dilution times", () => {
-    const source = "Dilute 1 mL at 08:00 or at 20:00";
+  it.each(["08:00 or 20:00", "08:00 or at 20:00"])(
+    "preserves the complete dilution clock choice: %s", choice => {
+    const source = "Dilute 1 mL at " + choice;
     const action = parseInstructionActions(source)[0];
     expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Time)).toEqual([
-      expect.objectContaining({ text: "08:00 or at 20:00", relation: AdviceRelation.On })
+      expect.objectContaining({ text: choice, relation: AdviceRelation.On })
     ]);
     expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Amount,
       quantity: { value: 1, unit: "mL" } }));
@@ -6493,8 +6494,9 @@ describe("complete typed action participants", () => {
       expect(selected.args.filter(arg => arg.role === AdviceArgumentRole.Time)).toHaveLength(1);
       for (const locale of ["en", "th"]) {
         const text = formatSig(value, "long", { locale, realizationMode: "normalized" });
-        expect(text).toContain("08:00 or at 20:00");
-        expect(text).toContain(locale === "en" ? "1 mL" : "1 มิลลิลิตร");
+        expect(text).toBe(locale === "en"
+          ? `Dilute 1 mL at ${choice}.`
+          : `เจือจาง 1 มิลลิลิตร เวลา ${choice}.`);
       }
     }
     expect(parseInstructionGraphExtension(parsed.fhir[0].extension)?.sourceText).toBe(source);
@@ -6540,6 +6542,124 @@ describe("current graph realization families", () => {
     return { marker, row, course, native: importCanonicalCourse(course) };
   };
 
+  it.each([
+    [AdviceRelation.On, false, "Do not drive at 08:00", "ห้ามขับรถ เวลา 08:00"],
+    [AdviceRelation.Before, false, "Do not drive before 08:00", "ห้ามขับรถก่อน08:00"],
+    [AdviceRelation.Before, true, "Do not drive before 08:00 before taking the first dose",
+      "ห้ามขับรถก่อน08:00ก่อนรับประทานยาครั้งแรก"]
+  ] as const)("retains the selected clock relation on a negated action (%s, activity=%s)",
+    (relation, hasActivity, enBody, thBody) => {
+    const action: AdviceFrame = {
+      force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "drive", display: "Drive", semanticClass: "activity", i18n: { th: "ขับรถ" } },
+      relation, sourceText: "", span: { start: 0, end: 0 },
+      args: [
+        { role: AdviceArgumentRole.Time, text: "08:00", relation },
+        ...(hasActivity ? [{ role: AdviceArgumentRole.Activity, text: "taking the first dose",
+          i18n: { th: "รับประทานยาครั้งแรก" } }] : [])
+      ]
+    };
+    const graph = { sourceText: "", sourceLocale: "en", actions: [action] };
+    const before = JSON.stringify(graph), views = publicViews(graph);
+    expect(realizeInstructionAction(action, "en")).toBe(enBody);
+    expect(realizeInstructionAction(action, "th")).toBe(thBody);
+    for (const value of [views.native, JSON.parse(JSON.stringify([views.row])),
+      JSON.parse(JSON.stringify(views.course))]) {
+      const inputBefore = JSON.stringify(value);
+      for (const [locale, body] of [["en", enBody], ["th", thBody]]) {
+        const text = formatSig(value, "long", { locale, realizationMode: "normalized" });
+        expect(text).toBe(body + ".");
+        expect(text.split("08:00")).toHaveLength(2);
+      }
+      const saved = importCanonicalCourse(value).stages[0].administrations[0].syntax!.instructionGraph!.actions[0];
+      expect(saved.relation).toBe(relation);
+      expect(saved.args).toMatchObject(action.args);
+      expect(JSON.stringify(value)).toBe(inputBefore);
+    }
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it.each([
+    [AdviceRelation.With, "with", "ด้วย"],
+    [AdviceRelation.Without, "without", "โดยไม่ใช้"]
+  ] as const)("retains the material relation when negating Cover: %s", (relation, enLead, thLead) => {
+    const action: AdviceFrame = {
+      force: AdviceForce.Warning, polarity: AdvicePolarity.Negate, relation,
+      predicate: { lemma: "cover", display: "Cover", semanticClass: "protect",
+        realizer: "object-amount-material", i18n: { th: "ปิดคลุม" } },
+      sourceText: "", span: { start: 0, end: 0 }, args: [
+        { role: AdviceArgumentRole.Object, text: "the wound", i18n: { th: "แผล" } },
+        { role: AdviceArgumentRole.Material, text: "an occlusive dressing",
+          conceptId: "occlusive_dressing", relation, i18n: { th: "วัสดุปิดแผลชนิดปิดสนิท" } }
+      ]
+    };
+    const graph = { sourceText: "", sourceLocale: "en", actions: [action] };
+    const before = JSON.stringify(graph), views = publicViews(graph);
+    for (const value of [views.native, JSON.parse(JSON.stringify([views.row])),
+      JSON.parse(JSON.stringify(views.course))]) {
+      const inputBefore = JSON.stringify(value);
+      expect(formatSig(value, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe(`Do not cover the wound ${enLead} an occlusive dressing.`);
+      expect(formatSig(value, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe(`ห้ามปิดคลุมแผล${thLead}วัสดุปิดแผลชนิดปิดสนิท.`);
+      const saved = importCanonicalCourse(value).stages[0].administrations[0].syntax!.instructionGraph!.actions[0];
+      expect(saved.polarity).toBe(AdvicePolarity.Negate);
+      expect(saved.args[1]).toMatchObject(action.args[1]);
+      expect(JSON.stringify(value)).toBe(inputBefore);
+    }
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it.each([false, true])("retains a graph condition when its Free argument was not rendered (source=%s)", replay => {
+    const source = replay ? "Do not drive if affected" : "";
+    const action: AdviceFrame = {
+      force: AdviceForce.Warning, polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
+      predicate: { lemma: "drive", display: "Drive", semanticClass: "activity", i18n: { th: "ขับรถ" } },
+      sourceText: source, span: { start: 0, end: source.length },
+      args: [{ role: AdviceArgumentRole.Free, text: "affected" }]
+    };
+    const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en", actions: [action],
+      relations: [{ kind: AdviceRelation.If, toActionIndex: 0, text: "if affected" }] };
+    const before = JSON.stringify(graph), views = publicViews(graph);
+    for (const value of [views.native, JSON.parse(JSON.stringify([views.row])),
+      JSON.parse(JSON.stringify(views.course))]) {
+      const inputBefore = JSON.stringify(value);
+      expect(formatSig(value, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Do not drive if affected.");
+      expect(formatSig(value, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("ห้ามขับรถ if affected.");
+      const saved = importCanonicalCourse(value).stages[0].administrations[0].syntax!.instructionGraph!;
+      expect(saved.relations).toMatchObject(graph.relations!);
+      expect(saved.actions[0].args).toHaveLength(1);
+      expect(saved.actions[0].args[0]).toMatchObject(action.args[0]);
+      expect(saved.sourceText).toBe(source);
+      expect(JSON.stringify(value)).toBe(inputBefore);
+    }
+    expect(toFhirR5Dosages(views.course)[0].extension).toContainEqual({
+      url: "urn:clinic:instruction-note", valueString: "Keep supplied graph"
+    });
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it("keeps an unqualified graph warning distinct from a conditional warning", () => {
+    const action: AdviceFrame = {
+      force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "drive", display: "Drive", semanticClass: "activity", i18n: { th: "ขับรถ" } },
+      sourceText: "", span: { start: 0, end: 0 }, args: []
+    };
+    const graph: CanonicalInstructionGraph = { sourceText: "", sourceLocale: "en", actions: [action] };
+    const before = JSON.stringify(graph), views = publicViews(graph);
+    for (const value of [views.native, JSON.parse(JSON.stringify([views.row])),
+      JSON.parse(JSON.stringify(views.course))]) {
+      const inputBefore = JSON.stringify(value);
+      expect(formatSig(value, "long", { locale: "en", realizationMode: "normalized" })).toBe("Do not drive.");
+      expect(formatSig(value, "long", { locale: "th", realizationMode: "normalized" })).toBe("ห้ามขับรถ.");
+      expect(importCanonicalCourse(value).stages[0].administrations[0].syntax!.instructionGraph!.relations ?? []).toEqual([]);
+      expect(JSON.stringify(value)).toBe(inputBefore);
+    }
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
   it("keeps every selected rinse accompaniment and its own relation", () => {
     const saline = { role: AdviceArgumentRole.Substance, relation: AdviceRelation.With,
       text: "saline", normalized: "saline", i18n: { en: "saline", th: "น้ำเกลือ" } };
@@ -6582,6 +6702,8 @@ describe("current graph realization families", () => {
         expect(en).toContain("remove the old patch");
         expect(en).toContain("apply the new patch");
         expect(en.indexOf("remove the old patch")).toBeLessThan(en.indexOf("apply the new patch"));
+        expect(th).toContain("แผ่นยาเก่า");
+        expect(th).toContain("แผ่นยาใหม่");
         expect(th.indexOf("แผ่นยาเก่า")).toBeLessThan(th.indexOf("แผ่นยาใหม่"));
         const current = importCanonicalCourse(value).stages[0].administrations[0].syntax!.instructionGraph!;
         expect(current.relations).toMatchObject(graph.relations!);
