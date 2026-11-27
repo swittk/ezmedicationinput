@@ -586,7 +586,7 @@ describe("round49 endpoint units and normalized conditions", () => {
     { name: "independently valued endpoints", range: {
       low: { value: 1, unit: "mg" }, high: { value: 1, unit: "g" }
     }, short: ["Dose: 1 mg – 1 g", "ขนาดยาต่อครั้ง: 1 mg – 1 g"],
-      long: ["Use; Dose: 1 mg – 1 g", "ใช้; ขนาดยาต่อครั้ง: 1 mg – 1 g"] }
+      long: ["Use; Dose: 1 mg – 1 g.", "ใช้; ขนาดยาต่อครั้ง: 1 mg – 1 g."] }
   ];
 
   it.each(cases)("uses the valued unit without rewriting $name", ({ range, short, long }) => {

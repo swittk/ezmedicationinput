@@ -3699,7 +3699,7 @@ describe("parseSig core scenarios", () => {
     };
     expect(again.meta.canonical.administration?.amounts?.[0].range).toEqual(endpoints);
     expect(again.fhir.doseAndRate?.[0].doseRange).toEqual(endpoints);
-    expect(again.longText).toBe("Use; Dose: 1 tab – 2 mL");
+    expect(again.longText).toBe("Use; Dose: 1 tab – 2 mL.");
   });
 
   it("does not emit empty timing objects when no timing data is present", () => {
