@@ -71,8 +71,12 @@ export function convertValue(
         return (value * fFactor) / tFactor;
     }
 
-    // 2. Cross-category conversion using strength
-    if (strength && ((fCat === "mass" && tCat === "volume") || (fCat === "volume" && tCat === "mass"))) {
+    // 2. Cross-category conversion using strength. A common patient-weight
+    // denominator remains on both sides and cancels from the concentration.
+    if (strength && ((fCat === "mass" && tCat === "volume") ||
+        (fCat === "volume" && tCat === "mass") ||
+        (fCat === "mass-per-weight" && tCat === "volume-per-weight") ||
+        (fCat === "volume-per-weight" && tCat === "mass-per-weight"))) {
         const numUnit = strength.numerator.unit.toLowerCase();
         const denUnit = strength.denominator.unit.toLowerCase();
         const numCat = getUnitComparisonCategory(numUnit);
@@ -85,7 +89,7 @@ export function convertValue(
             // Normalize bridge to base units (mg/mL)
             const bridgeDensity = (massSide.value * getBaseUnitFactor(massSide.unit)) / (volSide.value * getBaseUnitFactor(volSide.unit));
 
-            if (fCat === "mass") {
+            if (fCat === "mass" || fCat === "mass-per-weight") {
                 // Mass to Volume: value_mg / density_mg_per_ml
                 const valueMg = value * getBaseUnitFactor(fromUnit);
                 const valueMl = valueMg / bridgeDensity;

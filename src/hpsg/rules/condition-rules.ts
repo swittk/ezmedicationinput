@@ -335,7 +335,7 @@ function withholdsMedicationAdministration(
         ["only", "the"].indexOf(normalizeTokenLower(token)) >= 0 ||
         DOSE_TARGET_QUANTIFIERS.has(normalizeTokenLower(token)))) return true;
     if (words.some(word => resolveMedicationInstructionConcept(word, context.options)?.code === "medication-dose" ||
-        prohibitedAdministration && normalizeUnit(word, context.options))) return true;
+        effect === "withhold" && normalizeUnit(word, context.options))) return true;
 
     // A selected dose slot is a nominal head plus its event modifier, not a
     // food object. The typed conditionTarget below must subsequently bind to
@@ -618,7 +618,7 @@ function targetedWithholdingCalendarAt(context: HpsgClauseContext, start: number
         });
       }
     }
-    if (!target.dose && !target.when?.length && !target.timeOfDay?.length && !target.clockRange && !target.quantifier) continue;
+    if (!target.dose && !target.site && !target.when?.length && !target.timeOfDay?.length && !target.clockRange && !target.quantifier) continue;
     let rangeStart = frame.span.start, rangeEnd = frame.span.end;
     let calendarSpan: { start: number; end: number } | undefined;
     let calendarArgument: AdviceFrame["args"][number] | undefined;

@@ -1,4 +1,5 @@
 import { convertQuantityValue } from "../src/utils/units";
+import { getQuantityComparator } from "../src/fhir-quantity-operator";
 import { describe, expect, it } from "vitest";
 import { parserStateFromFhir } from "../src/fhir";
 import { calculateTotalUnits, formatSig, getDosageCondition, parseSig as parseBatch, importCanonicalCourse, nextDueDoses, toDosageDetails, toFhirR5Dosages, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src/index";
@@ -1844,6 +1845,9 @@ describe("recognized duration labels and qualified scheduling quantities", () =>
     expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
       period: 6, periodUnit: "h", maxDosePerPeriod: [{ amount: 4, unit: "tab", period: 1, periodUnit: "d" }]
     });
+    const maximum = parsed.meta.canonical.clauses[0].schedule!.maxDosePerPeriod![0];
+    expect(maximum.amountComparator ?? "<=").toBe("<=");
+    expect(maximum.periodComparator).toBeUndefined();
     const projected = toFhirR5Dosages(parsed.fhirNext);
     expect(parsed.fhir).toHaveLength(1);
     expect(projected).toHaveLength(1);
@@ -1853,6 +1857,18 @@ describe("recognized duration labels and qualified scheduling quantities", () =>
       expect(row.maxDosePerPeriod).toMatchObject([
         { numerator: { value: 4, unit: "tab" }, denominator: { value: 1, unit: "d" } }
       ]);
+      expect(getQuantityComparator(row.maxDosePerPeriod![0].numerator) ?? "<=").toBe("<=");
+      expect(getQuantityComparator(row.maxDosePerPeriod![0].denominator)).toBeUndefined();
+    }
+    const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 4 };
+    for (const dosage of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-12-01T00:00:00+00:00", "2026-12-01T06:00:00+00:00",
+        "2026-12-01T12:00:00+00:00", "2026-12-01T18:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 4, unit: "tab" });
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
@@ -1915,5 +1931,47 @@ describe("supported compound quantity annotations", () => {
     expect(convertQuantityValue(1, quantity("mg{drug}/kg", "https://example.org/local-units"), quantity("mg/kg"))).toBeNull();
     expect(convertQuantityValue(1, quantity("dose{local}", "https://example.org/local-units"),
       quantity("dose{local}", "https://example.org/local-units"))).toBe(1);
+  });
+});
+
+
+describe("concentration across a shared patient-weight denominator", () => {
+  it("applies a mass-per-kg cap to volume-per-kg doses without inventing patient weight", () => {
+    const strength = { numerator: { value: 2, unit: "mg" }, denominator: { value: 1, unit: "mL" } };
+    expect(convertQuantityValue(1, { unit: "mL/kg" }, { unit: "mg/kg" }, strength)).toBe(2);
+    expect(convertQuantityValue(3, { unit: "mg/kg" }, { unit: "mL/kg" }, strength)).toBe(1.5);
+    expect(convertQuantityValue(1, { unit: "mL" }, { unit: "mg/kg" }, strength)).toBeNull();
+    expect(convertQuantityValue(1, { unit: "mL/kg" }, { unit: "mg" }, strength)).toBeNull();
+    const row: FhirDosage = {
+      id: "per-weight-dose",
+      doseAndRate: [{ doseQuantity: { id: "dose", value: 1, unit: "mL/kg",
+        system: "http://unitsofmeasure.org", code: "mL/kg",
+        extension: [{ url: "https://clinic.example/dose-note", valueString: "per kilogram volume" }] } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"] } },
+      maxDosePerPeriod: [{ numerator: { id: "cap", value: 3, unit: "mg/kg",
+        system: "http://unitsofmeasure.org", code: "mg/kg",
+        extension: [{ url: "https://clinic.example/cap-note", valueString: "per kilogram mass" }] },
+        denominator: { value: 24, unit: "h", system: "http://unitsofmeasure.org", code: "h" } }]
+    };
+    const original = JSON.stringify(row), r6 = toDosageDetails([row]);
+    const restored = toFhirR5Dosages(JSON.parse(JSON.stringify(r6)));
+    expect(restored).toHaveLength(1);
+    expect(restored[0].doseAndRate![0].doseQuantity).toEqual(row.doseAndRate![0].doseQuantity);
+    expect(restored[0].maxDosePerPeriod).toEqual(row.maxDosePerPeriod);
+    for (const dosage of [importCanonicalCourse([row]), JSON.parse(JSON.stringify([row])),
+      JSON.parse(JSON.stringify(r6))]) {
+      const before = JSON.stringify(dosage);
+      const member = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "mL/kg" });
+      expect(member.limits?.[0]).toMatchObject({ scope: "period", amount: { value: 3, unit: "mg/kg" },
+        period: { value: 24, unit: "h" } });
+      expect(calculateTotalUnits({ dosage, context: { strength: "2 mg/mL" },
+        orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC",
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 1, unit: "mL/kg" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    expect(JSON.stringify(row)).toBe(original);
   });
 });

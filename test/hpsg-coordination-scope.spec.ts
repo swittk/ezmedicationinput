@@ -651,7 +651,9 @@ describe('HPSG coordination cadence scope', () => {
     expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
     expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.condition).toMatchObject(condition);
     expect(parsed.fhir).toHaveLength(1);
-    for (const row of [parsed.fhir[0], ...toFhirR5Dosages(parsed.fhirNext)]) {
+    const converted = toFhirR5Dosages(parsed.fhirNext);
+    expect(converted).toHaveLength(1);
+    for (const row of [parsed.fhir[0], converted[0]]) {
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
       expect(getDosageCondition(row)).toMatchObject(condition);
       expect(row.asNeeded).not.toBe(true);
@@ -789,8 +791,25 @@ describe('HPSG coordination cadence scope', () => {
     ["ถ้าเวียนศีรษะ ห้ามเคี้ยว 1 เม็ด", "กลืน 1 เม็ด ทุกวัน", "เวียนศีรษะ"]
   ])("keeps quantified negative advice separate from positive PRN: %s", (advice, standing, symptom) => {
     const adviceOnly = parsePublicSig(advice);
+    expect(adviceOnly.meta.canonical.clauses).toHaveLength(1);
+    expect(adviceOnly.fhir).toHaveLength(1);
     expect(adviceOnly.meta.canonical.clauses.every(clause => !clause.dose && !clause.prn?.enabled)).toBe(true);
     expect(adviceOnly.fhir.every(row => !row.doseAndRate && !row.asNeeded)).toBe(true);
+    for (const view of [adviceOnly.meta.canonical.course!, JSON.parse(JSON.stringify(adviceOnly.fhir)),
+      JSON.parse(JSON.stringify(adviceOnly.fhirNext))]) {
+      const members = importCanonicalCourse(view).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts).toBeUndefined();
+      expect(members[0].asNeeded).not.toBe(true);
+      const graph = members[0].syntax?.instructionGraph;
+      expect(graph?.actions).toHaveLength(1);
+      expect(graph!.actions[0]).toMatchObject({ predicate: { lemma: "chew" }, polarity: "negate" });
+      expect(graph!.relations).toContainEqual(expect.objectContaining({
+        kind: "if", toActionIndex: 0, text: expect.stringContaining(symptom)
+      }));
+    }
+    expect(adviceOnly.input).toBe(advice);
+    expect(adviceOnly.fhirNext.renderedInstruction).toBe(advice);
     const input = `${standing}; ${advice}`, parsed = parsePublicSig(input);
     expect(parsed.meta.canonical.clauses).toHaveLength(1);
     for (const row of [parsed.fhir[0], ...toFhirR5Dosages(parsed.fhirNext)]) {
@@ -3248,6 +3267,57 @@ describe("registered withholding calendar and maximum constituents", () => {
 
 
 describe("withholding target identity", () => {
+  it.each([
+    "Skip the drops in the left eye on Mondays.",
+    "On Mondays skip the drops in the left eye."
+  ])("binds a site-only weekday withholding target: %s", advice => {
+    const source = "Instill 1 drop in the right eye at 08:00 and 1 drop in the left eye at 20:00 daily for 7 days. " + advice;
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const query = { from: "2026-11-23T00:00:00Z", orderedAt: "2026-11-23T00:00:00Z", timeZone: "UTC", limit: 20 };
+    const expected = [
+      "2026-11-23T08:00:00+00:00",
+      "2026-11-24T08:00:00+00:00", "2026-11-24T20:00:00+00:00",
+      "2026-11-25T08:00:00+00:00", "2026-11-25T20:00:00+00:00",
+      "2026-11-26T08:00:00+00:00", "2026-11-26T20:00:00+00:00",
+      "2026-11-27T08:00:00+00:00", "2026-11-27T20:00:00+00:00",
+      "2026-11-28T08:00:00+00:00", "2026-11-28T20:00:00+00:00",
+      "2026-11-29T08:00:00+00:00", "2026-11-29T20:00:00+00:00"
+    ];
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const inputBefore = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(2);
+      expect(members.map(member => member.target?.coding?.[0]?.code)).toEqual(["1290032005", "1290031003"]);
+      expect(members.map(member => member.amounts?.[0].quantity)).toMatchObject([
+        { value: 1, unit: "drop" }, { value: 1, unit: "drop" }
+      ]);
+      expect(members.map(member => member.schedule?.recurrence?.clocks)).toEqual([["08:00:00"], ["20:00:00"]]);
+      expect(members[0].excludedWeekdays).toBeUndefined();
+      expect(members[1].excludedWeekdays).toEqual(["mon"]);
+      const warnings = members.flatMap(member => member.syntax?.instructionGraph?.actions ?? [])
+        .filter(action => action.predicate.lemma === "withhold-administration");
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].args).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: "site", coding: expect.objectContaining({ code: "1290031003" }) }),
+        expect.objectContaining({ role: "time", relation: "on", text: expect.stringContaining("Mondays") })
+      ]));
+      expect(warnings[0].sourceText).toBe(advice.slice(0, -1));
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en.match(/\b(?:skip|withhold administration)\b/gi)).toHaveLength(1);
+      expect(en).toMatch(/(?:Skip the drops in the left eye on Mondays|On Mondays skip the drops in the left eye|Withhold administration the drops in the left eye on Monday)\.$/);
+      expect(th.split(advice).length - 1).toBe(1);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 13, unit: "drop" });
+      expect(JSON.stringify(input)).toBe(inputBefore);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
   const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 8 };
   it.each([
     ["in the left eye", ["20:00:00"], 2],

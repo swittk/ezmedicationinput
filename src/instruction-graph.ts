@@ -1358,7 +1358,7 @@ const OBJECT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const localTime = relIndex >= argumentStart && relIndex + 1 < segmentEnd &&
     !duration && !c.conditionalTail &&
     relationHasGrammarFeature(c.relation, "timeComplement")
-      ? argumentFromParts(parts, relIndex + 1, segmentEnd, input, AdviceArgumentRole.Time, options)
+      ? argumentFromParts(parts, relIndex + 1, c.relationTargetEnd, input, AdviceArgumentRole.Time, options)
       : undefined;
   return { args: parsedArgs(
     objectEnd > argumentStart
@@ -1982,6 +1982,19 @@ function buildActionFrame(
     pushArgument(args, argumentFromParts(
       parts, nextRelationIndex + 1, segmentEnd, input, AdviceArgumentRole.Activity, options
     ));
+  } else if (temporalIndex >= 0 &&
+      (definition.argumentParser === "object-duration" || definition.argumentParser === "bare-duration") &&
+      relationHasGrammarFeature(temporalRelation, "timeComplement")) {
+    // This valence already retains an opaque first Time complement. Preserve
+    // a later calendar nominal separately from its preceding typed site too.
+    const bounds = semanticArgumentBounds(parts, temporalIndex + 1, semanticEnd);
+    const time = argumentFromParts(parts, bounds.start, bounds.endExclusive, input, AdviceArgumentRole.Time, options);
+    if (time) {
+      time.relation = temporalRelation;
+      time.span = { start: offset + parts[bounds.start].sourceStart,
+        end: offset + parts[bounds.endExclusive - 1].sourceEnd };
+      pushArgument(args, time);
+    }
   }
   const materialAttached = args.some((arg) =>
     arg.role === AdviceArgumentRole.Substance || arg.role === AdviceArgumentRole.Material
@@ -3848,12 +3861,6 @@ export function buildInstructionGraph(
     }
   }
   const reconciledOpaque = reconcileOpaqueWithActionCoverage(input, opaqueSpans, actions, clause.additionalInstructions);
-  if (!clause.method && actions.some(action => !isInstructionGraphDisplayWarning(action))) {
-    const firstStart = Math.min(...actions.map((action) => action.span.start));
-    const lastEnd = Math.max(...actions.map((action) => action.span.end));
-    const exactProcedureText = input.slice(firstStart, lastEnd).trim();
-    if (exactProcedureText) clause.patientInstruction = exactProcedureText;
-  }
   const graph: CanonicalInstructionGraph = {
     actions,
     primaryAdministrationSpan,
@@ -3864,6 +3871,19 @@ export function buildInstructionGraph(
   const hpsgConditionRelations = conditionRelationsFromHpsgScopes(clause, input, actions);
   graph.relations = hpsgConditionRelations.length ? hpsgConditionRelations : undefined;
   refreshInstructionGraphDerivedState(graph);
+  // Selected advice already owns its complete typed action occurrence. A
+  // separate patient-text projection is still needed for an unowned action
+  // or a related program; supplied patient instructions remain unchanged.
+  if (!clause.method && actions.some(action => !isInstructionGraphDisplayWarning(action) && (
+    graph.relations?.length || !(clause.additionalInstructions ?? []).some(instruction =>
+      instruction.frames?.some(frame => frame.span.start === action.span.start &&
+        frame.span.end === action.span.end && sameTypedWarning(frame, action)))
+  ))) {
+    const firstStart = Math.min(...actions.map((action) => action.span.start));
+    const lastEnd = Math.max(...actions.map((action) => action.span.end));
+    const exactProcedureText = input.slice(firstStart, lastEnd).trim();
+    if (exactProcedureText) clause.patientInstruction = exactProcedureText;
+  }
   graph.primaryOwnership = inferPrimaryOwnership(graph, clause, options);
   return graph;
 }

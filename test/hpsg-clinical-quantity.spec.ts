@@ -1727,7 +1727,7 @@ describe("adversarial compact infusion carriers and leading-decimal rates", () =
       expectSimpleQuantityOperator(reopened?.doseQuantity, approximateDrug ? "~" : undefined);
       expect(reopened?.rateRatio?.numerator?.comparator).toBe(approximateCarrier ? "~" : undefined);
       expect(reopened?.rateRatio?.denominator).toMatchObject({ value: 4, unit: "h" });
-      expect(reopened?.rateRatio?.denominator?.comparator).toBeUndefined();
+      expect(getQuantityComparator(reopened?.rateRatio?.denominator)).toBeUndefined();
       expect(parsed.input).toBe(input);
     }
   );

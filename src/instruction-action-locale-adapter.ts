@@ -502,7 +502,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       return time ? `${body} ${time}` : body;
     }
     case "object-duration": {
-      const object = c.theme ?? c.site;
+      const object = c.theme && c.site ? siteRelationObject(c) : c.theme ?? c.site;
       const timeRelation = c.timeRelation;
       const relation = c.time && timeRelation &&
         relationHasGrammarFeature(timeRelation, "timeComplement")
@@ -667,7 +667,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       return time ? `${body}${time}` : body;
     }
     case "object-duration": {
-      const object = c.theme ?? c.site;
+      const object = c.theme && c.site ? siteRelationObject(c) : c.theme ?? c.site;
       const timeRelation = c.timeRelation;
       const relation = c.time && timeRelation &&
         relationHasGrammarFeature(timeRelation, "timeComplement")

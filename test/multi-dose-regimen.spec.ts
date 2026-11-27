@@ -330,6 +330,9 @@ describe("heterogeneous multi-dose regimens", () => {
     expect(parsed.count).toBe(1);
     expect(clause.dose).toMatchObject({ value: 1, unit: "tab" });
     expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(clause.schedule?.when).toBeUndefined();
+    expect(parsed.fhir[0].timing?.repeat?.when).toBeUndefined();
+    expect(parsed.fhirNext.step[0].component[0].timing?.repeat?.when).toBeUndefined();
     expect(clause.additionalInstructions).toHaveLength(1);
     const directive = clause.additionalInstructions![0].frames![0];
     const action = clause.instructionGraph!.actions[0];
