@@ -8709,46 +8709,84 @@ describe("current instruction occurrence projection stability", () => {
     }
   });
 
-  it.each(["r5", "r6"] as const)("keeps Coding annotations separate from clinical instruction identity in fresh %s", form => {
-    const parsed = parsePublicSig("Take 1 tablet daily. Do not drive.");
-    let wire: CurrentWire = fresh(form === "r5" ? parsed.fhir : parsed.fhirNext);
-    const row = Array.isArray(wire) ? wire[0] : wire.step![0].component[0];
-    const baseline = ["en", "th"].map(locale => formatSig(wire, "long", { locale, realizationMode: "normalized" }));
-    const baselineProjection = projectCanonicalCourse(importCanonicalCourse(wire));
-    const originalRows = [baselineProjection.fhir[0], baselineProjection.fhirNext.step![0].component[0]];
-    expect(baseline[0]).toBe("Take 1 tablet orally once daily. Do not drive.");
-    expect(row.additionalInstruction).toHaveLength(1);
-    const marker = row.additionalInstruction![0].extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!;
-    const action = marker.extension!.find(item => item.url === "action")!;
-    const coding = action.extension!.find(item => item.url === "predicateCoding")!.valueCoding!;
-    expect(coding.code).toBeDefined();
-    const note = { url: "urn:clinic:instruction-code-note", valueString: "retain without changing the instruction" };
-    coding.id = "authored-driving-code";
-    coding._code = { ...coding._code, id: "authored-driving-code-value", extension: [...(coding._code?.extension ?? []), note] };
-    coding.extension = [...(coding.extension ?? []), note];
-    const annotatedCoding = fresh(coding);
+  for (const form of ["r5", "r6"] as const) {
+    it.each(["element", "display", "userSelected", "i18n"] as const)(`keeps Coding %s annotations separate from clinical instruction identity in fresh ${form}`, variant => {
+      const parsed = parsePublicSig("Take 1 tablet daily. Do not drive.");
+      let wire: CurrentWire = fresh(form === "r5" ? parsed.fhir : parsed.fhirNext);
+      const row = Array.isArray(wire) ? wire[0] : wire.step![0].component[0];
+      const baseline = ["en", "th"].map(locale => formatSig(wire, "long", { locale, realizationMode: "normalized" }));
+      const baselineProjection = projectCanonicalCourse(importCanonicalCourse(wire));
+      const originalRows = [baselineProjection.fhir[0], baselineProjection.fhirNext.step![0].component[0]];
+      expect(baseline[0]).toBe("Take 1 tablet orally once daily. Do not drive.");
+      expect(row.additionalInstruction).toHaveLength(1);
+      const marker = row.additionalInstruction![0].extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!;
+      const action = marker.extension!.find(item => item.url === "action")!;
+      const coding = action.extension!.find(item => item.url === "predicateCoding")!.valueCoding!;
+      expect(coding.code).toBeDefined();
+      const note = { url: "urn:clinic:instruction-code-note", valueString: "retain without changing the instruction" };
+      if (variant === "element") {
+        coding.id = "authored-driving-code";
+        coding._code = { ...coding._code, id: "authored-driving-code-value", extension: [...(coding._code?.extension ?? []), note] };
+        coding.extension = [...(coding.extension ?? []), note];
+      } else if (variant === "display") coding.display = "Driving warning selected by clinician";
+      else if (variant === "userSelected") coding.userSelected = !coding.userSelected;
+      else coding.i18n = { ...coding.i18n, en: "Driving warning", th: "คำเตือนเรื่องการขับรถ" };
+      const annotatedCoding = fresh(coding);
 
-    for (let cycle = 0; cycle < 3; cycle++) {
-      const before = fresh(wire);
-      for (const [index, locale] of ["en", "th"].entries())
-        expect(formatSig(wire, "long", { locale, realizationMode: "normalized" })).toBe(baseline[index]);
+      for (let cycle = 0; cycle < 3; cycle++) {
+        const before = fresh(wire);
+        for (const [index, locale] of ["en", "th"].entries())
+          expect(formatSig(wire, "long", { locale, realizationMode: "normalized" })).toBe(baseline[index]);
+        const projected = projectCanonicalCourse(importCanonicalCourse(wire));
+        for (const [index, output] of [projected.fhir[0], projected.fhirNext.step![0].component[0]].entries()) {
+          const original = originalRows[index];
+          expect(output.additionalInstruction).toHaveLength(1);
+          const retained = output.additionalInstruction![0].extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!;
+          const current = retained.extension!.find(item => item.url === "action")!;
+          expect(current.extension!.find(item => item.url === "predicateCoding")!.valueCoding).toEqual(annotatedCoding);
+          expect(parseInstructionGraphExtension(output.extension)!.sourceText)
+            .toBe("Take 1 tablet daily. Do not drive.");
+          expect(output.patientInstruction).toBe(original.patientInstruction);
+          expect(output.doseAndRate).toEqual(original.doseAndRate);
+          expect(output.timing?.repeat).toEqual(original.timing?.repeat);
+        }
+        expect(wire).toEqual(before);
+        wire = fresh(form === "r5" ? projected.fhir : projected.fhirNext);
+      }
+    });
+
+
+    it.each(["code", "system", "version"] as const)(`keeps distinct selected Coding %s facts in fresh ${form}`, field => {
+      const parsed = parsePublicSig("Take 1 tablet daily. Do not drive.");
+      const wire: CurrentWire = fresh(form === "r5" ? parsed.fhir : parsed.fhirNext);
+      const row = Array.isArray(wire) ? wire[0] : wire.step![0].component[0];
+      const marker = row.additionalInstruction![0].extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!;
+      const selected = marker.extension!.find(item => item.url === "action")!.extension!
+        .find(item => item.url === "predicateCoding")!.valueCoding!;
+      const graphMarker = row.extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!;
+      const graphCoding = graphMarker.extension!.find(item => item.url === "action")!.extension!
+        .find(item => item.url === "predicateCoding")!.valueCoding!;
+      if (field === "version") graphCoding.version = "20260101";
+      const originalCoding = fresh(graphCoding);
+      selected[field] = field === "code" ? "clinic-driving-prohibition"
+        : field === "system" ? "urn:clinic:instruction-codes" : "20261101";
+      const selectedCoding = fresh(selected), before = fresh(wire);
+      expect(formatSig(wire, "long", { locale: "en", realizationMode: "normalized" }).match(/do not drive/giu)).toHaveLength(2);
       const projected = projectCanonicalCourse(importCanonicalCourse(wire));
-      for (const [index, output] of [projected.fhir[0], projected.fhirNext.step![0].component[0]].entries()) {
-        const original = originalRows[index];
-        expect(output.additionalInstruction).toHaveLength(1);
-        const retained = output.additionalInstruction![0].extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!;
-        const current = retained.extension!.find(item => item.url === "action")!;
-        expect(current.extension!.find(item => item.url === "predicateCoding")!.valueCoding).toEqual(annotatedCoding);
+      for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
+        expect(output.additionalInstruction).toHaveLength(2);
+        const codings = output.additionalInstruction!.flatMap(instruction =>
+          parseInstructionGraphExtension(instruction.extension)?.actions[0].predicate.codings ?? []);
+        expect(codings).toContainEqual(selectedCoding);
+        expect(codings).toContainEqual(originalCoding);
+        expect(output.doseAndRate).toEqual(row.doseAndRate);
+        expect(output.timing?.repeat).toEqual(row.timing?.repeat);
         expect(parseInstructionGraphExtension(output.extension)!.sourceText)
           .toBe("Take 1 tablet daily. Do not drive.");
-        expect(output.patientInstruction).toBe(original.patientInstruction);
-        expect(output.doseAndRate).toEqual(original.doseAndRate);
-        expect(output.timing?.repeat).toEqual(original.timing?.repeat);
       }
       expect(wire).toEqual(before);
-      wire = fresh(form === "r5" ? projected.fhir : projected.fhirNext);
-    }
-  });
+    });
+  }
 
   for (const form of ["r5", "r6"] as const) {
     it.each([
