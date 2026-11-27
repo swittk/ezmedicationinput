@@ -15,6 +15,7 @@ import { Token } from "../../parser-state";
 import { resolveBodySiteLexeme } from "../../body-site-grammar";
 import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, RouteCode, type ParseOptions } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
+import { inferUnitFromContext } from "../../context";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { frameActionDefinition } from "../../instruction-graph";
@@ -90,6 +91,7 @@ import {
   maximumDosePerPeriodAt,
   normalizeTokenLower,
   parseClockToken,
+  plainClinicalNumberAt,
   rangeFromTokens,
   tokensAvailable
 } from "../rule-context";
@@ -995,6 +997,17 @@ export function explicitDoseLexicalEnd(
   if (prefix) return explicitScalarDoseLexicalEnd(tokens, prefix.quantityStart, options, limit);
   if (quantityHasSupplementalPrefix(tokens, start)) return undefined;
   return explicitScalarDoseLexicalEnd(tokens, start, options, limit);
+}
+
+/** A written unit or the existing medication context can complete a numeric
+ * dose daughter. This is boundary admission; the dose rule still owns its value. */
+export function contextualDoseLexicalEnd(
+  tokens: Token[], start: number, options?: ParseOptions, limit = tokens.length
+): number | undefined {
+  const explicit = explicitDoseLexicalEnd(tokens, start, options, limit);
+  if (explicit !== undefined || !inferUnitFromContext(options?.context ?? undefined)) return explicit;
+  const number = plainClinicalNumberAt({ tokens, options, limit }, start);
+  return number ? number.numericIndex + 1 : undefined;
 }
 
 function percentBodyAreaDoseAfter(

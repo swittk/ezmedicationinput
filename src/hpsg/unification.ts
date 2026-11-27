@@ -900,7 +900,9 @@ export function unifySynsem(
       (!quantity || (quantity.representation === "dose" && quantity.status === "resolved" &&
         !quantity.denominators.some(term => term.dimension === "time"))) &&
       dose.value !== undefined && dose.unit &&
-      schedule?.frequency === 1 && schedule.period === 1 && schedule.periodUnit === "d") {
+      schedule?.frequency === 1 &&
+      (schedule.period === 1 && schedule.periodUnit === "d" ||
+       schedule.period === 24 && schedule.periodUnit === "h")) {
     const category = getUnitCategory(dose.unit);
     const dimension: HpsgClinicalQuantityDimension = category === "other"
       ? (dose.unit === "[iU]" ? "biologic-activity" : "administration-unit")
@@ -912,7 +914,8 @@ export function unifySynsem(
       representation: "dose", status: "resolved",
       numerator: quantity?.numerator ?? { value: dose.value, unit: dose.unit, dimension,
         ...(dose.comparator ? { comparator: dose.comparator } : {}) },
-      denominators: [...(quantity?.denominators ?? []), { value: 1, unit: "d", dimension: "time" }],
+      denominators: [...(quantity?.denominators ?? []),
+        { value: schedule.period, unit: schedule.periodUnit, dimension: "time" }],
       dailyTotal: true, dividedDoseCount: dose.divisionCount, projectedDose
     } };
     schedule = { ...schedule, frequency: dose.divisionCount, timingCode: undefined };

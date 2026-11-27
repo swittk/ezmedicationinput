@@ -7309,11 +7309,16 @@ describe("conditional driving qualifier evidence", () => {
     });
     const codings = [...instructions.map(instruction => instruction.coding?.code),
       ...matchComposedAdviceCodings(frames).map(definition => definition.coding?.code)];
-    expect(codings).toContain("418954008");
+    expect(codings).not.toContain("418954008");
     const explicit = buildAdditionalInstructionFramesFromCoding(SNOMED_SYSTEM, "418954008");
     expect(explicit).toContainEqual(expect.objectContaining({ predicate: expect.objectContaining({ lemma: "drive" }),
       polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
-      args: [expect.objectContaining({ role: AdviceArgumentRole.Free, text: "affected" })] }));
+      args: [
+        expect.objectContaining({ role: AdviceArgumentRole.Object, text: "or operate machinery" }),
+        expect.objectContaining({ role: AdviceArgumentRole.Free, text: "affected" }),
+      ] }));
+    expect(matchComposedAdviceCodings(explicit!).map(definition => definition.coding?.code))
+      .toContain("418954008");
   });
 });
 

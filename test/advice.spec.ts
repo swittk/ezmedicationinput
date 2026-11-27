@@ -491,12 +491,13 @@ describe("alcohol advice action and polarity proof", () => {
     ]));
     const before = JSON.stringify(frames);
     const codes = matchComposedAdviceCodings(frames).map(definition => definition.coding?.code);
-    expect(codes).toContain("418954008");
-    expect(codes.includes("418914006")).toBe(compound);
+    expect(codes).not.toContain("418954008");
+    expect(codes).not.toContain("418914006");
+    expect(codes.includes("419822006")).toBe(compound);
     expect(JSON.stringify(frames)).toBe(before);
   });
 
-  it.each(["419822006", "418914006"])("keeps the explicit %s template unchanged", code => {
+  it.each(["419822006", "418914006"])("retains the complete meaning of the explicit %s template", code => {
     const frames = buildAdditionalInstructionFramesFromCoding(SNOMED_SYSTEM, code)!;
     expect(frames.map(frame => frame.predicate.lemma))
       .toEqual(code === "419822006" ? ["avoid"] : ["cause", "drive", "avoid"]);
@@ -509,7 +510,10 @@ describe("alcohol advice action and polarity proof", () => {
       expect(frames[0]).toMatchObject({ modality: AdviceModality.May,
         args: [expect.objectContaining({ conceptId: "drowsiness" })] });
       expect(frames[1]).toMatchObject({ polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
-        args: [expect.objectContaining({ role: AdviceArgumentRole.Free, text: "affected" })] });
+        args: expect.arrayContaining([
+          expect.objectContaining({ role: AdviceArgumentRole.Object, text: "or operate machinery" }),
+          expect.objectContaining({ role: AdviceArgumentRole.Free, text: "affected" })
+        ]) });
     }
     expect(matchComposedAdviceCodings(frames).map(definition => definition.coding?.code)).toContain(code);
   });
@@ -543,5 +547,52 @@ describe("independent sentence advice ownership", () => {
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(before);
+  });
+});
+
+
+describe("complete drowsiness composite meaning", () => {
+  it.each(["418954008", "418914006", "418071006"])("requires machinery as well as driving for %s", code => {
+    const frames = buildAdditionalInstructionFramesFromCoding(SNOMED_SYSTEM, code)!;
+    const saved = JSON.stringify(frames);
+    const codes = matchComposedAdviceCodings(frames).map(definition => definition.coding?.code);
+    expect(codes).toContain(code);
+    const driveOnly = frames.map(frame => frame.predicate.lemma === "drive" ? { ...frame,
+      args: frame.args.filter(argument => argument.text !== "or operate machinery") } : frame);
+    expect(driveOnly.find(frame => frame.predicate.lemma === "drive")).toMatchObject({
+      polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
+      args: [expect.objectContaining({ text: "affected" })]
+    });
+    const reducedCodes = matchComposedAdviceCodings(driveOnly).map(definition => definition.coding?.code);
+    for (const composite of ["418954008", "418914006", "418071006"]) expect(reducedCodes).not.toContain(composite);
+    expect(JSON.stringify(frames)).toBe(saved);
+  });
+
+  it.each([
+    ["Avoid alcohol", true], ["Do not drink alcohol", true], ["Do not take with alcohol", true],
+    ["Drink alcohol", false], ["Take with alcohol", false], ["Mix with alcohol", false]
+  ] as const)("requires owned alcohol avoidance in the next-day warning: %s", (source, expected) => {
+    const template = buildAdditionalInstructionFramesFromCoding(SNOMED_SYSTEM, "418071006")!;
+    const authored = parseAdditionalInstructions(source, { start: 0, end: source.length }).flatMap(row => row.frames);
+    const frames = [...template.filter(frame => frame.predicate.lemma !== "avoid"), ...authored];
+    const saved = JSON.stringify(frames);
+    expect(matchComposedAdviceCodings(frames).some(definition => definition.coding?.code === "418071006"))
+      .toBe(expected);
+    expect(JSON.stringify(frames)).toBe(saved);
+  });
+
+  it("keeps a next-day administration separate from the drowsiness effect", () => {
+    const frames = buildAdditionalInstructionFramesFromCoding(SNOMED_SYSTEM, "418071006")!;
+    const cause = frames.find(frame => frame.predicate.lemma === "cause")!;
+    const nextDay = cause.args.filter(argument => argument.conceptId === "next_day");
+    expect(nextDay).toHaveLength(1);
+    const separate = frames.map(frame => frame === cause ? { ...frame,
+      args: frame.args.filter(argument => argument.conceptId !== "next_day") } : frame);
+    separate.push({ force: AdviceForce.Instruction, predicate: { lemma: "take", semanticClass: "administration" },
+      args: nextDay, span: { start: 0, end: 13 }, sourceText: "Take next day" });
+    const saved = JSON.stringify(separate);
+    expect(matchComposedAdviceCodings(frames).map(definition => definition.coding?.code)).toContain("418071006");
+    expect(matchComposedAdviceCodings(separate).map(definition => definition.coding?.code)).not.toContain("418071006");
+    expect(JSON.stringify(separate)).toBe(saved);
   });
 });

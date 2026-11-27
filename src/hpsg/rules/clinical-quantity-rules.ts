@@ -114,7 +114,18 @@ function compactUnitExpression(
     // absorb a following route or cadence into an unknown suffix.
     const expectsSeparator = attachedPrefix ? part % 2 === 1 : part % 2 === 0;
     if (part > 1 || attachedPrefix) {
-      if (separator !== expectsSeparator) break;
+      if (separator !== expectsSeparator) {
+        // A compact dimensional term may end with the numeric half of a
+        // time denominator (`mg/kg/24 hours`). Complete only that existing
+        // denominator before asking the construction to license the whole unit.
+        const timeUnit = expectsSeparator ? mapIntervalUnit(normalizeTokenLower(token)) : undefined;
+        const slash = compact.lastIndexOf("/");
+        if (timeUnit && slash >= 0 && clinicalTimeDenominator(compact.slice(slash + 1) + timeUnit)) {
+          const completed = compact.toLowerCase().replace(/[μµ]/gu, "u") + timeUnit;
+          if (accepts(completed)) result = { compact: completed, end: cursor + 1 };
+        }
+        break;
+      }
     } else if (separator) break;
     let term = (token.canonical ?? token.original).replace(/\s+/gu, "");
     cursor++;

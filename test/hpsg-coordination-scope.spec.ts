@@ -2229,6 +2229,73 @@ describe("site and clock complement ownership", () => {
 
 
 describe("condition and successor timing ownership", () => {
+  it.each(["take 1", "take 1 daily"])("retains a fronted measurement guard for the context-owned dose: %s", consequent => {
+    const source = "If systolic BP is above 140 " + consequent;
+    const parsed = parsePublicSig(source, { context: { dosageForm: "tablet" } });
+    const saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject({ kind: "measurement", name: "systolic bp", operation: "gt", value: 140 });
+      expect(members[0].predicate).toMatchObject({ text: "systolic BP is above 140" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it("keeps a quantified activity inside the antecedent of a context-owned dose", () => {
+    const source = "Only if you can take 1 tablet, take 1";
+    const parsed = parsePublicSig(source, { context: { dosageForm: "tablet" } });
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject({ kind: "state", name: "you can take 1 tablet", text: "you can take 1 tablet" });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([undefined, { dosageForm: "tablet" }])("keeps an unquantified conditional prohibition as advice (%j)", context => {
+    const source = "If dizzy, do not drive", parsed = parsePublicSig(source, { context });
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members.every(member => !member.amounts?.length && !member.predicate)).toBe(true);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toMatch(/(?:if dizzy,\s+do not drive|do not drive if dizzy)/iu);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([false, true])("keeps the history count on its own conjunct beside an independent maximum (%s)", capped => {
+    const history = "you have vomited no more than twice";
+    const source = "Take 1 tablet only if your temperature is above 38 C and " + history +
+      (capped ? ", maximum 2 doses per day" : "");
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject({ kind: "all", conditions: [
+        { kind: "measurement", name: "your temperature", operation: "gt", value: 38, unit: "C" },
+        { kind: "state", name: history, expected: true, text: history }
+      ] });
+      expect(members[0].schedule?.recurrence?.countMax).toBeUndefined();
+      expect(members[0].schedule?.recurrence?.courseLength).toBeUndefined();
+      expect(members[0].schedule?.recurrence?.occurrenceCap).toEqual(capped ? { max: 2, period: 1, periodUnit: "d" } : undefined);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain(history);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
   it.each([
     { partial: "If systolic BP is below 90,", predicate: {
       kind: "measurement", name: "systolic bp", operation: "lt", value: 90 } },

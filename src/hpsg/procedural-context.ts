@@ -1,5 +1,5 @@
 import {
-  parseInstructionActions, isSupplementalHydrationInstruction, frameActionDefinition
+  parseInstructionActions, isSupplementalHydrationInstruction, frameActionDefinition, actionMatchAt
 } from "../instruction-graph";
 import { AdviceArgumentRole, AdvicePolarity, EventTiming, type AdviceFrame } from "../types";
 import { EVENT_TIMING_TOKENS } from "../maps";
@@ -7,7 +7,7 @@ import { ACTION_SEQUENCE_RELATION_SURFACES, relationHasGrammarFeature, relationH
 import { medicationGuardForContext, normalizeTokenLower, parseClockToken, type HpsgClauseContext } from "./rule-context";
 import { LexKind } from "../lexer/token-types";
 import { MEAL_TIMING_BY_RELATION } from "./lexical-classes";
-import { explicitDoseLexicalEnd } from "./rules/core-rules";
+import { explicitDoseLexicalEnd, contextualDoseLexicalEnd } from "./rules/core-rules";
 
 const PROCEDURAL_FRAME_CACHE = new WeakMap<object, AdviceFrame[]>();
 
@@ -99,6 +99,10 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
       // A dose nominal can precede its verb in a fronted conditional. It is
       // still an administration daughter, not part of the condition/advice.
       const headIndex = context.tokens.findIndex(candidate => candidate.sourceStart >= frame.span.start);
+      const head = definition?.primaryAdministrationHead || definition?.definesDose && definition.administrationMethod
+        ? actionMatchAt(context.tokens, headIndex, context.options) : undefined;
+      const doseEnd = head && contextualDoseLexicalEnd(context.tokens, headIndex + head.length, context.options);
+      if (doseEnd !== undefined && context.tokens[doseEnd - 1].sourceEnd <= frame.span.end) continue;
       let clauseStart = 0;
       for (const boundary of context.tokens) {
         if (boundary.sourceEnd > frame.span.start) break;

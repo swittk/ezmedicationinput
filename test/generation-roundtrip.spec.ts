@@ -5583,6 +5583,9 @@ describe("alcohol advice action and polarity in current projections", () => {
       if (source === "Drink alcohol") {
         expect(en).toBe("Drink alcohol.");
         expect(th).toBe("ดื่มแอลกอฮอล์.");
+      } else if (source === "Take with alcohol") {
+        expect(en).toMatch(/(?:^|[.;]\s+)Take with alcohol\.(?:$|\s)/u);
+        expect(en).not.toMatch(/do not take with alcohol/iu);
       }
       expect(JSON.stringify(input)).toBe(before);
     }

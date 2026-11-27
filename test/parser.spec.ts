@@ -9047,7 +9047,10 @@ describe("round72 reviewed interchange source families", () => {
     expect(frames.find(frame => frame.predicate.lemma === "cause")).toMatchObject({ modality: AdviceModality.May });
     expect(frames.find(frame => frame.predicate.lemma === "drive")).toMatchObject({
       polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
-      args: [{ role: AdviceArgumentRole.Free, text: "affected", normalized: "affected" }]
+      args: [
+        { role: AdviceArgumentRole.Object, text: "or operate machinery", normalized: "or operate machinery" },
+        { role: AdviceArgumentRole.Free, text: "affected", normalized: "affected" },
+      ]
     });
     for (const scheduled of [false, true]) {
       const row: FhirDosage = { additionalInstruction: [advice],
@@ -9108,7 +9111,10 @@ describe("round72 reviewed interchange source families", () => {
       ]));
     expect(frames.find(frame => frame.predicate.lemma === "drive")).toMatchObject({
       polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
-      args: [{ role: AdviceArgumentRole.Free, text: "affected", normalized: "affected" }],
+      args: [
+        { role: AdviceArgumentRole.Object, text: "or operate machinery", normalized: "or operate machinery" },
+        { role: AdviceArgumentRole.Free, text: "affected", normalized: "affected" },
+      ],
     });
     expect(frames.find(frame => frame.predicate.lemma === "avoid")?.args)
       .toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Substance, conceptId: "alcohol" }));

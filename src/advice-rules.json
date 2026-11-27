@@ -761,6 +761,10 @@
           },
           "relation": "if",
           "args": [
+            {
+              "role": "object",
+              "text": "or operate machinery"
+            },
             { "role": "free", "text": "affected" }
           ]
         }
@@ -798,6 +802,12 @@
                     "object"
                   ],
                   "value": "affected"
+                },
+                {
+                  "roles": [
+                    "object"
+                  ],
+                  "value": "or operate machinery"
                 }
               ]
             }
@@ -838,6 +848,10 @@
           },
           "relation": "if",
           "args": [
+            {
+              "role": "object",
+              "text": "or operate machinery"
+            },
             { "role": "free", "text": "affected" }
           ]
         },
@@ -889,6 +903,12 @@
                     "object"
                   ],
                   "value": "affected"
+                },
+                {
+                  "roles": [
+                    "object"
+                  ],
+                  "value": "or operate machinery"
                 }
               ]
             }
@@ -905,7 +925,8 @@
                   ],
                   "role": "substance"
                 }
-              ]
+              ],
+              "polarity": "affirm"
             }
           }
         ]
@@ -948,6 +969,10 @@
           },
           "relation": "if",
           "args": [
+            {
+              "role": "object",
+              "text": "or operate machinery"
+            },
             { "role": "free", "text": "affected" }
           ]
         },
@@ -978,25 +1003,72 @@
                   "conceptIds": [
                     "drowsiness"
                   ]
+                },
+                {
+                  "conceptIds": [
+                    "next_day"
+                  ],
+                  "role": "time"
                 }
               ]
             }
           },
           {
-            "argConcept": {
-              "conceptIds": [
-                "next_day"
-              ],
-              "role": "time"
-            }
-          },
-          {
-            "argConcept": {
-              "conceptIds": [
-                "alcohol"
-              ],
-              "role": "substance"
-            }
+            "anyOf": [
+              {
+                "frame": {
+                  "predicateLemmas": [
+                    "avoid"
+                  ],
+                  "polarity": "affirm",
+                  "argConcepts": [
+                    {
+                      "conceptIds": [
+                        "alcohol"
+                      ],
+                      "role": "substance"
+                    }
+                  ]
+                }
+              },
+              {
+                "frame": {
+                  "predicateLemmas": [
+                    "drink"
+                  ],
+                  "polarity": "negate",
+                  "argConcepts": [
+                    {
+                      "conceptIds": [
+                        "alcohol"
+                      ],
+                      "role": "substance"
+                    }
+                  ]
+                }
+              },
+              {
+                "frame": {
+                  "predicateLemmas": [
+                    "take",
+                    "use",
+                    "administer"
+                  ],
+                  "relations": [
+                    "with"
+                  ],
+                  "polarity": "negate",
+                  "argConcepts": [
+                    {
+                      "conceptIds": [
+                        "alcohol"
+                      ],
+                      "role": "substance"
+                    }
+                  ]
+                }
+              }
+            ]
           },
           {
             "frame": {
@@ -1014,6 +1086,12 @@
                     "object"
                   ],
                   "value": "affected"
+                },
+                {
+                  "roles": [
+                    "object"
+                  ],
+                  "value": "or operate machinery"
                 }
               ]
             }

@@ -333,17 +333,22 @@ function tryNumericRangeToken(
   const hyphen = surfaces[index + 1];
   const end = surfaces[index + 2];
 
-  // A spaced left endpoint may be followed by a dash attached to its right
-  // endpoint. It is the same bounded range as three separate surface tokens.
-  if (isSurfaceText(start) && isNumericText(start.lower) && isSurfaceText(hyphen) &&
-      /^[-–—]/u.test(hyphen.lower)) {
-    const parts = splitCompactToken(hyphen.original.slice(1));
-    if (isNumericText(parts[0])) {
-      const rangeEnd = hyphen.start + 1 + parts[0].length;
-      const tokens = [buildToken(start.original + hyphen.original[0] + parts[0],
-        [start, hyphen], input, start.start, rangeEnd, true)];
-      pushSplitParts(tokens, hyphen, parts.slice(1), input);
-      return { tokens, nextIndex: index + 2 };
+  // Either numeric endpoint may own the adjacent dash. Both spellings are
+  // the same bounded range, including an attached unit on the right endpoint.
+  if (isSurfaceText(start) && isSurfaceText(hyphen)) {
+    const leftDash = /[-–—]$/u.test(start.lower);
+    const left = leftDash ? start.original.slice(0, -1) : start.original;
+    const rightOffset = leftDash ? 0 : 1;
+    if (isNumericText(left) && (leftDash || /^[-–—]/u.test(hyphen.lower))) {
+      const parts = splitCompactToken(hyphen.original.slice(rightOffset));
+      if (isNumericText(parts[0])) {
+        const rangeEnd = hyphen.start + rightOffset + parts[0].length;
+        const dash = leftDash ? start.original.slice(-1) : hyphen.original[0];
+        const tokens = [buildToken(left + dash + parts[0],
+          [start, hyphen], input, start.start, rangeEnd, true)];
+        pushSplitParts(tokens, hyphen, parts.slice(1), input);
+        return { tokens, nextIndex: index + 2 };
+      }
     }
   }
   if (

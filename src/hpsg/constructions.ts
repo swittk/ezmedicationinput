@@ -9,7 +9,7 @@ import type { Token } from "../parser-state";
 import type { MedicationCondition, ParseOptions } from "../types";
 import { actionMatchAt } from "../instruction-graph";
 import { ACTION_DIRECTIVE_PREFIXES, normalizeTokenLower } from "./lexical-classes";
-import { explicitDoseLexicalEnd } from "./rules/core-rules";
+import { contextualDoseLexicalEnd } from "./rules/core-rules";
 import { maximumDosePerPeriodAt, maximumCountLeadAt } from "./rule-context";
 import { maximumOccurrenceAt, isIndependentMaximum } from "./rules/timing-rules";
 import { lexicalSign, type HpsgGuardExpression, type HpsgSynsem, type HpsgPhraseRule } from "./signature";
@@ -648,6 +648,18 @@ function guardHasMeasurement(value: MedicationCondition): boolean {
     value.kind === "not" && guardHasMeasurement(value.condition);
 }
 
+/** Only the final predicate daughter can license a following bare limit. */
+function guardFinalPredicateLicensesLimit(value: HpsgGuardExpression): boolean {
+  if (value.kind === "coordination") {
+    const last = value.parts[value.parts.length - 1];
+    return last !== undefined && guardFinalPredicateLicensesLimit(last);
+  }
+  if (value.kind === "negation") return guardFinalPredicateLicensesLimit(value.operand);
+  return value.kind === "predicate" && (value.value.kind === "measurement" ||
+    value.dayInvariant === true || value.value.kind === "text" &&
+      medicationConditionAtomLexeme(value.value.text).licensesBareIf === true);
+}
+
 /** Create a binary feature-structure derivation from already licensed daughters. */
 function guardMother(
   left: HpsgSign, right: HpsgSign, type: HpsgType,
@@ -861,8 +873,8 @@ export function parseMedicationGuard(
       if (index < 0 || index >= tokens.length) return undefined;
       const match = actionMatchAt(tokens, index, options), action = match?.definition;
       if (!match || !action?.primaryAdministrationHead && !(action?.definesDose && action.administrationMethod)) return undefined;
-      return (requiresDose || action.procedural) && explicitDoseLexicalEnd(tokens, index + match.length, options) === undefined
-        ? undefined : match;
+      return (requiresDose || action.procedural) &&
+        contextualDoseLexicalEnd(tokens, index + match.length, options) === undefined ? undefined : match;
     };
     let delimitedConsequent = false;
     if (comma >= 0) {
@@ -928,8 +940,9 @@ export function parseMedicationGuard(
       // An implicit occurrence frequency can qualify the patient's history.
       // Explicit dose/occurrence periods, separators, maximum heads or a
       // complete structured predicate retain independent limit ownership.
+      const expression = predicate?.synsem.cont.guard?.expression;
       if (!isIndependentMaximum(lexicalContext, index, maximum) &&
-          !predicate?.synsem.cont.guard?.licensesBareIf && !guardHasMeasurement(condition)) continue;
+          (!expression || !guardFinalPredicateLicensesLimit(expression))) continue;
       end = capStart;
       scopedGuard = guard;
       break;
