@@ -8902,17 +8902,32 @@ function successorIntervalStart(
     // clock. This standalone cadence query has no phase origin or predecessor,
     // so it cannot re-enter successor resolution. Actual eligibility and
     // count/quantity admission remain on the original administration.
+    const candidateRepeat = { ...repeat };
+    candidateRepeat.courseLength = undefined;
+    candidateRepeat.courseLengthRange = undefined;
+    candidateRepeat.count = undefined;
+    candidateRepeat.countMax = undefined;
+    candidateRepeat.sharedCount = undefined;
+    const candidateSchedule = { ...dosage.schedule };
+    candidateSchedule.recurrence = candidateRepeat;
+    const candidateOptions = { ...options } as PhaseCountOptions;
+    candidateOptions.from = new Date(predecessorPoint.getTime() + 1);
+    candidateOptions.orderedAt = displacement ? new Date(predecessorPoint.getTime() - displacement) : predecessorPoint;
+    candidateOptions.timeZone = zone;
+    candidateOptions.priorCount = 0;
+    candidateOptions.priorDoseTimes = undefined;
+    candidateOptions.limit = 1;
+    candidateOptions.candidateOnly = true;
+    candidateOptions.countEligibilityStart = undefined;
+    candidateOptions.countedActualTimes = undefined;
+    candidateOptions.prnOpportunityFrom = undefined;
+    candidateOptions.explicitEventStatus = undefined;
+    candidateOptions.roundingLimits = undefined;
     const first = nextDueDoses({
       kind: "administration", delayMinutes: dosage.delayMinutes,
       excludedDates: dosage.excludedDates, excludedWeekdays: dosage.excludedWeekdays,
-      schedule: { ...dosage.schedule, recurrence: { ...repeat,
-        courseLength: undefined, courseLengthRange: undefined,
-        count: undefined, countMax: undefined, sharedCount: undefined } },
-    }, { ...options, from: new Date(predecessorPoint.getTime() + 1),
-      orderedAt: displacement ? new Date(predecessorPoint.getTime() - displacement) : predecessorPoint,
-      timeZone: zone, priorCount: 0, priorDoseTimes: undefined, limit: 1, candidateOnly: true,
-      countEligibilityStart: undefined, countedActualTimes: undefined, prnOpportunityFrom: undefined,
-      explicitEventStatus: undefined, roundingLimits: undefined } as PhaseCountOptions)[0];
+      schedule: candidateSchedule,
+    }, candidateOptions)[0];
     // Keep the actual opening distinct from the nominal cadence origin;
     // the caller displaces only the latter and its duration fence.
     if (first) {
