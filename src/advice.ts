@@ -21,7 +21,7 @@ import { resolveMedicationInstructionConcept } from "./instruction-concept-termi
 import { composeLocalizedRecords, localizedValue } from "./localization";
 import { getAdviceLocaleAdapter } from "./advice-locale-adapter";
 import { joinLocalizedTokens } from "./locale-realization";
-import { ACTION_COORDINATION_CONNECTOR_I18N } from "./hpsg/lexical-classes";
+import { ACTION_COORDINATION_CONNECTOR_I18N, INSTRUCTION_NOMINAL_ARTICLES } from "./hpsg/lexical-classes";
 import {
   ACTION_SEQUENCE_MARKERS,
   localizeAdviceRelation,
@@ -1164,9 +1164,15 @@ function mapSemanticClassToRole(semanticClass: string | undefined): AdviceArgume
   return enumValue<AdviceArgumentRole>(AdviceArgumentRole, configured) ?? AdviceArgumentRole.Object;
 }
 
+function withoutNominalArticle(text: string): string {
+  const end = text.indexOf(" ");
+  return end > 0 && INSTRUCTION_NOMINAL_ARTICLES.has(text.slice(0, end).toLowerCase())
+    ? text.slice(end + 1).trim() : text;
+}
+
 function bodySiteAdviceArgument(text: string): AdviceArgument | undefined {
   const cleaned = cleanFreeText(text);
-  const withoutArticle = cleaned.replace(/^(?:the|a|an)\s+/iu, "").trim();
+  const withoutArticle = withoutNominalArticle(cleaned);
   const resolveOne = (value: string) => resolveBodySitePhrase(value, undefined, {
     allowTerminalModifierInheritance: true
   });
@@ -1185,8 +1191,8 @@ function bodySiteAdviceArgument(text: string): AdviceArgument | undefined {
   }
   const match = withoutArticle.match(/^(.+?)\s+(and|or)\s+(.+)$/iu);
   if (!match) return undefined;
-  const left = resolveOne(match[1].replace(/^(?:the|a|an)\s+/iu, "").trim());
-  const right = resolveOne(match[3].replace(/^(?:the|a|an)\s+/iu, "").trim());
+  const left = resolveOne(withoutNominalArticle(match[1]));
+  const right = resolveOne(withoutNominalArticle(match[3]));
   if (!(left?.coding || left?.definition) || !(right?.coding || right?.definition)) return undefined;
   const connector = match[2].toLowerCase();
   const leftI18n = left.definition?.i18n ?? left.coding?.i18n;
@@ -1204,7 +1210,7 @@ function bodySiteAdviceArgument(text: string): AdviceArgument | undefined {
   };
 }
 
-function classifyArgument(text: string): AdviceArgument {
+function classifyArgument(text: string, completeNominal = false): AdviceArgument {
   const cleaned = cleanFreeText(text);
   const normalized = normalizeAdditionalInstructionKey(cleaned);
   if (!normalized) {
@@ -1214,9 +1220,10 @@ function classifyArgument(text: string): AdviceArgument {
   // The main typed argument vocabulary owns exact clinical material
   // compounds, including qualitative quantity. Prefer it over the older
   // advice-only substring lexicon to avoid erasing a meaningful modifier.
+  const nominal = completeNominal ? withoutNominalArticle(normalized) : normalized;
   const shared = resolveMedicationInstructionConcept(cleaned) ??
-    resolveMedicationInstructionConcept(normalized);
-  const concept = findContainedConcept(normalized);
+    resolveMedicationInstructionConcept(nominal);
+  const concept = completeNominal ? findExactConcept(nominal) : findContainedConcept(normalized);
   // Existing advice meal-state/clinical roles outrank a generic shared noun.
   // Within the SAME typed role, prefer the exact shared lexical concept,
   // which preserves a qualified material instead of collapsing it to water.
@@ -1260,7 +1267,7 @@ function classifyArgument(text: string): AdviceArgument {
   }
 
   const parts = normalized.split(" ");
-  if (parts.length >= 2) {
+  if (parts.length >= 2 && (!completeNominal || parts.length === 2)) {
     const first = parts[0];
     const second = parts[1];
     if (/^[0-9]+(?:\.[0-9]+)?$/.test(first) && DURATION_UNIT_WORDS.has(second)) {
@@ -1272,7 +1279,7 @@ function classifyArgument(text: string): AdviceArgument {
     return createArgument(AdviceArgumentRole.Time, cleaned, normalized, normalized);
   }
 
-  return createArgument(AdviceArgumentRole.Object, cleaned, normalized);
+  return createArgument(completeNominal ? AdviceArgumentRole.Free : AdviceArgumentRole.Object, cleaned, normalized);
 }
 
 function trimSegment(text: string, start: number, end: number): AdviceSegment | undefined {
@@ -1489,7 +1496,12 @@ function tryParseRelationInstruction(
     return undefined;
   }
   const force = createDefaultForce(sequenceCount, sequenceIndex, context);
-  const args = [classifyArgument(objectText)];
+  // An implicit administration requires a complete nominal daughter. A
+  // contained concept does not license the surrounding instruction as one.
+  // Accompaniment keeps its established open material-object admission.
+  const argument = classifyArgument(objectText, !relationHasSemanticClass(relation, "accompaniment"));
+  if (argument.role === AdviceArgumentRole.Free) return undefined;
+  const args = [argument];
   return [
     createFrame(
       sourceText,

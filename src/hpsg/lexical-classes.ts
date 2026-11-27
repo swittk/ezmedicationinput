@@ -440,6 +440,7 @@ export const TIMING_ANAPHORA_PHRASES =
 export const CLOCK_LEAD_TOKENS = setOf(source.clockLeadTokens);
 export const EVENT_PREPOSITIONS = setOf(source.eventPrepositions);
 export const EVENT_ARTICLE_TOKENS = setOf(source.eventArticleTokens);
+export const INSTRUCTION_NOMINAL_ARTICLES = setOf(source.instructionNominalArticles);
 export const FIXED_EVENT_PHRASES = eventTimingMap(source.fixedEventPhrases);
 export const MEAL_RELATION_BY_TOKEN = new Map<string, MealRelation>(
   stringEntries(source.mealRelationTokens).map(([token, relation]) => [token, relation as MealRelation])

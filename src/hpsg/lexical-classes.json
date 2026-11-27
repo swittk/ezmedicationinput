@@ -1309,6 +1309,11 @@
   "eventArticleTokens": [
     "the"
   ],
+  "instructionNominalArticles": [
+    "the",
+    "a",
+    "an"
+  ],
   "fixedEventPhrases": {
     "early morning": "Early Morning",
     "meal morning": "Breakfast",

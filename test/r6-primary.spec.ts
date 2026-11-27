@@ -1,3 +1,4 @@
+import { parseAdditionalInstructions } from "../src/advice";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL, parseBodySiteSpatialRelationExtension, buildBodySiteSpatialRelationExtension } from "../src/body-site-spatial";
 import { encodeR6SourceMetadata, decodeR6SourceMetadata } from "../src/dosage-course";
 import { R6_SCOPED_SAFETY_MODIFIER_URL } from "../src/adapters/r6-editable-metadata";
@@ -8826,4 +8827,40 @@ it("retains a calendar restriction beside a method-only current prescription", (
     }
   }
   expect(JSON.stringify([row, r6])).toBe(before);
+});
+
+describe("complete relation-led advice ownership", () => {
+  it.each([
+    "On Mondays, do not take the morning dose.",
+    "Before dressing, do not apply the medication."
+  ])("retains the complete authored warning without inventing an implicit administration: %s", warning => {
+    const parsed = parseAdditionalInstructions(warning, { start: 0, end: warning.length },
+      { defaultPredicate: "take", allowFreeTextFallback: true });
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].frames).toEqual([]);
+    expect(parsed[0].text).toBe(warning.slice(0, -1));
+    const unknown = { url: "urn:clinic:advice-review", valueString: "Preserve authored warning" };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      additionalInstruction: [{ text: warning }], extension: [unknown] };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      additionalInstruction: [{ text: warning }], extension: [unknown]
+    }] }] };
+    const before = JSON.stringify([row, r6]), native = importCanonicalCourse(r6);
+    expect(native.stages[0].administrations[0].additionalInstructions?.[0].text).toBe(warning);
+    for (const value of [row, r6, native]) for (const locale of ["en", "th"] as const) {
+      const output = formatSig(value, "long", { locale, realizationMode: "normalized" });
+      expect(output).toContain(warning.slice(0, -1));
+      expect(output.match(/do not/gu)).toHaveLength(1);
+      expect(output).toContain(locale === "en" ? "1 tablet" : "1 เม็ด");
+    }
+    const returned = toFhirR5Dosages(r6)[0];
+    expect(returned.additionalInstruction).toEqual(row.additionalInstruction);
+    expect(returned.doseAndRate).toEqual(row.doseAndRate);
+    expect(returned.extension).toContainEqual(unknown);
+    expect(toDosageDetails([row]).step[0].component[0].additionalInstruction).toEqual(row.additionalInstruction);
+    expect(JSON.stringify([row, r6])).toBe(before);
+  });
 });
