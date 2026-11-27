@@ -514,8 +514,13 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
       expect(english.meta.leftoverText).toBeUndefined();
       expect(english.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
       expect(english.meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 2 });
-      expect(english.fhir.timing?.repeat?.countMax).toBe(2);
-      expect(english.fhirNext.step![0].component![0].timing?.repeat?.countMax).toBe(2);
+      for (const repeat of [english.fhir.timing?.repeat, english.fhirNext.step![0].component![0].timing?.repeat]) {
+        expect(repeat?.countMax).toBe(2);
+        expect(repeat?.count).toBeUndefined();
+        expect(repeat?._count).toEqual({ extension: [{
+          url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+        }] });
+      }
       expect(english.meta.canonical.clauses[0]?.instructionGraph?.actions[0]).toMatchObject({
         predicate: { lemma: "repeat" },
         relation: "after",
@@ -536,8 +541,13 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     });
     expect(thai.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
     expect(thai.meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 2 });
-    expect(thai.fhir.timing?.repeat?.countMax).toBe(2);
-    expect(thai.fhirNext.step![0].component![0].timing?.repeat?.countMax).toBe(2);
+    for (const repeat of [thai.fhir.timing?.repeat, thai.fhirNext.step![0].component![0].timing?.repeat]) {
+      expect(repeat?.countMax).toBe(2);
+      expect(repeat?.count).toBeUndefined();
+      expect(repeat?._count).toEqual({ extension: [{
+        url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+      }] });
+    }
     expect(thai.meta.canonical.clauses[0]?.instructionGraph?.relations).toContainEqual(
       expect.objectContaining({ kind: "if", text: "ถ้าจำเป็น" })
     );

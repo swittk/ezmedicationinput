@@ -1,4 +1,5 @@
 import { DAY_OF_WEEK_TOKENS } from "../maps";
+import lexicalVocabulary from "../hpsg/lexical-classes.json";
 import { LexKind, LexToken, SurfaceToken, SurfaceTokenKind } from "./token-types";
 import { scanSurfaceTokens } from "./surface";
 import { applyLocaleLexicon } from "./locale";
@@ -446,7 +447,8 @@ function tryTimeLikeToken(
 function pushTextToken(output: LexToken[], surface: SurfaceToken, input: string): void {
   // A slash attached to its right daughter is the same separator as a spaced
   // slash. Reuse ordinary compact-token expansion for the remaining term.
-  if (surface.original.startsWith("/") && surface.original.length > 1) {
+  if (surface.original.startsWith("/") && surface.original.length > 1 &&
+      lexicalVocabulary.hardSegmentBoundaryTokens.indexOf(surface.lower) < 0) {
     output.push(buildToken("/", [surface], input, surface.start, surface.start + 1, true));
     pushTextToken(output, { ...surface, original: surface.original.slice(1),
       lower: surface.lower.slice(1), start: surface.start + 1 }, input);

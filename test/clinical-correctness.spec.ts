@@ -3663,7 +3663,9 @@ describe("round79 current clinical preview ownership", () => {
         const predecessor = locale === "en" ? "After the previous phase" : "หลังขั้นตอนก่อนหน้า";
         expect(text).toContain("follow-up");
         expect(text.includes(predecessor)).toBe(!explicit);
-        if (!explicit) expect(text.indexOf(predecessor)).toBeLessThan(text.indexOf("follow-up"));
+        if (!explicit) expect(text).toContain(locale === "en"
+          ? "After the previous phase; Timing requires review: Until follow-up: Use 2 mg once daily."
+          : "หลังขั้นตอนก่อนหน้า; ต้องตรวจสอบช่วงเวลา: จนถึงfollow-up: ใช้ครั้งละ 2 มิลลิกรัม วันละครั้ง.");
         else expect(text).toContain(locale === "en"
           ? "From 2 days after treatment start until follow-up: Use 2 mg once daily."
           : "ตั้งแต่2 วันหลังเริ่มการรักษาจนถึงfollow-up: ใช้ครั้งละ 2 มิลลิกรัม วันละครั้ง.");

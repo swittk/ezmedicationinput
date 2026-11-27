@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { RouteCode } from "../src/types";
 import {
   resolveBodySitePhrase, resolveBodySiteRestrictionPredicate,
   formBodySiteRestriction, realizeBodySiteRestriction
@@ -430,5 +431,28 @@ describe("standards-accurate middle versus median body-site qualifier", () => {
       .toMatchObject({ code: "C25569", display: "Middle" });
     expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain("กลาง");
     expect(parsed.longText).toContain("middle of the forearm");
+  });
+});
+
+
+describe("registered route and anchored site ownership", () => {
+  it.each(["", " OPH", " CLINICEYE"])("keeps a route alias outside the left-eye constituent: %s", suffix => {
+    const phrase = "in the left eye" + suffix;
+    const tokens = tokenize(phrase);
+    const options = { routeMap: { cliniceye: RouteCode["Ophthalmic route"] } };
+    const context: HpsgClauseContext = {
+      state: new ParserState(phrase, tokens), tokens, limit: tokens.length, options,
+      dateSpans: [], clinicalCache: {}, deps: {} as HpsgClauseContext["deps"]
+    };
+    const site = siteLexicalRule().match(context, 0).find(sign => sign.type === "site-sign")!;
+    expect(site.synsem.valence.site).toMatchObject({ text: "left eye", coding: { code: "1290031003" } });
+    if (suffix) expect(site.tokens.some(token => token.original === suffix.trim())).toBe(false);
+    const source = "Instill 1 drop " + phrase + " daily", parsed = parseSig(source, options);
+    for (const row of [parsed.fhir, ...toFhirR5Dosages(toDosageDetails([parsed.fhir]))]) {
+      expect(row.site?.coding?.[0]?.code).toBe("1290031003");
+      expect(row.route?.coding?.[0]?.code).toBe(RouteCode["Ophthalmic route"]);
+      expect(row.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });

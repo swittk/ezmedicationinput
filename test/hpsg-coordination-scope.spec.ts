@@ -840,7 +840,7 @@ describe('HPSG coordination cadence scope', () => {
     let evaluatorCalls = 0;
     expect(nextDueDoses(parsed.fhirNext, {
       from: "2026-11-02T00:00:00+07:00", orderedAt: "2026-11-02T00:00:00+07:00",
-      timeZone: "Asia/Bangkok", limit: 7,
+      timeZone: "Asia/Bangkok", limit: 8,
       evaluateCondition: () => { evaluatorCalls++; return false; }
     })).toHaveLength(7);
     expect(evaluatorCalls).toBe(0);
@@ -3214,5 +3214,45 @@ describe("withholding target identity", () => {
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(before);
+  });
+});
+
+describe("registered weekday and hard-delimiter vocabulary", () => {
+  it.each(["Thurs", "Thursday"])("keeps the Thursday exclusion for %s", weekday => {
+    const source = "Take 1 tablet daily except " + weekday, parsed = parsePublicSig(source);
+    const query = { orderedAt: "2026-11-02T00:00:00Z", from: "2026-11-02T00:00:00Z", timeZone: "UTC" };
+    expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.excludedWeekdays).toEqual(["thu"]);
+    for (const dosage of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...query, limit: 8 }).map(at => at.slice(0, 10))).toEqual([
+        "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-06", "2026-11-07", "2026-11-08", "2026-11-09", "2026-11-10"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 7, durationUnit: "d" }).totalUnits).toBe(6);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("keeps the complete double-slash boundary between independent eyes", () => {
+    const source = "Instill 1 drop OD qAM // Instill 1 drop OS qHS";
+    const tokens = tokenize(source), delimiter = tokens.filter(token => token.original.includes("/"));
+    expect(delimiter).toHaveLength(1);
+    expect(delimiter[0]).toMatchObject({ original: "//", sourceStart: source.indexOf("//"), sourceEnd: source.indexOf("//") + 2 });
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members.map(member => ({ eye: member.target?.coding?.[0]?.code, dose: member.amounts?.[0]?.quantity,
+        anchors: member.schedule?.recurrence?.anchors }))).toMatchObject([
+        { eye: "1290032005", dose: { value: 1, unit: "drop" }, anchors: ["MORN"] },
+        { eye: "1290031003", dose: { value: 1, unit: "drop" }, anchors: ["HS"] }
+      ]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    const daily = parsePublicSig("Take 5 mg/day");
+    expect(daily.meta.canonical.clauses[0]).toMatchObject({ dose: { value: 5, unit: "mg" },
+      schedule: { frequency: 1, period: 1, periodUnit: "d" } });
   });
 });

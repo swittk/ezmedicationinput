@@ -138,8 +138,7 @@ function coordinatedRightSiteTokens(
     const tokens = tokensAvailable(context, rightStart, span);
     if (!tokens) break;
     const last = tokens[tokens.length - 1];
-    const lower = normalizeTokenLower(last);
-    if (span > 1 && (siteCoordinatorSpan(context, rightStart + span - 1) || siteBoundary(lower, context))) break;
+    if (span > 1 && (siteCoordinatorSpan(context, rightStart + span - 1) || siteBoundary(last, context))) break;
     const resolved = resolveBodySiteLexeme(joinTokenText(tokens), context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     });
@@ -226,7 +225,8 @@ function coordinationStartsAction(context: HpsgClauseContext, index: number): bo
   );
 }
 
-function siteBoundary(lower: string, context: HpsgClauseContext, allowRelativeMarker = false): boolean {
+function siteBoundary(token: Token, context: HpsgClauseContext, allowRelativeMarker = false): boolean {
+  const lower = normalizeTokenLower(token);
   if (SITE_MULTIPLICITY_WORDS.has(lower)) {
     return false;
   }
@@ -253,7 +253,14 @@ function siteBoundary(lower: string, context: HpsgClauseContext, allowRelativeMa
     mapFrequencyAdverb(lower) ||
     mapIntervalUnit(lower)
   ) return true;
-  return false;
+  // A registered route owns its token unless the same surface is anatomical.
+  // Resolve this ambiguity only for route candidates, using the site owner.
+  if ((!getRouteMeaning(token) && !context.options?.routeMap?.[lower]) ||
+      getPrimarySiteMeaningCandidate(token)) return false;
+  const site = resolveBodySiteLexeme(lower, context.options?.siteCodeMap, {
+    bodySiteContext: context.options?.context?.bodySiteContext
+  });
+  return !site?.coding && !site?.definition;
 }
 
 function trimBraceRange(
@@ -422,7 +429,7 @@ function sitePredicateEndsBefore(
     coordinationStartsAction(context, index) ||
     Boolean(coordinatedRightSiteTokens(context, index)) ||
     ACTION_SEQUENCE_MARKERS.has(lower) ||
-    (index > predicateStart && siteBoundary(lower, context))
+    (index > predicateStart && siteBoundary(token, context))
   ) return true;
 
   if (!SITE_ANCHORS.has(lower)) return false;
@@ -658,7 +665,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(candidateLower)
       ) && anchoredModifierLeadsToResolvableSite(context, cursor);
       if (
-        (siteBoundary(candidateLower, context) || relationIntroducesNonSiteComplement(context, cursor)) &&
+        (siteBoundary(candidate, context) || relationIntroducesNonSiteComplement(context, cursor)) &&
         (isPunctuation(candidateLower) || !siteModifierCanBridgeBoundary)
       ) {
         const next = context.tokens[cursor + 1];
@@ -792,7 +799,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (
       (SITE_ANCHORS.has(firstLower) || SITE_SELF_DISPLAY_ANCHORS.has(firstLower)) ||
       isPunctuation(firstLower) ||
-      siteBoundary(firstLower, context, true)
+      siteBoundary(first, context, true)
     ) {
       return [];
     }
@@ -802,8 +809,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (!tokens) {
         continue;
       }
-      const lowers = tokens.map((token) => normalizeTokenLower(token));
-      if (lowers.some((lower) => !lower || siteBoundary(lower, context, true))) {
+      if (tokens.some(token => !normalizeTokenLower(token) || siteBoundary(token, context, true))) {
         continue;
       }
       const originalText = joinTokenText(tokens);
