@@ -3895,21 +3895,84 @@ describe("round72 reviewed interchange source families", () => {
     }] };
     const advice = { id: "conditional-driving-warning", extension: [note],
       coding: [{ system: "http://snomed.info/sct", code }] };
-    const row: FhirDosage = { additionalInstruction: [advice],
-      extension: [buildInstructionGraphExtension(graph)!] };
-    const inputs = [persist([row]), persist({ step: [{ component: [row] }] })];
-    for (const input of inputs) {
-      const before = persist(input), native = importCanonicalCourse(input);
-      const frames = buildAdditionalInstructionFramesFromCoding("http://snomed.info/sct", code)!;
-      expect(frames.find(frame => frame.predicate.lemma === "cause")).toMatchObject({ modality: AdviceModality.May });
-      expect(frames.find(frame => frame.predicate.lemma === "drive")).toMatchObject({
-        polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
-        args: [{ role: AdviceArgumentRole.Free, text: "affected", normalized: "affected" }]
-      });
-      const projected = projectCanonicalCourse(native);
+    const codedEnglish = "May cause drowsiness; if affected, do not drive or operate machinery" +
+      (code === "418914006" ? "; avoid alcohol." : ".");
+    const codedThai = "อาจทำให้ง่วงซึม; ห้ามขับขี่ยานพาหนะหรือทำงานกับเครื่องจักรหากมีอาการ" +
+      (code === "418914006" ? "; หลีกเลี่ยงเครื่องดื่มแอลกอฮอล์." : ".");
+    const frames = buildAdditionalInstructionFramesFromCoding("http://snomed.info/sct", code)!;
+    expect(frames.find(frame => frame.predicate.lemma === "cause")).toMatchObject({ modality: AdviceModality.May });
+    expect(frames.find(frame => frame.predicate.lemma === "drive")).toMatchObject({
+      polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
+      args: [{ role: AdviceArgumentRole.Free, text: "affected", normalized: "affected" }]
+    });
+    for (const scheduled of [false, true]) {
+      const row: FhirDosage = { additionalInstruction: [advice],
+        extension: [buildInstructionGraphExtension(graph)!],
+        ...(scheduled ? {
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+        } : {}),
+      };
+      for (const input of [persist([row]), persist({ step: [{ component: [row] }] })]) {
+        const before = persist(input), native = importCanonicalCourse(input);
+        const options = { locale: "en", realizationMode: "normalized" as const };
+        for (const text of [formatSig(input, "long", options), formatCanonicalCourse(native, "long", options)]) {
+          expect(text.split(codedEnglish)).toHaveLength(2);
+          expect(text.split("Do not drive.")).toHaveLength(2);
+          if (scheduled) {
+            expect(text).toContain("1 tablet");
+            expect(text).toContain("once daily");
+          }
+        }
+        for (const text of [
+          formatSig(input, "long", { ...options, locale: "th" }),
+          formatCanonicalCourse(native, "long", { ...options, locale: "th" }),
+        ]) {
+          expect(text.split(codedThai)).toHaveLength(2);
+          expect(text.split("ห้ามDrive.")).toHaveLength(2);
+          if (scheduled) {
+            expect(text).toContain("1 เม็ด");
+            expect(text).toContain("วันละครั้ง");
+          }
+        }
+        const projected = projectCanonicalCourse(native);
+        for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
+          expect(output.additionalInstruction).toEqual([advice, { text: "Do not drive" }]);
+          expect(output.doseAndRate).toEqual(row.doseAndRate);
+          expect(output.timing?.repeat).toEqual(row.timing?.repeat);
+          expect(parseInstructionGraphExtension(output.extension)).toEqual(parseInstructionGraphExtension(row.extension));
+        }
+        expect(input).toEqual(before);
+      }
+    }
+  });
+
+  it.each(["text", "display"] as const)("keeps supplied advice %s ahead of a known-code label", labelOwner => {
+    const suppliedText = "Clinic warning: do not drive if affected";
+    const suppliedDisplay = "Clinic display: avoid driving if affected";
+    const advice = {
+      id: "authored-warning", extension: [note],
+      ...(labelOwner === "text" ? { text: suppliedText } : {}),
+      coding: [{ system: "http://snomed.info/sct", code: "418954008", display: suppliedDisplay }],
+    };
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      additionalInstruction: [advice],
+    };
+    for (const input of [persist([row]), persist({ step: [{ component: [row] }] })]) {
+      const before = persist(input);
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toContain(labelOwner === "text" ? suppliedText : suppliedDisplay);
+      expect(text).not.toContain("May cause drowsiness");
+      if (labelOwner === "text") expect(text).not.toContain(suppliedDisplay);
+      expect(text).toContain("1 tablet");
+      expect(text).toContain("once daily");
+      const projected = projectCanonicalCourse(importCanonicalCourse(input));
       for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
-        expect(output.additionalInstruction).toEqual([advice, { text: "Do not drive" }]);
-        expect(parseInstructionGraphExtension(output.extension)).toEqual(parseInstructionGraphExtension(row.extension));
+        expect(output.additionalInstruction).toEqual([advice]);
+        expect(output.doseAndRate).toEqual(row.doseAndRate);
+        expect(output.timing?.repeat).toEqual(row.timing?.repeat);
       }
       expect(input).toEqual(before);
     }

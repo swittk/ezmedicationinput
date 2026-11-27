@@ -1994,12 +1994,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         })
       : undefined;
     const graphWarningText = graphWarning ? formatPatientInstructionSentence(graphWarning) : undefined;
-    if (graphWarningText && !instructionPhrases.some((value) =>
-      normalizeInstructionText(value).includes(normalizeInstructionText(graphWarningText)) ||
-      normalizeInstructionText(graphWarningText).includes(normalizeInstructionText(value))
-    )) {
-      instructionPhrases.push(graphWarningText);
-    }
+    if (graphWarningText) instructionPhrases.push(graphWarningText);
   }
   const representedInstructionTexts = additionalForDirectRendering
     .map((instruction) => instruction.text)
@@ -2089,12 +2084,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     const wholeGraphText = formatPatientInstructionSentence(wholeGraph);
     const parts: string[] = [];
     for (const value of [wholeGraphText, ...instructionPhrases]) {
-      if (!value) continue;
-      const normalized = normalizeInstructionText(value);
-      if (parts.some((existing) => {
-        const candidate = normalizeInstructionText(existing);
-        return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
-      })) continue;
+      if (!value || parts.indexOf(value) !== -1) continue;
       parts.push(value);
     }
     if (authoredPrimary || condition || hasCalendarQualifiers)
@@ -2190,7 +2180,11 @@ function formatAdditionalInstructions(instructions: readonly CanonicalAdditional
       phrases.push("On an empty stomach");
       continue;
     }
-    const text = instruction.text ?? instruction.coding?.display;
+    const text = instruction.text ?? instruction.coding?.display ?? (
+      instruction.coding?.code ? findAdditionalInstructionDefinitionByCoding(
+        instruction.coding.system ?? "http://snomed.info/sct", instruction.coding.code
+      )?.text : undefined
+    );
     if (!text) {
       continue;
     }

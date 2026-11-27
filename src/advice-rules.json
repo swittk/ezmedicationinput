@@ -717,7 +717,7 @@
       "definition": {
         "code": "418954008",
         "display": "Warning. May cause drowsiness. If affected do not drive or operate machinery (qualifier value)",
-        "text": "May cause drowsiness; do not drive if affected",
+        "text": "May cause drowsiness; if affected, do not drive or operate machinery",
         "thai": "อาจทำให้ง่วงซึม; ห้ามขับขี่ยานพาหนะหรือทำงานกับเครื่องจักรหากมีอาการ"
       },
       "frames": [
@@ -781,8 +781,8 @@
       "definition": {
         "code": "418914006",
         "display": "Warning. May cause drowsiness. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)",
-        "text": "May cause drowsiness; avoid driving or alcohol",
-        "thai": "อาจทำให้ง่วงซึม; หลีกเลี่ยงการขับขี่ยานพาหนะหรือดื่มแอลกอฮอล์"
+        "text": "May cause drowsiness; if affected, do not drive or operate machinery; avoid alcohol",
+        "thai": "อาจทำให้ง่วงซึม; ห้ามขับขี่ยานพาหนะหรือทำงานกับเครื่องจักรหากมีอาการ; หลีกเลี่ยงเครื่องดื่มแอลกอฮอล์"
       },
       "frames": [
         {
