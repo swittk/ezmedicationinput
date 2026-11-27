@@ -720,6 +720,7 @@
       "frames": [
         {
           "force": "warning",
+          "modality": "may",
           "predicate": {
             "lemma": "cause",
             "semanticClass": "effect"
@@ -739,7 +740,10 @@
             "lemma": "drive",
             "semanticClass": "activity"
           },
-          "args": []
+          "relation": "if",
+          "args": [
+            { "role": "free", "text": "affected" }
+          ]
         }
       ],
       "matcher": {
@@ -780,6 +784,7 @@
       "frames": [
         {
           "force": "warning",
+          "modality": "may",
           "predicate": {
             "lemma": "cause",
             "semanticClass": "effect"
@@ -799,7 +804,10 @@
             "lemma": "drive",
             "semanticClass": "activity"
           },
-          "args": []
+          "relation": "if",
+          "args": [
+            { "role": "free", "text": "affected" }
+          ]
         },
         {
           "force": "warning",

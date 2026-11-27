@@ -83,6 +83,7 @@ interface AdviceFrameTemplateArgument {
 interface AdviceFrameTemplate {
   force: AdviceForce;
   polarity?: AdvicePolarity;
+  modality?: AdviceModality;
   predicate: {
     lemma: string;
     semanticClass?: string;
@@ -109,6 +110,7 @@ interface AdviceFrameTemplateArgumentSource {
 interface AdviceFrameTemplateSource {
   force: string;
   polarity?: string;
+  modality?: string;
   predicate: {
     lemma: string;
     semanticClass?: string;
@@ -476,6 +478,7 @@ function buildAdviceFrameTemplate(source: AdviceFrameTemplateSource): AdviceFram
   return {
     force: mapAdviceForce(source.force),
     polarity: mapAdvicePolarity(source.polarity),
+    modality: source.modality ? requiredEnumValue<AdviceModality>(AdviceModality, source.modality, "advice modality") : undefined,
     predicate: {
       lemma: source.predicate.lemma,
       semanticClass: source.predicate.semanticClass
@@ -971,7 +974,8 @@ function instantiateTemplateFrames(
         args,
         index,
         template.relation,
-        template.polarity
+        template.polarity,
+        template.modality
       )
     );
     index += 1;

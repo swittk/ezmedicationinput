@@ -1,6 +1,7 @@
 import retainedCourseProfile from "../fhir/r5/medication-r6-course-details.json";
 import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../src/dosage-course";
 import { describe, expect, it } from "vitest";
+import { buildAdditionalInstructionFramesFromCoding } from "../src/advice";
 import {
   fromDosageDetails, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages, parseSig, parseSig as parsePublicSig, parseInstructionActions, formatSig, importCanonicalCourse, projectCanonicalCourse,
   type EzDosage, type FhirDosage, type FhirExtension, type FhirR6Extension, type FhirElement, type FhirR6PrimitiveElement, type FhirRatio, type FhirR6Ratio, type FhirR6Dosage,
@@ -12,7 +13,7 @@ import {
   buildBodySiteSpatialRelationExtension, parseBodySiteSpatialRelationExtension,
   registerSigLocalization, getMedicationInstructionAction,
   formatCanonicalCourse, formatCanonicalAdministration, formatSigBatch, formatParseBatch, suggestSig,
-  buildInstructionGraphExtension, parseInstructionGraphExtension, AdviceForce, AdvicePolarity, AdviceArgumentRole, AdviceRelation,
+  buildInstructionGraphExtension, parseInstructionGraphExtension, AdviceForce, AdvicePolarity, AdviceModality, AdviceArgumentRole, AdviceRelation,
   type CanonicalInstructionGraph,
 } from "../src/index";
 import {
@@ -3884,6 +3885,34 @@ describe("round72 reviewed interchange source families", () => {
       expect(parseInstructionGraphExtension(output.extension)?.actions[0].polarity).toBe(AdvicePolarity.Negate);
     }
     expect(parsed.fhir).toEqual(before);
+  });
+
+  it.each(["418954008", "418914006"])("retains conditional coded advice beside an unconditional Drive warning: %s", code => {
+    const graph: CanonicalInstructionGraph = { sourceText: "", actions: [{
+      force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "drive", semanticClass: "activity", display: "Drive" },
+      args: [], span: { start: 0, end: 12 }, sourceText: ""
+    }] };
+    const advice = { id: "conditional-driving-warning", extension: [note],
+      coding: [{ system: "http://snomed.info/sct", code }] };
+    const row: FhirDosage = { additionalInstruction: [advice],
+      extension: [buildInstructionGraphExtension(graph)!] };
+    const inputs = [persist([row]), persist({ step: [{ component: [row] }] })];
+    for (const input of inputs) {
+      const before = persist(input), native = importCanonicalCourse(input);
+      const frames = buildAdditionalInstructionFramesFromCoding("http://snomed.info/sct", code)!;
+      expect(frames.find(frame => frame.predicate.lemma === "cause")).toMatchObject({ modality: AdviceModality.May });
+      expect(frames.find(frame => frame.predicate.lemma === "drive")).toMatchObject({
+        polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
+        args: [{ role: AdviceArgumentRole.Free, text: "affected", normalized: "affected" }]
+      });
+      const projected = projectCanonicalCourse(native);
+      for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
+        expect(output.additionalInstruction).toEqual([advice, { text: "Do not drive" }]);
+        expect(parseInstructionGraphExtension(output.extension)).toEqual(parseInstructionGraphExtension(row.extension));
+      }
+      expect(input).toEqual(before);
+    }
   });
 
   it.each([false, true])("keeps complete typed warning qualifiers beside generic annotated coding (qualified %s)", qualified => {
