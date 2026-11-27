@@ -5097,13 +5097,22 @@ describe("round40 current R6 generation and localized previews", () => {
 
   it("keeps text-only external R6 directions when no clinical fields can replace them", () => {
     const raw: FhirR6DosageInstruction = {
-      renderedInstruction: "Follow specialist directions", step: [{ component: [{ text: "Use the supplied instructions" }] }]
+      renderedInstruction: "Follow specialist directions", step: [{ component: [{ text: "Do not crush" }] }]
     };
-    expect(formatSig(raw, "long", { locale: "en", realizationMode: "roundtrip" }))
-      .toBe("Follow specialist directions");
-    const course = courseFromR6(raw);
+    const before = structuredClone(raw), course = courseFromR6(raw);
+    for (const input of [course, raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))])
+      for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const output = formatSig(input, "long", { locale, realizationMode });
+        expect(output).toContain("Follow specialist directions");
+        expect(output).toContain("Do not crush");
+      }
     expect(formatCanonicalAdministration(course.stages[0].administrations[0], "long",
-      { locale: "en", realizationMode: "roundtrip" })).toBe("Use the supplied instructions");
+      { locale: "en", realizationMode: "roundtrip" })).toBe("Do not crush");
+    expect(formatSig({ renderedInstruction: raw.renderedInstruction, step: [] }, "long",
+      { locale: "en", realizationMode: "roundtrip" })).toBe("Follow specialist directions");
+    expect(formatSig({ renderedInstruction: "Do not crush", step: raw.step }, "long",
+      { locale: "en", realizationMode: "roundtrip" })).toBe("Do not crush");
+    expect(raw).toEqual(before);
   });
 
   it("localizes a labelled scalar independently of a per-target scope", () => {

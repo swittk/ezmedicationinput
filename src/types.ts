@@ -780,8 +780,9 @@ export interface FhirR6CodeableReference extends Omit<FhirCodeableReference, "ex
 export interface FhirR6Dosage extends Omit<FhirDosage,
   "sequence" | "_sequence" | "site" | "maxDosePerPeriod" | "maxDosePerAdministration" |
   "maxDosePerLifetime" | "doseAndRate" | "timing" | "extension" | "modifierExtension" | "_text" | "_asNeeded" |
-  "route" | "method" | "additionalInstruction" | "asNeededFor"> {
+  "route" | "method" | "additionalInstruction" | "asNeededFor" | "_patientInstruction"> {
   _text?: FhirR6PrimitiveElement;
+  _patientInstruction?: FhirR6PrimitiveElement;
   _asNeeded?: FhirR6PrimitiveElement;
   extension?: FhirR6Extension[];
   modifierExtension?: FhirR6Extension[];
@@ -838,6 +839,7 @@ export interface FhirDosage extends FhirBackboneElement {
   /** Primitive metadata belongs to the authored narrative, not a new dose. */
   _text?: FhirPrimitiveElement;
   patientInstruction?: string;
+  _patientInstruction?: FhirPrimitiveElement;
   timing?: FhirTiming;
   route?: FhirCodeableConcept;
   site?: FhirCodeableConcept;

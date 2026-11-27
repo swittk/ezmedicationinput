@@ -886,7 +886,8 @@ export function formatCanonicalCourse(
   // Parser-owned native courses and reconciled R5 imports retain source mode.
   const sourceReplayAllowed = oneOrCourse.provenance?.format !== "r6" &&
     oneOrCourse.provenance?.sourceTextVerified !== false;
-  if (!sourceReplayAllowed && oneOrCourse.instruction && !courseHasClinicalFacts(oneOrCourse)) {
+  if (!sourceReplayAllowed && oneOrCourse.instruction && oneOrCourse.stages.length === 0 &&
+      !courseHasClinicalFacts(oneOrCourse)) {
     if (authored && authored.text === oneOrCourse.instruction) authored.rendered = true;
     return oneOrCourse.instruction;
   }

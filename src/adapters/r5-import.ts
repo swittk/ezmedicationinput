@@ -1060,7 +1060,9 @@ function reconcileNativeCompactCourse(
   const sequences = new Set([...groups.keys(), ...metadata.keys(), ...(historicalStages?.keys() ?? [])]);
   const stageCount = Math.max(0, ...localRows.map((local) => local?.value.stepCount ?? 0));
   const observedLast = Math.max(0, ...sequences);
-  const fillCount = Math.min(stageCount, observedLast, 10_000);
+  // Sparse sequence labels order stages without identifying missing ordinal positions.
+  const fillCount = sequences.size < stageCount && observedLast <= stageCount
+    ? Math.min(observedLast, 10_000) : 0;
   for (let sequence = 1; sequence <= fillCount; sequence++)
     if (!removedEmptySequences?.has(sequence)) sequences.add(sequence);
   if (stageCount > 10_000 || observedLast > 10_000) {

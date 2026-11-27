@@ -3747,14 +3747,18 @@ describe("round72 reviewed completion and batch directions", () => {
     expect(input).toEqual(before);
   });
 
-  it("keeps an imported whole-course header when it owns the directions", () => {
+  it.each(["Follow specialist directions", "Do not crush"])(
+    "keeps header and component directions in the imported batch (%s)", text => {
     const source: FhirR6DosageInstruction = { renderedInstruction: "Follow specialist directions",
-      step: [{ component: [{ text: "Use the supplied instructions" }] }] };
+      step: [{ component: [{ text }] }] };
     const before = persist(source), batch = fromFhir(source, { locale: "en" });
-    expect(batch.items[0].longText).toBe("Use the supplied instructions");
+    expect(batch.items[0].longText).toBe(text);
     for (const style of ["short", "long"] as const) {
-      expect(style === "short" ? batch.shortText : batch.longText).toBe(source.renderedInstruction);
-      expect(formatParseBatch(batch, style, " / ")).toBe("Follow specialist directions");
+      const whole = style === "short" ? batch.shortText : batch.longText;
+      expect(whole).toContain(source.renderedInstruction);
+      expect(whole).toContain(text);
+      if (text === source.renderedInstruction) expect(whole).toBe(text);
+      expect(formatParseBatch(batch, style, " / ")).toBe(whole);
     }
     expect(source).toEqual(before);
   });
@@ -6203,5 +6207,74 @@ describe("independent current FHIR field fidelity", () => {
     expect(quantity.extension).toContainEqual(missing);
     expect(quantity.extension!.some(field => field.url === "sourceQuantityField")).toBe(false);
     expect(input).toEqual(before);
+  });
+});
+
+describe("current dosage annotations and sparse phase ordering", () => {
+  it("preserves typed patient-instruction metadata across R5 and R6", () => {
+    const note = { url: "https://example.org/patient-note", valueString: "Retain this annotation" };
+    const row: FhirDosage = {
+      patientInstruction: "Shake well before use",
+      _patientInstruction: { id: "r5-patient-instruction", extension: [note] },
+      doseAndRate: [{ doseQuantity: { value: 5, unit: "mL" } }],
+    };
+    const component: FhirR6Dosage = {
+      patientInstruction: "Shake well before use",
+      _patientInstruction: { id: "r6-patient-instruction", extension: [note, {
+        url: "https://example.org/annotated-quantity", valueQuantity: { value: 2, unit: "mg", comparator: "~" },
+      }] },
+      doseAndRate: [{ doseQuantity: { value: 5, unit: "mL" } }],
+    };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [component] }] };
+    const before = structuredClone({ row, raw });
+    const fromRow = toDosageDetails([persist(row)]);
+    expect(fromRow.step[0].component[0]._patientInstruction).toEqual(row._patientInstruction);
+    expect(toFhirR5Dosages(fromRow)[0]._patientInstruction).toEqual(row._patientInstruction);
+    const reopened = toDosageDetails(persist(toFhirR5Dosages(raw)));
+    expect(reopened.step[0].component[0]._patientInstruction).toEqual(component._patientInstruction);
+    for (const input of [row, raw, reopened]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toContain("Shake well before use");
+      expect(importCanonicalCourse(input).stages[0].administrations[0].amounts?.[0].quantity)
+        .toMatchObject({ value: 5, unit: "mL" });
+    }
+    expect({ row, raw }).toEqual(before);
+  });
+
+  it.each([[1, 2], [10, 20]])("orders a complete two-phase taper with labels %s and %s", (first, second) => {
+    const rows: FhirDosage[] = [first, second].map((sequence, index) => ({
+      sequence,
+      doseAndRate: [{ doseQuantity: { value: index + 1, unit: "tab" } }],
+      timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"],
+        boundsDuration: { value: index + 2, unit: "d", system: "http://unitsofmeasure.org", code: "d" },
+      } },
+      extension: [{ url: "https://example.org/phase-note", valueString: "Phase " + sequence }],
+      modifierExtension: [{ url: DOSAGE_DETAILS_R5_URL, extension: encodeR5RetainedFields({
+        rowIndex: index, sequence, stepCount: 2, step: { id: "phase-" + sequence },
+      }) }],
+    }));
+    const before = structuredClone(rows), native = importCanonicalCourse(rows);
+    const projected = projectCanonicalCourse(native);
+    for (const input of [rows, native, persist(projected.fhir), persist(projected.fhirNext)]) {
+      const current = structuredClone(input), restored = importCanonicalCourse(input);
+      expect(restored.stages).toHaveLength(2);
+      expect(restored.stages.map(stage => stage.provenance?.id)).toEqual(["phase-" + first, "phase-" + second]);
+      expect(restored.stages.map(stage => stage.administrations[0].amounts?.[0].quantity?.value)).toEqual([1, 2]);
+      expect(nextDueDoses(input, {
+        orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 8,
+      })).toEqual([
+        "2026-12-01T09:00:00+00:00", "2026-12-02T09:00:00+00:00", "2026-12-03T09:00:00+00:00",
+        "2026-12-04T09:00:00+00:00", "2026-12-05T09:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({
+        dosage: input, orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+        timeZone: "UTC", durationValue: 8, durationUnit: FhirPeriodUnit.Day,
+      })).toMatchObject({ totalUnits: 8, unit: "tab", quantityKind: "scheduled" });
+      expect(projectCanonicalCourse(restored).fhir.map(row => row.extension?.find(item => item.url === "https://example.org/phase-note")?.valueString))
+        .toEqual(["Phase " + first, "Phase " + second]);
+      expect(input).toEqual(current);
+    }
+    expect(rows).toEqual(before);
   });
 });

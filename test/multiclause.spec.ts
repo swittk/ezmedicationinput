@@ -5423,8 +5423,11 @@ describe("selected branch preview and cadence ownership", () => {
       expect(member.schedule?.recurrence).toMatchObject({ period, periodUnit, periodMax, monthDays: [15], clocks: ["08:00:00"] });
       for (const locale of ["en", "th"]) {
         const text = formatSig(input, "long", { locale });
-        expect(text).toContain("15");
+        expect(text).toContain(locale === "en" && !eachMonth ? "on day 15" : "15");
         expect(text.includes(locale === "en" ? "of each month" : "ของทุกเดือน")).toBe(eachMonth);
+        if (_name === "yearly") expect(text).toContain(locale === "en" ? "once yearly" : "ปีละครั้ง");
+        if (_name === "one-to-two-day range")
+          expect(text).toContain(locale === "en" ? "once every 1 to 2 days" : "1 ครั้ง ทุก 1 ถึง 2 วัน");
       }
       // Range execution chooses the existing best-effort cadence; preview
       // must still describe the full authored range without a monthly promise.
