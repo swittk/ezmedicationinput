@@ -14,6 +14,7 @@ import { resolveBodySiteLexeme, resolveBodySiteRestrictionPredicate, type Resolv
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import {
+  BODY_SITE_LOCATIVE_LEAD_TOKENS,
   relationHasGrammarFeature,
   resolveActionRelationSurface,
   resolveActionRelationSurfaceCandidates
@@ -34,6 +35,7 @@ import {
   ACTION_COORDINATION_CONNECTORS,
   ACTION_SEQUENCE_MARKERS,
   BODY_SITE_BARE_NOMINAL_PREFIXES,
+  BODY_SITE_PARTITIVE_HEADS,
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_FEATURE_SCORE_BONUS,
   DURATION_LEAD_TOKENS,
@@ -177,12 +179,13 @@ function anchoredModifierLeadsToResolvableSite(
 ): boolean {
   const maxEnd = Math.min(context.limit, start + 5);
   for (let index = start + 1; index < maxEnd; index += 1) {
-    const candidate = context.tokens.slice(index, index + 1)[0];
+    const candidate = context.tokens[index];
     if (!candidate || context.state.consumed.has(candidate.index) || isPunctuation(normalizeTokenLower(candidate))) break;
-    const resolved = resolveBodySiteLexeme(candidate.original, context.options?.siteCodeMap, {
+    const phrase = joinTokenText(context.tokens.slice(start, index + 1));
+    const resolved = resolveBodySiteLexeme(phrase, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     });
-    if (resolved?.coding || resolved?.definition) return true;
+    if (resolved?.coding || resolved?.definition || resolved?.spatialRelation?.targetCoding) return true;
   }
   return false;
 }
@@ -260,7 +263,10 @@ function siteBoundary(token: Token, context: HpsgClauseContext, allowRelativeMar
   const site = resolveBodySiteLexeme(lower, context.options?.siteCodeMap, {
     bodySiteContext: context.options?.context?.bodySiteContext
   });
-  return !site?.coding && !site?.definition;
+  if (site?.coding || site?.definition) return false;
+  if (!BODY_SITE_PARTITIVE_HEADS.has(lower) && !BODY_SITE_LOCATIVE_LEAD_TOKENS.has(lower)) return true;
+  // A complete registered site phrase can also own an ambiguous route head.
+  return !anchoredModifierLeadsToResolvableSite(context, token.index);
 }
 
 function trimBraceRange(
