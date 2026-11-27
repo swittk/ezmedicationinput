@@ -6487,6 +6487,9 @@ function visitClockOccurrences(
   timeZone: string, effectiveLimit: number, dayFilter: Set<string>, enforceDayFilter: boolean,
   calendarDays: CalendarDaySelection | undefined, emit: (at: Date) => boolean
 ): void {
+  const fromTime = from.getTime();
+  const orderedTime = orderedAt?.getTime();
+  const endTime = courseEnd?.getTime();
   let currentDay = firstClockAnchorDay(from, expanded, timeZone, orderedAt);
   const firstShift = expanded[0].dayShift;
   // Shifted anchors can interlace adjacent source days. Keep their existing
@@ -6498,7 +6501,7 @@ function visitClockOccurrences(
   const maxIterations = calendarScanLimit(currentDay, courseEnd, effectiveLimit, repeat) + Math.max(0, -firstShift);
   while (
     iterations < maxIterations &&
-    (!courseEnd || (firstShift < 0 ? addLocalDays(currentDay, firstShift, timeZone) : currentDay) < courseEnd)
+    (endTime === undefined || (firstShift < 0 ? addLocalDays(currentDay, firstShift, timeZone) : currentDay).getTime() < endTime)
   ) {
     if (
       matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
@@ -6507,8 +6510,10 @@ function visitClockOccurrences(
       for (const entry of expanded) {
         const targetDay = entry.dayShift === 0 ? currentDay : addLocalDays(currentDay, entry.dayShift, timeZone);
         const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
-        if (!zoned || zoned < from || orderedAt && zoned < orderedAt || courseEnd && zoned >= courseEnd) continue;
-        if (pending) pending.push({ at: zoned.getTime(), date: zoned, serial: serial++ });
+        if (!zoned) continue;
+        const at = zoned.getTime();
+        if (at < fromTime || orderedTime !== undefined && at < orderedTime || endTime !== undefined && at >= endTime) continue;
+        if (pending) pending.push({ at, date: zoned, serial: serial++ });
         else if (emit(zoned)) return;
       }
     }
