@@ -16333,3 +16333,27 @@ Registered conditional relations reuse the shared prefix and postfix guard
 construction for quantitative predicates. Medication conditions remain distinct
 from independently conditional counseling. Ordinary guard selection and explicit
 closed withholding spans retain their existing paths.
+
+
+## 2026-11-27 — Clinical timing, action order and current annotations
+
+Ordinary daily amounts retain their scalar dose and cadence, while licensed
+infusion rates and dose ceilings keep their existing owners. Sequential phases
+preserve the distinction between an opening delay and administration duration,
+local calendar cadence and inherited event offsets. Quantified withholding
+instructions retain each selected dose and apply only to matching administrations.
+
+Clinical windows distinguish query eligibility from authored phase origins and
+actual predecessor completion. Unknown step counts remain unresolved. Historical
+counting deduplicates existing instants without recreating their timestamps, and
+variable daily frequencies remain within their stated clock windows.
+
+Typed temporal edges preserve action order and attached conditions. Current
+previews retain specific sites, equivalent advice displays, independent vehicles,
+clock windows and cycle intervals. Calendar exclusions qualify the medication
+primary before independent advice, including method-only instructions. Relation-led
+advice requires a complete licensed nominal; other authored text remains intact.
+FHIR conversion retains Boolean condition
+subjects, unknown relation nodes, nested Coding quantities, spatial annotations
+and RelativeTime primitive metadata. Independent conforming fixtures preserve
+authored source, current structured facts and meaningful execution assertions.
