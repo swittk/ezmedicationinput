@@ -1990,11 +1990,11 @@ function buildActionFrame(
     span = trimActionRange(input, { start: earliestArgumentStart, end: span.end }, offset);
   }
   const frame: AdviceFrame = {
-    force: polarity === AdvicePolarity.Negate
+    force: prefixed?.force ?? (polarity === AdvicePolarity.Negate
       ? AdviceForce.Warning
       : modality === AdviceModality.Should
         ? AdviceForce.Instruction
-        : AdviceForce.Sequence,
+        : AdviceForce.Sequence),
     polarity,
     modality,
     predicate: {
@@ -2028,6 +2028,7 @@ interface PrefixedActionMatch {
   match: ActionMatch;
   polarity?: AdvicePolarity;
   modality?: AdviceModality;
+  force?: AdviceForce;
   preposedTheme?: { start: number; end: number };
 }
 
@@ -2058,6 +2059,7 @@ function prefixedActionAt(
       match,
       polarity: prefix.polarity,
       modality: prefix.modality,
+      force: prefix.force,
       ...(prefix.complement === "contact-clause"
         ? { preposedTheme: { start: complementStart, end: actionIndex } } : {})
     };
@@ -3801,12 +3803,14 @@ export function instructionGraphAdministrationTechnique(
   const graph = clause.instructionGraph;
   const actions = graph?.actions;
   if (!actions?.length) return undefined;
+  const unqualified = (action: AdviceFrame, index: number) =>
+    action.polarity !== AdvicePolarity.Negate && action.modality === undefined &&
+    !(action.relation && relationHasGrammarFeature(action.relation, "conditionScope")) &&
+    !graph?.relations?.some(relation => relation.toActionIndex === index &&
+      relationHasGrammarFeature(relation.kind, "conditionScope"));
   const occlusiveTopical = clause.route?.code === "6064005" &&
     clause.method?.coding?.code === "738991002" && actions.some((action, index) =>
-      action.predicate.lemma === "cover" && action.polarity !== AdvicePolarity.Negate &&
-      action.modality === undefined &&
-      !graph?.relations?.some(relation => relation.toActionIndex === index &&
-        relationHasGrammarFeature(relation.kind, "conditionScope")) &&
+      action.predicate.lemma === "cover" && unqualified(action, index) &&
       action.args.some(arg => arg.conceptId === "occlusive_dressing"));
   if (occlusiveTopical) return {
     route: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
@@ -3819,18 +3823,18 @@ export function instructionGraphAdministrationTechnique(
   };
   // Preserve the existing ordered oral-rinse technique decision. A separately
   // administered tablet or lotion does not acquire the rinse's route.
-  const swishIndex = actions.findIndex(action =>
-    action.predicate.lemma === "swish" && action.polarity !== AdvicePolarity.Negate);
+  const swishIndex = actions.findIndex((action, index) =>
+    action.predicate.lemma === "swish" && unqualified(action, index));
   const swishSpit = swishIndex >= 0 && !clause.route?.code && !clause.method?.coding?.code &&
     !actions.some(action => action.predicate.lemma === "swallow" && action.polarity !== AdvicePolarity.Negate) &&
     actions.some((action, index) => index > swishIndex && action.predicate.lemma === "spit" &&
-      action.polarity !== AdvicePolarity.Negate);
+      unqualified(action, index));
   const swishSwallow = swishIndex >= 0 && !swishSpit &&
     clause.route?.code === "26643006" && clause.method?.coding?.code === "738995006" &&
     clause.dose?.unit === "mL" &&
     !actions.some(action => action.predicate.lemma === "spit" && action.polarity !== AdvicePolarity.Negate) &&
     actions.some((action, index) => index > swishIndex && action.predicate.lemma === "swallow" &&
-      action.polarity !== AdvicePolarity.Negate && !action.args.some(arg =>
+      unqualified(action, index) && !action.args.some(arg =>
         arg.conceptId === "medication-tablet" || arg.conceptId === "medication-capsule"));
   if (!swishSpit && !swishSwallow) return undefined;
   return { route: { text: "swish and spit, oromucosal", coding: [

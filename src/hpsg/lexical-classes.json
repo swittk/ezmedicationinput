@@ -2064,6 +2064,26 @@
       "modality": "must"
     },
     {
+      "parts": ["may"],
+      "modality": "may",
+      "force": "warning"
+    },
+    {
+      "parts": ["can"],
+      "modality": "can",
+      "force": "warning"
+    },
+    {
+      "parts": ["might"],
+      "modality": "might",
+      "force": "warning"
+    },
+    {
+      "parts": ["could"],
+      "modality": "could",
+      "force": "warning"
+    },
+    {
       "parts": [
         "do"
       ]

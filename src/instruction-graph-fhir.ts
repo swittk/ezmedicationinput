@@ -258,7 +258,7 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   return result;
 }
 
-function buildActionExtension(frame: AdviceFrame): FhirExtension {
+export function buildActionExtension(frame: AdviceFrame): FhirExtension {
   const nested: FhirExtension[] = [];
   add(nested, valueInteger("sequenceIndex", frame.sequenceIndex));
   add(nested, valueCode("origin", frame.origin));

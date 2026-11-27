@@ -40,7 +40,7 @@ import { formatCanonicalClause } from "./format";
 import {
   getQuantityComparator, simpleQuantityForR5, quantityPrimitiveForR5, quantityForR5, quantityFromR5
 } from "./fhir-quantity-operator";
-import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "./instruction-graph-fhir";
+import { buildActionExtension, buildInstructionGraphExtension, parseInstructionGraphExtension, MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-fhir";
 import { ParserState } from "./parser-state";
 import { getQuantityDurationUnit } from "./unit-lexicon";
 import { joinCanonicalPrnReasonTexts } from "./prn";
@@ -1674,6 +1674,7 @@ export function serializeCanonicalContext(
     i18n?: Record<string, string>;
     coding?: { system?: string; code?: string; display?: string };
     hasTypedEvidence?: boolean;
+    frames?: AdviceFrame[];
   }> = [];
   for (const instruction of clause.additionalInstructions ?? []) {
     const text = instruction.text?.trim();
@@ -1694,7 +1695,9 @@ export function serializeCanonicalContext(
       text,
       i18n,
       coding: instruction.coding,
-      hasTypedEvidence: Boolean(instruction.evidence?.length)
+      hasTypedEvidence: Boolean(instruction.evidence?.length),
+      frames: !instruction.coding?.code && instruction.frames?.some(frame => frame.modality !== undefined)
+        ? instruction.frames : undefined
     });
   }
   if (additionalInstructions.length) {
@@ -1709,19 +1712,20 @@ export function serializeCanonicalContext(
         instruction.coding?.code || instruction.hasTypedEvidence) && instruction.i18n
         ? buildTranslationPrimitiveElement(instruction.i18n)
         : undefined;
-      dosage.additionalInstruction.push({
-        text: instruction.text,
-        ...(textElement ? { _text: textElement } : {}),
-        coding: instruction.coding?.code
-          ? [
-            {
-              system: instruction.coding.system ?? SNOMED_SYSTEM,
-              code: instruction.coding.code,
-              display: instruction.coding.display
-            }
-          ]
-          : undefined
-      });
+      const projected: FhirCodeableConcept = { text: instruction.text };
+      if (textElement) projected._text = textElement;
+      projected.coding = instruction.coding?.code
+        ? [{ system: instruction.coding.system ?? SNOMED_SYSTEM,
+          code: instruction.coding.code, display: instruction.coding.display }]
+        : undefined;
+      // Uncoded modal advice cannot recover its selected qualification from
+      // a terminology template. The dosage graph retains the clause source;
+      // this instruction carries only its own already-selected frames.
+      if (instruction.frames?.length) projected.extension = [{
+        url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL,
+        extension: instruction.frames.map(buildActionExtension)
+      }];
+      dosage.additionalInstruction.push(projected);
     }
   }
 
@@ -2330,7 +2334,7 @@ export function deserializeCanonicalContext(
             text ?? coding.display ?? "",
             clause.raw
           )
-          : undefined
+          : parseInstructionGraphExtension(instruction.extension)?.actions
       });
     }
   }
@@ -2720,7 +2724,7 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
             sourceText,
             { start: 0, end: sourceText.length }
           )
-          : undefined
+          : parseInstructionGraphExtension(concept.extension)?.actions
       };
     });
   }

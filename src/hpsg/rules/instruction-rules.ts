@@ -908,7 +908,9 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const next = context.tokens[cursor + 1];
       const nextLower = next ? normalizeTokenLower(next) : "";
       const nextAction = resolveMedicationInstructionAction(nextLower, context.options);
-      if (nextAction?.procedural) {
+      const selected = !nextAction && next
+        ? proceduralFrames(context).find(frame => frame.span.start === next.sourceStart) : undefined;
+      if (nextAction?.procedural || selected && frameActionDefinition(selected, context.options)?.procedural) {
         return [];
       }
       if (

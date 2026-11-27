@@ -1652,6 +1652,12 @@ function administrationToWire(
     additionalInstructions = additionalInstructions.map((instruction) => {
       const metadata = instruction.text?.trim() ? context.additionalInstruction?.[generatedIndex++] : undefined;
       const projected: Record<string, unknown> = { ...metadata, ...instruction };
+      const extensions = (instruction as FhirCodeableConcept).extension;
+      if (extensions) {
+        const frames = metadata?.extension?.find(field => field.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL);
+        if (frames && !extensions.some(field => field.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL))
+          projected.extension = [...extensions, frames];
+      }
       assign(projected, "text", instruction.text);
       assign(projected, "coding", instruction.coding);
       return projected;

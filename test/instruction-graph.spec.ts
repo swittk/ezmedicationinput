@@ -3,6 +3,7 @@ import { deserializeCanonicalContext, TIMING_ADMINISTRATION_DURATION_EXTENSION_U
 import { courseFromR6 } from "../src/adapters/canonical-course";
 import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, EventTiming, type AdviceFrame, type CanonicalInstructionGraph, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
 import { describe, expect, it } from "vitest";
+import { getMedicationLexerLocalePack, registerMedicationLexerLocalePack } from "../src/lexer/locale";
 import { getInstructionActionLocaleAdapter, registerInstructionActionLocaleAdapter } from "../src/index";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
@@ -2030,8 +2031,21 @@ describe("selected optional action meaning", () => {
     expect(formatSig(native, "long", { locale: "th" })).toBe("ทา. อาจปิดคลุมด้วยแผ่นปิดแบบทึบ.");
     for (const input of [native, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
       const snapshot = JSON.stringify(input);
-      const projected = projectCanonicalCourse(importCanonicalCourse(input));
+      const imported = importCanonicalCourse(input);
+      expect(imported.stages[0].administrations[0].syntax?.additionalInstructions?.[0].frames?.[0])
+        .toMatchObject({ modality: "may", span: { start: 16, end: 49 },
+          predicate: { lemma: "cover", realizer: "object-amount-material" } });
+      expect(imported.instruction).toBe(source);
+      expect(formatSig(input, "long", { locale: "en", instructionTextMode: "normalized" }))
+        .toBe("Apply the medication topically. May cover with an occlusive dressing.");
+      expect(formatSig(input, "long", { locale: "th", instructionTextMode: "normalized" }))
+        .toBe("ทา. อาจปิดคลุมด้วยแผ่นปิดแบบทึบ.");
+      const projected = projectCanonicalCourse(imported);
       for (const row of [projected.fhir[0], toFhirR5Dosages(projected.fhirNext)[0]]) {
+        expect(row.additionalInstruction).toHaveLength(1);
+        expect(row.additionalInstruction?.[0].text).toBe("May cover with an occlusive dressing");
+        expect(deserializeCanonicalContext(row).additionalInstructions?.[0].frames?.[0])
+          .toMatchObject({ modality: "may", span: { start: 16, end: 49 }, predicate: { lemma: "cover" } });
         expect(row.route?.coding?.map(coding => coding.code)).toEqual(["6064005"]);
         expect(row.method?.coding?.map(coding => coding.code)).toEqual(["738991002"]);
         expect(row.asNeeded).not.toBe(true);
@@ -2045,6 +2059,150 @@ describe("selected optional action meaning", () => {
       }
       expect(JSON.stringify(input)).toBe(snapshot);
     }
+  });
+
+  it("retains advice annotations and the code-only template beside an uncoded selected frame", () => {
+    const source = "Apply ointment; may cover with occlusive dressing";
+    const native = parsePublicSig(source).meta.canonical.course!;
+    const supplied = {
+      id: "optional-cover", text: "May cover with an occlusive dressing",
+      _text: { id: "authored-text" },
+      coding: [{ system: "urn:clinic:labels", display: "Optional dressing",
+        extension: [{ url: "urn:clinic:label-note", valueString: "reviewed" }] }],
+      extension: [{ id: "advice-note", url: "urn:clinic:advice-note", valueString: "retain" }]
+    };
+    const coded = { id: "independent-coded-advice", coding: [{
+      system: "http://terminology.hl7.org/CodeSystem/v3-EntityHandling", code: "PSA",
+      _code: { id: "coded-identity" }
+    }], extension: [{ url: "urn:clinic:coded-note", valueString: "retain" }] };
+    native.stages[0].administrations[0].additionalInstructions = [supplied, coded];
+    const before = JSON.stringify(native);
+    const initial = projectCanonicalCourse(native);
+    for (const input of [JSON.parse(JSON.stringify(initial.fhir)), JSON.parse(JSON.stringify(initial.fhirNext))]) {
+      const snapshot = JSON.stringify(input);
+      const imported = importCanonicalCourse(input);
+      const selected = imported.stages[0].administrations[0].syntax?.additionalInstructions;
+      expect(selected?.[0].frames?.[0]).toMatchObject({ modality: "may", predicate: { lemma: "cover" } });
+      expect(selected?.[1].frames?.[0]).toMatchObject({ polarity: "negate", predicate: { lemma: "shake" } });
+      const projected = projectCanonicalCourse(imported);
+      for (const row of [projected.fhir[0], toFhirR5Dosages(projected.fhirNext)[0]]) {
+        expect(row.additionalInstruction).toHaveLength(2);
+        expect(row.additionalInstruction?.[0]).toMatchObject({
+          id: supplied.id, text: supplied.text, _text: supplied._text, coding: supplied.coding
+        });
+        expect(row.additionalInstruction?.[0].extension).toContainEqual(supplied.extension[0]);
+        expect(row.additionalInstruction?.[0].extension?.filter(field =>
+          field.url === "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph")).toHaveLength(1);
+        const carrier = row.additionalInstruction?.[0].extension?.find(field =>
+          field.url === "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph");
+        expect(carrier?.extension?.map(field => field.url)).toEqual(["action"]);
+        expect(row.additionalInstruction?.[1]).toEqual(coded);
+        expect(formatSig(row, "long", { locale: "en", instructionTextMode: "normalized" }))
+          .toBe("Apply the medication topically. May cover with an occlusive dressing. Do not shake.");
+      }
+      expect(JSON.stringify(input)).toBe(snapshot);
+    }
+    expect(JSON.stringify(native)).toBe(before);
+  });
+});
+
+describe("qualified composite technique ownership", () => {
+  it.each(["may", "can", "might", "could"])("retains the registered %s action prefix as an optional warning", modality => {
+    const source = `${modality} cover with occlusive dressing`;
+    const [frame] = parseInstructionActions(source);
+    expect(frame).toMatchObject({ modality, force: AdviceForce.Warning,
+      predicate: { lemma: "cover" }, span: { start: 0, end: source.length } });
+    expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Material,
+      conceptId: "occlusive_dressing" }));
+  });
+
+  it("uses the registered lexer provider for an optional action prefix", () => {
+    const original = getMedicationLexerLocalePack("en");
+    registerMedicationLexerLocalePack({ locale: "en", apply: (tokens, input) =>
+      (original?.apply(tokens, input) ?? tokens).map((token, index) => token.lower === "clinicmay"
+        ? { ...token, index, canonical: "may" } : { ...token, index }) });
+    try {
+      const source = "clinicmay cover with occlusive dressing";
+      const [frame] = parseInstructionActions(source);
+      expect(frame).toMatchObject({ modality: "may", force: AdviceForce.Warning,
+        predicate: { lemma: "cover" }, span: { start: 0, end: source.length }, sourceText: source });
+      expect(realizeInstructionAction(frame, "en")).toBe("May cover with an occlusive dressing");
+      expect(realizeInstructionAction(frame, "th")).toBe("อาจปิดคลุมด้วยแผ่นปิดแบบทึบ");
+    } finally {
+      registerMedicationLexerLocalePack(original ?? { locale: "en", apply: tokens =>
+        tokens.map((token, index) => ({ ...token, index })) });
+    }
+  });
+
+  it.each([
+    ["Swish 10 mL mouthwash, then spit out if nauseated", undefined,
+      "Swish 10 mL; then spit out if nauseated."],
+    ["Swish 10 mL mouthwash, then may spit out", "may",
+      "Swish 10 mL; then may spit out."]
+  ])("preserves the selected qualification without an unconditional route: %s", (source, modality, english) => {
+    const parsed = parsePublicSig(source!);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.actions.map(action => action.predicate.lemma)).toEqual(["swish", "spit"]);
+    expect(graph.actions[1].modality).toBe(modality);
+    if (modality) expect(graph.actions[1].force).toBe(AdviceForce.Warning);
+    else expect(graph.relations).toContainEqual(expect.objectContaining({
+      kind: AdviceRelation.If, toActionIndex: 1, text: "if nauseated"
+    }));
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const snapshot = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", instructionTextMode: "normalized" })).toBe(english);
+      const thai = formatSig(input, "long", { locale: "th", instructionTextMode: "normalized" });
+      if (modality) expect(thai).toBe("กลั้วปาก 10 มิลลิลิตร จากนั้นอาจบ้วนทิ้ง.");
+      else expect(thai).toContain("if nauseated");
+      const projected = projectCanonicalCourse(importCanonicalCourse(input));
+      expect(projected.fhirNext.renderedInstruction).toBe(source);
+      for (const row of [projected.fhir[0], toFhirR5Dosages(projected.fhirNext)[0]]) {
+        expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 10, unit: "mL" });
+        expect(row.asNeeded).not.toBe(true);
+        expect(row.route?.coding?.some(coding => ["SWISHSPIT", "C38302"].includes(coding.code ?? ""))).not.toBe(true);
+        const recovered = fromFhirDosage(row).meta.normalized.instructionGraph!;
+        expect(recovered.actions[1].modality).toBe(modality);
+        if (!modality) expect(recovered.relations).toContainEqual(expect.objectContaining({ kind: AdviceRelation.If, toActionIndex: 1 }));
+      }
+      expect(JSON.stringify(input)).toBe(snapshot);
+    }
+  });
+
+  it("requires an unqualified typed Cover action for the complete topical technique", () => {
+    const source = "Apply ointment then cover with occlusive dressing if instructed";
+    const cover = parseInstructionActions("cover with occlusive dressing")[0];
+    const graph = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en",
+      actions: [cover], relations: [{ kind: AdviceRelation.If, toActionIndex: 0, text: "if instructed" }] })!;
+    const row: FhirDosage = { text: source,
+      route: { coding: [{ system: "http://snomed.info/sct", code: "6064005" }] },
+      method: { coding: [{ system: "http://snomed.info/sct", code: "738991002" }] }, extension: [graph] };
+    const native = importCanonicalCourse([row]);
+    const initial = projectCanonicalCourse(native);
+    for (const input of [native, JSON.parse(JSON.stringify(initial.fhir)), JSON.parse(JSON.stringify(initial.fhirNext))]) {
+      const snapshot = JSON.stringify(input);
+      const projected = projectCanonicalCourse(importCanonicalCourse(input));
+      for (const output of [projected.fhir[0], toFhirR5Dosages(projected.fhirNext)[0]]) {
+        expect(output.route?.coding?.map(coding => coding.code)).toEqual(["6064005"]);
+        expect(output.method?.coding?.map(coding => coding.code)).toEqual(["738991002"]);
+        expect(output.asNeeded).not.toBe(true);
+        expect(formatSig(output, "long", { locale: "en", instructionTextMode: "normalized" })).toContain("if instructed");
+      }
+      expect(JSON.stringify(input)).toBe(snapshot);
+    }
+  });
+
+  it("keeps ordinary unqualified and conditional advice at its existing wire owner", () => {
+    const source = "Take 1 tablet once daily. Do not crush. Do not chew. Do not drive if dizzy.";
+    const parsed = parsePublicSig(source);
+    for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(row.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(row.additionalInstruction?.length).toBeGreaterThan(0);
+      expect(row.additionalInstruction?.every(instruction => !instruction.extension?.some(field =>
+        field.url === "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph"))).toBe(true);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });
 

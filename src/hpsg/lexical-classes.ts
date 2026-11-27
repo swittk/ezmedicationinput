@@ -1,5 +1,5 @@
 import { LexKind, type LexToken } from "../lexer/token-types";
-import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirDayOfWeek, FhirPeriodUnit, RouteCode, type FhirPrimitiveElement } from "../types";
+import { AdviceForce, AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirDayOfWeek, FhirPeriodUnit, RouteCode, type FhirPrimitiveElement } from "../types";
 import { baseLanguageTag } from "../localization";
 import { buildTranslationPrimitiveElement } from "../fhir-translations";
 import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
@@ -551,6 +551,7 @@ export const ACTION_DIRECTIVE_PREFIXES = source.actionDirectivePrefixes.map((pre
   parts: prefix.parts as readonly string[],
   polarity: prefix.polarity as AdvicePolarity | undefined,
   modality: prefix.modality as AdviceModality | undefined,
+  force: prefix.force as AdviceForce | undefined,
   complement: prefix.complement as "contact-clause" | undefined
 }));
 export const NEGATIVE_ACTION_DIRECTIVE_LEADS = new Set(ACTION_DIRECTIVE_PREFIXES
