@@ -4189,8 +4189,10 @@ function realizeAction(
     const amountSource = normalizedInstructionSurface(amountArg?.text ?? "");
     if (objectSource && amountSource && objectSource.includes(amountSource)) amount = undefined;
   }
-  const theme = objectArg && (objectArg.role === AdviceArgumentRole.Theme || objectArg.role === AdviceArgumentRole.Object)
-    ? translatedArgument(objectArg, locale) : first(AdviceArgumentRole.Theme) ?? first(AdviceArgumentRole.Object);
+  const themeArg = objectArg && (objectArg.role === AdviceArgumentRole.Theme || objectArg.role === AdviceArgumentRole.Object)
+    ? objectArg : firstArguments[AdviceArgumentRole.Theme] ?? firstArguments[AdviceArgumentRole.Object];
+  const theme = themeArg && !(realizerKey === "site-relation" && relationHasSemanticClass(themeArg.relation, "accompaniment"))
+    ? translatedArgument(themeArg, locale) : undefined;
   const container = first(AdviceArgumentRole.Container);
   const destination = first(AdviceArgumentRole.Destination);
   const site = objectArg?.role === AdviceArgumentRole.Site ? translatedArgument(objectArg, locale) : first(AdviceArgumentRole.Site);
@@ -5395,7 +5397,7 @@ export function realizeInstructionGraph(
     if (sourceFrame === options?.omitRenderedAction) {
       if (!options?.onlyWarnings) {
         conditionTargets.set(actionIndex, sourceFrame);
-        if (actionIndex === primaryAction) coveredPrimaryAction = actionIndex;
+        coveredPrimaryAction = actionIndex;
       }
       continue;
     }

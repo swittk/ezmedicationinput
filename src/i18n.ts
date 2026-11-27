@@ -1,7 +1,7 @@
 import { bodySiteTextConflictsWithCoding } from "./body-site-target";
 import { joinLocalizedList } from "./utils/text";
 import type { CourseLanguage } from "./localization";
-import { ENGLISH_COURSE, ENGLISH_CLAUSE_TIMING } from "./locales/course/en";
+import { ENGLISH_COURSE, ENGLISH_CLAUSE_TIMING, routeCodeFromDisplayText } from "./locales/course/en";
 import { THAI_COURSE, THAI_CLAUSE_TIMING, THAI_DAY_NAMES } from "./locales/course/th";
 export type { CourseLanguage } from "./localization";
 import { localizedValue, quantityComparatorText } from "./localization";
@@ -24,7 +24,6 @@ import {
   instructionGraphCanStandAlone,
   isEmptyStomachInstruction,
   stripTrailingZero,
-  routeCodeFromDisplayText,
   frequencyDisplay, registeredMethodManner
 } from "./format";
 import { findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
@@ -2317,10 +2316,7 @@ function formatLongThai(
     ? realizeInstructionGraph(clause.instructionGraph, "th", graphRealizationOptions)
     : undefined;
 
-  const directInstruction = formatAdditionalInstructionsThai({
-    ...clause,
-    additionalInstructions: directAdditional
-  });
+  const directInstruction = formatAdditionalInstructionsThai(directAdditional, baseVerb);
   const { preFlowsIntoAdministration, postFlowsFromAdministration } =
     instructionGraphAdministrationFlow(clause, roundTrip, preGraphInstruction, postGraphInstruction);
   const leadingInstructionText = preFlowsIntoAdministration
@@ -2393,7 +2389,7 @@ function formatLongThai(
     if (authoredPrimary || clause.clinicalAdjuncts?.condition || clause.clinicalAdjuncts?.excludedDates?.length ||
         clause.clinicalAdjuncts?.excludedWeekdays?.length)
       parts.unshift(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary,
-        clause.clinicalAdjuncts?.condition, words, deferredDirections, clause.clinicalAdjuncts));
+        clause.clinicalAdjuncts?.condition, words, deferredDirections, clause));
     return parts.join(" ").trim() || `${verb}.`;
   }
 
@@ -2412,7 +2408,7 @@ function formatLongThai(
   let administrationText = richGraphAdministrationText ??
     joinThaiVerbAndBody(verb, body, Boolean(qualifierSuffix));
   administrationText = composeNativePrimaryDirections(administrationText, authoredPrimary,
-    clause.clinicalAdjuncts?.condition, words, deferredDirections, clause.clinicalAdjuncts).replace(/[.!?]+$/u, "");
+    clause.clinicalAdjuncts?.condition, words, deferredDirections, clause).replace(/[.!?]+$/u, "");
   // Independent graph conditions remain alongside the structured guard.
   if (primaryConditions?.length)
     administrationText = attachInstructionGraphPrimaryConditions(administrationText, primaryConditions, "th", Boolean(clause.clinicalAdjuncts?.condition));
@@ -2486,14 +2482,13 @@ function reconstructAdditionalInstructionThai(text: string): string | undefined 
   return undefined;
 }
 
-function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | undefined {
-  const instructions = clause.additionalInstructions ?? [];
+function formatAdditionalInstructionsThai(
+  instructions: readonly NonNullable<CanonicalSigClause["additionalInstructions"]>[number][], verb: string
+): string | undefined {
   if (!instructions.length) {
     return undefined;
   }
   const phrases: string[] = [];
-  const grammar = resolveRouteGrammarThai(clause);
-  const verb = resolveThaiMethodVerb(clause, grammar);
   for (const instruction of instructions) {
     if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) {
       const contextual = verb ? `${verb}ช้าๆ` : "ช้าๆ";

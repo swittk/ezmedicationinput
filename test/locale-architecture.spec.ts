@@ -476,16 +476,17 @@ describe("independent cadence and preview condition owners", () => {
     expect(JSON.stringify(source)).toBe(before);
   });
 
-  it.each(["en", "th"] as const)("guards partially authored dose directions once in %s", locale => {
+  it.each(["en", "th"] as const)("guards current cadence and authored dose directions once each in %s", locale => {
     const source: FhirR6DosageInstruction = { step: [{ component: [{ text: "Swallow 1 tablet whole",
       timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }, condition: [guard]
     }] }] };
     const before = JSON.stringify(source);
     for (const style of ["short", "long"] as const) {
       const text = formatSig(source, style, { locale, realizationMode: "normalized" });
-      expect(text.match(/SBP > 160/gu)).toHaveLength(1);
       expect(text).toContain("Swallow 1 tablet whole");
-      const authored = text.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[1];
+      const [current, authored] = text.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
+      expect(current.match(/SBP > 160/gu)).toHaveLength(1);
+      expect(authored.match(/SBP > 160/gu)).toHaveLength(1);
       expect(authored).toBe("Swallow 1 tablet whole " + (locale === "en" ? "only if" : "เฉพาะเมื่อ") + " SBP > 160.");
       expect(text).toContain(locale === "en" ? style === "short" ? "1x/d" : "once daily" : "วันละครั้ง");
     }
@@ -559,16 +560,21 @@ describe("complete native clause defaults", () => {
       for (const input of [source, toFhirR5Dosages(source)]) {
         const before = JSON.stringify(input);
         const native = formatSig(input, "long", { locale, realizationMode: "normalized" });
-        expect(native.match(/SBP > 160/gu)).toHaveLength(1);
         expect(native).toContain(text.replace(/\.$/u, ""));
         expect(native).toContain(locale === "en" ? "once daily" : "วันละครั้ง");
         if (text.startsWith("Swallow")) {
           const [current, authored] = native.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
           expect(current).toContain("Call the clinic");
+          expect(current.match(/SBP > 160/gu)).toHaveLength(1);
+          expect(current).toContain((locale === "en" ? "once daily only if" : "วันละครั้ง เฉพาะเมื่อ") + " SBP > 160.");
+          expect(current).not.toMatch(/Call the clinic\.? (?:only if|เฉพาะเมื่อ)/u);
           expect(authored).toBe("Swallow 1 tablet whole " + (locale === "en" ? "only if" : "เฉพาะเมื่อ") + " SBP > 160.");
           expect(authored).not.toContain("Call the clinic");
-        } else expect(native).toBe(text.replace(/\.$/u, "") +
-          (locale === "en" ? " only if" : " เฉพาะเมื่อ") + " SBP > 160. Call the clinic.");
+        } else {
+          expect(native.match(/SBP > 160/gu)).toHaveLength(1);
+          expect(native).toBe(text.replace(/\.$/u, "") +
+            (locale === "en" ? " only if" : " เฉพาะเมื่อ") + " SBP > 160. Call the clinic.");
+        }
         let calls = 0;
         expect(formatSig(input, "long", { locale, realizationMode: "normalized", i18n: {
           formatLong: context => {

@@ -8993,6 +8993,88 @@ describe("current topical method and independent dressing directions", () => {
     } } };
     expect(formatSig(generic, "long", { ...custom, locale: "en" }).split("; original directions:")[0]).toContain("Apply by clinic plan");
     expect(formatSig(generic, "long", { ...custom, locale: "th" }).split("; ข้อความเดิม:")[0]).toContain("ทาตามแผนคลินิก");
+    const slow: FhirDosage = { method: structuredClone(generic.method), route: structuredClone(row.route),
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+      additionalInstruction: [{ coding: [{ system: "http://snomed.info/sct", code: "419443000", display: "Slowly" }] }] };
+    const slowBefore = structuredClone(slow);
+    for (const input of [slow, toDosageDetails([slow])]) {
+      const en = formatSig(input, "long", { ...custom, locale: "en" });
+      const th = formatSig(input, "long", { ...custom, locale: "th" });
+      expect(en).toContain("Apply by clinic plan 1 g");
+      expect(en).toContain("Apply by clinic plan slowly"); expect(en).not.toContain("Apply thinly");
+      expect(th).toContain("ทาตามแผนคลินิกช้าๆ"); expect(th).not.toContain("ทาบางๆ");
+    }
+    expect(formatSig({ method: slow.method }, "short", { ...custom, locale: "en" })).toBe("Apply by clinic plan");
+    expect(slow).toEqual(slowBefore);
     expect({ row, native, generic }).toEqual(before);
+  });
+});
+
+describe("independent route labels and bedtime event anchors", () => {
+  it("distinguishes supplied nasal and oral inhalation labels without changing the wire route", () => {
+    for (const text of ["Nasal inhalation", "Oral inhalation"]) {
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "puff" } }], route: { text },
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } } };
+      const input: FhirR6DosageInstruction = { step: [{ component: structuredClone([row]) }] };
+      const before = structuredClone({ row, input });
+      for (const value of [row, input]) {
+        const thai = formatSig(value, "long", { locale: "th", realizationMode: "normalized" });
+        expect(thai).toContain(text === "Nasal inhalation" ? "จมูก" : "สูด");
+        if (text === "Oral inhalation") expect(thai).not.toContain("จมูก");
+        expect(thai).toContain("1 พัฟ"); expect(thai).toContain("วันละครั้ง");
+      }
+      expect(toFhirR5Dosages(input)[0].route).toEqual({ text });
+      expect(toDosageDetails([row]).step![0].component[0].route).toEqual({ text });
+      expect({ row, input }).toEqual(before);
+    }
+  });
+
+  it("keeps the BED anchor when an upper-only period consumes the short cadence slot", () => {
+    const code = { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BED" }] };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code, repeat: { periodMax: 1, periodUnit: FhirPeriodUnit.Day } } };
+    const before = structuredClone(row);
+    for (const input of [row, toDosageDetails([row])]) {
+      expect(formatSig(input, "short", { locale: "en", realizationMode: "normalized" })).toBe("1 tab every up to 1 day HS");
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("at bedtime");
+    }
+    const exact: FhirDosage = { doseAndRate: structuredClone(row.doseAndRate), timing: { code, repeat: { period: 1, periodUnit: FhirPeriodUnit.Day } } };
+    expect(formatSig(exact, "short", { locale: "en", realizationMode: "normalized" })).toBe("1 tab BED");
+    expect(row).toEqual(before);
+  });
+});
+
+
+describe("current cadence and authored dose condition ownership", () => {
+  it("qualifies current daily directions before independent advice while retaining the authored dose", () => {
+    const source = "Swallow 1 tablet whole";
+    const predicate: MedicationCondition = { kind: "measurement", name: "sbp", operation: "gt", value: 160, text: "SBP > 160" };
+    const repeat = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day };
+    const note = { url: "https://example.org/guard-review", valueString: "Retain current directions" };
+    const row: FhirDosage = { text: source, timing: { repeat }, patientInstruction: "Otherwise hold.", extension: [note] };
+    setDosageCondition(row, predicate);
+    const r6: FhirR6DosageInstruction = { step: [{ component: [{ text: source, timing: { repeat },
+      condition: [conditionToR6(predicate)], patientInstruction: "Otherwise hold.", extension: [note] }] }] };
+    const before = structuredClone({ row, r6 });
+    for (const input of [row, r6]) for (const locale of ["en", "th"] as const) {
+      const output = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      const [current, original] = output.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
+      expect(current).toContain(locale === "en" ? "once daily only if SBP > 160" : "วันละครั้ง เฉพาะเมื่อ SBP > 160");
+      expect(current).toContain("Otherwise hold");
+      expect(current).not.toMatch(/Otherwise hold\.? (?:only if|เฉพาะเมื่อ)/u);
+      expect(original).toContain(source); expect(original).toContain("SBP > 160");
+      let calls = 0;
+      const custom = formatSig(input, "long", { locale, realizationMode: "normalized", i18n: {
+        inherit: locale, formatLong: context => {
+          calls++; expect(context.defaultText).toBe(output); return "Clinic directions";
+        }
+      } });
+      expect(custom).toBe("Clinic directions"); expect(calls).toBe(1);
+    }
+    const returned = toFhirR5Dosages(r6)[0];
+    expect(returned.text).toBe(source); expect(returned.extension).toContainEqual(note);
+    expect(getDosageCondition(returned)).toMatchObject(predicate);
+    expect(returned.doseAndRate ?? []).toHaveLength(0);
+    expect({ row, r6 }).toEqual(before);
   });
 });

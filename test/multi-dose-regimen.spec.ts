@@ -3394,11 +3394,13 @@ describe("round61 supported grammar and display ownership", () => {
       expect(clause.additionalInstructions).toBeUndefined();
       expect(clause.patientInstruction).toBe("rinse the skin");
       expect(clause.prn?.enabled).not.toBe(true);
-      expect(clause.instructionGraph?.relations?.some(relation => relation.kind === AdviceRelation.If)).toBe(true);
+      const graph = clause.instructionGraph!;
+      const rinseIndex = graph.actions.findIndex(action => action.predicate.lemma === "rinse");
+      expect(rinseIndex).toBeGreaterThanOrEqual(0);
+      expect(graph.relations).toContainEqual(expect.objectContaining({ kind: AdviceRelation.If, toActionIndex: rinseIndex }));
       for (const input of views(parsed.fhirNext)) {
         const text = formatSig(input, "long", { ...selectedOptions, locale: "en", realizationMode: "normalized" });
-        expect(text).toMatch(/if dizzy/iu);
-        expect(text).toMatch(/rinse the skin/iu);
+        expect(text.split("; original directions:")[0]).toMatch(/if dizzy,? rinse the skin/iu);
       }
     }
     expect(parseSig("If dizzy, clinic warning", options).meta.canonical.clauses[0].additionalInstructions)

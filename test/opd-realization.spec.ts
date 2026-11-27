@@ -1258,14 +1258,15 @@ describe("round37 action participant and method ownership", () => {
     expect(JSON.stringify(graph)).toBe(before);
   });
 
-  it("selects a request's custom method before a recognized default through public imports", () => {
+  it.each([false, true])("selects a request's custom method before a recognized default through public imports (default first=%s)", defaultFirst => {
     const coding = { system: "urn:clinic:method", code: "chew-slowly" };
     const options = { realizationMode: "normalized" as const, instructionActionMap: {
       "chew-slowly": { code: "chew-slowly", display: "Chew slowly", i18n: { th: "เคี้ยวช้าๆ" },
         primaryAdministrationHead: true, administrationMethod: coding }
     } };
+    const known = { system: "http://snomed.info/sct", code: "738992009", display: "Chew" };
     const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
-      method: { coding: [coding, { system: "http://snomed.info/sct", code: "738992009", display: "Chew" }] } };
+      method: { coding: defaultFirst ? [known, coding] : [coding, known] } };
     const before = JSON.stringify(row);
     let saved = toDosageDetails([row]);
     for (let save = 0; save < 3; save++) {

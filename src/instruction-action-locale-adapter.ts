@@ -151,6 +151,13 @@ function relationForSite(input: InstructionActionRealizationInput): AdviceRelati
     (() => { throw new Error("Missing declarative default site relation"); })();
 }
 
+function siteRelationActivity(input: InstructionActionRealizationInput): string | undefined {
+  if (!input.activity) return undefined;
+  const relation = relationForSite(input);
+  const profile = getAdviceRelationDefinition(relation)?.grammar.timeRealizationProfile ?? "default";
+  return joinLocalizedTokens(input.locale, [localizeAdviceRelation(relation, input.locale, profile) ?? relation, input.activity]);
+}
+
 /** Keep the selected nominal and its attachment together, independently of Time. */
 function accompanimentContent(c: InstructionActionRealizationInput): { text: string; relation: AdviceRelation } | undefined {
   const arg = c.frame.args.find(arg => arg.role === AdviceArgumentRole.Substance ||
@@ -424,14 +431,12 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       const elapsed = c.duration ? ` for ${c.duration}` : "";
       if (relationTarget) {
         const target = object && (!c.site || !suppressSite(c)) ? ` ${object}` : "";
+        const activity = siteRelationActivity(c);
         if (c.time) {
           const timePhrase = realizeTimeArgument(c);
-          return `${c.label}${target}${manner}${elapsed}${substance} ${timePhrase}`;
+          return `${c.label}${target}${manner}${elapsed}${substance} ${timePhrase}${activity ? ` ${activity}` : ""}`;
         }
-        const semanticRelation = relationForSite(c);
-        const profile = getAdviceRelationDefinition(semanticRelation)?.grammar.timeRealizationProfile ?? "default";
-        const relation = localizeAdviceRelation(semanticRelation, c.locale, profile) ?? semanticRelation;
-        return `${c.label}${target}${manner}${elapsed}${substance} ${relation} ${relationTarget}`;
+        return `${c.label}${target}${manner}${elapsed}${substance} ${activity}`;
       }
       const result = c.result ? ` until ${c.result}` : "";
       if (object) return `${c.label} ${object}${manner}${elapsed}${substance}${result}`;
@@ -585,14 +590,12 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const elapsed = c.duration ? `เป็นเวลา ${c.duration}` : "";
       if (relationTarget) {
         const target = object && (!c.site || !suppressSite(c)) ? object : "";
+        const activity = siteRelationActivity(c);
         if (c.time) {
           const timePhrase = realizeTimeArgument(c);
-          return `${c.label}${target}${manner}${elapsed}${substance}${timePhrase}`;
+          return `${c.label}${target}${manner}${elapsed}${substance}${timePhrase}${activity ?? ""}`;
         }
-        const semanticRelation = relationForSite(c);
-        const profile = getAdviceRelationDefinition(semanticRelation)?.grammar.timeRealizationProfile ?? "default";
-        const relation = localizeAdviceRelation(semanticRelation, c.locale, profile) ?? semanticRelation;
-        return `${c.label}${target}${manner}${elapsed}${substance}${relation}${relationTarget}`;
+        return `${c.label}${target}${manner}${elapsed}${substance}${activity}`;
       }
       const result = c.result ? `ให้${c.result}` : "";
       if (object) return `${c.label}${object}${manner}${elapsed}${substance}${result}`;

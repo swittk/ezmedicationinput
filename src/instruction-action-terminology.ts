@@ -502,15 +502,20 @@ export function selectMedicationInstructionMethodCoding<TCoding extends FhirR6Co
   if (codings.length === 1) return codings[0].code || codings[0].display ? codings[0] : undefined;
   let fallback: TCoding | undefined;
   let displayFallback: TCoding | undefined;
+  let recognized: TCoding | undefined;
   for (const coding of codings) {
     if (!coding.code) {
       if (!displayFallback && coding.display) displayFallback = coding;
       continue;
     }
     if (!fallback) fallback = coding;
-    if (resolveMedicationInstructionActionByMethod(coding, options)) return coding;
+    const action = resolveMedicationInstructionActionByMethod(coding, options);
+    if (action) {
+      if (!options?.instructionActionMap || action !== getMedicationInstructionAction(action.code)) return coding;
+      recognized ??= coding;
+    }
   }
-  return fallback ?? displayFallback;
+  return recognized ?? fallback ?? displayFallback;
 }
 
 /** Keep compatible authored verbs (Drink and Swallow share a method), while

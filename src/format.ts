@@ -1,7 +1,7 @@
 import { TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
 import { getDoseUnitKind, getQuantityDurationUnit } from "./unit-lexicon";
 import { joinLocalizedList } from "./utils/text";
-import { ENGLISH_COURSE, ENGLISH_DAY_NAMES, ENGLISH_CLAUSE_TIMING } from "./locales/course/en";
+import { ENGLISH_COURSE, ENGLISH_DAY_NAMES, ENGLISH_CLAUSE_TIMING, routeCodeFromDisplayText } from "./locales/course/en";
 import type { CourseLanguage } from "./localization";
 import { buildCanonicalSigClauses, canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
@@ -236,56 +236,6 @@ function scheduleOf(clause: CanonicalSigClause): CanonicalScheduleExpr {
   return clause.schedule ?? {};
 }
 
-export function routeCodeFromDisplayText(text: string | undefined, includeOtic: boolean): RouteCode | undefined {
-  if (!text) {
-    return undefined;
-  }
-  const normalized = text.trim().toLowerCase();
-  if (!normalized) {
-    return undefined;
-  }
-  if (normalized.includes("inhal")) {
-    return RouteCode["Respiratory tract route (qualifier value)"];
-  }
-  if (normalized.includes("mouth") || normalized.includes("oral")) {
-    return RouteCode["Oral route"];
-  }
-  if (normalized.includes("ophthalm")) {
-    return RouteCode["Ophthalmic route"];
-  }
-  if (normalized.includes("intravitreal")) {
-    return RouteCode["Intravitreal route (qualifier value)"];
-  }
-  if (normalized.includes("topical")) {
-    return RouteCode["Topical route"];
-  }
-  if (normalized.includes("transdermal")) {
-    return RouteCode["Transdermal route"];
-  }
-  if (normalized.includes("subcutaneous") || normalized === "sc" || normalized === "sq") {
-    return RouteCode["Subcutaneous route"];
-  }
-  if (normalized.includes("intramuscular") || normalized === "im") {
-    return RouteCode["Intramuscular route"];
-  }
-  if (normalized.includes("intravenous") || normalized === "iv") {
-    return RouteCode["Intravenous route"];
-  }
-  if (normalized.includes("rectal") || normalized.includes("rectum")) {
-    return RouteCode["Per rectum"];
-  }
-  if (normalized.includes("vagin")) {
-    return RouteCode["Per vagina"];
-  }
-  // Otic text remains an English fallback; Thai requires its existing coded route.
-  if (includeOtic && (normalized.includes("otic") || normalized.includes("ear"))) {
-    return RouteCode["Otic route"];
-  }
-  if (normalized.includes("nasal")) {
-    return RouteCode["Nasal route"];
-  }
-  return undefined;
-}
 
 function resolveRouteGrammar(clause: CanonicalSigClause): RouteGrammar {
   const routeCode = clause.route?.code;
@@ -1352,12 +1302,13 @@ export function timingEventPreviewSchedule(
   return when?.length && (anchorOnly || timingCodeMatchesRecurrence(schedule)) ? { ...schedule, when } : schedule;
 }
 
-function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string {
+function formatShort(clause: CanonicalSigClause, words: CourseLanguage, resolvedMethod?: SigLongContext["resolvedMethod"]): string {
   const schedule = scheduleOf(clause);
   const codeText = independentTimingText(schedule.timingCode, schedule);
   const timingText = schedule.timingTextIsLiteral ? schedule.timingText
     : schedule.timingText === undefined ? codeText : independentTimingText(schedule.timingText, schedule);
   const parts: string[] = [];
+  let codeEmitted = false;
   const dosePart = formatDoseShort(clause.dose);
   if (dosePart) {
     parts.push(dosePart);
@@ -1384,6 +1335,7 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
     parts.push("daily");
   } else if (schedule.timingCode && !codeText && timingCodeMatchesRecurrence(schedule)) {
     parts.push(schedule.timingCode);
+    codeEmitted = true;
   } else if (
     schedule.frequency === undefined && schedule.frequencyMax !== undefined &&
     schedule.periodUnit === FhirPeriodUnit.Day &&
@@ -1434,7 +1386,7 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
     parts.push(`${count}x`);
   }
   if (timingText) parts.push(timingText);
-  const eventSchedule = timingCodeMatchesRecurrence(schedule) ? schedule : timingEventPreviewSchedule(schedule)!;
+  const eventSchedule = codeEmitted ? schedule : timingEventPreviewSchedule(schedule)!;
   if (eventSchedule.when?.length) {
     parts.push(eventSchedule.offset !== undefined || eventSchedule.offsetMin !== undefined || eventSchedule.offsetMax !== undefined
       ? collectWhenPhrases(eventSchedule).join(" ") : eventSchedule.when.join(" "));
@@ -1493,7 +1445,7 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
       parts.push("PRN");
     }
   }
-  if (!parts.length && clause.method) parts.push(resolveMethodVerb(clause, resolveRouteGrammar(clause)));
+  if (!parts.length && clause.method) parts.push(resolveMethodVerb(clause, resolveRouteGrammar(clause), resolvedMethod));
   return parts.filter(Boolean).join(" ");
 }
 
@@ -1782,8 +1734,9 @@ export function composeNativePrimaryDirections(
   rendered: string, authored: string | undefined,
   condition: MedicationCondition | undefined, words: CourseLanguage,
   deferredDirections?: { text?: string; current?: string },
-  calendar?: CanonicalSigClause["clinicalAdjuncts"]
+  clause?: CanonicalSigClause
 ): string {
+  const calendar = clause?.clinicalAdjuncts;
   const qualified = condition || calendar?.excludedDates?.length || calendar?.excludedWeekdays?.length;
   if (deferredDirections?.current) {
     // Rich native amounts belong to the same primary administration. Compose
@@ -1805,11 +1758,15 @@ export function composeNativePrimaryDirections(
     const qualifiedCurrent = qualifyNativePrimaryDirections(rendered, condition, words, calendar);
     if (qualifiedCurrent.trim().replace(/[.!?]+$/u, "") === directions.trim().replace(/[.!?]+$/u, ""))
       return directions;
+    // A current administration carries the same live qualifier as its authored
+    // dose. A standalone maximum remains a constraint, not a replacement dose.
+    const currentDirections = clause && canonicalClauseHasAdministrationSemantics(clause, false)
+      ? qualifiedCurrent : rendered;
     if (deferredDirections) {
       deferredDirections.text = directions;
-      return rendered;
+      return currentDirections;
     }
-    return words.withAuthoredDirections(current, directions);
+    return words.withAuthoredDirections(currentDirections.trim().replace(/[.!?]+$/u, ""), directions);
   }
   if (current === source) return rendered;
   return words.withAuthoredDirections(current, source) + ".";
@@ -2024,7 +1981,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         })
       : undefined;
   if (!graphWholeInstruction) {
-    const directInstruction = formatAdditionalInstructions(clause, additionalForDirectRendering);
+    const directInstruction = formatAdditionalInstructions(additionalForDirectRendering, baseVerb);
     if (directInstruction) instructionPhrases.push(directInstruction);
     const graphWarning = clause.instructionGraph && !positionedGraph
       ? realizeInstructionGraph(clause.instructionGraph, "en", {
@@ -2141,7 +2098,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       parts.push(value);
     }
     if (authoredPrimary || condition || hasCalendarQualifiers)
-      parts.unshift(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary, condition, words, deferredDirections, clause.clinicalAdjuncts));
+      parts.unshift(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary, condition, words, deferredDirections, clause));
     return parts.join(" ").trim() || `${verb}.`;
   }
   const leadingInstructionText = preFlowsIntoAdministration
@@ -2174,7 +2131,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const sequenceSurface = localizeAdviceRelation(sequenceRelation, "en") ?? sequenceRelation;
   const compose = (base: string): string => {
     let effectiveBase = richGraphAdministrationSentence ?? primarySourceSentence ?? base;
-    effectiveBase = composeNativePrimaryDirections(effectiveBase, authoredPrimary, condition, words, deferredDirections, clause.clinicalAdjuncts);
+    effectiveBase = composeNativePrimaryDirections(effectiveBase, authoredPrimary, condition, words, deferredDirections, clause);
     // Independent graph conditions remain attached to this administration
     // alongside its current structured clinical guard.
     if (primaryConditions?.length)
@@ -2217,16 +2174,11 @@ export function isEmptyStomachInstruction(instruction: CanonicalAdditionalInstru
   ));
 }
 
-function formatAdditionalInstructions(
-  clause: CanonicalSigClause,
-  instructions: CanonicalSigClause["additionalInstructions"]
-): string | undefined {
-  if (!instructions?.length) {
+function formatAdditionalInstructions(instructions: readonly CanonicalAdditionalInstructionExpr[], verb: string): string | undefined {
+  if (!instructions.length) {
     return undefined;
   }
   const phrases: string[] = [];
-  const grammar = resolveRouteGrammar(clause);
-  const verb = resolveMethodVerb(clause, grammar);
   for (const instruction of instructions) {
     if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) {
       const contextual = verb ? `${verb} slowly` : "Slowly";
@@ -2356,7 +2308,7 @@ export function formatNativeCanonicalClause(
   }
   const words = localization?.course ?? ENGLISH_COURSE;
   const rendered = style === "short"
-    ? native.short ? native.short(clause, words, resolvedMethod) : formatShort(clause, words)
+    ? native.short ? native.short(clause, words, resolvedMethod) : formatShort(clause, words, resolvedMethod)
     : native.long ? native.long(clause, options, words, resolvedMethod, authoredPrimary, deferredDirections)
       : formatLong(clause, options, words, resolvedMethod, clause.clinicalAdjuncts?.condition, authoredPrimary, deferredDirections);
   const schedule = clause.schedule;

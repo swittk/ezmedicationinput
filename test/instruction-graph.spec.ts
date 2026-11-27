@@ -6047,9 +6047,11 @@ describe("independent primary graph rendering owners", () => {
       ...(kind === "clock only" ? [] : [{ role: AdviceArgumentRole.Duration, text: "1 minute", quantity: { value: 1, unit: "min" } }]),
       ...(kind === "duration only" ? [] : [{ role: AdviceArgumentRole.Time,
         text: kind === "event" ? "breakfast" : "08:00", normalized: kind === "event" ? EventTiming.Breakfast : "08:00",
-        relation: kind === "event" ? AdviceRelation.Before : AdviceRelation.At }])
+        relation: kind === "event" ? AdviceRelation.Before : AdviceRelation.On }])
     ] };
     const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: [frame] })!] };
+    if (kind !== "duration only") expect(parseInstructionGraphExtension(row.extension)!.actions[0].args
+      .find(arg => arg.role === AdviceArgumentRole.Time)?.relation).toBe(kind === "event" ? AdviceRelation.Before : AdviceRelation.On);
     for (const input of [[row], toDosageDetails([row])]) for (const locale of ["en", "th"]) {
       const before = JSON.stringify(input), text = formatSig(input, "long", { locale, realizationMode: "normalized" });
       expect(text).toContain(locale === "en" ? "Rinse mouth" : "บ้วนปาก");
@@ -6386,5 +6388,62 @@ describe("negative material accompaniment realization", () => {
     }
     expect(clause.instructionGraph!.sourceText).toBe(source);
     expect({ fhir: parsed.fhir, r6: parsed.fhirNext, graph: clause.instructionGraph }).toEqual(before);
+  });
+});
+
+describe("selected primary and procedural complement ownership", () => {
+  it("keeps an inferred primary's indexed guard distinct from independent advice", () => {
+    const action = parseInstructionActions("Swallow 1 tablet whole")[0];
+    const call = { ...parseInstructionActions("Call the clinic")[0], span: { start: 50, end: 65 } };
+    const graph: CanonicalInstructionGraph = { sourceText: "", sourceLocale: "en", actions: [action, call], relations: [
+      { kind: AdviceRelation.If, toActionIndex: 0, text: "if able to swallow" },
+      { kind: AdviceRelation.If, toActionIndex: 1, text: "if dizzy" }
+    ] };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], extension: [buildInstructionGraphExtension(graph)!] };
+    const before = structuredClone(row);
+    for (const input of [row, toDosageDetails([row])]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(en).toContain("Swallow 1 tablet whole if able to swallow.");
+      expect(en).toMatch(/Call the clinic if dizzy/iu);
+      expect(en.match(/able to swallow/gu)).toHaveLength(1);
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(th).toMatch(/กลืน.*1 เม็ด.*able to swallow.*Call the clinic/u);
+      expect(th).toContain("เวียนศีรษะ");
+    }
+    expect(row).toEqual(before);
+  });
+
+  it("keeps an explicitly attached rinse instrument outside the direct-object slot", () => {
+    const frame: AdviceFrame = { ...parseInstructionActions("Rinse the wound")[0], sourceText: "", relation: AdviceRelation.With, args: [
+      { role: AdviceArgumentRole.Site, text: "wound", normalized: "wound", i18n: { en: "the wound", th: "แผล" } },
+      { role: AdviceArgumentRole.Object, text: "syringe", normalized: "syringe", relation: AdviceRelation.With,
+        i18n: { en: "a syringe", th: "กระบอกฉีดยา" } }
+    ] };
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!] };
+    for (const input of [row, toDosageDetails([row])]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe("Rinse the wound with a syringe.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe("ล้างแผลด้วยกระบอกฉีดยา.");
+    }
+    expect(parseInstructionGraphExtension(row.extension)!.actions[0].args[1]).toMatchObject({ role: AdviceArgumentRole.Object, relation: AdviceRelation.With });
+  });
+
+  it("retains both a clock limit and a dressing-change activity under a rinse prohibition", () => {
+    const frame: AdviceFrame = { ...parseInstructionActions("Rinse the wound")[0], sourceText: "", force: AdviceForce.Warning,
+      polarity: AdvicePolarity.Negate, relation: AdviceRelation.Before, args: [
+        { role: AdviceArgumentRole.Site, text: "wound", normalized: "wound", i18n: { en: "the wound", th: "แผล" } },
+        { role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00", relation: AdviceRelation.Before },
+        { role: AdviceArgumentRole.Activity, text: "changing the dressing", normalized: "changing the dressing", i18n: { th: "เปลี่ยนผ้าปิดแผล" } }
+      ] };
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!] };
+    const before = structuredClone(row);
+    for (const input of [row, toDosageDetails([row])]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(en).toContain("Do not rinse the wound");
+      expect(en).toContain("before 08:00"); expect(en).toContain("before changing the dressing");
+      expect(en.match(/08:00/gu)).toHaveLength(1);
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(th).toContain("ห้ามล้างแผล"); expect(th).toContain("ก่อน08:00"); expect(th).toContain("ก่อนเปลี่ยนผ้าปิดแผล");
+    }
+    expect(row).toEqual(before);
   });
 });

@@ -1,5 +1,6 @@
 /** English course wording. Clinical scope and date arithmetic are supplied
  * by the canonical formatter; this module owns words and English inflection. */
+import { RouteCode } from "../../types";
 import type { CourseLanguage } from "../../localization";
 import { joinLocalizedList } from "../../utils/text";
 
@@ -115,3 +116,55 @@ export const ENGLISH_CLAUSE_TIMING = {
   dayShift: (days: number) => days === 1 ? "the following day" : days === -1 ? "the previous day"
     : Math.abs(days) + (days < 0 ? " days earlier" : " days later")
 };
+
+/** English route labels retain their existing lexical specificity in every locale. */
+export function routeCodeFromDisplayText(text: string | undefined, includeOtic: boolean): RouteCode | undefined {
+  if (!text) {
+    return undefined;
+  }
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized.includes("nasal")) {
+    return RouteCode["Nasal route"];
+  }
+  if (normalized.includes("inhal")) {
+    return RouteCode["Respiratory tract route (qualifier value)"];
+  }
+  if (normalized.includes("mouth") || normalized.includes("oral")) {
+    return RouteCode["Oral route"];
+  }
+  if (normalized.includes("ophthalm")) {
+    return RouteCode["Ophthalmic route"];
+  }
+  if (normalized.includes("intravitreal")) {
+    return RouteCode["Intravitreal route (qualifier value)"];
+  }
+  if (normalized.includes("topical")) {
+    return RouteCode["Topical route"];
+  }
+  if (normalized.includes("transdermal")) {
+    return RouteCode["Transdermal route"];
+  }
+  if (normalized.includes("subcutaneous") || normalized === "sc" || normalized === "sq") {
+    return RouteCode["Subcutaneous route"];
+  }
+  if (normalized.includes("intramuscular") || normalized === "im") {
+    return RouteCode["Intramuscular route"];
+  }
+  if (normalized.includes("intravenous") || normalized === "iv") {
+    return RouteCode["Intravenous route"];
+  }
+  if (normalized.includes("rectal") || normalized.includes("rectum")) {
+    return RouteCode["Per rectum"];
+  }
+  if (normalized.includes("vagin")) {
+    return RouteCode["Per vagina"];
+  }
+  // Otic text remains an English fallback; Thai requires its existing coded route.
+  if (includeOtic && (normalized.includes("otic") || normalized.includes("ear"))) {
+    return RouteCode["Otic route"];
+  }
+  return undefined;
+}

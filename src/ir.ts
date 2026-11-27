@@ -191,7 +191,7 @@ function buildClauseConfidence(internal: ParserState, leftovers: CanonicalSource
   return clampConfidence(confidence);
 }
 
-export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigClause): boolean {
+export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigClause, includeConstraints = true): boolean {
   const schedule = clause.schedule;
   const hasSchedule = Boolean(schedule && (
     schedule.frequency !== undefined ||
@@ -212,10 +212,9 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.offsetMin !== undefined ||
     schedule.offsetMax !== undefined ||
     Boolean(schedule.activityTiming?.length) ||
-    schedule.occurrenceCap !== undefined ||
-    Boolean(schedule.maxDosePerPeriod?.length) ||
+    (includeConstraints && (schedule.occurrenceCap !== undefined ||
+      Boolean(schedule.maxDosePerPeriod?.length) || schedule.countMax !== undefined)) ||
     schedule.count !== undefined ||
-    schedule.countMax !== undefined ||
     schedule.timingCode || schedule.timingText?.trim() ||
     schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
     schedule.eventWindow || schedule.clockWindow || schedule.when?.length ||

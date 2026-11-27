@@ -734,12 +734,12 @@ function formatCanonicalBaseNative(
   let rendered = formatNativeCanonicalClause(displayClause, style, env.localization, options,
     style === "long" ? authoredPrimary : undefined, primaryDirections);
   if (authoredQualifiers) {
-    const directions = composeNativePrimaryDirections("", a.text!, a.predicate, words, undefined, clause.clinicalAdjuncts);
+    const directions = composeNativePrimaryDirections("", a.text!, a.predicate, words, undefined, clause);
     rendered = a.additionalInstructions?.length || a.patientInstruction
       ? directions + " " + rendered : directions;
   }
   if (style !== "long" && !authoredQualifiers)
-    rendered = composeNativePrimaryDirections(rendered, authoredPrimary, a.predicate, words, primaryDirections, clause.clinicalAdjuncts);
+    rendered = composeNativePrimaryDirections(rendered, authoredPrimary, a.predicate, words, primaryDirections, clause);
   // The clause's calendar view needs a complete civil date. Partial FHIR
   // dateTimes (for example YYYY-MM) remain useful authored information; show
   // their original values instead of inventing a missing month/day or hiding
