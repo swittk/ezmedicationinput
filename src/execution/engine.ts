@@ -427,11 +427,12 @@ function resolveRepeatBoundsEndExclusive(
  * Cadence keeps its nominal origin; admission and completion use actual bounds. */
 function resolveRepeatBoundsPeriod(
   repeat: CanonicalRecurrence | undefined, timeZone: string, displacement = 0
-): { nominalStart: Date | null; start: Date | null; end: Date | null } {
+): { nominalStart: Date | null; nominalEnd: Date | null; start: Date | null; end: Date | null } {
   const nominalStart = resolveRepeatBoundsStart(repeat, timeZone);
   const nominalEnd = resolveRepeatBoundsEndExclusive(repeat, timeZone);
   return {
     nominalStart,
+    nominalEnd,
     start: nominalStart && displacement ? new Date(nominalStart.getTime() + displacement) : nominalStart,
     end: nominalEnd && displacement ? new Date(nominalEnd.getTime() + displacement) : nominalEnd,
   };
@@ -481,6 +482,7 @@ function validateRepeatBoundsPeriod(
   displacement = 0
 ): {
   nominalStart: Date | null;
+  nominalEnd: Date | null;
   start: Date | null;
   end: Date | null;
 } {
@@ -2685,7 +2687,7 @@ function resolveAdministrationWindow(
     ? { recurrenceOrigin: start, eligibleFrom: start }
     : successorIntervalStart(administration, implicitPredecessor ? implicitPredecessor.point : predecessorPoint,
         implicitPredecessor ? implicitPredecessor.point ?? implicitPredecessor.end : start,
-        timeZone, displacement, options, absoluteEnd);
+        timeZone, displacement, options, calendar.nominalEnd);
   const implicitStart = implicitWindow.recurrenceOrigin;
   const componentClock = implicitStart > start ? getTimeParts(implicitStart, timeZone) : capClock;
   const cadence = recurrence?.calendarWindow && !administration.phaseStart &&
@@ -8888,13 +8890,15 @@ function successorIntervalStart(
   zone: string,
   displacement: number,
   options?: NextDueDoseOptions,
-  calendarEnd?: Date | null
+  nominalCalendarEnd?: Date | null
 ): Pick<ResolvedAdministrationWindow, "recurrenceOrigin" | "eligibleFrom"> {
   const repeat = dosage.schedule?.recurrence;
   if (predecessorPoint && repeat?.clocks?.length && !repeat.anchors?.length &&
       (repeat.courseLength || repeat.courseLengthRange) &&
       !repeat.calendarWindow?.start && !dosage.phaseStart && !dosage.phaseOrigin &&
       !dosage.schedule?.explicitEvents?.length) {
+    const nominalPredecessor = displacement
+      ? new Date(predecessorPoint.getTime() - displacement) : predecessorPoint;
     // The finite successor owns its duration from its first post-completion
     // clock. This standalone cadence query has no phase origin or predecessor,
     // so it cannot re-enter successor resolution. Actual eligibility and
@@ -8903,9 +8907,9 @@ function successorIntervalStart(
     // Other cadence and actual-admission owners keep the standalone query.
     // Ranged repeats keep the existing best-effort cadence preparation.
     if (repeat.frequencyMax === undefined && repeat.periodMax === undefined &&
-      !displacement && !getDosageExcludedDates(dosage).length && !getDosageExcludedWeekdays(dosage).length &&
+      !getDosageExcludedDates(dosage).length && !getDosageExcludedWeekdays(dosage).length &&
         !getTimingOccurrenceCap(repeat) && !isWakingHoursInterval(repeat) &&
-        !clockAnchoredElapsedOrigin(repeat, predecessorPoint, zone)) {
+        !clockAnchoredElapsedOrigin(repeat, nominalPredecessor, zone)) {
       requireConsistentTimingCode(dosage.schedule);
       const dayFilter = new Set((repeat.dayOfWeek ?? []).map(day => day.toLowerCase()));
       const enforceDayFilter = dayFilter.size > 0;
@@ -8913,14 +8917,17 @@ function successorIntervalStart(
       const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);
       if (expanded.length && !canFallbackToCadence(repeat, expanded, enforceDayFilter) &&
           !hasDistributedClockFrequency(repeat, expanded, enforceDayFilter)) {
-        const from = new Date(predecessorPoint.getTime() + 1);
+        const from = new Date(nominalPredecessor.getTime() + 1);
         let first: Date | undefined;
-        visitClockOccurrences(repeat, expanded, predecessorPoint, from, predecessorPoint, calendarEnd,
-          zone, 1, dayFilter, enforceDayFilter, resolveCalendarDaySelection(repeat, predecessorPoint, zone), at => {
+        visitClockOccurrences(repeat, expanded, nominalPredecessor, from, nominalPredecessor, nominalCalendarEnd,
+          zone, 1, dayFilter, enforceDayFilter, resolveCalendarDaySelection(repeat, nominalPredecessor, zone), at => {
             first = at;
             return true;
           });
-        if (first) return { recurrenceOrigin: new Date(first.getTime()), eligibleFrom: first };
+        if (first) return {
+          recurrenceOrigin: new Date(first.getTime()),
+          eligibleFrom: displacement ? new Date(first.getTime() + displacement) : first,
+        };
         return { recurrenceOrigin: fallback, eligibleFrom: fallback };
       }
     }
@@ -8934,7 +8941,7 @@ function successorIntervalStart(
     candidateSchedule.recurrence = candidateRepeat;
     const candidateOptions = { ...options } as PhaseCountOptions;
     candidateOptions.from = new Date(predecessorPoint.getTime() + 1);
-    candidateOptions.orderedAt = displacement ? new Date(predecessorPoint.getTime() - displacement) : predecessorPoint;
+    candidateOptions.orderedAt = nominalPredecessor;
     candidateOptions.timeZone = zone;
     candidateOptions.priorCount = 0;
     candidateOptions.priorDoseTimes = undefined;
