@@ -438,7 +438,7 @@ describe("FHIR parser-state import", () => {
       system: "http://snomed.info/sct",
       code: "418693002",
       display: "Swallowed whole, not chewed (qualifier value)",
-      i18n: { th: "กลืนทั้งเม็ด; ห้ามเคี้ยวหรือบด" }
+      i18n: { th: "กลืนทั้งเม็ด; ห้ามเคี้ยว" }
     });
   });
 

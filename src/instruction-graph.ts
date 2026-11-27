@@ -3798,10 +3798,23 @@ export function buildInstructionGraph(
     }
     return false;
   };
+  // Fragment recovery can begin inside a selected action's negator or modal.
+  // The unique containing whole-input action already owns that source scope.
+  const selectedSourceAction = (fragment: AdviceFrame): AdviceFrame => {
+    let selected: AdviceFrame | undefined;
+    for (const candidate of fullInputFrames) {
+      if (candidate.predicate.lemma !== fragment.predicate.lemma ||
+          candidate.span.start > fragment.span.start || fragment.span.end > candidate.span.end) continue;
+      if (selected) return fragment;
+      selected = candidate;
+    }
+    return selected ?? fragment;
+  };
   for (const range of semanticSourceSpans(clause)) {
     const parsed = parseInstructionActions(input.slice(range.start, range.end), range.start, options);
     const accepted: AdviceFrame[] = [];
-    for (const frame of parsed) {
+    for (const recovered of parsed) {
+      const frame = selectedSourceAction(recovered);
       if (range.kind === "instruction" && !frameIsProcedural(frame, options)) {
         continue;
       }
@@ -3826,7 +3839,8 @@ export function buildInstructionGraph(
       continue;
     }
     const accepted: AdviceFrame[] = [];
-    for (const frame of proceduralFramesFromSpan(input, span, options)) {
+    for (const recovered of proceduralFramesFromSpan(input, span, options)) {
+      const frame = selectedSourceAction(recovered);
       if (pushActionIfUnique(actions, frame)) accepted.push(frame);
     }
     if (accepted.length) {

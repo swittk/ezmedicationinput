@@ -8872,3 +8872,95 @@ describe("current instruction occurrence projection stability", () => {
     });
   }
 });
+
+
+describe("whole-clause polarity during instruction fragment recovery", () => {
+  const administration = "Take 1 tablet orally once daily. ";
+  const thaiAdministration = "รับประทานครั้งละ 1 เม็ด วันละครั้ง. ";
+  it.each([
+    { source: "Take 1 tablet daily, do not crush or chew.", verbs: ["crush", "chew"], negative: true,
+      en: administration + "Do not crush. Do not chew.", th: thaiAdministration + "ห้ามบด. ห้ามเคี้ยว." },
+    { source: "Take 1 tablet daily, do not chew or crush.", verbs: ["chew", "crush"], negative: true,
+      en: administration + "Do not chew. Do not crush.", th: thaiAdministration + "ห้ามเคี้ยว. ห้ามบด." },
+    { source: "Take 1 tablet daily. Do not crush or chew.", verbs: ["crush", "chew"], negative: true,
+      en: administration + "Do not crush. Do not chew.", th: thaiAdministration + "ห้ามบด. ห้ามเคี้ยว." },
+    { source: "Take 1 tablet daily; do not crush or chew.", verbs: ["crush", "chew"], negative: true,
+      en: administration + "Do not crush. Do not chew.", th: thaiAdministration + "ห้ามบด. ห้ามเคี้ยว." },
+    { source: "Take 1 tablet daily, do not crush.", verbs: ["crush"], negative: true,
+      en: administration + "Do not crush.", th: thaiAdministration + "ห้ามบด." },
+    { source: "Crush the tablet.", verbs: ["crush"], negative: false, en: "Crush tablet.", th: "บดยาเม็ด." },
+  ])("retains selected scope and emits each action once: $source", ({ source, verbs, negative, en, th }) => {
+    const parsed = parsePublicSig(source), parsedBefore = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const actions = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations
+        .flatMap(member => member.syntax?.instructionGraph?.actions ?? []));
+      for (const verb of verbs) {
+        const selected = actions.filter(action => action.predicate.lemma === verb);
+        expect(selected).toHaveLength(1);
+        expect(selected[0].polarity ?? AdvicePolarity.Affirm)
+          .toBe(negative ? AdvicePolarity.Negate : AdvicePolarity.Affirm);
+      }
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(en);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(th);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+});
+
+
+describe("whole-swallow coding retains its declared clinical facts", () => {
+  it.each([
+    { source: "Swallow whole daily, do not chew", crush: false },
+    { source: "Swallow 1 tablet whole daily. Do not chew", crush: false },
+    { source: "Swallow 1 tablet whole daily. Do not crush. Do not chew", crush: true },
+  ])("does not add a crushing prohibition from the whole-swallow code: $source", ({ source, crush }) => {
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const output of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]]) {
+      const coded = output.additionalInstruction?.find(row => row.coding?.some(coding => coding.code === "418693002"));
+      expect(coded?.text).toBe("Swallow whole; do not chew");
+      expect(JSON.stringify(coded)).not.toMatch(/crush|บด/iu);
+      const independent = output.additionalInstruction?.flatMap(row =>
+        parseInstructionGraphExtension(row.extension)?.actions ?? []).filter(frame => frame.predicate.lemma === "crush");
+      expect(independent).toHaveLength(crush ? 1 : 0);
+      if (crush) expect(independent![0].polarity).toBe(AdvicePolarity.Negate);
+    }
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text.toLowerCase().split(locale === "en" ? "crush" : "บด")).toHaveLength(crush ? 2 : 1);
+      }
+    }
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  for (const form of ["r5", "r6"] as const) {
+    it.each([false, true])(`preserves supplied ${form} whole-swallow advice without inventing crush (authored text %s)`, withText => {
+      const advice = { id: "whole-swallow", ...(withText ? { text: "Swallow whole, do not chew" } : {}),
+        coding: [{ system: "http://snomed.info/sct", code: "418693002" }],
+        extension: [{ url: "urn:clinic:advice-note", valueString: "retain this note" }] };
+      const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }, additionalInstruction: [advice] };
+      const input = form === "r5" ? [row] : { step: [{ component: [row] }] };
+      const before = JSON.stringify(input);
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(english).toContain("Swallow whole");
+      expect(english.toLowerCase()).toContain("do not chew");
+      expect(english.toLowerCase()).not.toContain("crush");
+      expect(thai).toContain("กลืนทั้งเม็ด");
+      expect(thai).toContain("ห้ามเคี้ยว");
+      expect(thai).not.toContain("บด");
+      const projected = projectCanonicalCourse(importCanonicalCourse(input));
+      for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
+        expect(output.additionalInstruction).toEqual([advice]);
+        expect(output.doseAndRate).toEqual(row.doseAndRate);
+        expect(output.timing?.repeat).toEqual(row.timing.repeat);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    });
+  }
+});

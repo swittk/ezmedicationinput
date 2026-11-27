@@ -1119,8 +1119,8 @@
       "definition": {
         "code": "418693002",
         "display": "Swallowed whole, not chewed (qualifier value)",
-        "text": "Swallow whole; do not crush or chew",
-        "thai": "กลืนทั้งเม็ด; ห้ามเคี้ยวหรือบด"
+        "text": "Swallow whole; do not chew",
+        "thai": "กลืนทั้งเม็ด; ห้ามเคี้ยว"
       },
       "frames": [
         {
@@ -1133,15 +1133,6 @@
           "args": [
             { "role": "manner", "text": "whole", "conceptId": "whole" }
           ]
-        },
-        {
-          "force": "instruction",
-          "polarity": "negate",
-          "predicate": {
-            "lemma": "crush",
-            "semanticClass": "manipulate"
-          },
-          "args": []
         },
         {
           "force": "instruction",

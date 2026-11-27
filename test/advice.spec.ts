@@ -299,12 +299,12 @@ describe("additional instruction rule inventory", () => {
   it("rebuilds template frames from coded advice definitions", () => {
     const definition = findAdditionalInstructionDefinitionByCoding(SNOMED_SYSTEM, "418693002");
     expect(definition).toMatchObject({
-      text: "Swallow whole; do not crush or chew",
+      text: "Swallow whole; do not chew",
       coding: {
         system: SNOMED_SYSTEM,
         code: "418693002"
       },
-      i18n: { th: "กลืนทั้งเม็ด; ห้ามเคี้ยวหรือบด" }
+      i18n: { th: "กลืนทั้งเม็ด; ห้ามเคี้ยว" }
     });
 
     const frames = buildAdditionalInstructionFramesFromCoding(
@@ -323,16 +323,12 @@ describe("additional instruction rule inventory", () => {
       }),
       expect.objectContaining({
         polarity: AdvicePolarity.Negate,
-        predicate: expect.objectContaining({ lemma: "crush" })
-      }),
-      expect.objectContaining({
-        polarity: AdvicePolarity.Negate,
         predicate: expect.objectContaining({ lemma: "chew" })
       })
     ]);
   });
 
-  it("reconstructs the full affirmative and negative instructions from an imported swallow-whole code", () => {
+  it("keeps imported whole-swallow code facts separate from its authored advice text", () => {
     const reconstructed = fromFhirDosage({
       text: "Swallow whole; do not crush or chew",
       additionalInstruction: [{
@@ -340,10 +336,11 @@ describe("additional instruction rule inventory", () => {
         coding: [{ system: SNOMED_SYSTEM, code: "418693002" }]
       }]
     });
+    expect(reconstructed.meta.canonical.clauses[0]?.additionalInstructions?.[0]?.text)
+      .toBe("Swallow whole; do not crush or chew");
     const frames = reconstructed.meta.canonical.clauses[0]?.additionalInstructions?.[0]?.frames ?? [];
     expect(frames.map(frame => [frame.predicate.lemma, frame.polarity])).toEqual([
       ["swallow", AdvicePolarity.Affirm],
-      ["crush", AdvicePolarity.Negate],
       ["chew", AdvicePolarity.Negate]
     ]);
     expect(frames[0]?.args).toContainEqual(
