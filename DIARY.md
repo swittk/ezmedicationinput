@@ -16439,3 +16439,26 @@ without changing the registered callback contract or the executable schedule.
 R5 and R6 import retain plain schedule object construction. Optional shared
 allowance records are assigned only when present, preserving decoded facts and
 the existing property shape without copying descriptors for ordinary inputs.
+
+
+## 2026-11-27 — Complete conditions, collections and current FHIR facts
+
+Warning heads retain their selected modality, condition and temporal arguments.
+Optional procedures keep their complete qualified advice, and current FHIR advice
+rows retain the selected warning identity through conversion. Graph relations
+continue to own sequencing and conditional technique interpretation.
+
+Shared dose counts account for recorded administrations once. Ranged supply retains
+later eligible opportunities under existing count and period limits, with one final
+planning pass. Event offsets preserve their calendar day, and elapsed occurrence
+limits retain their typed period.
+
+Weekday withholding keeps every selected day and its dose target. Guard composition
+distinguishes implicit patient-history frequency from an explicit medication limit.
+Registered duration and rate tokens preserve their original source. Time choices,
+action companions and equal-position temporal dependencies retain all selected parts.
+
+Current FHIR import and projection preserve unknown cycle counts, nested Quantity
+annotations, code-only clinical meaning, spatial site relations and unfamiliar
+annotated graph relations. Preview labels use the existing terminology owners. Monthly day wording reflects
+the actual recurrence without changing scheduled dates.
