@@ -602,7 +602,7 @@ function hasRelativeTimeEndGovernor(tokens: readonly Token[], start: number): bo
   // The same complete clock complement belongs to the end construction,
   // whether it was authored numerically or as a licensed event name.
   const clockEnd = before + 1;
-  for (let clockStart = Math.max(0, clockEnd - Math.max(2, MAX_EVENT_TIMING_EXPRESSION_PARTS)); clockStart < clockEnd; clockStart++) {
+  for (let clockStart = Math.max(0, clockEnd - Math.max(2, 1 + MAX_EVENT_TIMING_EXPRESSION_PARTS)); clockStart < clockEnd; clockStart++) {
     const clock = courseEndClockAt(tokens, clockStart, clockEnd);
     if (clock && clockStart + clock.tokens.length === clockEnd) {
       before = clockStart - 1;

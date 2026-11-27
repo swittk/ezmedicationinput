@@ -1,3 +1,5 @@
+import { tokenize } from "../src/parser";
+import { nextDayOnsetAt } from "../src/hpsg/rule-context";
 import { describe,expect,it } from "vitest";
 import retainedCourseProfile from "../fhir/r5/medication-r6-course-details.json";
 import { R5_SOURCE_ONLY_MAXIMUM_URL,administrationFromR5,courseFromR6,courseToR5,courseToR6 } from "../src/adapters/canonical-course";
@@ -9374,8 +9376,12 @@ describe("round74 shared source owners", () => {
 
 
 describe("relative meal course-end ownership", () => {
-  it.each(["before breakfast", "after dinner"])("keeps until %s the next day as an end complement", meal => {
+  it.each(["before breakfast", "after dinner", "before meal morning", "ก่อนอาหารเช้า"])("keeps until %s the next day as an end complement", meal => {
     const source = "Take 1 tablet every 6 hours until " + meal + " the next day";
+    const tokens = tokenize(source), next = tokens.findIndex(token => token.lower === "next");
+    // The complete end daughter owns NEXT even before chart selection.
+    expect(nextDayOnsetAt(tokens, next, tokens.length)).toBeUndefined();
+    expect(nextDayOnsetAt(tokens, next - 1, tokens.length)).toBeUndefined();
     const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
     for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
       const course = importCanonicalCourse(input), administration = course.stages[0].administrations[0];
