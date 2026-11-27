@@ -20,6 +20,7 @@ import { CALENDAR_WEEKDAY_LEXEMES, CALENDAR_WEEKDAY_GROUPS, CALENDAR_DAY_LIST_CO
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { countAndDurationRule, countFrequencyRule, timeOfDayRule, timingLexicalRule, dayRangeLexicalRule, maximumOccurrenceAt, isIndependentMaximum } from "./timing-rules";
 import { LexKind } from "../../lexer/token-types";
+import { hasPrnMeaning } from "../../lexer/meaning";
 import { normalizeUnit } from "../../unit-lexicon";
 import { mapIntervalUnit } from "../timing-lexicon";
 import {
@@ -830,7 +831,10 @@ function postfixConditionEnd(context: HpsgClauseContext, start: number): number 
     const maximum = maximumDosePerPeriodAt(context, index, maximumHead) ??
       maximumOccurrenceAt(context, index, maximumHead);
     if (maximum) {
-      if (!isIndependentMaximum(context, index, maximum)) continue;
+      // A complete lexical PRN predicate has no comparative complement;
+      // an opaque observation history can still own the following count.
+      if (!isIndependentMaximum(context, index, maximum) &&
+          !(index === start + 2 && hasPrnMeaning(context.tokens[start + 1]))) continue;
     } else if (maximumHead.headStart !== index) continue;
     end = current.sourceStart;
     break;

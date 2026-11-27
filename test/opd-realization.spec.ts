@@ -507,21 +507,25 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
   });
 
   it("composes onset trigger, compact repeat delay, condition and total max-dose cap", () => {
-    const english = parseSig(
-      "take 1 tab at onset of migraine repeat after 2h if needed max 2 doses"
-    );
-    expect(english.meta.leftoverText).toBeUndefined();
-    expect(english.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
-    expect(english.meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 2 });
-    expect(english.meta.canonical.clauses[0]?.instructionGraph?.actions[0]).toMatchObject({
-      predicate: { lemma: "repeat" },
-      relation: "after",
-      args: [expect.objectContaining({ role: "duration", quantity: { value: 2, unit: "h" } })]
-    });
-    expect(english.meta.canonical.clauses[0]?.instructionGraph?.relations).toContainEqual(
-      expect.objectContaining({ kind: "if", text: "if needed" })
-    );
-    expect(formatSig(english.fhir, "long", { locale: "th" })).toContain("ถ้าจำเป็น");
+    for (const cap of ["max 2 doses", "no more than 2 doses"]) {
+      const english = parseSig(
+        "take 1 tab at onset of migraine repeat after 2h if needed " + cap
+      );
+      expect(english.meta.leftoverText).toBeUndefined();
+      expect(english.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
+      expect(english.meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 2 });
+      expect(english.fhir.timing?.repeat?.countMax).toBe(2);
+      expect(english.fhirNext.step![0].component![0].timing?.repeat?.countMax).toBe(2);
+      expect(english.meta.canonical.clauses[0]?.instructionGraph?.actions[0]).toMatchObject({
+        predicate: { lemma: "repeat" },
+        relation: "after",
+        args: [expect.objectContaining({ role: "duration", quantity: { value: 2, unit: "h" } })]
+      });
+      expect(english.meta.canonical.clauses[0]?.instructionGraph?.relations).toContainEqual(
+        expect.objectContaining({ kind: "if", text: "if needed" })
+      );
+      expect(formatSig(english.fhir, "long", { locale: "th" })).toContain("ถ้าจำเป็น");
+    }
 
     const thai = parseSig(
       "รับประทาน 1 เม็ดเมื่อเริ่มมีอาการไมเกรน กินซ้ำหลัง 2 ชั่วโมงถ้าจำเป็น ไม่เกิน 2 ครั้ง",
@@ -532,6 +536,11 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     });
     expect(thai.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
     expect(thai.meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 2 });
+    expect(thai.fhir.timing?.repeat?.countMax).toBe(2);
+    expect(thai.fhirNext.step![0].component![0].timing?.repeat?.countMax).toBe(2);
+    expect(thai.meta.canonical.clauses[0]?.instructionGraph?.relations).toContainEqual(
+      expect.objectContaining({ kind: "if", text: "ถ้าจำเป็น" })
+    );
     expect(formatSig(thai.fhir, "long", { locale: "en" }))
       .toContain("repeat after 2 hours if needed");
   });
