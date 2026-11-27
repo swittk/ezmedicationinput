@@ -16536,3 +16536,11 @@ Supplied conflicting facts and independently authored advice remain distinct.
 - Compute complete advice-representation evidence only for the existing FHIR consumer that needs it; shared action association and coding proof remain unchanged for parsing and preview.
 - Share explicit-clock enumeration between due-dose generation and finite successor origins. Keep the nominal cadence origin separate from signed eligibility, retain ranged cadence preparation, and reuse the query date for unshifted clock walks.
 - Retain the alternate-day successor regression across native and fresh R5/R6 scheduling and maximum supply.
+
+## 2026-11-27 — Keep calendar ends separate from successor origins
+
+An end-only calendar bound now clips a finite successor without replacing its
+resolved first-clock origin. Explicit calendar starts and phase starts retain
+their existing precedence. Native and fresh R5/R6 regressions cover a counted
+loading dose followed by a two-day course, including an excluded opening day,
+later queries, supply totals and retained quantity annotations.
