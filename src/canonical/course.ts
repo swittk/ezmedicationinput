@@ -16,6 +16,7 @@ import { AdviceArgumentRole, AdvicePolarity } from "../types";
 import { buildAdditionalInstructionFramesFromCoding } from "../advice";
 import type {
   CanonicalSigClause,
+  CanonicalScheduleExpr,
   CanonicalActivityTimingExpr,
   CanonicalCycleDayConstraint,
   CanonicalOccurrenceCapExpr,
@@ -109,6 +110,7 @@ export interface CanonicalAmount {
 export interface CanonicalRecurrence {
   count?: number;
   countMax?: number;
+  sharedCount?: CanonicalScheduleExpr["sharedCount"];
   frequency?: number;
   frequencyMax?: number;
   period?: number;

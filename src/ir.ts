@@ -213,8 +213,9 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.offsetMax !== undefined ||
     Boolean(schedule.activityTiming?.length) ||
     (includeConstraints && (schedule.occurrenceCap !== undefined ||
-      Boolean(schedule.maxDosePerPeriod?.length) || schedule.countMax !== undefined)) ||
-    schedule.count !== undefined ||
+      Boolean(schedule.maxDosePerPeriod?.length) || schedule.countMax !== undefined ||
+      schedule.sharedCount?.countMax !== undefined)) ||
+    schedule.count !== undefined || schedule.sharedCount?.count !== undefined ||
     schedule.timingCode || schedule.timingText?.trim() ||
     schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
     schedule.eventWindow || schedule.clockWindow || schedule.when?.length ||

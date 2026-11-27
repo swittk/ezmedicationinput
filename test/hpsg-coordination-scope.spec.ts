@@ -8,6 +8,7 @@ import {
   formatSig, importCanonicalCourse, lintSig, nextDueDoses, toDosageDetails, toFhirR5Dosages, getMedicationInstructionAction, parseSig as parsePublicSig
 } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
+import { courseToR5 } from '../src/adapters/canonical-course';
 import { shiftCanonicalSigClauses } from '../src/ir';
 import { ParserState } from '../src/parser-state';
 import { calendarExclusionLexicalRule, matchCalendarExclusion } from '../src/hpsg/rules/condition-rules';
@@ -3370,5 +3371,120 @@ describe("registered route and anchored site ownership", () => {
       expect(row.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+});
+
+describe("shared bounds of a selectively partitioned administration", () => {
+  const query = { orderedAt: "2026-11-23T00:00:00Z", from: "2026-11-23T00:00:00Z", timeZone: "UTC", limit: 5 };
+  const warning = " On Mondays, do not take the 1-tablet morning dose";
+  const ordinary = "Take 1 tablet at 08:00 and 20:00 for 4 doses.";
+  const selected = ["2026-11-23T20:00:00+00:00", "2026-11-24T08:00:00+00:00",
+    "2026-11-24T20:00:00+00:00", "2026-11-25T08:00:00+00:00"];
+  const civil = ["2026-11-23T20:00:00+00:00", "2026-11-24T08:00:00+00:00",
+    "2026-11-25T08:00:00+00:00", "2026-11-26T08:00:00+00:00"];
+  const rolling = ["2026-11-23T20:00:00+00:00", "2026-11-24T20:00:00+00:00",
+    "2026-11-25T20:00:00+00:00", "2026-11-26T20:00:00+00:00"];
+
+  it.each([
+    ["ordinary four", ordinary, false, 4, undefined, [
+      "2026-11-23T08:00:00+00:00", "2026-11-23T20:00:00+00:00",
+      "2026-11-24T08:00:00+00:00", "2026-11-24T20:00:00+00:00"]],
+    ["shared four", ordinary + warning, true, 4, undefined, selected],
+    ["shared upper four", "Take 1 tablet at 08:00 and 20:00 up to 4 doses." + warning,
+      true, undefined, 4, selected],
+    ["shared four and civil occurrence cap",
+      "Take 1 tablet at 08:00 and 20:00 for 4 doses, maximum 1 dose per day." + warning,
+      true, 4, undefined, civil],
+    ["shared four and rolling quantity cap",
+      "Take 1 tablet at 08:00 and 20:00 for 4 doses, maximum 1 tablet per day." + warning,
+      true, 4, undefined, rolling],
+    ["shared civil occurrence cap without finite count",
+      "Take 1 tablet at 08:00 and 20:00, maximum 1 dose per day." + warning,
+      true, undefined, undefined, [...civil, "2026-11-27T08:00:00+00:00"]]
+  ] as const)("preserves the accepted occurrence owner: %s", (name, source, shared, count, countMax, expected) => {
+    const parsed = parsePublicSig(source), original = JSON.stringify(parsed);
+    if (shared) expect(parsed.meta.canonical.clauses.every(clause => clause.sourceProjectionVerified === false)).toBe(true);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(shared ? 2 : 1);
+      expect(members.every(member => member.amounts?.[0].quantity?.value === 1)).toBe(true);
+      if (shared) {
+        const groups = members.map(member => member.schedule?.recurrence?.sharedCount);
+        expect(groups.every(group => Boolean(group?.groupId))).toBe(true);
+        expect(new Set(groups.map(group => group?.groupId)).size).toBe(1);
+        for (const member of members) {
+          expect(member.schedule?.recurrence?.count).toBeUndefined();
+          expect(member.schedule?.recurrence?.countMax).toBeUndefined();
+          expect(member.schedule?.recurrence?.sharedCount?.count).toBe(count);
+          expect(member.schedule?.recurrence?.sharedCount?.countMax).toBe(countMax);
+        }
+        const morning = members.find(member => member.schedule?.recurrence?.clocks?.[0] === "08:00:00")!;
+        const evening = members.find(member => member.schedule?.recurrence?.clocks?.[0] === "20:00:00")!;
+        expect(morning.excludedWeekdays).toEqual(["mon"]);
+        expect(evening.excludedWeekdays).toBeUndefined();
+      } else {
+        expect(members[0].schedule?.recurrence?.count).toBe(4);
+        expect(members[0].schedule?.recurrence?.sharedCount).toBeUndefined();
+      }
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: count === undefined && countMax === undefined ? 7 : 4, unit: "tab" });
+      if (name === "ordinary four" || name === "shared four") {
+        const late = { ...query, from: "2026-11-24T00:00:00Z" };
+        expect(nextDueDoses(input, late)).toEqual(expected.filter(time => time >= late.from));
+        expect(calculateTotalUnits({ dosage: input, ...late, durationValue: 7, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: shared ? 3 : 2, unit: "tab" });
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(original);
+  });
+
+  it("retains an independent count and current shared-timing annotations through fresh wire inputs", () => {
+    const url = "urn:ezmedicationinput:StructureDefinition:medication-timing-shared-count";
+    const marker = (index: number) => ({ url, id: `quota-${index}`, extension: [
+      { url: "groupId", valueString: "daily-pair", id: `group-${index}` },
+      { url: "count", valueInteger: 4, _valueInteger: { id: `total-${index}`,
+        extension: [{ url: "https://example.org/total-note", valueString: "authored" }] } },
+      { url: "https://example.org/quota-note", valueString: `retained-${index}` }
+    ] });
+    const rows = JSON.parse(JSON.stringify([
+      ...[["20:00:00", undefined], ["08:00:00", ["tue", "wed", "thu", "fri", "sat", "sun"]]].map(([clock, dayOfWeek], index) => ({
+        sequence: 1, id: `row-${index}`,
+        extension: [{ url: "https://example.org/row-note", valueString: `current-${index}` }],
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: "d",
+          timeOfDay: [clock], dayOfWeek, extension: [marker(index)] } }
+      })),
+      { sequence: 1, id: "independent", doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+        timing: { repeat: { count: 1, timeOfDay: ["12:00:00"] } } }
+    ]));
+    const original = JSON.stringify(rows);
+    for (const input of [importCanonicalCourse(rows), rows, JSON.parse(JSON.stringify(toDosageDetails(rows)))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(3);
+      for (const member of members.slice(0, 2)) {
+        expect(member.schedule?.recurrence?.sharedCount).toEqual({ groupId: "daily-pair", count: 4 });
+        expect(member.schedule?.recurrence?.count).toBeUndefined();
+      }
+      expect(members[2].schedule?.recurrence?.count).toBe(1);
+      expect(members[2].schedule?.recurrence?.sharedCount).toBeUndefined();
+      expect(nextDueDoses(input, query)).toEqual(["2026-11-23T12:00:00+00:00", ...selected]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 6, unit: "tab" });
+      const projected = courseToR5(course);
+      for (let index = 0; index < 2; index++) {
+        expect(projected[index].timing?.repeat?.extension?.find(extension => extension.url === url)).toEqual(marker(index));
+        expect(projected[index].extension).toContainEqual({
+          url: "https://example.org/row-note", valueString: `current-${index}`
+        });
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(rows)).toBe(original);
   });
 });

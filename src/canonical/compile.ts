@@ -146,6 +146,7 @@ export function administrationFromClause(
     recurrence = {
       count: s.count,
       countMax: s.countMax,
+      ...(s.sharedCount ? { sharedCount: s.sharedCount } : undefined),
       frequency: s.frequency,
       frequencyMax: s.frequencyMax,
       period: s.period,
@@ -395,18 +396,20 @@ export function courseFromPartialParallel(
             finitePredecessors = priorEnd > priorStart;
             for (let parent = priorStart; finitePredecessors && parent < priorEnd; parent++) {
               const previous = administrations[parent], repeat = previous.schedule?.recurrence;
+              const count = repeat?.count ?? repeat?.sharedCount?.count;
+              const countMax = repeat?.countMax ?? repeat?.sharedCount?.countMax;
               finitePredecessors = Boolean(previous.phaseEnd || repeat?.calendarWindow?.end ||
                 previous.schedule?.explicitEvents?.length ||
                 repeat?.courseLength?.value !== undefined &&
                   !repeat.courseLength.comparator ||
                 previous.anchoredLength?.quantity?.value !== undefined &&
                   !previous.anchoredLength.quantity.comparator ||
-                repeat?.count !== undefined &&
-                  (repeat.countMax === undefined || repeat.countMax === repeat.count) ||
-                repeat?.count === undefined && repeat?.anchors?.length === 1 && repeat.anchors[0] === "IMD" &&
+                count !== undefined &&
+                  (countMax === undefined || countMax === count) ||
+                count === undefined && repeat?.anchors?.length === 1 && repeat.anchors[0] === "IMD" &&
                   !repeat.clocks?.length && repeat.frequency === undefined && repeat.frequencyMax === undefined &&
                   repeat.period === undefined && repeat.periodMax === undefined && repeat.periodUnit === undefined &&
-                  (repeat.countMax === undefined || repeat.countMax === 1));
+                  (countMax === undefined || countMax === 1));
             }
           }
           if (finitePredecessors) dependsOnPrevious = true;
@@ -618,6 +621,8 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
   if(a.schedule){
     const schedule:NonNullable<CanonicalSigClause["schedule"]>=base?.schedule?Object.assign({},base.schedule):{};
     schedule.count=r?.count;schedule.countMax=r?.countMax;
+    if(r?.sharedCount)schedule.sharedCount=r.sharedCount;
+    else if(schedule.sharedCount)delete schedule.sharedCount;
     schedule.frequency=r?.frequency;schedule.frequencyMax=r?.frequencyMax;
     schedule.period=r?.period;schedule.periodMax=r?.periodMax;schedule.periodUnit=r?.periodUnit;
     schedule.administrationDuration=r?.occurrenceDuration;schedule.administrationDurationMax=r?.occurrenceDurationMax;

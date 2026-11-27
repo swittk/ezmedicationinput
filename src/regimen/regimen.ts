@@ -310,7 +310,7 @@ export function scopeSequentialPhaseSemantics(
     // clause supplies recurring or as-needed use. Establish it before native
     // and R5 projection; an empty repeat cannot decide this at execution time.
     if (schedule?.administrationOffsetMinutes !== undefined && !clause.prn?.enabled &&
-        schedule.count === undefined && schedule.countMax === undefined &&
+        schedule.count === undefined && schedule.countMax === undefined && !schedule.sharedCount &&
         !hasRecurringSchedule(schedule) && schedule.frequencyMax === undefined &&
         schedule.periodMax === undefined && schedule.periodUnit === undefined &&
         !schedule.dayOfMonth?.length && schedule.weekdayOrdinal === undefined &&
@@ -420,7 +420,7 @@ export function scopeSequentialPhaseSemantics(
           preceding.periodUnit === FhirPeriodUnit.Day;
         if (preceding?.timeOfDay?.length === 1 && states[prior[0]].primaryClause.prn?.enabled !== true &&
             preceding.count === undefined &&
-            preceding.countMax === undefined && preceding.duration === undefined &&
+            preceding.countMax === undefined && !preceding.sharedCount && preceding.duration === undefined &&
             preceding.durationMax === undefined && preceding.durationUnit === undefined &&
             (onceDaily || preceding.frequency === undefined && preceding.period === undefined) &&
             preceding.frequencyMax === undefined && preceding.periodMax === undefined &&
@@ -442,7 +442,7 @@ export function scopeSequentialPhaseSemantics(
         // the actual occupied day rather than just the nominal calendar end.
         const displaced = schedules.some(value => Boolean(value?.administrationOffsetMinutes));
         contextualPredecessor = (!start || displaced) && (singleClockPredecessor !== undefined || priorStart === null ||
-          schedules.some(value => value?.count !== undefined || value?.countMax !== undefined ||
+          schedules.some(value => value?.count !== undefined || value?.countMax !== undefined || value?.sharedCount ||
             value?.phaseStartReference === 'previous-phase-next-day' ||
             value?.duration !== undefined || value?.durationUnit !== undefined ||
             // An open phase with one shared calendar origin already locates NEXT.

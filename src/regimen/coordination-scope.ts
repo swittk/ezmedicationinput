@@ -159,7 +159,7 @@ type ScheduleFeatureGroup = keyof typeof SCHEDULE_FEATURE_GROUPS;
  */
 const SCHEDULE_FEATURE_GROUPS = {
   recurrence: [
-    'timingCode', 'timingText', 'count', 'countMax', 'frequency', 'frequencyMax',
+    'timingCode', 'timingText', 'count', 'countMax', 'sharedCount', 'frequency', 'frequencyMax',
     'period', 'periodMax', 'periodUnit', 'dayOfWeek', 'dayOfMonth', 'timeOfDay',
     'occurrenceCap', 'maxDosePerPeriod', 'eventWindow', 'clockWindow', 'weekdayOrdinal'
   ],
@@ -193,7 +193,7 @@ const COORDINATED_ANCHOR_CONTEXT_FIELDS = [
   'dayOfWeek', 'dayOfMonth', 'weekdayOrdinal', 'calendarEvents', 'cycleDayConstraint'
 ] as const satisfies readonly ScheduleSemanticField[];
 const NON_ANCHOR_SCHEDULE_FIELDS = [
-  'timingCode', 'timingText', 'count', 'countMax', 'frequency', 'frequencyMax',
+  'timingCode', 'timingText', 'count', 'countMax', 'sharedCount', 'frequency', 'frequencyMax',
   'period', 'periodMax', 'periodUnit', 'offset', 'offsetMin', 'offsetMax',
   'activityTiming', 'eventWindow', 'clockWindow', 'occurrenceCap', 'maxDosePerPeriod', 'administrationOffsetMinutes',
   'timingReference', 'treatmentStartOffsetDays', 'phaseStartReference', 'repeatCycle', 'repeatCount'
@@ -1424,6 +1424,22 @@ function partitionConditionTargetStates(
     selectedState.productFormKey = state.productFormKey;
     selectedState.warnings = [...state.warnings];
     const selectedSchedule = selectedState.primaryClause.schedule!;
+    // Retained source describes the unpartitioned anchor set. Neither daughter
+    // independently owns replay of that complete source as its current directions.
+    state.primaryClause.sourceProjectionVerified = false;
+    selectedState.primaryClause.sourceProjectionVerified = false;
+    if (schedule.sharedCount || schedule.count !== undefined || schedule.countMax !== undefined ||
+        schedule.occurrenceCap || schedule.maxDosePerPeriod?.length) {
+      // This split changes which anchors an adjunct selects, not the authored
+      // total or period ceilings. Subsequent splits retain this group identity.
+      const shared = schedule.sharedCount ?? {
+        groupId: `partition-count:${segments[index].start}:${segments[index].end}`,
+        count: schedule.count, countMax: schedule.countMax
+      };
+      schedule.sharedCount = selectedSchedule.sharedCount = shared;
+      delete schedule.count; delete schedule.countMax;
+      delete selectedSchedule.count; delete selectedSchedule.countMax;
+    }
     selectedSchedule.timeOfDay = selected.times.length ? selected.times : undefined;
     selectedSchedule.when = selected.events.length ? selected.events : undefined;
     const remainingTimes = (schedule.timeOfDay ?? []).filter(clock => selected.times.indexOf(clock) < 0);

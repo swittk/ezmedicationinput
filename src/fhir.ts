@@ -61,6 +61,7 @@ import {
   CanonicalOccurrenceCapExpr,
   CanonicalDoseRange,
   CanonicalSigClause,
+  CanonicalScheduleExpr,
   CanonicalPrnReasonExpr,
   BodySiteRestriction,
   BodySiteSpatialRelation,
@@ -597,6 +598,8 @@ export function getTimingEventWindow(
 }
 
 export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-occurrence-cap";
+/** Internal current recurrence fact; deliberately absent from public index exports. */
+export const TIMING_SHARED_COUNT_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-shared-count";
 export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-event-calendar-source";
 export const PRN_TRIGGER_PHASE_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-prn-trigger-phase";
 export const BODY_SITE_RESTRICTION_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-body-site-restriction";
@@ -956,6 +959,26 @@ function activityTimingQuantityMinutes(extension: NonNullable<FhirR6TimingRepeat
   if (unit === "h" || /^hours?$/i.test(unit)) return value * 60;
   if (unit === "d" || /^days?$/i.test(unit)) return value * 1440;
   return undefined;
+}
+
+function buildSharedCountExtension(shared: NonNullable<CanonicalScheduleExpr["sharedCount"]>): FhirExtension {
+  const extension: FhirExtension[] = [{ url: "groupId", valueString: shared.groupId }];
+  if (shared.count !== undefined) extension.push({ url: "count", valueInteger: shared.count });
+  if (shared.countMax !== undefined) extension.push({ url: "countMax", valueInteger: shared.countMax });
+  return { url: TIMING_SHARED_COUNT_EXTENSION_URL, extension };
+}
+
+/** Read the explicit shared allowance, never derive membership from source or phase IDs. */
+export function getTimingSharedCount(
+  repeat: FhirR6TimingRepeat | undefined
+): CanonicalScheduleExpr["sharedCount"] {
+  const marker = repeat?.extension?.find(item => item.url === TIMING_SHARED_COUNT_EXTENSION_URL);
+  const child = (url: string) => marker?.extension?.find(item => item.url === url);
+  const groupId = child("groupId")?.valueString;
+  const count = child("count")?.valueInteger, countMax = child("countMax")?.valueInteger;
+  if (!groupId) return undefined;
+  return { groupId, ...(count !== undefined ? { count } : undefined),
+    ...(countMax !== undefined ? { countMax } : undefined) };
 }
 
 function buildOccurrenceCapExtension(cap: CanonicalOccurrenceCapExpr) {
@@ -2021,6 +2044,10 @@ export function serializeCanonicalSchedule(
     ];
     hasRepeat = true;
   }
+  if (schedule?.sharedCount) {
+    repeat.extension = [...(repeat.extension ?? []), buildSharedCountExtension(schedule.sharedCount)];
+    hasRepeat = true;
+  }
   if (schedule?.occurrenceCap) {
     repeat.extension = [
       ...(repeat.extension ?? []),
@@ -2349,6 +2376,7 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
   const dayOfMonth = getTimingMonthDays(repeat);
   const eventWindow = getTimingEventWindow(repeat);
   const occurrenceCap = getTimingOccurrenceCap(repeat);
+  const sharedCount = getTimingSharedCount(repeat);
   const cycleDayConstraint = getCycleDayConstraint(dosage);
   const maxDosePerPeriod = canonicalDosePeriodMaximums(dosage);
   const administrationOffsetMinutes = getAdministrationOffsetMinutes(dosage);
@@ -2364,7 +2392,7 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
     dayOfMonth !== undefined ||
     eventWindow !== undefined ||
     cycleDayConstraint !== undefined ||
-    occurrenceCap !== undefined ||
+    occurrenceCap !== undefined || sharedCount !== undefined ||
     maxDosePerPeriod?.length ||
     repeat?.boundsDuration ||
     repeat?.boundsPeriod?.start ||
@@ -2397,6 +2425,7 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
       timingTextIsLiteral,
       count: repeat?.count,
       countMax: repeat?.countMax,
+      ...(sharedCount ? { sharedCount } : undefined),
       duration: timingBounds.duration,
       durationMax: timingBounds.durationMax,
       durationIsRange: timingBounds.durationIsRange,
@@ -2566,6 +2595,8 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
     };
   }
   state.occurrenceCap = getTimingOccurrenceCap(dosage.timing?.repeat);
+  const sharedCount = getTimingSharedCount(dosage.timing?.repeat);
+  if (sharedCount) (state.primaryClause.schedule ??= {}).sharedCount = sharedCount;
   const administrationOffsetMinutes = getAdministrationOffsetMinutes(dosage);
   if (administrationOffsetMinutes !== undefined) {
     const schedule = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});

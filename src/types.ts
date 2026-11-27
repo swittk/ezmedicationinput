@@ -1994,6 +1994,9 @@ export interface CanonicalScheduleExpr {
   timingTextIsLiteral?: true;
   count?: number;
   countMax?: number;
+  /** Original occurrence allowance shared only by a partition's anchor daughters.
+   * Existing period caps retain this same owner; a finite total is optional. */
+  sharedCount?: { groupId: string; count?: number; countMax?: number };
   duration?: number;
   durationMax?: number;
   /** Preserve an authored duration range even when only one endpoint exists. */

@@ -109,6 +109,7 @@ import {
   getTimingWeekdayOrdinal,
   getTimingEventWindow,
   getTimingOccurrenceCap,
+  getTimingSharedCount,
   getCycleDayConstraint,
   getExactTimingOffsetMinutes,
   parseActivityTimingExtensions,
@@ -125,6 +126,7 @@ import {
   TIMING_CLOCK_WINDOW_EXTENSION_URL,
   TIMING_EVENT_WINDOW_EXTENSION_URL,
   TIMING_OCCURRENCE_CAP_EXTENSION_URL,
+  TIMING_SHARED_COUNT_EXTENSION_URL,
   ADMINISTRATION_OFFSET_EXTENSION_URL,
   ANCHORED_COURSE_DURATION_EXTENSION_URL,
   CYCLE_DAY_ELIGIBILITY_EXTENSION_URL,
@@ -250,6 +252,7 @@ function timingAnnotations(
   | "weekdayOrdinal"
   | "activityTiming"
   | "occurrenceCap"
+  | "sharedCount"
   | "clockWindow"
   | "eventWindow"
   | "frequency"
@@ -269,6 +272,7 @@ function timingAnnotations(
     | "weekdayOrdinal"
     | "activityTiming"
     | "occurrenceCap"
+    | "sharedCount"
     | "clockWindow"
     | "eventWindow"
     | "frequency"
@@ -284,6 +288,7 @@ function timingAnnotations(
     activities: FhirR6Extension[] | undefined;
   let weekday: FhirR6Extension | undefined,
     cap: FhirR6Extension | undefined,
+    shared: FhirR6Extension | undefined,
     clock: FhirR6Extension | undefined,
     event: FhirR6Extension | undefined;
   for (const e of r?.extension ?? [])
@@ -335,6 +340,9 @@ function timingAnnotations(
       case TIMING_OCCURRENCE_CAP_EXTENSION_URL:
         if (!cap) cap = e;
         break;
+      case TIMING_SHARED_COUNT_EXTENSION_URL:
+        if (!shared) shared = e;
+        break;
       case TIMING_CLOCK_WINDOW_EXTENSION_URL:
         if (!clock) clock = e;
         break;
@@ -347,6 +355,7 @@ function timingAnnotations(
   if (weekday) out.weekdayOrdinal = getTimingWeekdayOrdinal({ extension: [weekday] });
   if (activities) out.activityTiming = parseActivityTimingExtensions({ extension: activities });
   if (cap) out.occurrenceCap = getTimingOccurrenceCap({ extension: [cap] });
+  if (shared) out.sharedCount = getTimingSharedCount({ extension: [shared] });
   if (clock) out.clockWindow = getTimingClockWindow({ extension: [clock] });
   if (event) out.eventWindow = getTimingEventWindow({ extension: [event] });
   return out;
@@ -397,6 +406,7 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
       weekdayOrdinal: annotations?.weekdayOrdinal,
       activityTiming: annotations?.activityTiming,
       occurrenceCap: annotations?.occurrenceCap,
+      ...(annotations?.sharedCount ? { sharedCount: annotations.sharedCount } : undefined),
       clockWindow: annotations?.clockWindow,
       eventWindow: annotations?.eventWindow,
       startOffset: measureFromWire(native.startOffset),
@@ -1204,6 +1214,7 @@ function updateNativeTimingAnnotations(
     !live?.weekdayOrdinal &&
     !live?.activityTiming &&
     !live?.occurrenceCap &&
+    !live?.sharedCount &&
     !live?.clockWindow &&
     !live?.eventWindow &&
     !live?.occurrenceDurationRange &&
@@ -1261,6 +1272,7 @@ function updateNativeTimingAnnotations(
       live?.activityTiming
     );
     changed(TIMING_OCCURRENCE_CAP_EXTENSION_URL, getTimingOccurrenceCap(oldMarkers), live?.occurrenceCap);
+    changed(TIMING_SHARED_COUNT_EXTENSION_URL, getTimingSharedCount(oldMarkers), live?.sharedCount);
     changed(TIMING_OFFSET_EXACT_EXTENSION_URL, getExactTimingOffsetMinutes(oldMarkers), live?.offset);
     changed(
       TIMING_OFFSET_MIN_EXTENSION_URL,
