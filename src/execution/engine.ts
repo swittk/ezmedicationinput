@@ -1158,8 +1158,9 @@ function canFallbackToCadence(
 function resolveFrequencyCadence(
   timing: CanonicalTiming, effectiveRepeat: CanonicalRecurrence, config: NextDueDoseConfig,
   coding = executionTimingCoding(timing)
-): { clocks: string[]; daily: boolean; configured: boolean } {
+): { clocks: string[]; anchors?: CanonicalRecurrence["anchors"]; daily: boolean; configured: boolean } {
   let configuredClocks = false;
+  let codeAnchors: CanonicalRecurrence["anchors"];
   const configured = config.frequencyDefaults;
   const collected = new Set<string>();
   const normalizedCode = coding?.code?.toUpperCase();
@@ -1195,8 +1196,13 @@ function resolveFrequencyCadence(
         const descriptor = meaning ? timingPreviewDescriptor(meaning) : undefined;
         // Event-only meanings without a clinic default use the same clock
         // resolution as an explicit timing anchor, retaining the cadence.
-        if (descriptor?.when?.length && descriptor.frequency === undefined && descriptor.period === undefined)
-          codeClocks = expandWhenCodes(descriptor.when, config, effectiveRepeat, true).map(entry => entry.time);
+        if (descriptor?.when?.length && descriptor.frequency === undefined && descriptor.period === undefined) {
+          const entries = expandWhenCodes(descriptor.when, config, effectiveRepeat, true);
+          if (entries.some(entry => entry.dayShift !== 0)) {
+            codeAnchors = descriptor.when;
+            codeClocks = [];
+          } else codeClocks = entries.map(entry => entry.time);
+        }
       }
     }
   }
@@ -1221,12 +1227,14 @@ function resolveFrequencyCadence(
       for (const clock of inferDailyFrequencyClocks(repeat.frequency)) collected.add(clock);
     }
   }
-  return {
+  const result: ReturnType<typeof resolveFrequencyCadence> = {
     clocks: Array.from(collected).sort(),
     daily: (codeFrequency !== undefined && codeFrequency >= 1) ||
       (effectiveRepeat.period === 1 && effectiveRepeat.periodUnit === DurationUnit.Day),
     configured: configuredClocks,
   };
+  if (codeAnchors) result.anchors = codeAnchors;
+  return result;
 }
 /** Realize known code cadence without changing the authored recurrence:
  * QOD uses alternate-day institution clocks; hourly codes retain elapsed spacing. */
@@ -1237,8 +1245,12 @@ function codedExecutionRecurrence(timing: CanonicalTiming | undefined, config: N
   const coding = executionTimingCoding(timing);
   const meaning = isRegisteredTimingCoding(coding) ? timingCodeMeaning(coding) : undefined;
   const descriptor = meaning ? timingPreviewDescriptor(meaning) : undefined;
-  if (descriptor?.when?.length && descriptor.frequency === undefined && descriptor.period === undefined)
-    return { ...repeat, clocks: resolveFrequencyCadence(timing, repeat, config, coding).clocks };
+  if (descriptor?.when?.length && descriptor.frequency === undefined && descriptor.period === undefined) {
+    const resolved = resolveFrequencyCadence(timing, repeat, config, coding);
+    // An event anchor retains its signed day shift at the existing expansion
+    // owner; clinic-selected clocks still have ordinary clock precedence.
+    return resolved.anchors ? { ...repeat, anchors: resolved.anchors } : { ...repeat, clocks: resolved.clocks };
+  }
   if (repeat.frequency === 1 && (repeat.period !== 2 || repeat.periodUnit !== DurationUnit.Day)) return repeat;
   if (repeat.frequency && repeat.period && repeat.periodUnit === DurationUnit.Day &&
       standardTimingCodeFrequency(coding) === 0.5 && matchesDailyCodeCadence(0.5, repeat)) {
@@ -3314,6 +3326,8 @@ interface SharedCycleCountAllowance extends CycleCountAllowance {
   members: CycleEventQuota[];
   hasActualHistory?: true;
   lastRecordedAt?: number;
+  /** A sufficient uniform maximum, proved by separated eligible opportunities. */
+  rangeWitness?: { remaining: number; after?: number } | null;
 }
 interface CycleEventQuota extends CycleCountAllowance {
   shared?: SharedCycleCountAllowance;
@@ -3585,6 +3599,8 @@ function scheduleTreatmentRelativeCourse(
           remaining: collect && originalRepeat && !shared ? repeatOccurrenceCap(originalRepeat) ??
             (deferred ? finiteCompletionCount(originalRepeat) : undefined) : undefined,
         };
+        if (quota.remaining !== undefined && member.priorCount !== undefined)
+          quota.remaining = Math.max(0, quota.remaining - Math.floor(member.priorCount));
         if (shared) {
           const group = `${shared.groupId}:${member.recurrenceOrigin.getTime()}`;
           let allowance = sharedCounts?.get(group);
@@ -3807,6 +3823,7 @@ interface TimedRangeLedger {
 }
 interface ChronologicalAcceptor {
   (event: UncommittedCycleEvent): boolean;
+  wantsRangeCandidate(event: UncommittedCycleEvent): boolean;
   finish(events: UncommittedCycleEvent[], from: number): UncommittedCycleEvent[];
 }
 /** Fixed authored clocks are opportunities, not greedy maximum quantities.
@@ -4021,9 +4038,8 @@ function chronologicalCapAcceptor(
 ): ChronologicalAcceptor {
   const ledgers = new Map<string, ChronologicalCapLedger>();
   let hasRanges = false;
-  const accept = (event: UncommittedCycleEvent): boolean => {
+  const ensureState = (event: UncommittedCycleEvent): ChronologicalCapLedger => {
     const key = event.quota.shared?.key ?? event.key;
-    const allowance = cycleCountAllowance(event.quota);
     let state = ledgers.get(key);
     if (!state) {
       let maximum = remainingMaximum;
@@ -4063,10 +4079,55 @@ function chronologicalCapAcceptor(
       };
       ledgers.set(key, state);
     }
+    return state;
+  };
+  const accept = (event: UncommittedCycleEvent): boolean => {
+    const state = ensureState(event), allowance = cycleCountAllowance(event.quota);
     if (state.rangePlan) {
       state.rangePlan.candidates.push(event);
       if (!state.rangePlan.quotas.has(allowance))
         state.rangePlan.quotas.set(allowance, allowance.remaining);
+      const shared = event.quota.shared;
+      if (shared && event.at >= from) {
+        const range = state.range!;
+        if (shared.rangeWitness === undefined) {
+          // No extra plan or history ledger: a uniform amount and fully separated
+          // opportunities suffice to attain the existing count/cap/lifetime bound.
+          const available = allowance.remaining;
+          let perDose = range.high;
+          for (const cap of range.caps) perDose = Math.min(perDose, cap.max);
+          const count = available === undefined ? undefined : range.maximum === undefined ? available :
+            Math.min(available, rangeDoseCapacity(range.maximum, range));
+          const upper = count === undefined ? undefined : Math.min(count * perDose, range.maximum ?? Infinity);
+          const uniform = upper === undefined ? undefined : uniformRangeQuantity(available!, range, upper);
+          const value = uniform?.count ? uniform.quantity / uniform.count : 0;
+          shared.rangeWitness = uniform && uniform.quantity >= upper! - 1e-9 &&
+              range.caps.every(cap => cap.strict ? value < cap.max - 1e-10 : value <= cap.max + 1e-9) &&
+              (finiteCompletionCount(event.member.schedule?.recurrence) === undefined || uniform.count === available)
+            ? { remaining: uniform.count } : null;
+          const witness = shared.rangeWitness;
+          if (witness) {
+            const past = state.rangePlan.selected[state.rangePlan.selected.length - 1];
+            witness.after = Math.max(prior[prior.length - 1] ?? -Infinity, past?.at ?? -Infinity);
+            // Already-admitted fixed amounts, and a cap that can hold the whole
+            // uniform plan without prior use, need no later candidate.
+            if (range.low === range.high || !Number.isFinite(witness.after) && uniform!.count === available &&
+                range.caps.every(cap => cap.strict ? upper! < cap.max - 1e-10 : upper! <= cap.max + 1e-9))
+              witness.remaining = 0;
+          }
+        }
+        const witness = shared.rangeWitness;
+        if (witness && witness.remaining > 0) {
+          const at = new Date(event.at), after = witness.after ?? -Infinity;
+          const occurrence = state.occurrence;
+          if (state.caps.every(cap => quantityCapWindowStart(at, cap, zone) >= after) &&
+              (!occurrence || elapsedOccurrencePeriod(occurrence) || !Number.isFinite(after) ||
+                occurrenceCapBucketKey(at, occurrence, zone) !== occurrenceCapBucketKey(new Date(after), occurrence, zone))) {
+            witness.after = event.at;
+            witness.remaining--;
+          }
+        }
+      }
     }
     if (allowance.remaining !== undefined && allowance.remaining <= 0) return false;
     const at = event.at;
@@ -4142,7 +4203,11 @@ function chronologicalCapAcceptor(
     if (occurrence && !rollingOccurrence) state.occurrenceUsed++;
     return true;
   };
-  return Object.assign(accept, { finish(events: UncommittedCycleEvent[], from: number) {
+  return Object.assign(accept, { wantsRangeCandidate(event: UncommittedCycleEvent): boolean {
+    const plan = ensureState(event).rangePlan;
+    return (plan?.quotas.get(cycleCountAllowance(event.quota)) ?? 0) > 0 &&
+      event.quota.shared?.rangeWitness?.remaining !== 0;
+  }, finish(events: UncommittedCycleEvent[], from: number) {
     if (!hasRanges) return events;
     const selected = events.filter(event => !ledgers.get(event.quota.shared?.key ?? event.key)?.rangePlan && event.at >= from);
     for (const state of ledgers.values()) if (state.rangePlan)
@@ -4192,7 +4257,8 @@ function chronologicalRepeatedEvents(
     ? course.stages[0].administrations[0]?.schedule?.recurrence?.sharedCount?.groupId : undefined;
   const sharedPriorCount = sharedGroup !== undefined && course.stages[0].administrations.every(
     member => member.schedule?.recurrence?.sharedCount?.groupId === sharedGroup) ? options.priorCount : undefined;
-  if (options.priorCount !== undefined && options.priorCount > 0 && sharedPriorCount === undefined)
+  const identifiedPriorCount = sharedPriorCount ?? singleCyclePriorCount(course, options.priorCount);
+  if (options.priorCount !== undefined && options.priorCount > 0 && identifiedPriorCount === undefined)
     throw new MedicationQuantityCalculationError("repeated-course-history-needs-timestamps",
       "A prior count cannot identify which repeated phase or cycle was administered or when its rolling cap expires. Supply priorDoseTimes without priorCount for this course; its instructions and limits remain unchanged.");
   const from = coerceDate(options.from, "from"),
@@ -4266,12 +4332,17 @@ function chronologicalRepeatedEvents(
     while (next && next.at < before) {
       const event = queue.pop()!;
       const allowance = cycleCountAllowance(event.quota);
-      if (event.quota.shared && allowance.remaining === 0) { next = queue.first(); continue; }
+      let rangeCandidate = false;
+      if (event.quota.shared && allowance.remaining === 0) {
+        rangeCandidate = quantityEstimation && accept.wantsRangeCandidate(event);
+        if (!rangeCandidate) { next = queue.first(); continue; }
+      }
       let actual = event.recorded === true;
       // Actual records are queued before coincident planned clocks. Stable
       // chronological order needs only the last recorded point, not a second
       // history set or another scan of the recorded administrations.
       if (!actual && (event.quota.shared ?? event.quota).lastRecordedAt === event.at) {
+        event.quota.advance?.(event.at, false, false);
         next = queue.first();
         continue;
       }
@@ -4294,9 +4365,13 @@ function chronologicalRepeatedEvents(
         conditionAllowsAdministration(getDosageCondition(event.member), options, event.iso);
       const accepted = actual || eligibleOpportunity && conditionEligible && accept(event);
       if (actual) (event.quota.shared ?? event.quota).lastRecordedAt = event.at;
-      if (actual && allowance.remaining !== undefined && allowance.remaining > 0) allowance.remaining--;
-      if (accepted && event.quota.shared && allowance.remaining === 0) {
-        for (const member of event.quota.shared.members) member.advance?.(event.at, true, true);
+      if (actual && identifiedPriorCount === undefined &&
+          allowance.remaining !== undefined && allowance.remaining > 0) allowance.remaining--;
+      if (event.quota.shared && allowance.remaining === 0) {
+        rangeCandidate ||= quantityEstimation && accept.wantsRangeCandidate(event);
+        if (!rangeCandidate) {
+          for (const member of event.quota.shared.members) member.advance?.(event.at, true, true);
+        } else event.quota.advance?.(event.at, false, conditionEligible);
       } else event.quota.advance?.(event.at, accepted, conditionEligible);
       if (accepted && event.at >= from.getTime()) {
         if (explicitQuotas?.has(event.quota))
@@ -4320,9 +4395,9 @@ function chronologicalRepeatedEvents(
       singleCycle,
       {
         ...options,
-        from: sharedPriorCount !== undefined ? from : cycleLead ? new Date(cycleStart.getTime() + cycleLead) : cycleStart,
+        from: identifiedPriorCount !== undefined ? from : cycleLead ? new Date(cycleStart.getTime() + cycleLead) : cycleStart,
         orderedAt: cycleStart,
-        priorCount: sharedPriorCount,
+        priorCount: identifiedPriorCount,
         limit: 10000,
       },
       next ?? undefined,

@@ -7007,6 +7007,32 @@ describe("standard coded bedtime execution", () => {
 });
 
 
+describe("coded bedtime retains its anchor day", () => {
+  it.each([
+    ["event lead", 60, undefined, undefined, "2026-01-04T23:30:00+00:00", 1],
+    ["zero lead", 0, undefined, undefined, "2026-01-05T00:30:00+00:00", 0],
+    ["clinic clock", 60, undefined, ["07:15"], "2026-01-05T07:15:00+00:00", 0],
+    ["explicit clock", 60, ["09:00:00"], undefined, "2026-01-05T09:00:00+00:00", 0],
+  ] as const)("preserves %s with a Monday sleep anchor", (_kind, offset, timeOfDay, byCode, first, total) => {
+    const note = { url: "urn:clinic:bedtime-day", valueString: "Monday sleep anchor; retain the lead" };
+    const supplied: FhirDosage = { extension: [note], doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BED" }] },
+        repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, dayOfWeek: [FhirDayOfWeek.Monday], offset,
+          ...(timeOfDay ? { timeOfDay: [...timeOfDay] } : {}) } } };
+    const native = importCanonicalCourse(supplied);
+    const options = { orderedAt: "2026-01-04T23:00:00Z", from: "2026-01-04T23:00:00Z", timeZone: "UTC",
+      eventClock: { HS: "00:30" }, ...(byCode ? { config: { frequencyDefaults: { byCode: { BED: [...byCode] } } } } : {}) };
+    for (const dosage of [native, courseToR5(native), courseToR6(native)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 1 })).toEqual([first]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: FhirPeriodUnit.Hour }).totalUnits).toBe(total);
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.recurrence?.offset).toBe(offset);
+      expect(before).toContain(note.valueString);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+});
+
 describe("current execution boundaries and dimensional maxima", () => {
   const start = "2027-01-01T00:00:00Z";
   const query = { from: start, orderedAt: start, timeZone: "UTC" };
