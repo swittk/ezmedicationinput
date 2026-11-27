@@ -1455,7 +1455,7 @@ function splitInstructionSegments(sourceText: string, baseRange: TextRange): Adv
   let segmentStart = 0;
   for (let index = 0; index < sourceText.length; index++) {
     const char = sourceText[index];
-    if (char !== ";" && char !== "." && char !== "\n" && char !== "\r") {
+    if (char !== ";" && char !== "." && char !== "!" && char !== "?" && char !== "\n" && char !== "\r") {
       continue;
     }
     if (char === ".") {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseSig } from "./helpers/r5-parser";
-import { fromFhirDosage } from "../src/index";
+import { formatSig, fromFhirDosage, parseSig as parsePublicSig } from "../src/index";
 import {
   buildAdditionalInstructionFramesFromCoding,
   __test__ as adviceTest,
@@ -512,5 +512,36 @@ describe("alcohol advice action and polarity proof", () => {
         args: [expect.objectContaining({ role: AdviceArgumentRole.Free, text: "affected" })] });
     }
     expect(matchComposedAdviceCodings(frames).map(definition => definition.coding?.code)).toContain(code);
+  });
+});
+
+
+describe("independent sentence advice ownership", () => {
+  it.each([".", ";", "!", "?"])("keeps unknown advice independent after %s", punctuation => {
+    const source = `Take 1 tablet daily. Do not drive${punctuation} Arrange a ride home.`;
+    const adviceSource = `Do not drive${punctuation} Arrange a ride home.`;
+    const advice = parseAdditionalInstructions(adviceSource, { start: 0, end: adviceSource.length },
+      { allowFreeTextFallback: true });
+    expect(advice).toHaveLength(2);
+    expect(advice[0].frames).toEqual([expect.objectContaining({
+      polarity: AdvicePolarity.Negate, predicate: expect.objectContaining({ lemma: "drive" }), args: []
+    })]);
+    expect(advice[1]).toEqual({ text: "Arrange a ride home", frames: [] });
+    const parsed = parsePublicSig(source);
+    const before = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].instructionGraph?.actions).toEqual([expect.objectContaining({
+      polarity: AdvicePolarity.Negate, predicate: expect.objectContaining({ lemma: "drive" }), args: []
+    })]);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text.match(/Do not drive/gu)).toHaveLength(1);
+      expect(text.match(/Arrange a ride home/gu)).toHaveLength(1);
+      expect(text).not.toContain("drive arrange");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
   });
 });
