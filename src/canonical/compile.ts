@@ -146,7 +146,6 @@ export function administrationFromClause(
     recurrence = {
       count: s.count,
       countMax: s.countMax,
-      ...(s.sharedCount ? { sharedCount: s.sharedCount } : undefined),
       frequency: s.frequency,
       frequencyMax: s.frequencyMax,
       period: s.period,
@@ -185,6 +184,7 @@ export function administrationFromClause(
       eventWindow: s.eventWindow,
       occurrenceCap: s.occurrenceCap,
     };
+    if (s.sharedCount) recurrence.sharedCount = s.sharedCount;
     if (
       recurrence.frequency === undefined &&
       recurrence.period &&
