@@ -406,13 +406,13 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
       weekdayOrdinal: annotations?.weekdayOrdinal,
       activityTiming: annotations?.activityTiming,
       occurrenceCap: annotations?.occurrenceCap,
-      ...(annotations?.sharedCount ? { sharedCount: annotations.sharedCount } : undefined),
       clockWindow: annotations?.clockWindow,
       eventWindow: annotations?.eventWindow,
       startOffset: measureFromWire(native.startOffset),
       endOffset: measureFromWire(native.endOffset),
       provenance: record(r),
     };
+    if (annotations?.sharedCount) out.recurrence.sharedCount = annotations.sharedCount;
   }
   return out;
 }
