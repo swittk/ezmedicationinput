@@ -16515,3 +16515,8 @@ Supplied conflicting facts and independently authored advice remain distinct.
 - A containing whole-input typed action supplies scope that a smaller fragment cannot recover, including coordinated prohibitions after a comma.
 - Whole-swallow coding no longer adds an unauthored crushing prohibition. Alcohol avoidance and the compound drowsiness warning require their declared action and polarity evidence.
 - Complete regression groups were moved into existing subject suites to keep substantive tests reviewable. Their assertions and registration context are retained.
+
+## 2026-11-27 — Keep independent instruction sentences separate
+
+- Instruction actions stop at independent sentence and semicolon boundaries. The Thai lexical provider retains periods that belong to its existing declared quantity-unit abbreviations.
+- Selected opaque advice stays independent of typed actions. Current patient-instruction synthesis preserves the original source slice across both, including advice that follows a warning.
