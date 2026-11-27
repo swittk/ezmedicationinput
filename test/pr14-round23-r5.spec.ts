@@ -5447,7 +5447,7 @@ describe("round78 saved action and cycle locale ownership", () => {
     for (const input of [course, persist(toFhirR5Dosages(course))]) {
       const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
       if (count === 1) {
-        expect(th).toContain("ใช้แผนการใช้ยานี้รวม 1 รอบ.");
+        expect(th).toContain("ใช้แผนการใช้ยานี้รวม 1 รอบ (ระยะรอบการใช้ยา: 28 วัน).");
         expect(th).not.toContain("ทำซ้ำ");
         expect(th).not.toContain("ทุก 28 วัน");
       } else {
