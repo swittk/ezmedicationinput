@@ -3947,6 +3947,53 @@ describe("round72 reviewed interchange source families", () => {
     }
   });
 
+  it("retains next-day drowsiness, conditional machinery advice, and separate alcohol advice beside a bedtime dose", () => {
+    const advice = { id: "next-day-warning", extension: [note],
+      coding: [{ system: "http://snomed.info/sct", code: "418071006" }] };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        when: [EventTiming["Before Sleep"]] } }, additionalInstruction: [advice] };
+    const frames = buildAdditionalInstructionFramesFromCoding("http://snomed.info/sct", "418071006")!;
+    expect(frames.find(frame => frame.predicate.lemma === "cause")?.args)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: AdviceArgumentRole.Object, conceptId: "drowsiness" }),
+        expect.objectContaining({ role: AdviceArgumentRole.Time, conceptId: "next_day" }),
+      ]));
+    expect(frames.find(frame => frame.predicate.lemma === "drive")).toMatchObject({
+      polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
+      args: [{ role: AdviceArgumentRole.Free, text: "affected", normalized: "affected" }],
+    });
+    expect(frames.find(frame => frame.predicate.lemma === "avoid")?.args)
+      .toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Substance, conceptId: "alcohol" }));
+    const english = "Causes drowsiness which may continue the next day; if affected, do not drive or operate machinery; avoid alcohol.";
+    const thai = "ทำให้ง่วงซึมซึ่งอาจต่อเนื่องถึงวันถัดมา; ห้ามขับขี่ยานพาหนะหรือทำงานกับเครื่องจักรหากมีอาการ; หลีกเลี่ยงเครื่องดื่มแอลกอฮอล์.";
+    for (const input of [persist([row]), persist({ step: [{ component: [row] }] })]) {
+      const before = persist(input), native = importCanonicalCourse(input), nativeBefore = persist(native);
+      const administration = native.stages[0].administrations[0];
+      expect(administration.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(administration.schedule?.recurrence).toMatchObject({
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, anchors: [EventTiming["Before Sleep"]],
+      });
+      expect(administration.predicate).toBeUndefined();
+      for (const value of [native, input]) {
+        const en = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
+        const th = formatSig(value, "long", { locale: "th", realizationMode: "normalized" });
+        expect(en.split(english)).toHaveLength(2);
+        expect(en).toContain("1 tablet once daily at bedtime");
+        expect(th.split(thai)).toHaveLength(2);
+        expect(th).toContain("1 เม็ด วันละครั้ง ก่อนนอน");
+      }
+      const projected = projectCanonicalCourse(native);
+      for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
+        expect(output.additionalInstruction).toEqual([advice]);
+        expect(output.doseAndRate).toEqual(row.doseAndRate);
+        expect(output.timing?.repeat).toEqual(row.timing?.repeat);
+      }
+      expect(native).toEqual(nativeBefore);
+      expect(input).toEqual(before);
+    }
+  });
+
   it.each(["text", "display"] as const)("keeps supplied advice %s ahead of a known-code label", labelOwner => {
     const suppliedText = "Clinic warning: do not drive if affected";
     const suppliedDisplay = "Clinic display: avoid driving if affected";

@@ -867,8 +867,8 @@
       "definition": {
         "code": "418071006",
         "display": "Warning. Causes drowsiness which may continue the next day. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)",
-        "text": "May cause next-day drowsiness; avoid driving or alcohol",
-        "thai": "อาจทำให้ง่วงซึมในวันถัดมา; หลีกเลี่ยงการขับขี่ยานพาหนะหรือดื่มแอลกอฮอล์"
+        "text": "Causes drowsiness which may continue the next day; if affected, do not drive or operate machinery; avoid alcohol",
+        "thai": "ทำให้ง่วงซึมซึ่งอาจต่อเนื่องถึงวันถัดมา; ห้ามขับขี่ยานพาหนะหรือทำงานกับเครื่องจักรหากมีอาการ; หลีกเลี่ยงเครื่องดื่มแอลกอฮอล์"
       },
       "frames": [
         {
@@ -887,6 +887,32 @@
               "role": "time",
               "text": "next day",
               "conceptId": "next_day"
+            }
+          ]
+        },
+        {
+          "force": "warning",
+          "polarity": "negate",
+          "predicate": {
+            "lemma": "drive",
+            "semanticClass": "activity"
+          },
+          "relation": "if",
+          "args": [
+            { "role": "free", "text": "affected" }
+          ]
+        },
+        {
+          "force": "warning",
+          "predicate": {
+            "lemma": "avoid",
+            "semanticClass": "avoidance"
+          },
+          "args": [
+            {
+              "role": "substance",
+              "text": "alcohol",
+              "conceptId": "alcohol"
             }
           ]
         }
