@@ -1680,14 +1680,22 @@ export function serializeCanonicalContext(
         if (translated) (i18n ??= {})[locale] = translated;
       }
     }
+    let frames: AdviceFrame[] | undefined;
+    if (instruction.frames?.some(frame => frame.modality !== undefined ||
+        frame.force === AdviceForce.Warning && frame.polarity !== AdvicePolarity.Negate)) {
+      const recovered = instruction.coding?.code
+        ? buildAdditionalInstructionFramesFromCoding(instruction.coding.system ?? SNOMED_SYSTEM,
+          instruction.coding.code)
+        : undefined;
+      if (!recovered || instruction.frames.some(selected =>
+          !recovered.some(template => sameTypedWarning(selected, template)))) frames = instruction.frames;
+    }
     additionalInstructions.push({
       text,
       i18n,
       coding: instruction.coding,
       hasTypedEvidence: Boolean(instruction.evidence?.length),
-      frames: !instruction.coding?.code && instruction.frames?.some(frame => frame.modality !== undefined ||
-        frame.force === AdviceForce.Warning && frame.polarity !== AdvicePolarity.Negate)
-        ? instruction.frames : undefined
+      frames
     });
   }
   if (additionalInstructions.length) {
@@ -1708,9 +1716,9 @@ export function serializeCanonicalContext(
         ? [{ system: instruction.coding.system ?? SNOMED_SYSTEM,
           code: instruction.coding.code, display: instruction.coding.display }]
         : undefined;
-      // Uncoded modal/positive warning advice cannot recover its selected qualification from
-      // a terminology template. The dosage graph retains the clause source;
-      // this instruction carries only its own already-selected frames.
+      // Retain selected warning facts that the coding template cannot recover.
+      // The dosage graph owns the clause source; this row carries only its
+      // own selected frames, including their exact modality and arguments.
       if (instruction.frames?.length) projected.extension = [{
         url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL,
         extension: instruction.frames.map(buildActionExtension)
@@ -2296,6 +2304,8 @@ export function deserializeCanonicalContext(
     for (const instruction of dosage.additionalInstruction) {
       const coding = instruction.coding?.find((code) => Boolean(code.code));
       const text = additionalInstructionFallbackText(instruction, coding);
+      const ownedFrames = instruction.extension
+        ? parseInstructionGraphExtension(instruction.extension)?.actions : undefined;
       clause.additionalInstructions.push({
         text,
         i18n: codeableConceptTranslationI18n(instruction, coding).text,
@@ -2307,14 +2317,14 @@ export function deserializeCanonicalContext(
             version: coding.version
           }
           : undefined,
-        frames: coding?.code
+        frames: ownedFrames?.length ? ownedFrames : coding?.code
           ? buildAdditionalInstructionFramesFromCoding(
             coding.system ?? SNOMED_SYSTEM,
             coding.code,
             text ?? coding.display ?? "",
             clause.raw
           )
-          : parseInstructionGraphExtension(instruction.extension)?.actions
+          : undefined
       });
     }
   }
@@ -2680,6 +2690,8 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
       const coding = selectFirstCodingWithCode(concept);
       const text = additionalInstructionFallbackText(concept, coding);
       const sourceText = text ?? coding?.display ?? "";
+      const ownedFrames = concept.extension
+        ? parseInstructionGraphExtension(concept.extension)?.actions : undefined;
       const defaultDef = coding?.code
         ? findAdditionalInstructionDefinitionByCoding(
           coding.system ?? SNOMED_SYSTEM,
@@ -2697,14 +2709,14 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
             i18n: defaultDef?.i18n
           }
           : undefined,
-        frames: coding?.code
+        frames: ownedFrames?.length ? ownedFrames : coding?.code
           ? buildAdditionalInstructionFramesFromCoding(
             coding.system ?? SNOMED_SYSTEM,
             coding.code,
             sourceText,
             { start: 0, end: sourceText.length }
           )
-          : parseInstructionGraphExtension(concept.extension)?.actions
+          : undefined
       };
     });
   }

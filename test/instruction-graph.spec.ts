@@ -1,12 +1,12 @@
 import { buildAdditionalInstructionFramesFromCoding, matchComposedAdviceCodings, parseAdditionalInstructions } from "../src/advice";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
-import { deserializeCanonicalContext, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
+import { deserializeCanonicalContext, parserStateFromFhir, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
 import { courseFromR6 } from "../src/adapters/canonical-course";
-import { AdviceArgumentRole, AdviceForce, AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, type AdviceFrame, type CanonicalInstructionGraph, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
+import { AdviceArgumentRole, AdviceForce, AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirPeriodUnit, type AdviceFrame, type CanonicalInstructionGraph, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { getMedicationLexerLocalePack, registerMedicationLexerLocalePack } from "../src/lexer/locale";
 import { getInstructionActionLocaleAdapter, registerInstructionActionLocaleAdapter } from "../src/index";
-import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
+import { buildActionExtension, buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
 import adviceTerminology from "../src/advice-terminology.json";
 import { setDosageCondition, withDosageEditProvenance, getDosageSourceOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
@@ -6934,5 +6934,93 @@ describe("annotated current graph relation coding", () => {
       }
     }
     expect(JSON.stringify(source)).toBe(before);
+  });
+});
+
+
+describe("coded warning frame ownership on fresh interchange", () => {
+  it.each([AdviceModality.May, AdviceModality.Can, AdviceModality.Might, AdviceModality.Could])(
+    "retains the selected %s warning beside its standard coding", modality => {
+      const source = `take 10 ml prn dizziness, ${modality} cause drowsiness`;
+      const parsed = parsePublicSig(source);
+      const expected = { modality, force: AdviceForce.Warning,
+        predicate: { lemma: "cause", semanticClass: "effect" },
+        span: { start: source.indexOf(modality), end: source.length },
+        sourceText: `${modality} cause drowsiness` };
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const before = JSON.stringify(input), native = importCanonicalCourse(input);
+        const member = native.stages[0].administrations[0];
+        expect(member.amounts?.[0].quantity).toMatchObject({ value: 10, unit: "mL" });
+        expect(member.asNeeded).toBe(true);
+        expect(member.syntax?.additionalInstructions).toHaveLength(1);
+        expect(member.syntax?.additionalInstructions?.[0].frames?.[0]).toMatchObject(expected);
+        expect(member.syntax?.instructionGraph?.sourceText).toBe(source);
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(
+          "Take 10 mL orally as needed for dizziness. May cause drowsiness.");
+        expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })
+          .match(/อาจทำให้ง่วงซึม/gu)).toHaveLength(1);
+        const projected = projectCanonicalCourse(native);
+        for (const current of [JSON.parse(JSON.stringify(projected.fhir)),
+          JSON.parse(JSON.stringify(projected.fhirNext))]) {
+          const repeated = projectCanonicalCourse(importCanonicalCourse(current));
+          const row = repeated.fhir[0];
+          expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 10, unit: "mL" });
+          expect(row.asNeeded).toBe(true);
+          expect(row.asNeededFor?.[0]?.text).toBe("dizziness");
+          expect(row.additionalInstruction).toHaveLength(1);
+          expect(row.additionalInstruction?.[0].coding?.[0].code).toBe("418639000");
+          expect(row.additionalInstruction?.[0].text).toBe("May cause drowsiness");
+          const carrier = row.additionalInstruction?.[0].extension?.find(field =>
+            field.url === "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph");
+          expect(carrier?.extension?.map(field => field.url)).toEqual(["action"]);
+          expect(deserializeCanonicalContext(row).additionalInstructions?.[0].frames?.[0]).toMatchObject(expected);
+          expect(parserStateFromFhir(row).additionalInstructions?.[0].frames?.[0]).toMatchObject(expected);
+        }
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    }
+  );
+
+  it("preserves an independently supplied coded warning's current frame and annotations", () => {
+    const warning = "Could cause drowsiness", source = `Take 1 tablet daily. ${warning}.`;
+    const frame: AdviceFrame = { force: AdviceForce.Warning, modality: AdviceModality.Could,
+      predicate: { lemma: "cause", semanticClass: "effect" },
+      args: [{ role: AdviceArgumentRole.Object, text: "drowsiness", normalized: "drowsiness", conceptId: "drowsiness" }],
+      span: { start: source.indexOf(warning), end: source.indexOf(warning) + warning.length },
+      sourceText: warning, sequenceIndex: 0 };
+    const unknown = { id: "advice-note", url: "urn:clinic:advice-note", valueString: "retain" };
+    const coding = { system: "http://snomed.info/sct", code: "418639000",
+      display: "Warning. May cause drowsiness", _code: { id: "coded-identity" },
+      extension: [{ url: "urn:clinic:coding-note", valueString: "retain" }] };
+    const row: FhirDosage = { id: "independent-row", text: source,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      additionalInstruction: [{ id: "selected-warning", text: "May cause drowsiness",
+        _text: { id: "authored-warning-label" }, coding: [coding], extension: [unknown, {
+          url: "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph",
+          extension: [buildActionExtension(frame)]
+        }] }],
+      extension: [buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: [frame],
+        primaryAdministrationSpan: { start: 0, end: 4 } })!]
+    };
+    const before = JSON.stringify(row), native = importCanonicalCourse([row]);
+    const projected = projectCanonicalCourse(native);
+    for (const input of [JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+      const snapshot = JSON.stringify(input), current = importCanonicalCourse(input);
+      expect(current.stages[0].administrations[0].syntax?.additionalInstructions?.[0].frames?.[0]).toMatchObject(frame);
+      for (const output of projectCanonicalCourse(current).fhir) {
+        expect(output.additionalInstruction).toHaveLength(1);
+        expect(output.additionalInstruction?.[0]).toMatchObject({ id: "selected-warning",
+          text: "May cause drowsiness", _text: { id: "authored-warning-label" }, coding: [coding] });
+        expect(output.additionalInstruction?.[0].extension).toContainEqual(unknown);
+        expect(output.additionalInstruction?.[0].extension?.filter(field =>
+          field.url === "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph")).toHaveLength(1);
+        expect(deserializeCanonicalContext(output).additionalInstructions?.[0].frames?.[0]).toMatchObject(frame);
+        expect(parserStateFromFhir(output).additionalInstructions?.[0].frames?.[0]).toMatchObject(frame);
+      }
+      expect(JSON.stringify(input)).toBe(snapshot);
+    }
+    expect(JSON.stringify(row)).toBe(before);
   });
 });
