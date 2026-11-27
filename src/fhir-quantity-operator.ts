@@ -127,7 +127,7 @@ function editedOperator(
  * Coding and CodeableConcept annotations use that bridge without interpreting their terminology.
  * Other Extension value choices remain opaque. */
 const codingPrimitiveFields = ["_system", "_version", "_code", "_display", "_userSelected"] as const;
-const extensionPrimitiveFields = ["_valueCode", "_valueString", "_valueDecimal", "_valueTime", "_valueInteger", "_valueBoolean"] as const;
+const extensionPrimitiveFields = ["_valueCode", "_valueString", "_valueMarkdown", "_valueDecimal", "_valueTime", "_valueInteger", "_valueBoolean"] as const;
 export function quantityAnnotationExtensions(
   source: FhirR6Extension[], target: "r5" | "r6"
 ): FhirR6Extension[] {
@@ -169,7 +169,12 @@ export function quantityAnnotationExtensions(
     let reference = item.valueCodeableReference;
     if (reference) {
       const concept = quantityConceptForWire(reference.concept, target);
-      if (concept !== reference.concept) reference = { ...reference, concept };
+      const extension = reference.extension ? quantityAnnotationExtensions(reference.extension, target) : undefined;
+      if (concept !== reference.concept || extension !== reference.extension) reference = {
+        ...reference,
+        ...(concept !== reference.concept ? { concept } : {}),
+        ...(extension !== reference.extension ? { extension } : {}),
+      };
     }
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
     let current = quantity === item.valueQuantity && ratio === item.valueRatio &&

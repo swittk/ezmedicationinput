@@ -2833,9 +2833,11 @@ describe("review source and interchange ownership", () => {
     source._valueString = { id: "authored-source", extension: [
       { url: "urn:clinic:provenance-note", valueString: "Retain this source annotation" },
     ] };
+    const originalSource = saved(source);
     const graph = parseInstructionGraphExtension([marker])!;
     const rebuilt = buildInstructionGraphExtension(graph)!;
-    expect(rebuilt.extension!.filter(field => field.url === "sourceText")).toEqual([source]);
+    expect(rebuilt.extension!.filter(field => field.url === "sourceText")).toEqual([originalSource]);
+    expect(source).toEqual(originalSource);
     expect(graph.sourceText).toBe(sourceText);
   });
 

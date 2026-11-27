@@ -1602,22 +1602,27 @@ function administrationToWire(
     const repeat = projectTimingClocks(wireTiming.repeat, sourceRepeat, target);
     if (repeat !== wireTiming.repeat) wireTiming = { ...wireTiming, repeat };
   }
+  const calendarBounds = wireTiming?.repeat?.boundsPeriod;
+  const anchoredQuantity = calendarBounds
+    ? wireTiming?.repeat?.boundsDuration ?? a.anchoredLength?.quantity : a.anchoredLength?.quantity;
+  const anchoredRange = calendarBounds
+    ? wireTiming?.repeat?.boundsRange ?? a.anchoredLength?.range : a.anchoredLength?.range;
   const currentRange = wireTiming?.repeat?.boundsRange ??
-    (a.anchoredLength?.range ? serializeRange(a.anchoredLength.range, target, Boolean(clause)) : undefined);
+    (anchoredRange ? serializeRange(anchoredRange, target, Boolean(clause)) : undefined);
   const modifiers = output.modifierExtension as FhirR6Extension[] | undefined;
   const oldDuration = modifiers?.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
   const projection = currentRange ? projectCourseDurationRange(currentRange) : undefined;
   if (projection?.source || oldDuration && (wireTiming?.repeat?.boundsRange || wireTiming?.repeat?.boundsDuration) ||
       oldDuration?.extension?.some(child => child.url === "projectedRange") ||
-      (a.anchoredLength?.range || a.anchoredLength?.quantity) && !oldDuration) {
+      (anchoredRange || anchoredQuantity) && !oldDuration) {
     const replacement: FhirR6Extension | undefined = projection?.source
-      ? { ...projection.source, extension: wireTiming?.repeat?.boundsRange ? projection.source.extension :
+      ? { ...projection.source, extension: wireTiming?.repeat?.boundsRange && !calendarBounds ? projection.source.extension :
           projection.source.extension!.filter(child => child.url !== "projectedRange") }
-      : a.anchoredLength?.range && projection
+      : anchoredRange && projection
         ? { url: ANCHORED_COURSE_DURATION_EXTENSION_URL, valueRange: projection.range }
-        : a.anchoredLength?.quantity
+        : anchoredQuantity
           ? { url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
-              valueQuantity: generalQuantityForR5(clause ? serializeDuration(a.anchoredLength.quantity) : a.anchoredLength.quantity) }
+              valueQuantity: generalQuantityForR5(clause ? serializeDuration(anchoredQuantity) : anchoredQuantity) }
           : undefined;
     const next = modifiers?.filter(item => item !== oldDuration) ?? [];
     if (replacement) {
@@ -1640,7 +1645,13 @@ function administrationToWire(
       { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [oldDuration] }];
     assign(output, "modifierExtension", next.length ? next : undefined);
   }
-  if (projection && wireTiming?.repeat?.boundsRange && projection.range !== currentRange)
+  if (calendarBounds && wireTiming?.repeat &&
+      (wireTiming.repeat.boundsDuration || wireTiming.repeat.boundsRange)) {
+    // Period owns the single bounds[x] slot; its independent length is carried
+    // by the existing anchored-duration modifier above.
+    const { boundsDuration: _duration, boundsRange: _range, ...repeat } = wireTiming.repeat;
+    wireTiming = { ...wireTiming, repeat };
+  } else if (projection && wireTiming?.repeat?.boundsRange && projection.range !== currentRange)
     wireTiming = { ...wireTiming, repeat: { ...wireTiming.repeat, boundsRange: projection.range } };
   assign(output, "timing", wireTiming);
   assign(output, "text", a.text);

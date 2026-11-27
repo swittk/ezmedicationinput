@@ -6009,3 +6009,26 @@ describe("current instruction occurrence projection stability", () => {
     });
   }
 });
+
+describe("typed markdown source annotations", () => {
+  it("retains an inline markdown extension and its primitive metadata without creating advice", () => {
+    const input: FhirR6DosageInstruction = {
+      extension: [{ url: "urn:clinic:handover", valueMarkdown: "**Reviewed** with the patient.",
+        _valueMarkdown: { id: "handover-note", extension: [
+          { url: "urn:clinic:author", valueString: "Prescribing clinician" },
+        ] } }],
+      step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      }] }],
+    };
+    const before = JSON.parse(JSON.stringify(input));
+    const rows = JSON.parse(JSON.stringify(toFhirR5Dosages(input)));
+    const rebuilt = toDosageDetails(rows);
+    expect(rebuilt.extension).toEqual(before.extension);
+    expect(rebuilt.step).toHaveLength(1);
+    expect(rebuilt.step![0].component[0].patientInstruction).toBeUndefined();
+    expect(formatSig(rebuilt, "long", { locale: "en" })).not.toContain("Reviewed");
+    expect(input).toEqual(before);
+  });
+});

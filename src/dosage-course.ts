@@ -2631,7 +2631,11 @@ function encodeFields(
     const values = field.repeated && Array.isArray(part) ? part : [part];
     for (const item of values) {
       if (field.extension) {
-        children.push({ url: key, extension: [snapshot ? cloneStructuredValue(item as FhirExtension) : item as FhirExtension] });
+        const extension = preserveQuantityWire ? item as FhirR6Extension :
+          quantityAnnotationExtensions([item as FhirR6Extension], "r5")[0];
+        children.push({ url: key, extension: [
+          (snapshot ? cloneStructuredValue(extension) : extension) as FhirExtension,
+        ] });
       } else if (field.fields) {
         children.push({ url: key, extension: encodeFields(item as object, field.fields, snapshot, preserveQuantityWire) });
       } else if (field.quantity) {
@@ -2683,8 +2687,11 @@ function decodeFields(
       continue;
     }
     let value: unknown;
-    if (field.extension) value = child.extension?.[0] && cloneStructuredValue(child.extension[0]);
-    else if (field.fields) {
+    if (field.extension) {
+      const extensions = child.extension && !preserveQuantityWire
+        ? quantityAnnotationExtensions(child.extension, "r6") : child.extension;
+      value = extensions?.[0] && cloneStructuredValue(extensions[0]);
+    } else if (field.fields) {
       // Older saved rateRatio bridges used FHIR Extension.valueRatio.
       // New nested field shapes take precedence when both are present.
       value = child.extension

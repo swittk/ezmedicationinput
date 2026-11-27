@@ -165,7 +165,7 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   const nested: FhirExtension[] = [];
   add(nested, valueCode("role", argument.role));
   const sourceRelation = addRelation(nested, "relation", argument.relation, argument.sourceRelationCoding);
-  add(nested, valueString("text", argument.text));
+  add(nested, valueString("text", argument.text || undefined));
   add(nested, valueString("normalized", argument.normalized));
   add(nested, valueString("conceptId", argument.conceptId));
   add(nested, valueInteger("administrationTargetCount", argument.administrationTargetCount));
@@ -610,8 +610,10 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     }
     default:(sourceExtensions??=[]).push(entry);break;
   }
-  if(!role?.valueCode||text?.valueString===undefined)return undefined;
-  const result:AdviceArgument={role:role.valueCode as AdviceArgumentRole,text:text.valueString,
+  if(!role?.valueCode)return undefined;
+  // Typed argument facts remain usable when their lexical label is absent.
+  // Primitive metadata stays on the source field; projection omits empty text.
+  const result:AdviceArgument={role:role.valueCode as AdviceArgumentRole,text:text?.valueString??"",
     relation:firstRelation(relationCoding?.valueCoding,relation?.valueCode),
     normalized:normalized?.valueString,conceptId:concept?.valueString,
     coding:readCoding(coding?.valueCoding),codings};
