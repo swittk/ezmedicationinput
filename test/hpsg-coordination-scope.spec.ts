@@ -1,3 +1,5 @@
+import { siteLexicalRule } from "../src/hpsg/rules/site-rules";
+import { RouteCode } from "../src/types";
 import { parseSigSegments as parseHpsgSegments } from "../src/hpsg/segmenter";
 import { describe, expect, it } from 'vitest';
 import {
@@ -3308,4 +3310,55 @@ describe("HPSG inherited phase origins and complete anchor groups", () => {
       expect(parsed.fhirNext.renderedInstruction).toBe(source);
       expect(JSON.stringify(parsed)).toBe(before);
     });
+});
+
+describe("bilateral withholding target multiplicity", () => {
+  it.each([
+    ["in both eyes", "at 08:00", 2],
+    ["in both eyes", "at 08:00 and 20:00", 4],
+    ["OU", "at 08:00 and 20:00", 4],
+    ["OU", "at 08:00 and 20:00", 4, "in both eyes"]
+  ] as const)("retains the named bilateral target: %s %s", (site, clocks, administrations, target = site) => {
+    const source = `Instill 1 drop ${site} daily ${clocks} for 2 days. If itchy, do not instill 1 drop ${target}.`;
+    const parsed = parsePublicSig(source), original = JSON.stringify(parsed);
+    const options = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 8 };
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.target?.coding?.[0]?.code).toBe("40638003");
+      expect(member.targetCount).toBe(2);
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "drop" });
+      expect(nextDueDoses(input, { ...options, evaluateCondition: () => false })).toEqual([]);
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 2, durationUnit: "d", evaluateCondition: () => false }))
+        .toMatchObject({ totalUnits: 0, unit: "drop" });
+      expect(nextDueDoses(input, { ...options, evaluateCondition: () => true })).toHaveLength(administrations);
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 2, durationUnit: "d", evaluateCondition: () => true }))
+        .toMatchObject({ totalUnits: administrations * 2, unit: "drop" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(original);
+  });
+});
+
+describe("registered route and anchored site ownership", () => {
+  it.each(["", " OPH", " CLINICEYE"])("keeps a route alias outside the left-eye constituent: %s", suffix => {
+    const phrase = "in the left eye" + suffix;
+    const tokens = tokenize(phrase);
+    const options = { routeMap: { cliniceye: RouteCode["Ophthalmic route"] } };
+    const context: HpsgClauseContext = {
+      state: new ParserState(phrase, tokens), tokens, limit: tokens.length, options,
+      dateSpans: [], clinicalCache: {}, deps: {} as HpsgClauseContext["deps"]
+    };
+    const site = siteLexicalRule().match(context, 0).find(sign => sign.type === "site-sign")!;
+    expect(site.synsem.valence.site).toMatchObject({ text: "left eye", coding: { code: "1290031003" } });
+    if (suffix) expect(site.tokens.some(token => token.original === suffix.trim())).toBe(false);
+    const source = "Instill 1 drop " + phrase + " daily", parsed = parseSig(source, options);
+    for (const row of [parsed.fhir, ...toFhirR5Dosages(toDosageDetails([parsed.fhir]))]) {
+      expect(row.site?.coding?.[0]?.code).toBe("1290031003");
+      expect(row.route?.coding?.[0]?.code).toBe(RouteCode["Ophthalmic route"]);
+      expect(row.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "drop" });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
 });

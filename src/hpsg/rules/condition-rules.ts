@@ -1,3 +1,4 @@
+import { getBodySiteAdministrationTargetCount } from "../../body-site-target";
 import { medicationGuardLeadLexeme, CIRCUMSTANTIAL_CONDITION_HEADS } from "../../medication-condition";
 import { registeredActivityDayAt, isProceduralInstructionFrame } from "./instruction-rules";
 import { frameActionDefinition } from "../../instruction-graph";
@@ -373,6 +374,10 @@ function withholdingDoseTarget(
     if (argument.role === AdviceArgumentRole.Site) {
       target.site = { text: argument.normalized ?? argument.text,
         coding: argument.coding?.code ? { ...argument.coding, code: argument.coding.code } : undefined };
+      target.site.administrationTargetCount = getBodySiteAdministrationTargetCount(target.site, {
+        siteCodeMap: context.options?.siteCodeMap,
+        bodySiteContext: context.options?.context?.bodySiteContext
+      });
       continue;
     }
     if (argument.role !== AdviceArgumentRole.Object && argument.role !== AdviceArgumentRole.Time) continue;
