@@ -3486,7 +3486,7 @@ describe("round61 supported grammar and display ownership", () => {
       expect(parsed.meta.canonical.clauses).toHaveLength(1);
       const clause = parsed.meta.canonical.clauses[0];
       expect(clause.additionalInstructions).toBeUndefined();
-      expect(clause.patientInstruction).toBe("rinse the skin");
+      expect(clause.patientInstruction).toBe(source);
       expect(clause.prn?.enabled).not.toBe(true);
       const graph = clause.instructionGraph!;
       const rinseIndex = graph.actions.findIndex(action => action.predicate.lemma === "rinse");

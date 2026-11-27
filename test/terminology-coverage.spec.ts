@@ -1,9 +1,9 @@
-import { toFhirR5Dosages, parseSig as parsePublicSig, buildBodySiteSpatialRelationExtension, parseBodySiteSpatialRelationExtension } from "../src/index";
+import { toDosageDetails, toFhirR5Dosages, parseSig as parsePublicSig, buildBodySiteSpatialRelationExtension, parseBodySiteSpatialRelationExtension } from "../src/index";
 import { describe, expect, it } from "vitest";
 import { formatSig, resolveMedicationInstructionAction, listMedicationInstructionActions, getMedicationInstructionAction, getMedicationInstructionConcept, parseInstructionActions, buildMedicationInstructionConceptCodeSystem, buildMedicationInstructionActionCodeSystem } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { findAdditionalInstructionDefinitionByCoding } from "../src/advice";
-import { RouteCode } from "../src/types";
+import { RouteCode, type FhirDosage, type ParseOptions } from "../src/types";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { getDoseQuantityUnit, getStandardDoseUnitCoding } from "../src/maps";
 import { medicationInstructionConceptCodings, getMedicationInstructionConcept as getInternalInstructionConcept } from "../src/instruction-concept-terminology";
@@ -569,9 +569,10 @@ const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 describe("round77 selected procedural definition", () => {
   it("keeps the selected Rinse procedure when another configured action shares its code", () => {
-    const parsed = parsePublicSig("Rinse the left eye daily", { instructionActionMap: { inspect: {
+    const instructionActionMap: ParseOptions["instructionActionMap"] = { inspect: {
       code: "rinse", display: "Inspect", aliases: ["inspect"], procedural: false
-    } } });
+    } };
+    const parsed = parsePublicSig("Rinse the left eye daily", { instructionActionMap });
     const clause = parsed.meta.canonical.clauses[0];
     expect(clause.instructionGraph!.actions[0].predicate).toMatchObject({ lemma: "rinse", display: "Rinse" });
     expect(clause.method?.text).toBe("Rinse");
@@ -580,9 +581,13 @@ describe("round77 selected procedural definition", () => {
     expect(clause.patientInstruction).toBeUndefined();
     for (const input of [persist(parsed.fhir), persist(parsed.fhirNext), persist(toFhirR5Dosages(parsed.fhirNext))]) {
       for (const locale of ["en", "th"] as const) {
-        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
-        expect(text).toContain(locale === "en" ? "left eye" : "ตาซ้าย");
-        expect(text).not.toContain("Inspect");
+        for (const configured of [undefined, instructionActionMap]) {
+          const displayOptions: ParseOptions = { locale, realizationMode: "normalized", instructionActionMap: configured };
+          const text = formatSig(input, "long", displayOptions);
+          expect(text).toContain(locale === "en" ? "Rinse" : "ล้าง");
+          expect(text).toContain(locale === "en" ? "left eye" : "ตาซ้าย");
+          expect(text).not.toContain("Inspect");
+        }
       }
     }
   });
@@ -603,3 +608,24 @@ describe("round78 configured spatial Coding", () => {
   });
 });
 }
+
+
+describe("review51 broader anatomy with selected laterality", () => {
+  it.each([
+    ["16982005", "left shoulder", "ไหล่ซ้าย"],
+    ["91774008", "right shoulder", "ไหล่ขวา"]
+  ])("keeps the exact anatomy relation for site Coding %s", (code, english, thai) => {
+    const row: FhirDosage = {
+      method: { text: "Apply" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+      site: { text: "left shoulder", coding: [{ system: SNOMED, code }],
+        extension: [{ url: "urn:clinic:site-note", valueString: "Retain side wording" }] }
+    };
+    const before = JSON.stringify(row);
+    const rows = JSON.parse(JSON.stringify([row])) as FhirDosage[];
+    for (const input of [row, rows, JSON.parse(JSON.stringify(toDosageDetails(rows)))]) {
+      expect(formatSig(input, "long", { locale: "en" })).toContain(english);
+      expect(formatSig(input, "long", { locale: "th" })).toContain(thai);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+});

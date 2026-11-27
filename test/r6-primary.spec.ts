@@ -22,7 +22,7 @@ import {
   EventTiming, FhirPeriodUnit, RouteCode, AdviceRelation, AdviceArgumentRole, AdviceForce, AdvicePolarity, type CanonicalInstructionGraph, parseInstructionActions, cloneBodySiteSpatialRelation
 } from "../src/index";
 import {
-  canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, getTimingClocks,
+  canonicalFromFhir, canonicalToFhir, parserStateFromFhir, BODY_SITE_RESTRICTION_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, getTimingClocks,
   toFhir as parserStateToFhir, getAdministrationOffsetMinutes, ADMINISTRATION_OFFSET_EXTENSION_URL,
   buildInfusionCarrierMaterialStructureDefinition, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL
 } from "../src/fhir";
@@ -7144,5 +7144,105 @@ describe("independent FHIR annotations and timing constraints", () => {
       }
     }
     expect(course).toEqual(before);
+  });
+});
+
+describe("review51 current single-row and locale defaults", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+  it("keeps a complete repeat cycle in the single-row R5 preview", () => {
+    const source: FhirR6DosageInstruction = {
+      repeatCycle: { value: 28, code: "d", unit: "d" },
+      step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tablet" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          boundsDuration: { value: 7, code: "d", unit: "d" } } }
+      }] }]
+    };
+    const rows = fresh(toFhirR5Dosages(source));
+    expect(rows).toHaveLength(1);
+    for (const locale of ["en", "th"]) {
+      const before = fresh(rows);
+      for (const style of ["short", "long"] as const)
+        expect(formatSig(rows[0], style, { locale })).toBe(formatSig(rows, style, { locale }));
+      const long = formatSig(rows, "long", { locale });
+      expect(long).toContain(locale === "en" ? "every 28 days" : "28 วัน");
+      expect(fromFhirDosage(rows[0], { locale }).longText).toBe(long);
+      expect(rows).toEqual(before);
+    }
+    const ordinary = fresh(toFhirR5Dosages({ step: source.step }))[0];
+    expect(formatSig(ordinary, "long")).toBe("Use 1 tablet once daily for 7 days.");
+  });
+
+  it("uses the exact monthly cadence when equal bounds accompany selected month days", () => {
+    const make = (periodMax?: number): FhirDosage => ({
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tablet" } }],
+      timing: { repeat: { period: 1, periodMax, periodUnit: FhirPeriodUnit.Month, extension: [
+        { url: TIMING_DAY_OF_MONTH_EXTENSION_URL, valuePositiveInt: 1 },
+        { url: TIMING_DAY_OF_MONTH_EXTENSION_URL, valuePositiveInt: 15 }
+      ] } }
+    });
+    for (const locale of ["en", "th"]) {
+      const exact = make(), equal = make(1), ranged = make(2);
+      for (const input of [equal, fresh([equal]), fresh(toDosageDetails([equal]))]) {
+        const before = fresh(input), text = formatSig(input, "long", { locale });
+        expect(text).toBe(formatSig(exact, "long", { locale }));
+        expect(text).toContain(locale === "en" ? "days 1 and 15 of each month" : "วันที่ 1 และ 15 ของทุกเดือน");
+        expect(input).toEqual(before);
+      }
+      expect(formatSig(ranged, "long", { locale }))
+        .not.toContain(locale === "en" ? "of each month" : "ของทุกเดือน");
+    }
+  });
+
+  it("retains an untranslated raw site restriction's complete authored source", () => {
+    const sourceText = "where the skin directly beneath the dressing is intact";
+    const note: FhirExtension = { url: "urn:clinic:restriction-note", valueString: "Independent annotation" };
+    const restriction: FhirExtension = { id: "selected-restriction", url: BODY_SITE_RESTRICTION_EXTENSION_URL, extension: [
+      { url: "relation", valueCode: "where" }, { url: "sourceText", valueString: sourceText },
+      { url: "predicateText", valueString: "skin is intact" }, { url: "predicateForm", valueCode: "raw" }, note
+    ] };
+    const row: FhirDosage = {
+      method: { text: "Apply" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+      site: { text: "skin", extension: [restriction] }
+    };
+    for (const input of [fresh([row]), fresh(toDosageDetails([row]))]) {
+      const before = fresh(input);
+      expect(formatSig(input, "long", { locale: "th" })).toContain("(" + sourceText + ")");
+      const wire = projectCanonicalCourse(importCanonicalCourse(input)).fhir[0];
+      expect(wire.site!.extension).toContainEqual(restriction);
+      expect(input).toEqual(before);
+    }
+    const noSource = fresh(row);
+    noSource.site!.extension![0].extension = restriction.extension!.filter(field => field.url !== "sourceText");
+    expect(formatSig(noSource, "long", { locale: "th" })).toContain("(where skin is intact)");
+  });
+
+  it.each([
+    { realizationMode: "roundtrip" as const, sitePlacement: undefined, expected: "หยอด 1 หยด ที่ตาขวา.", placement: "trailing" },
+    { realizationMode: "roundtrip" as const, sitePlacement: "natural" as const, expected: "หยอดตาขวา 1 หยด.", placement: "natural" },
+    { realizationMode: "normalized" as const, sitePlacement: undefined, expected: "หยอดตาขวา ครั้งละ 1 หยด.", placement: "natural" },
+    { realizationMode: "normalized" as const, sitePlacement: "trailing" as const, expected: "หยอดครั้งละ 1 หยด ที่ตาขวา.", placement: "trailing" }
+  ])("shares the resolved Thai site placement with its callback: $realizationMode/$placement", test => {
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
+      method: { text: "Instill" },
+      route: { coding: [{ system: "http://snomed.info/sct", code: "54485002" }] },
+      site: { text: "right eye", coding: [{ system: "http://snomed.info/sct", code: "18944008" }] }
+    };
+    for (const input of [fresh(row), fresh([row]), fresh(toDosageDetails([row]))]) {
+      let calls = 0;
+      const before = fresh(input);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: test.realizationMode,
+        sitePlacement: test.sitePlacement, i18n: { inherit: "th", formatLong: context => {
+          calls++;
+          expect(context.sitePlacement).toBe(test.placement);
+          expect(context.defaultText).toBe(test.expected);
+          expect(context.formatDefault("long")).toBe(test.expected);
+          return context.defaultText;
+        } } })).toBe(test.expected);
+      expect(calls).toBe(1);
+      expect(input).toEqual(before);
+    }
   });
 });

@@ -3980,6 +3980,11 @@ export function buildInstructionGraph(
       firstStart = Math.min(firstStart, opaque.start);
       lastEnd = Math.max(lastEnd, opaque.end);
     }
+    for (const relation of graph.relations ?? []) {
+      if (!relation.span) continue;
+      firstStart = Math.min(firstStart, relation.span.start);
+      lastEnd = Math.max(lastEnd, relation.span.end);
+    }
     const exactProcedureText = input.slice(firstStart, lastEnd).trim();
     if (exactProcedureText) clause.patientInstruction = exactProcedureText;
   }
@@ -4391,9 +4396,13 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
     const duration = joinLocalizedTokens(c.locale, [profile.durationPrefix || undefined, c.duration]);
     text = `${text}${text ? profile.quantitySeparator : ""}${duration}`;
   }
-  // The selected Time has its locale phrase, independently of the destinations.
-  if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
-  return c.time ? joinLocalizedTokens(c.locale, [text, c.time]) : text;
+  // A preparation's frame relation may already belong to its material.
+  // Only a temporal governor can be inherited by an unmarked Time.
+  if (!c.selectedTime?.relation && c.timeRelation &&
+      !relationHasSemanticClass(c.timeRelation, "temporal") && c.timeRelation !== AdviceRelation.In)
+    c.timeRelation = undefined;
+  const time = realizeTimeArgument(c);
+  return time ? joinLocalizedTokens(c.locale, [text, time]) : text;
 };
 
 const ACTION_REALIZERS: Partial<Record<MedicationInstructionActionRealizer, ActionRealizer>> = {
@@ -4464,10 +4473,13 @@ function realizeAction(
   const objectArg = defaultArguments?.objectArg ?? (realizerKey === "relation-duration"
     ? firstArguments[AdviceArgumentRole.Theme] ?? firstArguments[AdviceArgumentRole.Object] : undefined);
   if (objectArg) {
-    const objectSource = normalizedInstructionSurface(objectArg.text);
     const amountArg = defaultArguments?.amountArg ?? firstArguments[AdviceArgumentRole.Amount];
+    const objectSource = normalizedInstructionSurface(objectArg.text);
     const amountSource = normalizedInstructionSurface(amountArg?.text ?? "");
-    if (objectSource && amountSource && objectSource.includes(amountSource)) amount = undefined;
+    const containsAmount = objectArg.span && amountArg?.span
+      ? objectArg.span.start <= amountArg.span.start && amountArg.span.end <= objectArg.span.end
+      : objectSource && amountSource && (" " + objectSource + " ").includes(" " + amountSource + " ");
+    if (containsAmount) amount = undefined;
   }
   const themeArg = objectArg && (objectArg.role === AdviceArgumentRole.Theme || objectArg.role === AdviceArgumentRole.Object)
     ? objectArg : firstArguments[AdviceArgumentRole.Theme] ?? firstArguments[AdviceArgumentRole.Object];

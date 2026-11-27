@@ -1,6 +1,6 @@
 import { buildAdditionalInstructionFramesFromCoding, matchComposedAdviceCodings, parseAdditionalInstructions } from "../src/advice";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
-import { deserializeCanonicalContext, parserStateFromFhir, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
+import { deserializeCanonicalContext, parserStateFromFhir, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL } from "../src/fhir";
 import { courseFromR6 } from "../src/adapters/canonical-course";
 import { AdviceArgumentRole, AdviceForce, AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirPeriodUnit, type AdviceFrame, type CanonicalInstructionGraph, type CanonicalAdditionalInstructionExpr, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
 import { describe, expect, it } from "vitest";
@@ -2407,7 +2407,14 @@ describe("qualified composite technique ownership", () => {
       expect(row.additionalInstruction?.length).toBe(instructions.length);
       const owned = parseInstructionGraphExtension(row.additionalInstruction![driveRow].extension ?? []);
       expect(owned?.actions).toHaveLength(1);
-      expect(JSON.parse(JSON.stringify(owned!.actions[0].predicate))).toEqual(JSON.parse(JSON.stringify(selected.predicate)));
+      expect(JSON.parse(JSON.stringify(owned!.actions[0].predicate))).toEqual({
+        ...JSON.parse(JSON.stringify(selected.predicate)),
+        codings: selected.predicate.codings!.map(coding => ({ ...coding, _display: { extension: [{
+          url: "http://hl7.org/fhir/StructureDefinition/translation", extension: [
+            { url: "lang", valueCode: "th" }, { url: "content", valueString: "ขับรถ" }
+          ]
+        }] } }))
+      });
       expect(owned!.actions[0]).toMatchObject({ args: selected.args,
         polarity: selected.polarity, span: selected.span, sourceText: selected.sourceText });
       expect(owned!.actions[0].modality).toBe(selected.modality);
@@ -6685,7 +6692,7 @@ describe("complete typed action participants", () => {
     }
   });
 
-  it.each(["08:00 or 20:00", "08:00 or at 20:00"])(
+  it.each(["08:00 or 20:00", "08:00 or at 20:00", "8:00 or 20:00"])(
     "preserves the complete dilution clock choice: %s", choice => {
     const source = "Dilute 1 mL at " + choice;
     const action = parseInstructionActions(source)[0];
@@ -7448,7 +7455,7 @@ describe("Mix material and calendar Time ownership", () => {
     const direct = parseInstructionActions(source);
     expect(direct).toHaveLength(1);
     for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
-      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhir)))]) {
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
       const before = JSON.stringify(input);
       const member = importCanonicalCourse(input).stages[0].administrations[0];
       const graph = member.syntax?.instructionGraph!;
@@ -7607,7 +7614,7 @@ describe("independent instruction sentence boundaries", () => {
       expect(formatSig(input, "long", { locale: "en", instructionTextMode: "normalized" }))
         .toBe(`Take 1 tablet orally once daily. Do not drive. ${englishTail}.`);
       expect(formatSig(input, "long", { locale: "th", instructionTextMode: "normalized" }))
-        .toBe(`รับประทานครั้งละ 1 เม็ด วันละครั้ง. ห้ามDrive. ${tail}.`);
+        .toBe(`รับประทานครั้งละ 1 เม็ด วันละครั้ง. ห้ามขับรถ. ${tail}.`);
       expect(JSON.stringify(input)).toBe(before);
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
@@ -7825,4 +7832,131 @@ describe("dotted quantity unit continuation", () => {
     expect(JSON.stringify(parsed)).toBe(parsedBefore);
   });
 
+});
+
+
+describe("review51 selected instruction facts and native defaults", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const graphInputs = (graph: CanonicalInstructionGraph) => {
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension(graph)!] };
+    const r6 = toDosageDetails([row]);
+    return [importCanonicalCourse(r6), fresh([row]), fresh(r6)];
+  };
+
+  it("retains the inherited negative prefix outside a coordinated member's exact span", () => {
+    const source = "Do not crush or chew the tablet";
+    const rows = parseAdditionalInstructions(source, { start: 0, end: source.length });
+    const frames = rows[0].frames!;
+    expect(frames).toHaveLength(2);
+    expect(frames[1]).toMatchObject({
+      predicate: { lemma: "chew" }, polarity: AdvicePolarity.Negate, polaritySource: "shared",
+      span: { start: source.indexOf("chew"), end: source.length }, sourceText: "chew the tablet"
+    });
+    expect(frames[0].polaritySource).toBeUndefined();
+    const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en", actions: [frames[1]] };
+    for (const input of graphInputs(graph)) {
+      const before = fresh(input), saved = importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!;
+      expect(saved.actions[0].polaritySource).toBe("shared");
+      expect(realizeInstructionGraph(saved, "en", { includeWarnings: true, preferSourceText: true }))
+        .toBe("Do not chew the tablet");
+      expect(formatSig(input, "long", { locale: "th" })).toContain("ห้ามเคี้ยว");
+      expect(input).toEqual(before);
+    }
+    const positive = parseAdditionalInstructions("Crush or chew the tablet", { start: 0, end: 24 })[0].frames!;
+    expect(positive[1].polarity).not.toBe(AdvicePolarity.Negate);
+    expect(positive[1].polaritySource).toBeUndefined();
+  });
+
+  it.each([
+    { time: "Monday", en: "on Monday", th: "เมื่อวันจันทร์" },
+    { time: "08:00", en: "at 08:00", th: "เวลา 08:00" },
+    { time: "08:00", relation: AdviceRelation.Before, en: "before 08:00", th: "ก่อน08:00" }
+  ])("realizes a preparation's selected Time through its locale owner: $en", ({ time, relation, en, th }) => {
+    const parsed = parseInstructionActions("Dilute 1 mL with water to 10 mL")[0];
+    const action: AdviceFrame = { ...parsed, sourceText: "", args: [...parsed.args,
+      { role: AdviceArgumentRole.Time, text: time, normalized: time.toLowerCase(), relation }] };
+    const graph: CanonicalInstructionGraph = { actions: [action], sourceText: "", sourceLocale: "en" };
+    for (const input of graphInputs(graph)) {
+      const before = fresh(input);
+      for (const [locale, expected] of [["en", en], ["th", th]]) {
+        const text = formatSig(input, "long", { locale });
+        expect(text.split(expected)).toHaveLength(2);
+        expect(text).toContain(locale === "en" ? "with water" : "น้ำ");
+        expect(text).toContain(locale === "en" ? "to 10 mL" : "10 มิลลิลิตร");
+        expect(text).not.toContain(locale === "en" ? "at Monday" : "เวลา Monday");
+      }
+      expect(input).toEqual(before);
+    }
+  });
+
+  it.each([false, true])("keeps a separate unitless dose beside a product-name digit (spans=%s)", spanned => {
+    const action: AdviceFrame = {
+      force: AdviceForce.Instruction, predicate: { lemma: "take" }, sourceText: "", span: { start: 0, end: 18 },
+      args: [
+        { role: AdviceArgumentRole.Object, text: "vitamin B12", ...(spanned ? { span: { start: 7, end: 18 } } : {}) },
+        { role: AdviceArgumentRole.Amount, text: "2", quantity: { value: 2 },
+          ...(spanned ? { span: { start: 5, end: 6 } } : {}) }
+      ]
+    };
+    for (const input of graphInputs({ actions: [action], sourceText: "" })) {
+      const before = fresh(input);
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale });
+        expect(text).toContain("vitamin B12");
+        expect(text).toMatch(/(?:^|\s)2(?:\s|[.]|$)/u);
+      }
+      expect(importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!.actions[0].args)
+        .toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: { value: 2 } }));
+      expect(input).toEqual(before);
+    }
+    const contained: AdviceFrame = { ...action, args: [
+      { role: AdviceArgumentRole.Object, text: "2 tablets of vitamin B12",
+        ...(spanned ? { span: { start: 5, end: 29 } } : {}) },
+      { role: AdviceArgumentRole.Amount, text: "2 tablets", quantity: { value: 2, unit: "tab" },
+        ...(spanned ? { span: { start: 5, end: 14 } } : {}) }
+    ] };
+    expect(realizeInstructionAction(contained, "en")).toBe("Take 2 tablets of vitamin B12");
+  });
+
+  it.each([["en", "Take 1 tablet"], ["th", "รับประทาน 1 เม็ด"]] as const)(
+    "keeps an independently supplied clock window beside %s graph source", (locale, source) => {
+      const graph: CanonicalInstructionGraph = {
+        actions: parseInstructionActions(source), sourceText: source, sourceLocale: locale
+      };
+      const window: FhirExtension = { url: TIMING_CLOCK_WINDOW_EXTENSION_URL, extension: [
+        { url: "start", valueTime: "08:00:00" }, { url: "end", valueTime: "20:00:00" },
+        { url: "endInclusive", valueBoolean: false }
+      ] };
+      const clause = { ...parsePublicSig(source).meta.canonical.clauses[0], method: undefined,
+        instructionGraph: graph, schedule: { clockWindow: { start: "08:00", end: "20:00", endInclusive: false } } };
+      const nativeDefault = formatCanonicalClause(clause, "long", resolveSigLocalization(locale),
+        { locale, realizationMode: "roundtrip" });
+      expect(nativeDefault.split("08:00")).toHaveLength(2);
+      expect(nativeDefault.split("20:00")).toHaveLength(2);
+      expect(formatCanonicalClause({ ...clause, schedule: undefined }, "long", resolveSigLocalization(locale),
+        { locale, realizationMode: "roundtrip" })).toBe(source);
+      const plain: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        extension: [buildInstructionGraphExtension(graph)!] };
+      const row: FhirDosage = { ...plain, timing: { repeat: { extension: [window] } } };
+      for (const input of [fresh([row]), fresh(toDosageDetails([row]))]) {
+        const before = fresh(input), text = formatSig(input, "long", { locale, realizationMode: "roundtrip" });
+        expect(text.split("08:00")).toHaveLength(2);
+        expect(text.split("20:00")).toHaveLength(2);
+        expect(text).toContain(locale === "en" ? "end excluded" : "ไม่รวมเวลาสิ้นสุด");
+        expect(importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!.sourceText).toBe(source);
+        let calls = 0;
+        expect(formatSig(input, "long", { locale, realizationMode: "roundtrip", i18n: {
+          inherit: locale, formatLong: context => {
+            calls++;
+            expect(context.defaultText).toContain("08:00");
+            expect(context.formatDefault("long")).toBe(context.defaultText);
+            return "Authored callback output";
+          }
+        } })).toBe("Authored callback output");
+        expect(calls).toBe(1);
+        expect(input).toEqual(before);
+      }
+      expect(formatSig([plain], "long", { locale, realizationMode: "roundtrip" })).toBe(source + ".");
+    }
+  );
 });

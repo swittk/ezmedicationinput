@@ -59,7 +59,8 @@ function refinesBodySite(code: string, broader: string): boolean {
 /** Compare exact stock site labels only. A lateralized label can refine its
  * registered unqualified anatomy; a different code alone is not a conflict. */
 export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirCoding, "system" | "code"> | undefined): boolean {
-  const definition = DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(text)];
+  const key = normalizeBodySiteKey(text);
+  const definition = DEFAULT_BODY_SITE_SNOMED[key];
   const textCode = definition?.coding;
   if (!textCode?.code || !coding?.code || textCode.code === coding.code ||
       (textCode.system ?? SNOMED_SYSTEM) !== (coding.system ?? SNOMED_SYSTEM)) return false;
@@ -74,7 +75,7 @@ export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirC
       coding: { ...coding, code: coding.code }
     })) return false;
   }
-  const canonical = definition.text;
+  const canonical = definition.text ?? key;
   const unqualified = canonical?.replace(/^(?:left|right|both) /u, "");
   if (unqualified && unqualified !== canonical) {
     const baseCode = DEFAULT_BODY_SITE_SNOMED[unqualified]?.coding;

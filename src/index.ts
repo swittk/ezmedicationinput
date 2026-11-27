@@ -1113,7 +1113,8 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
           child.extension?.some(field => field.url === "site" &&
             field.valueCodeableReference?.reference?.display)) ||
         (child.url === "step" || child.url === "course") && child.extension?.some(field =>
-          field.url === "safety" || child.url === "step" && (field.url === "count" ||
+          field.url === "safety" || child.url === "course" && field.url === "repeatCycle" ||
+          child.url === "step" && (field.url === "count" ||
             field.url === "retainedField" && field.extension?.some(part =>
               part.url === "name" && part.valueString === "_count"))))))
     return true;
@@ -1485,7 +1486,8 @@ function fromFhirDosageInternal(
     : undefined;
   const nativeStage = nativeCourse?.stages.find(stage => stage.administrations.length);
   const native = nativeStage?.administrations[0];
-  const nativeDisplayCourse: CanonicalCourse | undefined = native &&
+  const nativeDisplayCourse: CanonicalCourse | undefined =
+    nativeCourse?.cycleInterval || nativeCourse?.cycleCount !== undefined ? nativeCourse : native &&
     (nativeCourse?.safety || nativeStage?.count !== undefined || nativeStage?.countUnresolved) ? {
     kind: "course", safety: nativeCourse?.safety,
     stages: [{ administrations: [native], safety: nativeStage?.safety,

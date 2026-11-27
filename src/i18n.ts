@@ -1456,10 +1456,8 @@ function appendSiteRestrictionsThai(
     const current = restriction.predicate.text.trim();
     // The import boundary retires stale inferred predicates to the raw form.
     // Its current wording still owns display when no Thai realization exists.
-    const retained = local ? undefined : current && restriction.predicate.form === "raw"
-      ? realizeBodySiteRestriction({ ...restriction, sourceText: "" }, "en")
-      : restriction.sourceText.trim() || (current
-        ? realizeBodySiteRestriction({ ...restriction, sourceText: "" }, "en") : undefined);
+    const retained = local ? undefined : restriction.sourceText.trim() || (current
+      ? realizeBodySiteRestriction({ ...restriction, sourceText: "" }, "en") : undefined);
     const phrase = local ?? (retained ? ` (${retained})` : undefined);
     if (phrase && !result.includes(phrase)) result += phrase;
   }
@@ -2073,8 +2071,9 @@ function formatLongThai(
   authoredPrimary?: string,
   deferredDirections?: { text?: string; current?: string }
 ): string {
+  const schedule = scheduleOf(clause);
   if (
-    !authoredPrimary && options?.realizationMode === "roundtrip" &&
+    !authoredPrimary && !schedule.clockWindow && options?.realizationMode === "roundtrip" &&
     clause.instructionGraph?.sourceLocale?.toLowerCase().startsWith("th") &&
     clause.instructionGraph.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options) &&
     (!clause.clinicalAdjuncts?.condition || clause.sourceProjectionVerified !== false)
@@ -2082,7 +2081,6 @@ function formatLongThai(
     return clause.instructionGraph.sourceText.trim();
   }
   const hasCanonicalAdministration = canonicalClauseHasAdministrationSemantics(clause);
-  const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammarThai(clause);
   const methodDefinition = resolvedMethod ?? resolveMedicationInstructionAction(clause.method?.text ?? "");
   const methodLocaleConfig = medicationInstructionActionLocaleRealizerConfig(

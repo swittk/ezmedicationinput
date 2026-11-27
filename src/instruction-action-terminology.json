@@ -5,6 +5,7 @@
       "code": "drive",
       "semanticClass": "activity",
       "display": "Drive",
+      "i18n": { "th": "ขับรถ" },
       "aliases": [
         "drive",
         "driving"

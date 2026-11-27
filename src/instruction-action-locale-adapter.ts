@@ -229,7 +229,9 @@ export const EN_POSITIVE_MODALITY_PREFIX: Partial<Record<AdviceModality, string>
   [AdviceModality.Should]: "Should ", [AdviceModality.Must]: "Must "
 };
 
-const CLOCK_ARGUMENT = /^[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?$/;
+// A selected clock choice can retain an opaque suffix. Its complete leading
+// clock owns the preposition; the remaining Time wording stays intact.
+const CLOCK_ARGUMENT = /^[0-9]{1,2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?(?:$|\s)/;
 
 /** Internal selection metadata; public locale inputs and callbacks stay unchanged. */
 type SelectedTimeInput = Pick<InstructionActionRealizationInput,
@@ -746,13 +748,7 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
       localizedValue(input.frame.predicate.i18n, input.locale) === undefined
       ? medicationInstructionActionLocaleRealizerConfig(input.realizerConfig, input.locale)?.finiteUnmodalLabel
       : undefined;
-    if (finiteLabel) input = { ...input, label: finiteLabel };
-    if (!input.time || (input.frame.predicate.realizer ?? input.definition?.realizer) !== "amount-material-destination")
-      return input;
-    const relation = input.timeRelation;
-    const prefix = relation && (relationHasSemanticClass(relation, "temporal") || relation === AdviceRelation.In)
-      ? localizeAdviceRelation(relation, input.locale) ?? relation : "at";
-    return { ...input, time: `${prefix} ${input.time}` };
+    return finiteLabel ? { ...input, label: finiteLabel } : input;
   },
   render: renderEnglish,
   renderNegated(c, completeAction) {
@@ -816,12 +812,6 @@ const TH_ADAPTER: InstructionActionLocaleAdapter = {
   directTime: thaiDirectTime,
   withAuthoredDirections: THAI_COURSE.withAuthoredDirections,
   selectLexicalRealization(input) {
-    if (input.time && (input.frame.predicate.realizer ?? input.definition?.realizer) === "amount-material-destination") {
-      const relation = input.timeRelation;
-      const prefix = relation && (relationHasSemanticClass(relation, "temporal") || relation === AdviceRelation.In)
-        ? localizeAdviceRelation(relation, input.locale) ?? relation : " เวลา ";
-      input = { ...input, time: `${prefix}${input.time}` };
-    }
     // Whole-unit manner agrees with the already typed dosage form.
     // For solid tablets/capsules, use the registered Thai unit classifier;
     // no English token matching and no new quantity is inferred.

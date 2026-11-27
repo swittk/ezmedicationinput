@@ -1017,7 +1017,7 @@ function describeCalendarEventsEnglish(
 
 /** Whether the recurrence supports describing selected days as occurring each month. */
 export function dayOfMonthUsesSingleMonth(schedule: CanonicalScheduleExpr | undefined): boolean {
-  if (!schedule || schedule.periodMax !== undefined ||
+  if (!schedule || schedule.periodMax !== undefined && schedule.periodMax !== schedule.period ||
       schedule.frequency !== undefined && schedule.frequencyMax !== undefined &&
       schedule.frequencyMax !== schedule.frequency) return false;
   const period = schedule.period;
@@ -1814,6 +1814,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   // source cannot stand in for its independently structured cadence.
   const needsCurrentPrimary = Boolean(primaryGraphAction && (
     !graphSourceIsEnglish || !primaryGraphAction.sourceText.trim() || clause.sourceProjectionVerified === false ||
+    schedule.clockWindow ||
     !graphRepresentsDose && instructionGraphSourceConflictsWithDose(clause, options)
   ));
   const richPrimaryGraphAction = !roundTrip || !primaryGraphAction
@@ -1865,7 +1866,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     .filter(Boolean).join(" ").trim() || undefined;
   const hasExplicitMethod = hasExplicitAdministrationMethod(clause);
   if (
-    !authoredPrimary && !hasCalendarQualifiers && roundTrip && (!hasExplicitMethod || primaryGraphAction && !needsCurrentPrimary) && graphSourceIsEnglish &&
+    !authoredPrimary && !hasCalendarQualifiers && !schedule.clockWindow && roundTrip &&
+    (!hasExplicitMethod || primaryGraphAction && !needsCurrentPrimary) && graphSourceIsEnglish &&
     clause.instructionGraph?.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options) &&
     (!condition || clause.sourceProjectionVerified !== false)
   ) {
@@ -1983,6 +1985,10 @@ function firstCanonicalClause(internal: ParserState): CanonicalSigClause {
   };
 }
 
+function resolvedSitePlacement(options: TimingSummaryOptions | undefined): "natural" | "trailing" {
+  return options?.sitePlacement ?? (options?.realizationMode === "roundtrip" ? "trailing" : "natural");
+}
+
 export function formatNativeCanonicalClause(
   clause: CanonicalSigClause,
   style: "short" | "long",
@@ -2082,10 +2088,12 @@ export function formatNativeCanonicalClause(
     return rendered.replace(/[.。]$/u, "") + " (" + offsetNote + ").";
   }
   const words = localization?.course ?? ENGLISH_COURSE;
+  const longOptions = options?.realizationMode === "roundtrip" && options.sitePlacement === undefined
+    ? { ...options, sitePlacement: resolvedSitePlacement(options) } : options;
   const rendered = style === "short"
     ? native.short ? native.short(clause, words, resolvedMethod) : formatShort(clause, words, resolvedMethod)
-    : native.long ? native.long(clause, options, words, resolvedMethod, authoredPrimary, deferredDirections)
-      : formatLong(clause, options, words, resolvedMethod, clause.clinicalAdjuncts?.condition, authoredPrimary, deferredDirections);
+    : native.long ? native.long(clause, longOptions, words, resolvedMethod, authoredPrimary, deferredDirections)
+      : formatLong(clause, longOptions, words, resolvedMethod, clause.clinicalAdjuncts?.condition, authoredPrimary, deferredDirections);
   const schedule = clause.schedule;
   const authoredTiming = !schedule?.timingTextIsLiteral &&
     authoredCountTimingText(schedule?.timingText ?? schedule?.timingCode, schedule);
@@ -2133,8 +2141,7 @@ export function formatCanonicalClause(
       groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
       includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
       realizationMode: options?.realizationMode ?? "normalized",
-      sitePlacement: options?.sitePlacement ??
-        (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
+      sitePlacement: resolvedSitePlacement(options),
       formatDefault,
       instructionActionMap: options?.instructionActionMap,
       resolvedMethod
@@ -2151,8 +2158,7 @@ export function formatCanonicalClause(
       groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
       includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
       realizationMode: options?.realizationMode ?? "normalized",
-      sitePlacement: options?.sitePlacement ??
-        (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
+      sitePlacement: resolvedSitePlacement(options),
       formatDefault,
       instructionActionMap: options?.instructionActionMap,
       resolvedMethod

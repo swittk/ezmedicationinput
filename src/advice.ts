@@ -2111,6 +2111,8 @@ function tryParseClauseInstruction(
         prefix.modality
       )
     );
+    if (head && index > 0 && prefix.polarity === AdvicePolarity.Negate)
+      frames[frames.length - 1].polaritySource = "shared";
   }
 
   if (

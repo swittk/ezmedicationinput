@@ -7,7 +7,7 @@ import { ADMINISTRATION_OFFSET_EXTENSION_URL,ANCHORED_COURSE_DURATION_EXTENSION_
 import { EMA_QUANTITY_COMPARATOR_EXTENSION_URL,EMA_QUANTITY_OPERATOR_SYSTEM,getQuantityComparator,QUANTITY_OPERATOR_SOURCE_URL,quantityForR5,quantityFromR5,simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 import { AdviceArgumentRole,AdviceForce,AdvicePolarity,buildInstructionGraphExtension,calculateTotalUnits,EventTiming,FhirDayOfWeek,FhirPeriodUnit,formatCanonicalAdministration,formatCanonicalCourse,formatParseBatch,formatSig,formatSigBatch,fromDosageDetails,fromFhir,fromFhirDosage,getMedicationInstructionAction,importCanonicalCourse,nextDueDoses,parseInstructionGraphExtension,parseSig as parsePublicSig,projectCanonicalCourse,toDosageDetails,toFhirR5Dosages,type CanonicalInstructionGraph,type EzDosage,type FhirDosage,type FhirElement,type FhirExtension,type FhirR6Dosage,type FhirR6DosageCondition,type FhirR6DosageInstructionInput,type FhirR6DosageStep,type FhirR6Quantity,type FhirR6Timing,type FhirRatio } from "../src/index";
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../src/instruction-graph-fhir";
-import type { AdviceArgument,AdviceFrame,CanonicalSigClause,FhirR6DosageInstruction,FhirR6Extension,FhirR6Range } from "../src/types";
+import type { AdviceArgument,AdviceFrame,CanonicalSigClause,FhirCoding,FhirR6Coding,FhirR6DosageInstruction,FhirR6Extension,FhirR6Range } from "../src/types";
 import { type FhirR6DosageSafety,type FhirR6DoseLimit,type FormatOptions,type ParseOptions } from "../src/types";
 import { convertQuantityValue } from "../src/utils/units";
 import crossLanguageCases from "./generation-cross-language-cases.json";
@@ -5825,7 +5825,7 @@ describe("current instruction occurrence projection stability", () => {
 
   it.each([
     { warning: "May cause drowsiness", thaiWarning: "อาจทำให้ง่วงซึม" },
-    { warning: "Do not drive", thaiWarning: "ห้ามDrive" },
+    { warning: "Do not drive", thaiWarning: "ห้ามขับรถ" },
   ])("keeps $warning between independent holds without inventing a temporal sequence", ({ warning, thaiWarning }) => {
     const parsed = parsePublicSig(`${prefix}${leftHold}. ${warning}. ${rightHold}.`);
     for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
@@ -5910,9 +5910,12 @@ describe("current instruction occurrence projection stability", () => {
       const projected = projectCanonicalCourse(importCanonicalCourse(wire));
       for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
         expect(output.additionalInstruction).toHaveLength(2);
-        const codings: Array<NonNullable<AdviceFrame["predicate"]["codings"]>[number]> = [];
+        const codings: Array<FhirCoding | FhirR6Coding> = [];
         for (const instruction of output.additionalInstruction!) {
-          codings.push(...(parseInstructionGraphExtension(instruction.extension)?.actions[0].predicate.codings ?? []));
+          const graph = instruction.extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!;
+          const action = graph.extension!.find(item => item.url === "action")!;
+          for (const field of action.extension ?? [])
+            if (field.url === "predicateCoding" && field.valueCoding) codings.push(field.valueCoding);
         }
         expect(codings).toContainEqual(selectedCoding);
         expect(codings).toContainEqual(originalCoding);

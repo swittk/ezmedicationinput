@@ -3417,7 +3417,7 @@ describe("withholding target identity", () => {
         "2026-11-29T08:00:00+00:00", "2026-11-29T20:00:00+00:00"
       ];
       const patientInstruction = "Skip the drops in the left eye on Mondays. " +
-        "Skip the drops in the right eye on Fridays. Do not drive";
+        "Skip the drops in the right eye on Fridays. " + warning.slice(0, -1);
       for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
         JSON.parse(JSON.stringify(parsed.fhirNext))]) {
         const inputBefore = JSON.stringify(input), course = importCanonicalCourse(input);
@@ -4070,7 +4070,7 @@ describe("advice-owned continuation and procedural conditions", () => {
       const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
       expect(th).toContain("1");
       expect(th).toContain("affected");
-      expect(th.match(/drive/gi)).toHaveLength(1);
+      expect(th.match(/ขับรถ/gu)).toHaveLength(1);
       expect(JSON.stringify(input)).toBe(original);
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);

@@ -9073,7 +9073,7 @@ describe("round72 reviewed interchange source families", () => {
           formatCanonicalCourse(native, "long", { ...options, locale: "th" }),
         ]) {
           expect(text.split(codedThai)).toHaveLength(2);
-          expect(text.split("ห้ามDrive.")).toHaveLength(2);
+          expect(text.split("ห้ามขับรถ.")).toHaveLength(2);
           if (scheduled) {
             expect(text).toContain("1 เม็ด");
             expect(text).toContain("วันละครั้ง");
