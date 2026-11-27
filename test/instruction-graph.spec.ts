@@ -1,7 +1,8 @@
+import { buildAdditionalInstructionFramesFromCoding, matchComposedAdviceCodings, parseAdditionalInstructions } from "../src/advice";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
 import { deserializeCanonicalContext, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
 import { courseFromR6 } from "../src/adapters/canonical-course";
-import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, EventTiming, type AdviceFrame, type CanonicalInstructionGraph, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
+import { AdviceArgumentRole, AdviceForce, AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, type AdviceFrame, type CanonicalInstructionGraph, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { getMedicationLexerLocalePack, registerMedicationLexerLocalePack } from "../src/lexer/locale";
 import { getInstructionActionLocaleAdapter, registerInstructionActionLocaleAdapter } from "../src/index";
@@ -6778,5 +6779,49 @@ describe("advice predicate terminology ownership", () => {
       expect(action.definesDose).not.toBe(true);
       if (code === "cause") expect(action.defaultForce).toBe(AdviceForce.Warning);
     }
+  });
+});
+
+
+describe("conditional driving qualifier evidence", () => {
+  const SNOMED_SYSTEM = "http://snomed.info/sct";
+  it.each([
+    "May cause drowsiness, do not drive",
+    "May cause drowsiness, do not drive, avoid alcohol",
+    "May cause drowsiness, do not drive if tired"
+  ])("preserves the selected warning without inventing if-affected coding: %s", source => {
+    const instructions = parseAdditionalInstructions(source, { start: 0, end: source.length });
+    const frames = instructions.flatMap(instruction => instruction.frames);
+    const before = JSON.stringify(instructions);
+    const drive = frames.find(frame => frame.predicate.lemma === "drive");
+    expect(drive?.polarity).toBe(AdvicePolarity.Negate);
+    expect(drive?.sourceText).toContain("do not drive");
+    if (source.endsWith("if tired")) {
+      expect(instructions.some(instruction => instruction.text?.includes("if tired"))).toBe(true);
+      expect(frames.some(frame => frame.sourceText.includes("if tired"))).toBe(true);
+    } else expect(drive?.relation).toBeUndefined();
+    const codings = [...instructions.map(instruction => instruction.coding?.code),
+      ...matchComposedAdviceCodings(frames).map(definition => definition.coding?.code)];
+    expect(codings).not.toContain("418954008");
+    expect(codings).not.toContain("418914006");
+    expect(JSON.stringify(instructions)).toBe(before);
+  });
+
+  it("retains an exactly stated affected condition and the explicit-code template", () => {
+    const source = "May cause drowsiness; do not drive if affected";
+    const instructions = parseAdditionalInstructions(source, { start: 0, end: source.length });
+    const frames = instructions.flatMap(instruction => instruction.frames);
+    expect(frames.find(frame => frame.predicate.lemma === "cause")?.modality).toBe(AdviceModality.May);
+    expect(frames.find(frame => frame.predicate.lemma === "drive")).toMatchObject({
+      polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
+      args: [expect.objectContaining({ text: "affected" })]
+    });
+    const codings = [...instructions.map(instruction => instruction.coding?.code),
+      ...matchComposedAdviceCodings(frames).map(definition => definition.coding?.code)];
+    expect(codings).toContain("418954008");
+    const explicit = buildAdditionalInstructionFramesFromCoding(SNOMED_SYSTEM, "418954008");
+    expect(explicit).toContainEqual(expect.objectContaining({ predicate: expect.objectContaining({ lemma: "drive" }),
+      polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
+      args: [expect.objectContaining({ role: AdviceArgumentRole.Free, text: "affected" })] }));
   });
 });
