@@ -4878,6 +4878,34 @@ describe("round63: recorded caps, combined ceilings and finite calendar successo
         .toEqual(["2029-01-01T09:00:00+00:00", "2030-01-01T09:00:00+00:00"].slice(0, limit));
   });
 
+  it.each([[1, FhirPeriodUnit.Year], [12, FhirPeriodUnit.Month]] as const)(
+    "uses the same annual weekday occurrence for %s %s without an authored ordinal", (period, periodUnit) => {
+      const note = { url: "urn:clinic:calendar-note", valueString: "Keep the authored annual unit" };
+      const row: FhirDosage = { id: "annual-weekday",
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period, periodUnit,
+          dayOfWeek: [FhirDayOfWeek.Monday], timeOfDay: ["08:00:00"], extension: [note] } } };
+      const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z",
+        timeZone: "UTC", limit: 3 };
+      const freshR6 = JSON.parse(JSON.stringify(toDosageDetails([row]))) as FhirR6DosageInstruction;
+      for (const dosage of [row, importCanonicalCourse(row), freshR6]) {
+        const before = structuredClone(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual([
+          "2026-01-05T08:00:00+00:00", "2027-01-04T08:00:00+00:00", "2028-01-03T08:00:00+00:00"
+        ]);
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Year }))
+          .toMatchObject({ totalUnits: 1, unit: "tab" });
+        const current = importCanonicalCourse(dosage);
+        const recurrence = current.stages[0].administrations[0].schedule!.recurrence!;
+        expect(recurrence).toMatchObject({ frequency: 1, period, periodUnit,
+          dayOfWeek: [FhirDayOfWeek.Monday], clocks: ["08:00:00"] });
+        expect(recurrence.weekdayOrdinal).toBeUndefined();
+        expect(recurrence.count).toBeUndefined();
+        expect(courseToR5(current)[0].timing!.repeat!.extension).toContainEqual(note);
+        expect(dosage).toEqual(before);
+      }
+    });
+
   it("keeps an anchored 12-hour loading phase as the predecessor of the right-eye taper", () => {
     const parsed = parseSig("1 drop OD q2h starting 5 December 2026 for 12 hours then 2 drops OD QID; 1 drop OS BID");
     for (const dosage of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {

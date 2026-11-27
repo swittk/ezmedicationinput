@@ -671,10 +671,13 @@ function resolveCalendarDaySelection(
 ): CalendarDaySelection | undefined {
   const dayOfMonth = getTimingMonthDays(repeat);
   const membership = dayOfMonth?.length ? { dayOfMonth } : undefined;
-  if (repeat.periodUnit !== DurationUnit.Month || !repeat.dayOfWeek?.length) {
+  if ((repeat.periodUnit !== DurationUnit.Month && repeat.periodUnit !== DurationUnit.Year) ||
+      !repeat.dayOfWeek?.length) {
     return membership;
   }
-  const value = repeat.weekdayOrdinal;
+  // Annual cadence already selects its recurring month. Share the origin's
+  // weekday position while keeping the authored ordinal extension monthly.
+  const value = repeat.periodUnit === DurationUnit.Month ? repeat.weekdayOrdinal : undefined;
   if (value === -1 || (value !== undefined && Number.isInteger(value) && value >= 1 && value <= 5))
     return { ...membership, ordinal: value };
   if (membership) return membership;
