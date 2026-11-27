@@ -5464,8 +5464,12 @@ describe("whole-clause polarity during instruction fragment recovery", () => {
     for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
       JSON.parse(JSON.stringify(parsed.fhirNext))]) {
       const before = JSON.stringify(input);
-      const actions = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations
-        .flatMap(member => member.syntax?.instructionGraph?.actions ?? []));
+      const actions: AdviceFrame[] = [];
+      for (const stage of importCanonicalCourse(input).stages) {
+        for (const member of stage.administrations) {
+          actions.push(...(member.syntax?.instructionGraph?.actions ?? []));
+        }
+      }
       for (const verb of verbs) {
         const selected = actions.filter(action => action.predicate.lemma === verb);
         expect(selected).toHaveLength(1);
@@ -5492,8 +5496,12 @@ describe("whole-swallow coding retains its declared clinical facts", () => {
       const coded = output.additionalInstruction?.find(row => row.coding?.some(coding => coding.code === "418693002"));
       expect(coded?.text).toBe("Swallow whole; do not chew");
       expect(JSON.stringify(coded)).not.toMatch(/crush|บด/iu);
-      const independent = output.additionalInstruction?.flatMap(row =>
-        parseInstructionGraphExtension(row.extension)?.actions ?? []).filter(frame => frame.predicate.lemma === "crush");
+      const independent: AdviceFrame[] = [];
+      for (const row of output.additionalInstruction ?? []) {
+        for (const frame of parseInstructionGraphExtension(row.extension)?.actions ?? []) {
+          if (frame.predicate.lemma === "crush") independent.push(frame);
+        }
+      }
       expect(independent).toHaveLength(crush ? 1 : 0);
       if (crush) expect(independent![0].polarity).toBe(AdvicePolarity.Negate);
     }
@@ -5546,9 +5554,13 @@ describe("alcohol advice action and polarity in current projections", () => {
     { source: "Take with alcohol", avoidance: false }
   ])("preserves authored alcohol polarity in standard rows and previews: $source", ({ source, avoidance }) => {
     const parsed = parsePublicSig(source), parsedBefore = JSON.stringify(parsed);
-    const outputs = [parsed.fhir, parsed.fhirNext.step!.flatMap(step => step.component)];
+    const r6Rows: FhirR6Dosage[] = [];
+    for (const step of parsed.fhirNext.step!) r6Rows.push(...step.component);
+    const outputs = [parsed.fhir, r6Rows];
     for (const rows of outputs) {
-      const advice = rows.flatMap(row => row.additionalInstruction ?? []);
+      const advice: Array<NonNullable<FhirDosage["additionalInstruction"]>[number] |
+        NonNullable<FhirR6Dosage["additionalInstruction"]>[number]> = [];
+      for (const row of rows) advice.push(...(row.additionalInstruction ?? []));
       const selected = advice.filter(row => row.coding?.some(coding => coding.code === "419822006"));
       expect(selected).toHaveLength(avoidance ? 1 : 0);
       if (avoidance) expect(selected[0].text).toBe("Avoid alcoholic drinks");
@@ -5580,9 +5592,15 @@ describe("alcohol advice action and polarity in current projections", () => {
   it.each(["take with alcohol", "mix with alcohol"])("does not invent avoidance beside the drowsiness warning: %s", ending => {
     const source = `May cause drowsiness; do not drive if affected; ${ending}`;
     const parsed = parsePublicSig(source), parsedBefore = JSON.stringify(parsed);
-    for (const rows of [parsed.fhir, parsed.fhirNext.step!.flatMap(step => step.component)]) {
-      const codes = rows.flatMap(row => row.additionalInstruction?.flatMap(advice =>
-        advice.coding?.map(coding => coding.code) ?? []) ?? []);
+    const r6Rows: FhirR6Dosage[] = [];
+    for (const step of parsed.fhirNext.step!) r6Rows.push(...step.component);
+    for (const rows of [parsed.fhir, r6Rows]) {
+      const codes: Array<string | undefined> = [];
+      for (const row of rows) {
+        for (const advice of row.additionalInstruction ?? []) {
+          for (const coding of advice.coding ?? []) codes.push(coding.code);
+        }
+      }
       expect(codes).not.toContain("418914006");
       expect(codes).not.toContain("419822006");
     }
@@ -5892,8 +5910,10 @@ describe("current instruction occurrence projection stability", () => {
       const projected = projectCanonicalCourse(importCanonicalCourse(wire));
       for (const output of [projected.fhir[0], projected.fhirNext.step![0].component[0]]) {
         expect(output.additionalInstruction).toHaveLength(2);
-        const codings = output.additionalInstruction!.flatMap(instruction =>
-          parseInstructionGraphExtension(instruction.extension)?.actions[0].predicate.codings ?? []);
+        const codings: Array<NonNullable<AdviceFrame["predicate"]["codings"]>[number]> = [];
+        for (const instruction of output.additionalInstruction!) {
+          codings.push(...(parseInstructionGraphExtension(instruction.extension)?.actions[0].predicate.codings ?? []));
+        }
         expect(codings).toContainEqual(selectedCoding);
         expect(codings).toContainEqual(originalCoding);
         expect(output.doseAndRate).toEqual(row.doseAndRate);
