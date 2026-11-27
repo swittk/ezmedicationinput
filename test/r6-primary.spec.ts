@@ -7481,3 +7481,58 @@ it("retains fresh external annotations on a member-relative duration alongside c
   }
   expect(source).toEqual(before);
 });
+
+
+describe("coded timing offset carriers", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const url = "urn:ezmedicationinput:StructureDefinition:medication-timing-offset-exact";
+  const query = { orderedAt: "2026-01-04T23:00:00Z", from: "2026-01-04T23:00:00Z", timeZone: "UTC",
+    eventClock: { HS: "00:30" }, limit: 1 };
+
+  it.each([[60, "2026-01-04T23:30:00+00:00"], [0, "2026-01-05T00:30:00+00:00"]] as const)
+    ("keeps an authored %i-minute extension offset beside BED", (offset, expected) => {
+      const marker: FhirExtension = { url, id: "authored-lead", valueInteger: offset,
+        _valueInteger: { id: "lead-value" } };
+      const source: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BED" }] },
+          repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, extension: [marker] } } };
+      const before = fresh(source), output = projectCanonicalCourse(importCanonicalCourse(fresh(source)));
+      for (const row of [output.fhir[0], output.fhirNext.step[0].component[0],
+        toFhirR5Dosages(fresh(output.fhirNext))[0]]) {
+        expect(row.timing!.repeat!.offset).toBeUndefined();
+        expect(row.timing!.repeat!.when).toBeUndefined();
+        expect(row.timing!.repeat!.extension).toContainEqual(marker);
+        expect(nextDueDoses(row, query)).toEqual([expected]);
+        expect(importCanonicalCourse(row).stages[0].administrations[0].schedule?.recurrence?.offset).toBe(offset);
+      }
+      expect(source).toEqual(before);
+    });
+
+  it("writes a native code-derived offset through the existing exact carrier", () => {
+    const native: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: {
+        code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BED" }] },
+        recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, offset: 60 },
+      },
+    }] }] };
+    const before = fresh(native), output = projectCanonicalCourse(native);
+    for (const row of [output.fhir[0], output.fhirNext.step[0].component[0]]) {
+      expect(row.timing!.repeat!.offset).toBeUndefined();
+      expect(row.timing!.repeat!.extension).toContainEqual({ url, valueInteger: 60 });
+      expect(nextDueDoses(row, query)).toEqual(["2026-01-04T23:30:00+00:00"]);
+    }
+    expect(native).toEqual(before);
+  });
+
+  it("keeps an explicit event's authored core offset and annotations", () => {
+    const source: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { when: [EventTiming["Before Sleep"]], offset: 60, _offset: { id: "core-lead" } } } };
+    const before = fresh(source), output = projectCanonicalCourse(importCanonicalCourse(source));
+    for (const row of [output.fhir[0], output.fhirNext.step[0].component[0]]) {
+      expect(row.timing!.repeat).toMatchObject(source.timing!.repeat!);
+      expect(row.timing!.repeat!.extension?.some(field => field.url === url)).toBeFalsy();
+      expect(nextDueDoses(row, query)).toEqual(["2026-01-04T23:30:00+00:00"]);
+    }
+    expect(source).toEqual(before);
+  });
+});

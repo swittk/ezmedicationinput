@@ -1927,7 +1927,7 @@ export function serializeCanonicalSchedule(
     hasRepeat = true;
   }
   if (schedule?.offset !== undefined) {
-    if (Number.isInteger(schedule.offset)) {
+    if (schedule.when?.length && Number.isInteger(schedule.offset)) {
       repeat.offset = schedule.offset;
     } else {
       repeat.extension = [

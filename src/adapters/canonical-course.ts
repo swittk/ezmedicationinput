@@ -1113,8 +1113,10 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       unresolvedMarkerDuration ? prior?.durationMax : r.occurrenceDurationMax;
     const occurrenceDurationUnit = markerDuration ? undefined :
       unresolvedMarkerDuration ? prior?.durationUnit : r.occurrenceDurationUnit;
-    const offset = r.offset !== undefined && r.offset >= 0 && Number.isInteger(r.offset)
-      ? r.offset : undefined;
+    // An imported extension offset keeps its carrier when no core event is
+    // supplied. A Timing.code-derived anchor does not create repeat.when.
+    const offset = r.offset !== undefined && r.offset >= 0 && Number.isInteger(r.offset) &&
+      (prior?.offset !== undefined || r.anchors?.length) ? r.offset : undefined;
     // Imported native facts are immutable; retain the original primitive slots
     // and their annotations just as the event projection does below.
     const dayOfWeek = prior?.dayOfWeek ?? r.dayOfWeek;
