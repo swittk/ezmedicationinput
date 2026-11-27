@@ -17,7 +17,7 @@
 export const DOSAGE_RECONCILIATION_SOURCE_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source";
 import type { FhirQuantity, FhirR6Quantity, FhirSimpleQuantity,
-  FhirR6SimpleQuantity, FhirR6Coding, FhirR6Extension, FhirPrimitiveElement, FhirR6PrimitiveElement } from "./types";
+  FhirR6SimpleQuantity, FhirR6Coding, FhirR6CodeableConcept, FhirR6Extension, FhirPrimitiveElement, FhirR6PrimitiveElement } from "./types";
 
 export const EMA_QUANTITY_COMPARATOR_EXTENSION_URL =
   "http://ema.europa.eu/fhir/extension/comparator";
@@ -165,32 +165,22 @@ export function quantityAnnotationExtensions(
       };
     }
     const coding = quantityCodingForWire(item.valueCoding, target);
-    let concept = item.valueCodeableConcept;
-    if (concept) {
-      const extension = concept.extension ? quantityAnnotationExtensions(concept.extension, target) : undefined;
-      const text = quantityPrimitiveForWire(concept._text, target);
-      let codings: FhirR6Coding[] | undefined;
-      for (let index = 0; index < (concept.coding?.length ?? 0); index++) {
-        const current = quantityCodingForWire(concept.coding![index], target)!;
-        if (current !== concept.coding![index]) codings ??= concept.coding!.slice(0, index);
-        codings?.push(current);
-      }
-      if (extension !== concept.extension || text !== concept._text || codings) concept = {
-        ...concept,
-        ...(extension !== concept.extension ? { extension } : {}),
-        ...(text !== concept._text ? { _text: text } : {}),
-        ...(codings ? { coding: codings } : {})
-      };
+    const concept = quantityConceptForWire(item.valueCodeableConcept, target);
+    let reference = item.valueCodeableReference;
+    if (reference) {
+      const concept = quantityConceptForWire(reference.concept, target);
+      if (concept !== reference.concept) reference = { ...reference, concept };
     }
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
     let current = quantity === item.valueQuantity && ratio === item.valueRatio &&
       range === item.valueRange && coding === item.valueCoding && concept === item.valueCodeableConcept &&
-      children === item.extension ? item : {
+      reference === item.valueCodeableReference && children === item.extension ? item : {
       ...item, ...(quantity !== item.valueQuantity ? { valueQuantity: quantity } : {}),
       ...(ratio !== item.valueRatio ? { valueRatio: ratio } : {}),
       ...(range !== item.valueRange ? { valueRange: range } : {}),
       ...(coding !== item.valueCoding ? { valueCoding: coding } : {}),
       ...(concept !== item.valueCodeableConcept ? { valueCodeableConcept: concept } : {}),
+      ...(reference !== item.valueCodeableReference ? { valueCodeableReference: reference } : {}),
       ...(children !== item.extension ? { extension: children } : {}),
     };
     for (const field of extensionPrimitiveFields) {
@@ -203,6 +193,25 @@ export function quantityAnnotationExtensions(
     result?.push(current);
   }
   return result ?? source;
+}
+function quantityConceptForWire(
+  concept: FhirR6CodeableConcept | undefined, target: "r5" | "r6"
+): FhirR6CodeableConcept | undefined {
+  if (!concept) return concept;
+  const extension = concept.extension ? quantityAnnotationExtensions(concept.extension, target) : undefined;
+  const text = quantityPrimitiveForWire(concept._text, target);
+  let codings: FhirR6Coding[] | undefined;
+  for (let index = 0; index < (concept.coding?.length ?? 0); index++) {
+    const current = quantityCodingForWire(concept.coding![index], target)!;
+    if (current !== concept.coding![index]) codings ??= concept.coding!.slice(0, index);
+    codings?.push(current);
+  }
+  return extension !== concept.extension || text !== concept._text || codings ? {
+    ...concept,
+    ...(extension !== concept.extension ? { extension } : {}),
+    ...(text !== concept._text ? { _text: text } : {}),
+    ...(codings ? { coding: codings } : {})
+  } : concept;
 }
 function quantityCodingForWire(
   coding: FhirR6Coding | undefined, target: "r5" | "r6"

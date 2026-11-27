@@ -1,7 +1,7 @@
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../instruction-graph-fhir";
 import { projectR6ModifierWrapper, reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, sourceOwnership, isSourceAgreementMarker } from "../dosage-course";
 import { courseFromR5 } from "./r5-import";
-import { getCourseCycleCount, setCourseCycleCount } from "../dosage-course";
+import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../dosage-course";
 import { projectNativeR5Course } from "./r5-course";
 import { editableCourseSteps, retainedSingleStepSafety, liftSingleStepSafety, retainDraftSteps, retainConflictingAmountChoices, R6_DRAFT_STEPS_SOURCE_URL, R6_SINGLE_STEP_SAFETY_SOURCE_URL } from "./r6-editable-metadata";
 /**
@@ -2263,6 +2263,13 @@ export function courseMetadataToWire(
   delete out.renderedInstruction;
   assign(out, "repeatCycle", quantityForR6(course.cycleInterval));
   const displaced = setCourseCycleCount(out, course.cycleCount);
+  if (course.cycleCountUnresolved && course.cycleCount === undefined && getCourseCycleCount(out) === undefined)
+    out.modifierExtension = [...(out.modifierExtension ?? []), {
+      url: COURSE_CYCLE_COUNT_EXTENSION_URL,
+      _valueInteger: { extension: [{
+        url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+      }] },
+    }];
   if (displaced) out.extension = [...((out.extension as FhirExtension[] | undefined) ?? []),
     { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: displaced }];
   const raw = course.provenance?.data as Partial<FhirR6DosageInstruction> | undefined;

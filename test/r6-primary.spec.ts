@@ -1,3 +1,4 @@
+import type { CanonicalCourse } from "../src/canonical/course";
 import { parseAdditionalInstructions } from "../src/advice";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL, parseBodySiteSpatialRelationExtension, buildBodySiteSpatialRelationExtension } from "../src/body-site-spatial";
 import { encodeR6SourceMetadata, decodeR6SourceMetadata } from "../src/dosage-course";
@@ -12,12 +13,12 @@ import conditionLogicProfile from "../fhir/r6/medication-r6-condition-logic.json
 import r6SnapshotContract from "../fhir/r6/official-snapshot1-20261113-contract.json";
 import {
   parseSig, parseSigAsync, fromFhir, fromFhirDosage, formatSig, formatSigBatch, formatParseBatch,
-  importCanonicalCourse, formatCanonicalCourse,
+  importCanonicalCourse, projectCanonicalCourse, formatCanonicalCourse,
   nextDueDoses, calculateTotalUnits, getEmaQuantityComparator,
   EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getBodySiteText, buildBodySiteAdministrationTargetCountExtension, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
-  type FormatOptions, type FhirR6Extension, type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
+  type FormatOptions, type FhirR6DoseLimit, type FhirR6Extension, type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
   EventTiming, FhirPeriodUnit, RouteCode, AdviceRelation, AdviceArgumentRole, AdviceForce, AdvicePolarity, type CanonicalInstructionGraph, parseInstructionActions, cloneBodySiteSpatialRelation
 } from "../src/index";
 import {
@@ -9233,5 +9234,85 @@ describe("typed graph warnings without synthesized wire advice", () => {
       });
     }
     expect({ row, r6 }).toEqual(before);
+  });
+});
+
+
+describe("current FHIR header and annotation ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([false, true])("preserves an explicitly unknown native course count (unknown=%s)", unknown => {
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 28, unit: "d" },
+      cycleCountUnresolved: unknown ? true : undefined, stages: [{
+        end: { anchor: "treatment-start", displacement: { value: 7, unit: "d" } },
+        administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+          schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: ["08:00:00"] } } }],
+      }] };
+    const before = fresh(course), projected = projectCanonicalCourse(course);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 2 };
+    for (const input of [course, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      const imported = importCanonicalCourse(input);
+      expect(imported.cycleCount).toBeUndefined();
+      expect(imported.cycleCountUnresolved).toBe(unknown ? true : undefined);
+      if (unknown) {
+        expect(() => nextDueDoses(input, query)).toThrow(expect.objectContaining({ code: "course-cycle-count-unresolved" }));
+        expect(() => calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: "d" }))
+          .toThrow(expect.objectContaining({ code: "course-cycle-count-unresolved" }));
+      } else {
+        expect(nextDueDoses(input, query)).toEqual(["2026-12-01T08:00:00+00:00", "2026-12-02T08:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(3);
+      }
+    }
+    const count = projected.fhirNext.modifierExtension?.find(item => item.url === COURSE_CYCLE_COUNT_EXTENSION_URL);
+    if (unknown) expect(count?._valueInteger?.extension).toContainEqual({
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+    });
+    else expect(count).toBeUndefined();
+    expect(course).toEqual(before);
+  });
+
+  it.each(["extension", "primitive"] as const)("projects a calibration Quantity inside a CodeableReference concept (%s)", location => {
+    const calibration: FhirR6Extension = { url: "urn:clinic:calibration", valueQuantity: {
+      value: 5, unit: "mL", system: "http://unitsofmeasure.org", code: "mL", comparator: "~",
+      extension: [{ url: "urn:clinic:calibration-note", valueString: "retain" }],
+    } };
+    const concept = { id: "pump-kind", text: "Infusion pump", coding: [{ system: "urn:clinic:devices", code: "pump" }],
+      ...(location === "extension" ? { extension: [calibration] } : { _text: { id: "pump-label", extension: [calibration] } }) };
+    const device = { id: "device-owner", concept,
+      reference: { reference: "Device/pump-1", display: "Clinic pump", identifier: { system: "urn:clinic:device-id", value: "pump-1" } },
+      extension: [{ url: "urn:clinic:device-note", valueString: "keep original device metadata" }],
+    };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [{ doseQuantity: {
+      value: 1, unit: "mL", system: "http://unitsofmeasure.org", code: "mL",
+      extension: [{ url: "urn:clinic:device", valueCodeableReference: device }],
+    } }] }] }] };
+    const before = fresh(input), rows = fresh(toFhirR5Dosages(input));
+    const projected = rows[0].doseAndRate![0].doseQuantity!.extension![0].valueCodeableReference!;
+    const annotation = (location === "extension" ? projected.concept!.extension : projected.concept!._text!.extension)![0];
+    expect(annotation.valueQuantity!.comparator).toBeUndefined();
+    expect(getEmaQuantityComparator(annotation.valueQuantity)).toBe("~");
+    expect(annotation.valueQuantity).toMatchObject({ value: 5, unit: "mL", code: "mL" });
+    expect(projected.reference).toEqual(device.reference);
+    expect(projected.extension).toEqual(device.extension);
+    expect(projected.id).toBe(device.id);
+    const returned = toDosageDetails(rows).step[0].component[0].doseAndRate![0].doseQuantity!.extension![0].valueCodeableReference;
+    expect(returned).toEqual(device);
+    expect(input).toEqual(before);
+  });
+
+  it("retains primitive annotations on a current period dose limit", () => {
+    const limit: FhirR6DoseLimit = { scope: "period", _scope: { id: "period-scope" },
+      valueQuantity: { value: 2, unit: "tab" }, period: { value: 1, unit: "d", code: "d" },
+      text: "Daily maximum", _text: { extension: [{ url: "http://hl7.org/fhir/StructureDefinition/translation", extension: [
+        { url: "lang", valueCode: "th" }, { url: "content", valueString: "ขนาดยาสูงสุดต่อวัน" },
+      ] }] },
+    };
+    const input: FhirR6DosageInstruction = { safety: { doseLimit: [limit] }, step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } },
+    }] }] };
+    const before = fresh(input);
+    expect(courseToR6(importCanonicalCourse(input)).safety?.doseLimit?.[0]).toEqual(limit);
+    expect(toDosageDetails(fresh(toFhirR5Dosages(input))).safety?.doseLimit?.[0]).toEqual(limit);
+    expect(input).toEqual(before);
   });
 });

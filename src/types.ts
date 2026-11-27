@@ -709,8 +709,10 @@ export type FhirR6DosageCondition = FhirR6BackboneElement & {
 /** FHIR R6 DosageSafety.doseLimit.value[x] is a required choice. */
 export type FhirR6DoseLimit = FhirR6Element & {
   scope: "dosage" | "period" | "administration" | "lifetime";
+  _scope?: FhirR6PrimitiveElement;
   period?: FhirR6Quantity;
   text?: string;
+  _text?: FhirR6PrimitiveElement;
 } & (
   | { valueQuantity: FhirR6Quantity; valueInteger?: never; _valueInteger?: never; valueExpression?: never }
   | { valueInteger: number; _valueInteger?: FhirR6PrimitiveElement; valueQuantity?: never; valueExpression?: never }
