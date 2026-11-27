@@ -3105,15 +3105,19 @@ describe("quantified withholding target ownership", () => {
           expect(inheritedGraph?.relations).toContainEqual(expect.objectContaining({
             kind: "if", toActionIndex: 0, text: "if dizzy,"
           }));
+          // The selected quantity owns the noun once; no duplicate opaque Object.
+          expect(inheritedGraph?.actions[0].args).toEqual([expect.objectContaining({
+            role: "amount", quantity: { value: 5, unit: "mL" }
+          })]);
           expect(inheritedGraph?.primaryOwnership?.administrationActionIndex).toBeUndefined();
         }
         const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
-        expect(thai.match(/ถ้าเวียนศีรษะห้ามรับประทาน5 มิลลิลิตร/gu)).toHaveLength(2);
+        expect(thai.match(/ถ้าเวียนศีรษะห้ามรับประทาน 5 มิลลิลิตร/gu)).toHaveLength(2);
         expect(thai).not.toContain("ห้ามรับประทาน 5 mL และ 5 mL");
         const first = { kind: "course" as const, stages: [{ administrations: [members[0]] }] };
         for (const locale of ["en", "th"]) for (const realizationMode of ["roundtrip", "normalized"] as const) {
           const single = formatSig(first, "long", { locale, realizationMode });
-          expect(single).toContain(locale === "en" ? "If dizzy, do not take 5 mL" : "ถ้าเวียนศีรษะห้ามรับประทาน5 มิลลิลิตร");
+          expect(single).toContain(locale === "en" ? "If dizzy, do not take 5 mL" : "ถ้าเวียนศีรษะห้ามรับประทาน 5 มิลลิลิตร");
           expect(single).not.toMatch(/10 (?:mL|มิลลิลิตร)/u);
         }
       }
@@ -3141,7 +3145,7 @@ describe("quantified withholding target ownership", () => {
       const first = { kind: "course" as const, stages: [{ administrations: [members[0]] }] };
       for (const locale of ["en", "th"]) for (const realizationMode of ["roundtrip", "normalized"] as const) {
         const rendered = formatSig(first, "long", { locale, realizationMode });
-        expect(rendered).toContain(locale === "en" ? "If dizzy, do not take 5 mL" : "ถ้าเวียนศีรษะห้ามรับประทาน5 มิลลิลิตร");
+        expect(rendered).toContain(locale === "en" ? "If dizzy, do not take 5 mL" : "ถ้าเวียนศีรษะห้ามรับประทาน 5 มิลลิลิตร");
         expect(rendered).not.toMatch(/10 (?:mL|มิลลิลิตร)/u);
       }
     }
