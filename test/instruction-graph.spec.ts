@@ -7653,3 +7653,58 @@ describe("independent instruction sentence boundaries", () => {
     expect(JSON.stringify(parsed)).toBe(parsedBefore);
   });
 });
+
+
+describe("dotted quantity unit continuation", () => {
+  it.each([
+    ["15 mL", 15], ["15 mL.", 15], ["15ml.", 15], ["1.5 mL.", 1.5],
+    ["15 มล.", 15], ["15มล.", 15], ["15 มิลลิลิตร", 15]
+  ] as const)("keeps the rinse amount and duration together: %s", (amount, value) => {
+    const source = `Rinse mouth with ${amount} for 30 seconds then spit.`;
+    const parsed = parsePublicSig(source);
+    const before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const actions = members[0].syntax?.instructionGraph?.actions;
+      expect(actions?.map(action => action.predicate.lemma)).toEqual(["rinse_mouth", "spit"]);
+      expect(actions?.[0].args).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: { value, unit: "mL" } }),
+        expect.objectContaining({ role: AdviceArgumentRole.Duration, quantity: { value: 30, unit: "s" } })
+      ]));
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(english).toContain(`Rinse mouth ${value} mL for 30 seconds`);
+      expect(english.match(/30 seconds/gu)).toHaveLength(1);
+      expect(english.match(/spit out/gu)).toHaveLength(1);
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain("30 วินาที");
+      expect(thai.match(/30 วินาที/gu)).toHaveLength(1);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each(["15 mL.", "15 มล.", "15มล."])("keeps independent advice after the unit: %s", amount => {
+    const source = `Rinse mouth with ${amount} Arrange a ride home.`;
+    const parsed = parsePublicSig(source);
+    const before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const graph = members[0].syntax?.instructionGraph;
+      expect(graph?.actions).toHaveLength(1);
+      expect(graph?.actions[0].predicate.lemma).toBe("rinse_mouth");
+      expect(graph?.actions[0].sourceText).not.toContain("Arrange");
+      expect(graph?.actions[0].args.some(argument => argument.text.includes("Arrange"))).toBe(false);
+      expect(graph?.opaqueSpans).toContainEqual(expect.objectContaining({ text: "Arrange a ride home" }));
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(english.match(/Arrange a ride home/gu)).toHaveLength(1);
+      expect(english).not.toMatch(/mL arrange/u);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+});
