@@ -401,7 +401,9 @@ function instructionRefines(rich: HpsgInstructionFeature, weak: HpsgInstructionF
   for (const frame of weak.frames) {
     let overlapping: AdviceFrame | undefined;
     for (const candidate of rich.frames) {
-      if (candidate.span.end <= frame.span.start || frame.span.end <= candidate.span.start) continue;
+      const nested = candidate.span.start <= frame.span.start && frame.span.end <= candidate.span.end ||
+        frame.span.start <= candidate.span.start && candidate.span.end <= frame.span.end;
+      if (!nested) continue;
       if (overlapping) return false;
       overlapping = candidate;
     }

@@ -1511,8 +1511,17 @@ function splitSequenceSegments(sourceText: string, baseRange: TextRange): Advice
   }
   const segments: AdviceSegment[] = [];
   let segmentStart = 0;
+  let leading = true;
+  let trimmedPrefix = false;
   for (const token of tokens) {
-    if (!SEQUENCE_MARKERS.has(normalizeAdditionalInstructionKey(token.original))) {
+    const word = normalizeAdditionalInstructionKey(token.original);
+    if (leading && LEADING_NOISE_WORDS.has(word)) {
+      segmentStart = token.sourceEnd;
+      trimmedPrefix = true;
+      continue;
+    }
+    leading = false;
+    if (!SEQUENCE_MARKERS.has(word)) {
       continue;
     }
     const trimmed = trimSegment(sourceText, segmentStart, token.sourceStart);
@@ -1526,6 +1535,7 @@ function splitSequenceSegments(sourceText: string, baseRange: TextRange): Advice
       });
     }
     segmentStart = token.sourceEnd;
+    leading = true;
   }
   const finalTrimmed = trimSegment(sourceText, segmentStart, sourceText.length);
   if (finalTrimmed) {
@@ -1537,7 +1547,7 @@ function splitSequenceSegments(sourceText: string, baseRange: TextRange): Advice
       }
     });
   }
-  if (segments.length > 1) {
+  if (segments.length > 1 || trimmedPrefix) {
     return segments;
   }
   return [

@@ -1,3 +1,4 @@
+import { parseAdditionalInstructions } from "../src/advice";
 import { CALENDAR_WEEKDAY_LEXEMES } from "../src/hpsg/lexical-classes";
 import { siteLexicalRule } from "../src/hpsg/rules/site-rules";
 import { AdviceArgumentRole, AdviceForce, AdviceModality, AdvicePolarity, AdviceRelation, AdviceFrame, EventTiming, FhirDayOfWeek, RouteCode } from "../src/types";
@@ -4307,13 +4308,12 @@ describe("selected instruction refinement at HPSG unification", () => {
     const rich = parseClauseSign(source)!.synsem.valence.instructions![0];
     const action = rich.frames![1];
     const amount = action.args.find(arg => arg.role === AdviceArgumentRole.Amount)!;
-    const weak: HpsgInstructionFeature = { text: "Do not take 10 ml", frames: [{
-      force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
-      predicate: { lemma: "take", semanticClass: "administration" },
-      args: [{ role: AdviceArgumentRole.Object, text: "10 ml", normalized: "10 ml" }],
-      span: { start: action.span.start - 4, end: amount.span!.end },
-      sourceText: "and do not take 10 mL"
-    }] };
+    const weak = parseAdditionalInstructions("and do not take 10 mL", {
+      start: action.span.start - 4, end: amount.span!.end
+    })[0];
+    expect(weak.frames![0].span).toEqual({ start: action.span.start, end: amount.span!.end });
+    expect(source.slice(weak.frames![0].span.start, weak.frames![0].span.end))
+      .toBe(weak.frames![0].sourceText);
     const before = JSON.stringify([rich, weak]);
     expect(merge(rich, weak)).toEqual([rich]);
     expect(merge(weak, rich)).toEqual([rich]);
@@ -4337,6 +4337,9 @@ describe("selected instruction refinement at HPSG unification", () => {
     const nominal = { text: "Do not take milk", frames: [{ ...frame,
       args: [{ role: AdviceArgumentRole.Object, text: "milk", normalized: "milk" }] }] };
     expect(merge(left, nominal)).toEqual([left, nominal]);
+    const crossing = { ...left, frames: [{ ...frame, span: { start: 10, end: 30 } }] };
+    expect(merge(left, crossing)).toEqual([left, crossing]);
+    expect(merge(crossing, left)).toEqual([crossing, left]);
     const typed = { ...frame, args: [
       { role: AdviceArgumentRole.Amount, text: "5 mL", quantity: { value: 5, unit: "mL" } },
       { role: AdviceArgumentRole.Amount, text: "10 mL", quantity: { value: 10, unit: "mL" } }
