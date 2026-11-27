@@ -1454,9 +1454,12 @@ function appendSiteRestrictionsThai(
   for (const restriction of restrictions) {
     const local = realizeBodySiteRestriction(restriction, "th");
     const current = restriction.predicate.text.trim();
-    // The import boundary retires stale inferred predicates to the raw form.
-    // Its current wording still owns display when no Thai realization exists.
-    const retained = local ? undefined : restriction.sourceText.trim() || (current
+    // A selected predicate covering the complete relative-clause payload owns
+    // its current wording. Otherwise keep the complete authored source.
+    const completePredicate = restriction.range && restriction.predicate.range &&
+      restriction.predicate.range.end === restriction.range.end;
+    const source = completePredicate ? "" : restriction.sourceText.trim();
+    const retained = local ? undefined : source || (current
       ? realizeBodySiteRestriction({ ...restriction, sourceText: "" }, "en") : undefined);
     const phrase = local ?? (retained ? ` (${retained})` : undefined);
     if (phrase && !result.includes(phrase)) result += phrase;

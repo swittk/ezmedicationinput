@@ -7195,12 +7195,17 @@ describe("review51 current single-row and locale defaults", () => {
     }
   });
 
-  it("retains an untranslated raw site restriction's complete authored source", () => {
+  it.each([false, true])("retains an untranslated raw site restriction's complete authored source (ranged=%s)", ranged => {
     const sourceText = "where the skin directly beneath the dressing is intact";
+    const predicateText = ranged ? "the skin directly beneath the dressing is intact" : "skin is intact";
     const note: FhirExtension = { url: "urn:clinic:restriction-note", valueString: "Independent annotation" };
     const restriction: FhirExtension = { id: "selected-restriction", url: BODY_SITE_RESTRICTION_EXTENSION_URL, extension: [
       { url: "relation", valueCode: "where" }, { url: "sourceText", valueString: sourceText },
-      { url: "predicateText", valueString: "skin is intact" }, { url: "predicateForm", valueCode: "raw" }, note
+      { url: "predicateText", valueString: predicateText }, { url: "predicateForm", valueCode: "raw" },
+      ...(ranged ? [
+        { url: "sourceStart", valueInteger: 0 }, { url: "sourceEnd", valueInteger: sourceText.length },
+        { url: "predicateStart", valueInteger: 6 }, { url: "predicateEnd", valueInteger: sourceText.length }
+      ] : []), note
     ] };
     const row: FhirDosage = {
       method: { text: "Apply" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
@@ -7215,7 +7220,7 @@ describe("review51 current single-row and locale defaults", () => {
     }
     const noSource = fresh(row);
     noSource.site!.extension![0].extension = restriction.extension!.filter(field => field.url !== "sourceText");
-    expect(formatSig(noSource, "long", { locale: "th" })).toContain("(where skin is intact)");
+    expect(formatSig(noSource, "long", { locale: "th" })).toContain("(where " + predicateText + ")");
   });
 
   it.each([
