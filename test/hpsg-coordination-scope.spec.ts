@@ -3756,3 +3756,62 @@ describe("complete withholding weekday arguments", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 });
+
+
+describe("clinical guard complement ownership", () => {
+  it.each([" ", ", "])("keeps the tolerated activity inside the guard before a quantified consequent: %j", separator => {
+    const source = `Only if you tolerate drinking water${separator}take 1 tablet`;
+    const parsed = parsePublicSig(source);
+    const condition = "you tolerate drinking water";
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject({ kind: "state", name: condition, expected: true, text: condition });
+      expect(members[0].asNeeded).not.toBe(true);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Take 1 tablet orally only if you tolerate drinking water.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("รับประทานครั้งละ 1 เม็ด เฉพาะเมื่อ you tolerate drinking water.");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhir[0].text).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each([false, true])("retains a history frequency and only a separately stated medication maximum: %j", withMaximum => {
+    const condition = "you are using your rescue inhaler no more than twice a day";
+    const source = `Take 1 tablet only if ${condition}${withMaximum ? ", maximum 4 doses per day" : ""}`;
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject({ kind: "state", name: condition, expected: true, text: condition });
+      expect(members[0].asNeeded).not.toBe(true);
+      expect(members[0].limits).toBeUndefined();
+      if (withMaximum) {
+        expect(members[0].schedule?.recurrence?.occurrenceCap).toEqual({ max: 4, period: 1, periodUnit: "d" });
+      } else {
+        expect(members[0].schedule?.recurrence?.occurrenceCap).toBeUndefined();
+        expect(members[0].schedule?.recurrence?.frequency).toBeUndefined();
+      }
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain(`only if ${condition}`);
+      expect(th).toContain(`เฉพาะเมื่อ ${condition}`);
+      if (!withMaximum) expect(en).toBe(`Take 1 tablet orally only if ${condition}.`);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhir[0].text).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+
+});

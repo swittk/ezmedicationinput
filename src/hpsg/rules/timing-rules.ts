@@ -808,7 +808,7 @@ function exactCountCardinalValue(token: Token | undefined): number | undefined {
 export function maximumOccurrenceAt(
   context: Parameters<typeof maximumCountLeadAt>[0], start: number,
   lead = maximumCountLeadAt(context, start)
-): { tokens: Token[]; headStart: number; count: number;
+): { tokens: Token[]; headStart: number; count: number; implicitOccurrence: boolean;
   period?: NonNullable<ReturnType<typeof maximumDosePeriodAt>> } | undefined {
   if (!lead) return undefined;
   const valueIndex = lead.headStart + lead.tokens.length;
@@ -825,18 +825,20 @@ export function maximumOccurrenceAt(
   const countTokens = explicitOccurrence ? [valueToken, occurrenceToken] : [valueToken];
   const period = compact?.period ?? maximumDosePeriodAt(context, valueIndex + countTokens.length);
   return { tokens: [...lead.tokens, ...countTokens, ...(period?.tokens ?? [])],
-    headStart: lead.headStart, count, ...(period ? { period } : {}) };
+    headStart: lead.headStart, count, implicitOccurrence: fusedCount !== undefined && !explicitOccurrence,
+    ...(period ? { period } : {}) };
 }
 
 /** A comparative maximum can remain inside an opaque predicate.
- * Separators, an explicit maximum head or a treatment period establish an
- * independent limit; an observational window alone does not. */
+ * Explicit dose/occurrence periods, separators or maximum heads establish an
+ * independent limit; implicit occurrence frequencies can qualify the predicate. */
 export function isIndependentMaximum(
   context: Parameters<typeof maximumCountLeadAt>[0], start: number,
   maximum: NonNullable<ReturnType<typeof maximumOccurrenceAt> | ReturnType<typeof maximumDosePerPeriodAt>>
 ): boolean {
   return maximum.headStart !== start ||
-    Boolean(maximum.period && maximum.period.unitDenominator !== false) ||
+    Boolean(maximum.period && maximum.period.unitDenominator !== false &&
+      !("implicitOccurrence" in maximum && maximum.implicitOccurrence)) ||
     MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[maximum.headStart]));
 }
 

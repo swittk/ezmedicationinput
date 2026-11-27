@@ -857,11 +857,11 @@ export function parseMedicationGuard(
     end = Math.min(end, lead.end + (comma >= 0 ? comma : tail.length));
     // Registered administration heads and their directive prefixes delimit the
     // consequent. Locale lexing supplies their canonical tokens and source spans.
-    const administrationAt = (index: number) => {
+    const administrationAt = (index: number, requiresDose: boolean) => {
       if (index < 0 || index >= tokens.length) return undefined;
       const match = actionMatchAt(tokens, index, options), action = match?.definition;
       if (!match || !action?.primaryAdministrationHead && !(action?.definesDose && action.administrationMethod)) return undefined;
-      return action.procedural && explicitDoseLexicalEnd(tokens, index + match.length, options) === undefined
+      return (requiresDose || action.procedural) && explicitDoseLexicalEnd(tokens, index + match.length, options) === undefined
         ? undefined : match;
     };
     let delimitedConsequent = false;
@@ -876,13 +876,13 @@ export function parseMedicationGuard(
       }
       // A complete consequent after the delimiter licenses an antecedent
       // containing its own activity, including a quantified ability predicate.
-      delimitedConsequent = Boolean(administrationAt(next));
+      delimitedConsequent = Boolean(administrationAt(next, false));
     }
     for (let index = 0; !delimitedConsequent && index < tokens.length; index++) {
       const token = tokens[index];
       if (token.sourceStart < lead.end) continue;
       if (token.sourceStart >= end) break;
-      const match = administrationAt(index);
+      const match = administrationAt(index, true);
       if (!match) continue;
       let consequentStart = token.sourceStart;
       for (const directive of ACTION_DIRECTIVE_PREFIXES) {
@@ -925,9 +925,9 @@ export function parseMedicationGuard(
       if (!condition) continue;
       // A bare comparative maximum can be the predicate's own complement.
       // An opaque state prefix does not prove an independent treatment limit.
-      // A denominator/registered cadence, separator, explicit maximum head,
-      // or structured predicate supplies independent ownership. An observation
-      // window alone does not separate a maximum from the patient's history.
+      // An implicit occurrence frequency can qualify the patient's history.
+      // Explicit dose/occurrence periods, separators, maximum heads or a
+      // complete structured predicate retain independent limit ownership.
       if (!isIndependentMaximum(lexicalContext, index, maximum) &&
           !predicate?.synsem.cont.guard?.licensesBareIf && !guardHasMeasurement(condition)) continue;
       end = capStart;
