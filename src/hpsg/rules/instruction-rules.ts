@@ -530,9 +530,10 @@ function parseInstructionCandidates(
   return best;
 }
 
-function bodyParsesAsStyleInstruction(
+function styleInstructionEndsBeforeSite(
   context: HpsgClauseContext,
-  bodyTokens: Token[]
+  bodyTokens: Token[],
+  nextToken: Token
 ): boolean {
   const range = rangeFromTokens(bodyTokens);
   const text = range
@@ -542,14 +543,25 @@ function bodyParsesAsStyleInstruction(
     return false;
   }
   const typedConcept = resolveMedicationInstructionConcept(text, context.options);
-  if (typedConcept && (
+  const typedStyle = Boolean(typedConcept && (
     typedConcept.role === AdviceArgumentRole.Amount ||
     typedConcept.role === AdviceArgumentRole.Manner
-  )) return true;
-  const hasStyleLexeme = bodyTokens.some((token) =>
+  ));
+  if (!typedStyle && !bodyTokens.some((token) =>
     SITE_TRAILING_INSTRUCTION_WORDS.has(normalizeTokenLower(token))
+  )) return false;
+  // A style prefix can end this daughter only before a recognized site.
+  // Keep cheap lexical rejection first, then parse only a usable boundary.
+  const lower = normalizeTokenLower(nextToken);
+  const resolvedSite = resolveBodySiteLexeme(
+    nextToken.original,
+    context.options?.siteCodeMap,
+    { bodySiteContext: context.options?.context?.bodySiteContext }
   );
-  return hasStyleLexeme && parseInstructionCandidates(text, range).some((instruction) =>
+  if (!SITE_ANCHORS.has(lower) && !(
+    resolvedSite?.coding || resolvedSite?.definition || resolvedSite?.spatialRelation
+  )) return false;
+  return typedStyle || parseInstructionCandidates(text, range).some((instruction) =>
     Boolean(instruction.coding?.code || instruction.frames?.length)
   );
 }
@@ -1023,18 +1035,7 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           }
         }
       }
-      if (bodyTokens.length && bodyParsesAsStyleInstruction(context, bodyTokens)) {
-        const lower = normalizeTokenLower(token);
-        const resolvedSite = resolveBodySiteLexeme(
-          token.original,
-          context.options?.siteCodeMap,
-          { bodySiteContext: context.options?.context?.bodySiteContext }
-        );
-        const startsSite = SITE_ANCHORS.has(lower) || Boolean(
-          resolvedSite?.coding || resolvedSite?.definition || resolvedSite?.spatialRelation
-        );
-        if (startsSite) break;
-      }
+      if (bodyTokens.length && styleInstructionEndsBeforeSite(context, bodyTokens, token)) break;
       bodyTokens.push(token);
     }
     if (!bodyTokens.length) {
