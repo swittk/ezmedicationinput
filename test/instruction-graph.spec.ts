@@ -7284,3 +7284,47 @@ describe("Mix material and calendar Time ownership", () => {
       expect(formatSig(parsed.fhir, "long", { locale, realizationMode: "normalized" }).match(/if instructed/gu)).toHaveLength(1);
   });
 });
+
+
+describe("object Time relation ownership", () => {
+  it.each([
+    ["Do not take the dose on Mondays", "Mondays", AdviceRelation.On],
+    ["Do not take the dose at 08:00", "08:00", AdviceRelation.On],
+    ["Do not take the dose before 08:00", "08:00", AdviceRelation.Before],
+    ["Do not take the dose after breakfast", "breakfast", AdviceRelation.After],
+    ["Rotate injection sites on Mondays", "Mondays", AdviceRelation.On],
+    ["Rotate injection sites before 08:00", "08:00", AdviceRelation.Before],
+    ["Do not lie down immediately", "immediately", undefined]
+  ] as const)("keeps the licensed temporal governor: %s", (source, timeText, relation) => {
+    const frame = parseInstructionActions(source)[0];
+    const times = frame.args.filter(arg => arg.role === AdviceArgumentRole.Time);
+    expect(frame.sourceText).toBe(source);
+    expect(times).toHaveLength(1);
+    expect(times[0].text).toBe(timeText);
+    expect(times[0].relation).toBe(relation);
+    const reopened = parseInstructionGraphExtension([buildInstructionGraphExtension({ sourceText: source, actions: [frame] })!]);
+    expect(reopened?.actions[0].args.filter(arg => arg.role === AdviceArgumentRole.Time))
+      .toMatchObject(JSON.parse(JSON.stringify(times)));
+  });
+
+  it("keeps the same governor on a configured Time concept", () => {
+    const options: ParseOptions = { instructionConceptMap: { clinicday: {
+      code: "clinic-day", role: AdviceArgumentRole.Time, display: "clinic day",
+      i18n: { th: "วันที่คลินิก" }
+    } } };
+    const source = "Do not take the dose on clinicday";
+    const frame = parseInstructionActions(source, 0, options)[0];
+    expect(frame.sourceText).toBe(source);
+    expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Time)).toEqual([
+      expect.objectContaining({ text: "clinicday", conceptId: "clinic-day", relation: AdviceRelation.On })
+    ]);
+  });
+
+  it("does not admit an opaque non-temporal object tail as Time", () => {
+    const source = "Do not take the dose with damaged packaging";
+    const frame = parseInstructionActions(source)[0];
+    expect(frame.sourceText).toBe(source);
+    expect(frame.args.some(arg => arg.role === AdviceArgumentRole.Time)).toBe(false);
+    expect(frame.args.some(arg => arg.text?.indexOf("damaged packaging") !== -1)).toBe(true);
+  });
+});

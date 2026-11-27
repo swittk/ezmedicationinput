@@ -671,7 +671,7 @@ function timeArgumentsFromParts(
   const bounds = semanticArgumentBounds(parts, member.start, Math.min(member.end, singleEnd));
   const single = timeArgumentFromParts(parts, bounds.start, bounds.endExclusive,
     input, false, options, nominalComplement);
-  return single ? [{ ...single, span: {
+  return single ? [{ ...single, relation, span: {
     start: offset + parts[bounds.start].sourceStart,
     end: offset + parts[bounds.endExclusive - 1].sourceEnd
   } }] : undefined;
@@ -1216,7 +1216,8 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       ? quantifiedEntityArgument(parts, relIndex + 1, relationTargetEnd, input, offset,
           AdviceArgumentRole.Substance, options) : undefined;
     const argument = accompanyingQuantity?.quantity ? accompanyingQuantity : complement;
-    if (argument && accompaniment) argument.relation = relation;
+    if (argument && (accompaniment || argument.role === AdviceArgumentRole.Time &&
+        relationHasGrammarFeature(relation, "timeComplement"))) argument.relation = relation;
     pushArgument(args, argument);
   }
   return { args, semanticEnd };
@@ -1480,7 +1481,7 @@ const OBJECT_TIME_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     objectEnd > c.argumentStart
       ? argumentFromParts(c.parts, c.argumentStart, objectEnd, c.input, AdviceArgumentRole.Object, c.options)
       : undefined,
-    time?.argument
+    timeRelation ? { ...time.argument, relation: c.relation } : time?.argument
   ) };
 };
 
