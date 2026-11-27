@@ -5436,7 +5436,9 @@ describe("round67 reviewed execution boundaries", () => {
     const parsed = parseSig("Instill 1 drop OD QID, then " + successor + "; instill 1 drop OS BID");
     const native = parsed.meta.canonical.course!;
     const old = native.stages[0].administrations.find(member => member.schedule?.recurrence?.frequency === 4)!;
-    expect(old.schedule?.recurrence?.calendarWindow?.end).toBe("2026-12-04");
+    expect(old.schedule?.recurrence?.calendarWindow?.end).toBeUndefined();
+    expect(native.stages[0].administrations.filter(member =>
+      member.phasePredecessors?.includes(old.sourceMember!))).toHaveLength(2);
     const left = native.stages[0].administrations.find(member => member.schedule?.recurrence?.frequency === 2)!;
     expect(left.schedule?.recurrence).toMatchObject({ frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day });
     expect(left.schedule?.recurrence?.calendarWindow).toBeUndefined();
