@@ -828,8 +828,8 @@ const TH_ADAPTER: InstructionActionLocaleAdapter = {
     const classifier = whole && (unit === "tab" || unit === "cap")
       ? INSTRUCTION_QUANTITY_UNIT_LABELS.get(unit)?.locales?.th?.one
       : undefined;
-    const patch = input.frame.predicate.lemma === "apply" && input.frame.args.some(arg =>
-      (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) && arg.conceptId === "patch");
+    const patch = input.frame.predicate.lemma === "apply" && (unit === "patch" || input.frame.args.some(arg =>
+      (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) && arg.conceptId === "patch"));
     const patchLabel = patch && input.label === getMedicationInstructionAction("apply")?.i18n?.th
       ? getMedicationInstructionAction("apply_patch")?.i18n?.th : undefined;
     const realized = classifier || patchLabel

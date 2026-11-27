@@ -491,3 +491,41 @@ describe("independent graph locale annotations", () => {
   });
 });
 }
+
+
+describe("review814 quantified patch wording across conditional orders", () => {
+  it.each([
+    { source: "If skin irritation occurs, do not apply more than 1 patch before 08:00",
+      value: 1, comparator: ">" as const, relation: AdviceRelation.Before, condition: "If skin irritation occurs,",
+      thai: "If skin irritation occursห้ามแปะ มากกว่า 1 patchก่อน08:00:00." },
+    { source: "Do not apply more than 1 patch before 08:00 if skin irritation occurs",
+      value: 1, comparator: ">" as const, relation: AdviceRelation.Before, condition: "if skin irritation occurs",
+      thai: "ห้ามแปะ มากกว่า 1 patchก่อน08:00:00 if skin irritation occurs." },
+    { source: "If dizzy, do not apply 2 patches at 08:00",
+      value: 2, comparator: undefined, relation: AdviceRelation.On, condition: "If dizzy,",
+      thai: "ถ้าเวียนศีรษะห้ามแปะ 2 patch เวลา 08:00:00." },
+    { source: "Do not apply 2 patches at 08:00 if dizzy",
+      value: 2, comparator: undefined, relation: AdviceRelation.On, condition: "if dizzy",
+      thai: "ห้ามแปะ 2 patch เวลา 08:00:00ถ้าเวียนศีรษะ." }
+  ])("keeps the selected patch amount, clock and condition in $source", fixture => {
+    const parsed = parsePublicSig(fixture.source), before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const inputBefore = JSON.stringify(input);
+      const graph = importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!;
+      expect(graph.actions).toHaveLength(1);
+      expect(graph.actions[0]).toMatchObject({ predicate: { lemma: "apply" }, polarity: "negate" });
+      expect(graph.actions[0].args.some(argument => argument.role === AdviceArgumentRole.Object)).toBe(false);
+      expect(graph.actions[0].args.find(argument => argument.role === AdviceArgumentRole.Amount)?.quantity)
+        .toEqual({ value: fixture.value, unit: "patch", ...(fixture.comparator ? { comparator: fixture.comparator } : {}) });
+      expect(graph.actions[0].args.find(argument => argument.role === AdviceArgumentRole.Time))
+        .toMatchObject({ normalized: "08:00:00", relation: fixture.relation });
+      expect(graph.relations).toEqual([expect.objectContaining({ kind: AdviceRelation.If, toActionIndex: 0, text: fixture.condition })]);
+      expect(graph.sourceText).toBe(fixture.source);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(fixture.source + ".");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(fixture.thai);
+      expect(JSON.stringify(input)).toBe(inputBefore);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(fixture.source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+});
