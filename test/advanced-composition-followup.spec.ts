@@ -1312,7 +1312,7 @@ describe("selected negative directive row materialization", () => {
       source: "Should not take with grapefruit",
       texts: ["Should not take with grapefruit"],
       actions: [["take", "negate", AdviceModality.Should]],
-      thai: ["ไม่ควร"],
+      thai: ["ไม่ควรรับประทานร่วมกับgrapefruit"],
       duration: undefined
     },
     {
@@ -5091,7 +5091,7 @@ describe("round39 metric totals and live event identity", () => {
       const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
       expect(thai.split(/;\s*/u).filter(fragment => fragment.startsWith("ขนาดยา"))).toEqual([
         "ขนาดยาที่สั่ง: แต่ละจุด 1 ถึง 2 หยด",
-        "ขนาดยาต่อครั้ง: ครั้งละ 1 มิลลิลิตร"
+        "ขนาดยาต่อครั้ง: ครั้งละ 1 มิลลิลิตร."
       ]);
     }
   });

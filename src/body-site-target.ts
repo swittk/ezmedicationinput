@@ -47,6 +47,7 @@ const BODY_SITE_REFINEMENTS: Readonly<Record<string, { broader: string; laterali
   "244506005": { broader: "1797002" }, // Anterior nares -> naris.
   "1797002": { broader: "181195007" }, // Naris -> entire nose.
   "68426009": { broader: "181195007" }, // Nasal septum -> entire nose.
+  "731075006": { broader: "56459004" }, // Entire sole of foot -> foot.
 };
 
 function refinesBodySite(code: string, broader: string): boolean {

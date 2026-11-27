@@ -25,6 +25,7 @@ import { doseUnitUsesTargetScope, formatCanonicalClause, formatNativeCanonicalCl
 import { resolveBodySitePhrase } from "../body-site-grammar";
 import {
   resolveSigLocalization,
+  hasClauseFormatOverride,
   resolveCourseLanguage,
   appendClinicalConditionText,
   type SigLocalization,
@@ -388,8 +389,10 @@ export function formatCourseChoices<T>(
   const slots: Array<RenderedMember | { group: string }> = [];
   const groups = new Map<string, Map<string, RenderedMember[]>>();
   let displayedSharedGroups: Set<string> | undefined;
+  let hasSharedGroups = false;
   for (const member of members) {
     const sharedGroup = sharedGroupOf?.(member), choice = choiceOf(member);
+    if (sharedGroup !== undefined) hasSharedGroups = true;
     let branch: RenderedMember[] | undefined;
     if (choice) {
       let branches = groups.get(choice.groupId);
@@ -420,7 +423,7 @@ export function formatCourseChoices<T>(
     let body = "";
     const labels = courseLabels?.get(slot.group);
     for (const [branchId, branch] of groups.get(slot.group)!) {
-      const text = (displayedSharedGroups ? groupMembers(branch) : branch.map(item => item.text)).join(separator);
+      const text = (hasSharedGroups ? groupMembers(branch) : branch.map(item => item.text)).join(separator);
       if (!text) continue;
       if (body) body += labels ? separator : words.anySeparator;
       const grouped = branch.length > 1 ? "(" + text + ")" : text;
@@ -428,7 +431,7 @@ export function formatCourseChoices<T>(
     }
     if (body) output.push({ text: (labels ? "" : words.choicePrefix) + body + "." });
   }
-  return joinGeneratedClauses(displayedSharedGroups ? groupMembers(output) : output.map(item => item.text), separator);
+  return joinGeneratedClauses(hasSharedGroups ? groupMembers(output) : output.map(item => item.text), separator);
 }
 type PreviewChoiceGroups = Map<string, { branches: Set<string>; stages: Set<number> }>;
 /** Branch labels are stable across stage headings. The choice is made once
@@ -766,31 +769,6 @@ function formatCanonicalBaseNative(
     : clause;
   const authoredPrimary = partialAuthoredDirections && sourceOwnsPrimary && (!deferredDirections || hasPrimaryQualifiers)
     ? a.text : undefined;
-  const primaryDirections = deferredDirections?.current ? deferredDirections
-    : authoredPrimary && hasPrimaryQualifiers ? deferredDirections ?? {} : undefined;
-  let rendered = formatNativeCanonicalClause(displayClause, style, env.localization, options,
-    style === "long" ? authoredPrimary : undefined, primaryDirections, sharedCountAlreadyDisplayed);
-  if (authoredQualifiers) {
-    const directions = composeNativePrimaryDirections("", a.text!, a.predicate, words, undefined, clause);
-    rendered = a.additionalInstructions?.length || a.patientInstruction
-      ? directions + " " + rendered : directions;
-  }
-  if (style !== "long" && !authoredQualifiers)
-    rendered = composeNativePrimaryDirections(rendered, authoredPrimary, a.predicate, words, primaryDirections, clause);
-  // The clause's calendar view needs a complete civil date. Partial FHIR
-  // dateTimes (for example YYYY-MM) remain useful authored information; show
-  // their original values instead of inventing a missing month/day or hiding
-  // them when the native-to-clause projection cannot represent them.
-  const events = a.schedule?.explicitEvents, calendarEvents = clause.schedule?.calendarEvents;
-  if (events?.length && events.length > (calendarEvents?.length ?? 0)) {
-    const represented = new Set<string | undefined>();
-    for (const event of calendarEvents ?? []) represented.add(event.fhirDateTime ?? event.isoDate);
-    const remaining: string[] = [];
-    for (const event of events) if (!represented.has(event)) remaining.push(event);
-    if (remaining.length) rendered = joinGeneratedClauses([rendered, words.calendarEvents(remaining)]);
-  }
-  if (a.limits?.length || a.safety?.ifExceeded)
-    rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);
   const ranges: string[] = [];
   const labelled = (a.amounts?.length ?? 0) > 1 || hasAmountRole(primary?.role);
   // Target count is independent of quantity scope. Labelled discrete amounts
@@ -831,7 +809,35 @@ function formatCanonicalBaseNative(
       }
     }
   }
-  if (ranges.length) rendered = joinGeneratedClauses(rendered ? [rendered, ...ranges] : ranges);
+  let primaryDirections = deferredDirections?.current ? deferredDirections
+    : authoredPrimary && hasPrimaryQualifiers ? deferredDirections ?? {} : undefined;
+  if (ranges.length) primaryDirections = {
+    ...primaryDirections,
+    current: joinGeneratedClauses(primaryDirections?.current ? [primaryDirections.current, ...ranges] : ranges)
+  };
+  let rendered = formatNativeCanonicalClause(displayClause, style, env.localization, options,
+    style === "long" ? authoredPrimary : undefined, primaryDirections, sharedCountAlreadyDisplayed);
+  if (authoredQualifiers) {
+    const directions = composeNativePrimaryDirections("", a.text!, a.predicate, words, undefined, clause);
+    rendered = a.additionalInstructions?.length || a.patientInstruction
+      ? directions + " " + rendered : directions;
+  }
+  if (style !== "long" && !authoredQualifiers)
+    rendered = composeNativePrimaryDirections(rendered, authoredPrimary, a.predicate, words, primaryDirections, clause);
+  // The clause's calendar view needs a complete civil date. Partial FHIR
+  // dateTimes (for example YYYY-MM) remain useful authored information; show
+  // their original values instead of inventing a missing month/day or hiding
+  // them when the native-to-clause projection cannot represent them.
+  const events = a.schedule?.explicitEvents, calendarEvents = clause.schedule?.calendarEvents;
+  if (events?.length && events.length > (calendarEvents?.length ?? 0)) {
+    const represented = new Set<string | undefined>();
+    for (const event of calendarEvents ?? []) represented.add(event.fhirDateTime ?? event.isoDate);
+    const remaining: string[] = [];
+    for (const event of events) if (!represented.has(event)) remaining.push(event);
+    if (remaining.length) rendered = joinGeneratedClauses([rendered, words.calendarEvents(remaining)]);
+  }
+  if (a.limits?.length || a.safety?.ifExceeded)
+    rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);
   // Partial method, route, timing or guard facts cannot replace source-only
   // dose directions. A typed amount or graph retains its established owner;
   // do not infer missing semantics by comparing localized renderings.
@@ -983,6 +989,7 @@ export function formatCanonicalCourse(
       step.administrations,
       (component, sharedCountAlreadyDisplayed) => {
         const clause = compiled?.get(component) ?? clauseForAdministration(component, options);
+        const customFormatter = hasClauseFormatOverride(environment.localization, style);
         const nativeDefault = (style: "short" | "long"): string => {
           const repeat = component.schedule?.recurrence;
           const hasOffsets = repeat?.startOffset !== undefined || repeat?.endOffset !== undefined;
@@ -1192,7 +1199,7 @@ export function formatCanonicalCourse(
             component,
             authored,
             deferredDirections,
-            sharedCountAlreadyDisplayed
+            sharedCountAlreadyDisplayed && !customFormatter
           );
           let body = joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
           if (deferredDirections?.text)

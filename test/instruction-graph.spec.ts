@@ -7965,3 +7965,114 @@ describe("review51 selected instruction facts and native defaults", () => {
     }
   );
 });
+
+
+describe("review814 selected action arguments and occurrence scopes", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const graphViews = (graph: CanonicalInstructionGraph) => {
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension(graph)!] };
+    return [importCanonicalCourse([row]), fresh([row]), fresh(toDosageDetails([row]))] as const;
+  };
+
+  it("keeps an explicitly attached Without activity separate from a Before clock", () => {
+    const frame = parseInstructionActions("Rinse the wound before 08:00")[0];
+    const source = "Rinse the wound before 08:00 without scrubbing";
+    const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en", actions: [{
+      ...frame, sourceText: source, args: [...frame.args, {
+        role: AdviceArgumentRole.Activity, text: "scrubbing", normalized: "scrubbing", relation: AdviceRelation.Without
+      }]
+    }] };
+    for (const input of graphViews(graph)) {
+      const before = JSON.stringify(input);
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toBe("Rinse the wound without scrubbing before 08:00:00.");
+      expect(th).toBe("ล้างแผลโดยไม่ใช้scrubbingก่อน08:00:00.");
+      expect(en.match(/scrubbing/gu)).toHaveLength(1);
+      expect(th.match(/scrubbing/gu)).toHaveLength(1);
+      expect(importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!.actions[0].args)
+        .toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Activity, relation: AdviceRelation.Without }));
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const governed = { ...frame, args: [{ role: AdviceArgumentRole.Activity, text: "scrubbing", normalized: "scrubbing" }] };
+    expect(realizeInstructionAction(governed, "en")).toBe("Rinse before scrubbing");
+  });
+
+  it("retains both material companions of an ordinary Rinse action", () => {
+    const source = "Rinse the wound with saline without soap";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const graph = importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!;
+      expect(graph.actions).toHaveLength(1);
+      expect(graph.actions[0].args.filter(arg => arg.role === AdviceArgumentRole.Substance))
+        .toEqual([expect.objectContaining({ normalized: "saline", relation: AdviceRelation.With }),
+          expect.objectContaining({ normalized: "soap", relation: AdviceRelation.Without })]);
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? "with saline without soap" : "ด้วยsalineโดยไม่ใช้soap");
+        expect(text.match(/saline/gu)).toHaveLength(1);
+        expect(text.match(/soap/gu)).toHaveLength(1);
+      }
+      expect(graph.sourceText).toBe(source);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("keeps a quantified negated object-time action complete in each locale", () => {
+    const action: AdviceFrame = { ...parseInstructionActions("Apply patch in the morning")[0],
+      force: AdviceForce.Instruction, polarity: AdvicePolarity.Negate, span: { start: 0, end: 0 }, sourceText: "",
+      args: [
+        { role: AdviceArgumentRole.Amount, text: "more than 1 patch", quantity: { value: 1, unit: "patch", comparator: ">" } },
+        { role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00", relation: AdviceRelation.Before }
+      ] };
+    for (const input of graphViews({ sourceText: "", sourceLocale: "en", actions: [action] })) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Do not apply patch more than 1 patch before 08:00.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("ห้ามแปะ มากกว่า 1 patchก่อน08:00.");
+      const saved = importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!.actions[0];
+      expect(saved.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity)
+        .toEqual({ value: 1, unit: "patch", comparator: ">" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const amountless = { ...action, args: action.args.filter(arg => arg.role !== AdviceArgumentRole.Amount) };
+    expect(realizeInstructionAction(amountless, "en")).toBe("Do not apply patch before 08:00");
+  });
+
+  it("attaches current graph conditions by exact action identity when source ranges tie", () => {
+    const actions: AdviceFrame[] = ["dressing", "patch"].map(text => ({
+      predicate: { lemma: "remove", semanticClass: "procedure" }, force: AdviceForce.Instruction,
+      polarity: AdvicePolarity.Affirm, args: [{ role: AdviceArgumentRole.Object, text, normalized: text }],
+      span: { start: 0, end: 0 }, sourceText: ""
+    }));
+    const graph: CanonicalInstructionGraph = { sourceText: "", sourceLocale: "en", actions, relations: [
+      { kind: AdviceRelation.If, toActionIndex: 0, text: "if soaked" },
+      { kind: AdviceRelation.If, toActionIndex: 1, text: "if the skin is irritated" }
+    ] };
+    const restored = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+    for (const current of [graph, restored]) {
+      const before = JSON.stringify(current);
+      expect(realizeInstructionAction(current.actions[0], "en", current)).toBe("Remove dressing if soaked");
+      expect(realizeInstructionAction(current.actions[1], "en", current)).toBe("Remove patch if the skin is irritated");
+      expect(realizeInstructionAction(fresh(current.actions[1]), "en", current)).toBe("Remove patch");
+      expect(JSON.stringify(current)).toBe(before);
+    }
+    const unique = { ...graph, actions: [actions[0]], relations: [graph.relations![0]] };
+    expect(realizeInstructionAction(fresh(actions[0]), "en", unique)).toBe("Remove dressing if soaked");
+  });
+
+  it("uses the patch verb only for the stock Apply label and a selected patch object", () => {
+    const patch = parseInstructionActions("Apply the patch in the morning")[0];
+    expect(realizeInstructionAction(patch, "th")).toBe("แปะแผ่นแปะตอนเช้า");
+    expect(realizeInstructionAction({ ...patch, predicate: { ...patch.predicate, i18n: { th: "ติด" } } }, "th"))
+      .toBe("ติดแผ่นแปะตอนเช้า");
+    const cream: AdviceFrame = { ...patch, args: [{ role: AdviceArgumentRole.Object, text: "cream", normalized: "cream", i18n: { th: "ครีม" } }] };
+    expect(realizeInstructionAction(cream, "th")).toBe("ทาครีม");
+    const cover = parseInstructionActions("Cover with sterile gauze")[0];
+    const translated = { ...cover, args: cover.args.map(arg => arg.role === AdviceArgumentRole.Material
+      ? { ...arg, i18n: { th: "ผ้าก๊อซปลอดเชื้อ" } } : arg) };
+    expect(realizeInstructionAction(translated, "th")).toBe("ปิดคลุมด้วยผ้าก๊อซปลอดเชื้อ");
+  });
+});

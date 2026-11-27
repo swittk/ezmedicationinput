@@ -315,12 +315,22 @@ export function resolveSigLocalization(
   return result;
 }
 
+// Stock language packs delegate the whole clause to the native renderer.
+// An actual override must receive complete member defaults independently of
+// how earlier callbacks chose to present their shared allowance.
+function defaultClauseFormatter({ defaultText }: SigFormatContext): string { return defaultText; }
+
+export function hasClauseFormatOverride(localization: SigLocalization | undefined, style: "short" | "long"): boolean {
+  const formatter = style === "short" ? localization?.formatShort : localization?.formatLong;
+  return formatter !== undefined && formatter !== defaultClauseFormatter;
+}
+
 registerSigLocalization({
   locale: "en",
   course: ENGLISH_COURSE,
   formatDose: formatDoseEnglish,
-  formatShort: ({ defaultText }) => defaultText,
-  formatLong: ({ defaultText }) => defaultText
+  formatShort: defaultClauseFormatter,
+  formatLong: defaultClauseFormatter
 });
 REGISTERED_LOCALIZATIONS.get("en")!.native = ENGLISH_NATIVE_RENDERING;
 (REGISTERED_LOCALIZATIONS.get("en")!.localization as NativeLocalization)[NATIVE_CLAUSE_RENDERING] = ENGLISH_NATIVE_RENDERING;
@@ -361,8 +371,8 @@ function createThaiLocalization(): SigLocalization {
         : style === "short" ? formatDoseThaiShort(dose) : formatDoseThaiLong(dose);
       return amount && scope ? (scope.site?.perTargetI18n?.th ?? "แต่ละจุด") + " " + amount : amount;
     },
-    formatShort: ({ defaultText }) => defaultText,
-    formatLong: ({ defaultText }) => defaultText
+    formatShort: defaultClauseFormatter,
+    formatLong: defaultClauseFormatter
   };
 }
 
@@ -2308,10 +2318,10 @@ function formatLongThai(
     const parts = [formatPatientInstructionSentence(preGraphInstruction, false),
       formatPatientInstructionSentence(graphInstruction, false), fallbackPatientInstruction]
       .filter((value): value is string => Boolean(value));
-    if (authoredPrimary || clause.clinicalAdjuncts?.condition || clause.clinicalAdjuncts?.excludedDates?.length ||
+    if (deferredDirections?.current || authoredPrimary || clause.clinicalAdjuncts?.condition || clause.clinicalAdjuncts?.excludedDates?.length ||
         clause.clinicalAdjuncts?.excludedWeekdays?.length)
-      parts.unshift(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary,
-        clause.clinicalAdjuncts?.condition, words, deferredDirections, clause));
+      parts.unshift(formatPatientInstructionSentence(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary,
+        clause.clinicalAdjuncts?.condition, words, deferredDirections, clause))!);
     return parts.join(" ").trim() || `${verb}.`;
   }
 
@@ -2412,18 +2422,24 @@ function formatAdditionalInstructionThai(
 ): string | undefined {
   if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) return `${verb ? `${verb}ช้าๆ` : "ช้าๆ"}.`;
   if (isEmptyStomachInstruction(instruction)) return "ขณะท้องว่าง.";
-    let text = instruction.i18n?.th ??
+  const definition = !instruction.i18n?.th && instruction.coding?.code ? findAdditionalInstructionDefinitionByCoding(
+    instruction.coding.system ?? "http://snomed.info/sct", instruction.coding.code
+  ) : undefined;
+  // A stock code label translates its stock wording. Independently authored
+  // wording may contain more instructions than that label or its template;
+  // retain it whole unless the caller supplied its Thai realization.
+  const wording = definition ? instruction.text?.trim().replace(/[.!?]+$/u, "").toLowerCase() : undefined;
+  const authoredWording = wording && definition &&
+    wording !== definition.text?.trim().replace(/[.!?]+$/u, "").toLowerCase() &&
+    wording !== definition.coding?.display?.trim().replace(/[.!?]+$/u, "").toLowerCase();
+  let text = instruction.i18n?.th ?? (authoredWording ? instruction.text : undefined) ??
     (instruction.frames?.length ? realizeAdviceFramesThai(instruction.frames) : undefined) ??
     (instruction.text ? THAI_ADMINISTRATION_WINDOW_TRANSLATIONS.get(instruction.text.toLowerCase().trim()) : undefined) ??
     (instruction.text ? translateCoordinatedActivityWindowThai(instruction.text) : undefined) ??
     (instruction.text ? reconstructAdditionalInstructionThai(instruction.text) : undefined) ??
     instruction.text ?? instruction.coding?.display;
-  if (!instruction.i18n?.th && instruction.coding?.code) {
+  if (!instruction.i18n?.th && !authoredWording && instruction.coding?.code) {
     const concept = getMedicationInstructionConcept(instruction.coding.code, instruction.coding.system);
-    const definition = findAdditionalInstructionDefinitionByCoding(
-      instruction.coding.system ?? "http://snomed.info/sct",
-      instruction.coding.code
-    );
     text = concept?.i18n?.th ?? definition?.i18n?.th ?? text;
   }
   const trimmed = text?.trim();

@@ -1,3 +1,4 @@
+import { formatSig, importCanonicalCourse, projectCanonicalCourse, toDosageDetails, toFhirR5Dosages, type FhirDosage } from "../src/index";
 import { describe, expect, it } from "vitest";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
 import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir } from "../src/fhir";
@@ -573,4 +574,39 @@ describe("FHIR parser-state import", () => {
     expect(state.asNeededReasonTriggerPhase).toBe("onset");
   });
 
+});
+
+
+describe("review814 authored coded advice in Thai", () => {
+  it("keeps the complete authored prohibition beyond a narrower code label", () => {
+    const source = "Swallow whole; do not crush or chew";
+    const row: FhirDosage = { additionalInstruction: [{ text: source,
+      coding: [{ system: "http://snomed.info/sct", code: "418693002", display: "Swallowed whole, not chewed (qualifier value)" }],
+      extension: [{ url: "urn:clinic:advice-note", valueString: "whole source required" }]
+    }] };
+    const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+    for (const input of [importCanonicalCourse([row]), JSON.parse(JSON.stringify([row])), JSON.parse(JSON.stringify(r6))]) {
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(source + ".");
+      const advice = projectCanonicalCourse(importCanonicalCourse(input)).fhir[0].additionalInstruction![0];
+      expect(advice.text).toBe(source);
+      expect(advice.coding).toEqual(row.additionalInstruction![0].coding);
+      expect(advice.extension).toContainEqual(row.additionalInstruction![0].extension![0]);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it("retains code-only Thai wording and an independently supplied complete Thai translation", () => {
+    const coding = [{ system: "http://snomed.info/sct", code: "418693002" }];
+    const stock: FhirDosage = { additionalInstruction: [{ coding }] };
+    const selected: FhirDosage = { additionalInstruction: [{ coding,
+      text: "Swallow whole; do not crush or chew",
+      _text: translationPrimitive("th", "กลืนทั้งเม็ด ห้ามบดหรือเคี้ยว")
+    }] };
+    for (const [row, expected] of [[stock, "กลืนทั้งเม็ด; ห้ามเคี้ยว."], [selected, "กลืนทั้งเม็ด ห้ามบดหรือเคี้ยว."]] as const) {
+      const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+      for (const input of [row, JSON.parse(JSON.stringify(r6)), JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))])
+        expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(expected);
+      expect(JSON.stringify(row)).toBe(before);
+    }
+  });
 });

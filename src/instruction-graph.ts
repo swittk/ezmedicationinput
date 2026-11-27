@@ -1875,12 +1875,12 @@ function buildActionFrame(
     (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
       !relationHasSemanticClass(relation, "temporal");
   let amountEnd = headOwnsAmount && relIndex >= argumentStart ? Math.min(relIndex, semanticEnd) : semanticEnd;
-  let laterAccompaniment: AdviceArgument | undefined;
-  // A leading temporal adjunct does not transfer ownership of a later
-  // material/destination quantity to the head. Follow the same typed valence
-  // through later relations while retaining post-temporal head amounts.
-  if (!headOwnsAmount && (definition.acceptsAmount || nominalAccompanimentValence) && relIndex >= argumentStart &&
-      (relationTimes || relationHasSemanticClass(relation, "temporal"))) {
+  let laterAccompaniments: AdviceArgument[] | undefined;
+  // Retain each selected nominal accompaniment, including WITH ... WITHOUT
+  // ... . A leading Time does not transfer a later material quantity to the
+  // head; every complement keeps its own relation and source extent.
+  if (relIndex >= argumentStart && (nominalAccompanimentValence ||
+      !headOwnsAmount && definition.acceptsAmount && (relationTimes || relationHasSemanticClass(relation, "temporal")))) {
     let index = nextRelationIndex, current = nextRelation;
     while (index >= 0 && index < semanticEnd) {
       const following = relationIndex(parts, index + 1, semanticEnd);
@@ -1894,14 +1894,17 @@ function buildActionFrame(
         : (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
           !relationHasSemanticClass(current, "temporal"));
       if (ownsQuantity) {
-        amountEnd = index;
-        if (nominal) laterAccompaniment = nominal;
+        amountEnd = Math.min(amountEnd, index);
+        if (nominal) (laterAccompaniments ??= []).push(nominal);
         else if (directObjectValence) {
-          laterAccompaniment = quantifiedEntityArgument(parts, index + 1,
+          const companion = quantifiedEntityArgument(parts, index + 1,
             complementEnd, input, offset, AdviceArgumentRole.Substance, options);
-          if (laterAccompaniment) laterAccompaniment.relation = current;
+          if (companion) {
+            companion.relation = current;
+            (laterAccompaniments ??= []).push(companion);
+          }
         }
-        break;
+        if (!nominalAccompanimentValence) break;
       }
       index = following;
       current = index >= 0 ? actionArgumentRelation(key(parts[index]),
@@ -1924,7 +1927,7 @@ function buildActionFrame(
     separableParticleIndex: actionMatch.separableParticleIndex
   });
   const args = parsed.args;
-  pushArgument(args, laterAccompaniment);
+  if (laterAccompaniments) for (const companion of laterAccompaniments) pushArgument(args, companion);
   // Orthogonal temporal-event daughters are arguments of the SAME composed
   // action, not a second medication administration. A material WITH/IN
   // relation remains the head's relation while BEFORE/AFTER is owned by the
@@ -4522,7 +4525,8 @@ function realizeAction(
     : undefined;
   const realized = negated ? adapter.renderNegated(input, genericText ??
       (realizerKey === "mix-substance" || realizerKey === "amount-duration" || realizerKey === "site-relation" ||
-        realizerKey === "object-amount-material" || realizerKey === "relation-duration" && firstArguments[AdviceArgumentRole.Amount]?.quantity
+        realizerKey === "object-amount-material" ||
+        (realizerKey === "relation-duration" || realizerKey === "object-time") && firstArguments[AdviceArgumentRole.Amount]?.quantity
           ? adapter.render(realizerKey, input) : undefined))
     : genericText ?? adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
@@ -4569,8 +4573,19 @@ export function realizeInstructionAction(
 ): string {
   const text = realizeAction(frame, locale);
   if (!graph?.relations?.length) return text;
-  const actionIndex = graph.actions.findIndex(action => action.span.start === frame.span.start &&
-    action.span.end === frame.span.end && action.predicate.lemma === frame.predicate.lemma);
+  let actionIndex = graph.actions.indexOf(frame);
+  if (actionIndex < 0) {
+    for (let index = 0; index < graph.actions.length; index++) {
+      const action = graph.actions[index];
+      if (action.span.start !== frame.span.start || action.span.end !== frame.span.end ||
+          action.predicate.lemma !== frame.predicate.lemma) continue;
+      // A detached occurrence can inherit scope only when its correspondence
+      // is unique; equal or absent source ranges do not identify a graph node.
+      if (actionIndex >= 0) return text;
+      actionIndex = index;
+    }
+    if (actionIndex < 0) return text;
+  }
   const conditions: InstructionGraphPrimaryCondition[] = [];
   for (const relation of graph.relations) {
     if (relation.fromActionIndex !== undefined || relation.toActionIndex !== actionIndex) continue;

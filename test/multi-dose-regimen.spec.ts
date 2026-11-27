@@ -1,3 +1,4 @@
+import type { SigFormatContext } from "../src/i18n";
 import { parseAdditionalInstructions } from "../src/advice";
 import { getTimingClocks } from "../src/fhir";
 import { describe, expect, it } from "vitest";
@@ -4552,6 +4553,59 @@ describe("shared administration totals in current previews", () => {
       expect(calls).toBe(1);
     }
     expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(["short", "long"] as const)("gives every actual %s override complete shared member defaults", style => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [member("08:00:00", 4), member("20:00:00", 4)] }] };
+    for (const input of views(course)) for (const locale of ["en", "th"] as const) {
+      const before = JSON.stringify(input), calls: string[] = [];
+      let otherCalls = 0;
+      const override = (context: SigFormatContext): string => {
+        calls.push(context.clause.schedule?.timeOfDay?.[0] ?? "");
+        const total = locale === "en" ? "a total of 4 administrations" : "ให้ยา 4 ครั้งรวมทั้งชุด";
+        expect(context.defaultText).toContain(total);
+        expect(context.formatDefault("short")).toContain(total);
+        expect(context.formatDefault("long")).toContain(total);
+        expect(context.clause.schedule?.sharedCount?.count).toBe(4);
+        return calls.length === 1 ? "Clinic morning directions exactly!" : context.defaultText;
+      };
+      const unused = () => { otherCalls++; return "Wrong style"; };
+      const i18n = style === "long" ? { formatLong: override, formatShort: unused }
+        : { formatShort: override, formatLong: unused };
+      const text = formatSig(input, style, { locale, i18n, realizationMode: "normalized" });
+      expect(calls).toEqual(["08:00:00", "20:00:00"]);
+      expect(otherCalls).toBe(0);
+      expect(text.match(/Clinic morning directions exactly!/gu)).toHaveLength(1);
+      expect(text.match(/\b4\b/gu)).toHaveLength(1);
+      expect(text).toContain(locale === "en" && style === "long" ? "8:00 pm" : "20:00");
+      const inactive = style === "long" ? { formatShort: unused } : { formatLong: unused };
+      expect(formatSig(input, style, { locale, i18n: inactive }).match(/\b4\b/gu)).toHaveLength(1);
+      expect(otherCalls).toBe(0);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("keeps independent doses outside the shared pair inside a choice branch", () => {
+    const choice = { groupId: "dose-choice", branchId: "a" };
+    const alternative: CanonicalAdministration = { kind: "administration", choice: { ...choice, branchId: "b" },
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: ["18:00:00"] } } };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [
+      { ...member("08:00:00", 4), choice }, { ...independent(), choice }, { ...member("20:00:00", 4), choice }, alternative
+    ] }] };
+    const expected = {
+      en: "Choose one: ((Schedule sharing its limits and a total of 4 administrations: Use 1 tablet once daily at 8:00 am; Use 1 tablet once daily at 8:00 pm); Use 2 tablets once daily at 12:00 pm for 2 doses) or Use 1 tablet once daily at 6:00 pm.",
+      th: "เลือกอย่างใดอย่างหนึ่ง: ((ตารางให้ยาที่ใช้ข้อจำกัดร่วมกัน และให้ยา 4 ครั้งรวมทั้งชุด: ใช้ครั้งละ 1 เม็ด วันละครั้ง เวลา 08:00; ใช้ครั้งละ 1 เม็ด วันละครั้ง เวลา 20:00); ใช้ครั้งละ 2 เม็ด วันละครั้ง เวลา 12:00 จำนวน 2 ครั้ง) หรือ ใช้ครั้งละ 1 เม็ด วันละครั้ง เวลา 18:00."
+    };
+    for (const input of views(course)) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"] as const)
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toBe(expected[locale]);
+      const noon = importCanonicalCourse(input).stages[0].administrations[1];
+      expect(noon.schedule?.recurrence?.count).toBe(2);
+      expect(noon.schedule?.recurrence?.sharedCount).toBeUndefined();
+      expect(JSON.stringify(input)).toBe(before);
+    }
   });
 
   it("preserves the ordinary independent multi-member output", () => {

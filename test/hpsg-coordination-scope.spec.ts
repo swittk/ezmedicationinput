@@ -4160,7 +4160,7 @@ describe("advice-owned continuation and procedural conditions", () => {
       expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
       expect(member.asNeeded).not.toBe(true);
       const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
-      expect(en).toMatch(/may cause(?:s)? drowsiness/i);
+      expect(en).toMatch(/may cause drowsiness/i);
       expect(en).toMatch(/do not drive/i);
       expect(en).not.toContain("if affected");
     }

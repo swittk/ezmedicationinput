@@ -246,6 +246,7 @@ export function parseBodySiteSpatialRelationExtension(
   const sourceText=sourceNode?.valueString;
   const retainedTarget = targetConcept && ((targetConcept.coding?.length ?? 0) > 1 ||
     !targetCoding && targetConcept.coding?.length ||
+    targetCoding && targetCoding.system === undefined && targetCoding._system === undefined ||
     Object.keys(targetConcept).some(key => key !== "coding" && key !== "text")) ? targetConcept : undefined;
   if (!relationText && !relationCoding && !targetText && !targetCoding?.code && !sourceText && !retainedTarget) {
     return undefined;

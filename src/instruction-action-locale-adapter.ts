@@ -157,7 +157,11 @@ function relationForSite(input: InstructionActionRealizationInput): AdviceRelati
 
 function siteRelationActivity(input: InstructionActionRealizationInput): string | undefined {
   if (!input.activity) return undefined;
-  const relation = relationForSite(input);
+  const activity = input.frame.args.find(arg => arg.role === AdviceArgumentRole.Activity);
+  // Explicit accompaniment belongs to the selected argument, not the head
+  // Time relation, and is already emitted with the other companions.
+  if (relationHasSemanticClass(activity?.relation, "accompaniment")) return undefined;
+  const relation = activity?.relation ?? relationForSite(input);
   const profile = getAdviceRelationDefinition(relation)?.grammar.timeRealizationProfile ?? "default";
   return joinLocalizedTokens(input.locale, [localizeAdviceRelation(relation, input.locale, profile) ?? relation, input.activity]);
 }
@@ -488,13 +492,13 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     }
     case "site-relation": {
       const object = siteRelationObject(c);
-      const relationTarget = c.time ?? c.activity;
+      const activity = siteRelationActivity(c);
+      const relationTarget = c.time ?? activity;
       const manner = c.manner ? ` ${c.manner}` : "";
       const substance = renderEnglishAccompaniment(c);
       const elapsed = c.duration ? ` for ${c.duration}` : "";
       if (relationTarget) {
         const target = object && (!c.site || !suppressSite(c)) ? ` ${object}` : "";
-        const activity = siteRelationActivity(c);
         if (c.time) {
           const timePhrase = realizeTimeArgument(c);
           return `${c.label}${target}${manner}${elapsed}${substance} ${timePhrase}${activity ? ` ${activity}` : ""}`;
@@ -648,13 +652,13 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
     }
     case "site-relation": {
       const object = siteRelationObject(c);
-      const relationTarget = c.time ?? c.activity;
+      const activity = siteRelationActivity(c);
+      const relationTarget = c.time ?? activity;
       const manner = c.manner ?? "";
       const substance = renderThaiAccompaniment(c);
       const elapsed = c.duration ? `เป็นเวลา ${c.duration}` : "";
       if (relationTarget) {
         const target = object && (!c.site || !suppressSite(c)) ? object : "";
-        const activity = siteRelationActivity(c);
         if (c.time) {
           const timePhrase = realizeTimeArgument(c);
           return `${c.label}${target}${manner}${elapsed}${substance}${timePhrase}${activity ?? ""}`;
@@ -668,7 +672,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
     case "object-amount-material": {
       const object = c.theme ?? c.container;
       const lead = c.material ? thaiAccompanimentRelation(materialRelation(c), c.locale) : undefined;
-      return `${c.label}${object ?? ""}${c.amount ? ` ${c.amount}` : ""}${c.material ? `${lead}${c.material}` : ""}`;
+      return `${c.label}${object ?? ""}${c.amount ? ` ${c.amount}` : ""}${c.material ? `${lead}${thaiAsciiSeparated(c.material)}` : ""}`;
     }
     case "prime": {
       const object = c.theme ?? c.container;
@@ -824,8 +828,12 @@ const TH_ADAPTER: InstructionActionLocaleAdapter = {
     const classifier = whole && (unit === "tab" || unit === "cap")
       ? INSTRUCTION_QUANTITY_UNIT_LABELS.get(unit)?.locales?.th?.one
       : undefined;
-    const realized = classifier
-      ? { ...input, manner: `ทั้ง${classifier}` }
+    const patch = input.frame.predicate.lemma === "apply" && input.frame.args.some(arg =>
+      (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) && arg.conceptId === "patch");
+    const patchLabel = patch && input.label === getMedicationInstructionAction("apply")?.i18n?.th
+      ? getMedicationInstructionAction("apply_patch")?.i18n?.th : undefined;
+    const realized = classifier || patchLabel
+      ? { ...input, ...(classifier ? { manner: `ทั้ง${classifier}` } : {}), ...(patchLabel ? { label: patchLabel } : {}) }
       : input;
     if (realized.frame.predicate.semanticClass !== "avoidance" || !realized.site) return realized;
     return {

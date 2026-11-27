@@ -7536,3 +7536,55 @@ describe("coded timing offset carriers", () => {
     expect(source).toEqual(before);
   });
 });
+
+
+describe("review814 primary quantity and precise clock-window previews", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+  it("keeps the labelled ordered dose with its guard before independent hold advice", () => {
+    const note = { url: "urn:clinic:ordered-dose-note", valueString: "retain" };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{
+      method: { text: "Take" }, route: { text: "orally" },
+      doseAndRate: [{ type: { coding: [{ code: "ordered" }] }, doseQuantity: { value: 1, unit: "tab" }, extension: [note] }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      condition: [conditionToR6({ kind: "measurement", name: "SBP", operation: "gt", value: 160 })],
+      additionalInstruction: [{ text: "Otherwise hold." }]
+    }] }] };
+    const before = JSON.stringify(input);
+    const course = importCanonicalCourse(input);
+    const expected = {
+      en: "Take the medication orally once daily; Dose (ordered): 1 tablet only if SBP > 160. Otherwise hold.",
+      th: "รับประทานทางปาก วันละครั้ง; ขนาดยา (ordered): ครั้งละ 1 เม็ด เฉพาะเมื่อ SBP > 160. Otherwise hold."
+    };
+    for (const view of [course, fresh(toFhirR5Dosages(input)), fresh(input)]) {
+      for (const locale of ["en", "th"] as const)
+        expect(formatSig(view, "long", { locale, realizationMode: "normalized" })).toBe(expected[locale]);
+      const row = projectCanonicalCourse(importCanonicalCourse(view)).fhir[0];
+      expect(row.doseAndRate![0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(row.doseAndRate![0].extension).toContainEqual(note);
+      expect(row.additionalInstruction![0].text).toBe("Otherwise hold.");
+      expect(getDosageCondition(row)).toMatchObject({ kind: "measurement", name: "SBP", operation: "gt", value: 160 });
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each([false, true])("retains nonzero seconds at both clock-window bounds, inclusive=%s", inclusive => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { recurrence: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        clockWindow: { start: "08:00:30", end: "20:00:45", endInclusive: inclusive }
+      } }
+    }] }] };
+    const r6 = courseToR6(course), before = JSON.stringify(course);
+    for (const view of [course, fresh(toFhirR5Dosages(r6)), fresh(r6)]) {
+      const saved = importCanonicalCourse(view).stages[0].administrations[0].schedule!.recurrence!.clockWindow;
+      expect(saved).toEqual({ start: "08:00:30", end: "20:00:45", endInclusive: inclusive });
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(view, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? "between 08:00:30 and 20:00:45" : "08:00:30–20:00:45");
+        if (!inclusive) expect(text).toContain(locale === "en" ? "end excluded" : "ไม่รวมเวลาสิ้นสุด");
+      }
+    }
+    expect(JSON.stringify(course)).toBe(before);
+  });
+});

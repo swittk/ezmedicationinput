@@ -327,9 +327,9 @@ describe("round34 qualified Thai fractions", () => {
 describe("round78 scoped additional-instruction translations", () => {
   it.each([
     { source: "If skin irritation occurs, do not apply the patch",
-      en: "If skin irritation occurs, do not apply patch", th: "If skin irritation occurs ห้ามทาแผ่นแปะ" },
+      en: "If skin irritation occurs, do not apply patch", th: "If skin irritation occurs ห้ามแปะแผ่นแปะ" },
     { source: "Do not apply the patch if skin irritation occurs",
-      en: "Do not apply patch if skin irritation occurs", th: "ห้ามทาแผ่นแปะ if skin irritation occurs" },
+      en: "Do not apply patch if skin irritation occurs", th: "ห้ามแปะแผ่นแปะ if skin irritation occurs" },
     { source: "หากมีอาการระคายเคือง ห้ามตัดแผ่นแปะ",
       en: "หากมีอาการระคายเคือง, do not cut patch", th: "หากมีอาการระคายเคือง ห้ามตัดแผ่นแปะ" }
   ])("keeps the complete condition and negation: $source", fixture => {
@@ -358,7 +358,7 @@ describe("round78 scoped additional-instruction translations", () => {
       toFhirR5Dosages(persist(parsed.fhirNext))[0].additionalInstruction!]) {
       expect(instructions).toHaveLength(2);
       expect(getPrimitiveTranslation(instructions[0]._text, "en")).toBe("If skin irritation occurs, do not apply patch");
-      expect(getPrimitiveTranslation(instructions[0]._text, "th")).toBe("If skin irritation occurs ห้ามทาแผ่นแปะ");
+      expect(getPrimitiveTranslation(instructions[0]._text, "th")).toBe("If skin irritation occurs ห้ามแปะแผ่นแปะ");
       expect(instructions[1].text).toBe("do not lie down immediately");
       expect(getPrimitiveTranslation(instructions[1]._text, "en")).toBe("Do not lie down immediately");
       expect(getPrimitiveTranslation(instructions[1]._text, "th")).toBe("ห้ามนอนราบทันที");
@@ -415,8 +415,8 @@ describe("round78 saved action and cycle locale ownership", () => {
         .toBe(relation === AdviceRelation.On ? "Apply patch at 08:00." : relation === AdviceRelation.Before
           ? "Apply patch before 08:00." : "Apply patch in the morning.");
       expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
-        .toBe(relation === AdviceRelation.On ? "ทาแผ่นแปะ เวลา 08:00." : relation === AdviceRelation.Before
-          ? "ทาแผ่นแปะก่อน08:00." : "ทาแผ่นแปะตอนเช้า.");
+        .toBe(relation === AdviceRelation.On ? "แปะแผ่นแปะ เวลา 08:00." : relation === AdviceRelation.Before
+          ? "แปะแผ่นแปะก่อน08:00." : "แปะแผ่นแปะตอนเช้า.");
       const args = parseInstructionGraphExtension(toFhirR5Dosages(input)[0].extension)?.actions[0].args;
       expect(args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Object,
         normalized: "patch", i18n: { en: "patch", th: "แผ่นแปะ" } }));

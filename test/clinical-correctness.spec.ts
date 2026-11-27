@@ -1970,7 +1970,7 @@ describe("ordinary clinical vocabulary uses the same typed constructions", () =>
           expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
             .toBe("Clean the wound; then apply 1 g to the wound; then cover with sterile gauze. Apply thinly.");
           expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
-            .toBe("ทำความสะอาดแผล จากนั้นทาบางๆ ครั้งละ 1 g บริเวณแผล จากนั้นปิดคลุมด้วยsterile gauze.");
+            .toBe("ทำความสะอาดแผล จากนั้นทาบางๆ ครั้งละ 1 g บริเวณแผล จากนั้นปิดคลุมด้วย sterile gauze.");
           const administration = importCanonicalCourse(input).stages[0].administrations[0];
           expect(administration.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "g" });
           expect(administration.syntax?.instructionGraph?.sourceText).toBe(source);
@@ -3475,10 +3475,12 @@ describe("round52 live site and partial-direction previews", () => {
           expect(th).not.toMatch(/ตาขวา|ตาซ้าย|ตาทั้งสอง|ทั้งสองข้าง/u);
         } else {
           expect(en).not.toContain("SITE-OD");
-          expect(en).not.toContain("left eye");
+          expect(en).not.toMatch(/left eye|both eyes|each eye|bilateral/iu);
+          expect(en.match(/\b1 drop\b/gu)).toHaveLength(1);
           const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
           expect(th).toContain("ตาขวา");
-          expect(th).not.toContain("ตาซ้าย");
+          expect(th).not.toMatch(/ตาซ้าย|ตาทั้งสอง|ทั้งสองข้าง|ตาแต่ละข้าง/u);
+          expect(th.match(/1 หยด/gu)).toHaveLength(1);
         }
         expect(input).toEqual(before);
       }

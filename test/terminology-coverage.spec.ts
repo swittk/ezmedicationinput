@@ -1,4 +1,4 @@
-import { toDosageDetails, toFhirR5Dosages, parseSig as parsePublicSig, buildBodySiteSpatialRelationExtension, parseBodySiteSpatialRelationExtension } from "../src/index";
+import { importCanonicalCourse, projectCanonicalCourse, toDosageDetails, toFhirR5Dosages, parseSig as parsePublicSig, buildBodySiteSpatialRelationExtension, parseBodySiteSpatialRelationExtension } from "../src/index";
 import { describe, expect, it } from "vitest";
 import { formatSig, resolveMedicationInstructionAction, listMedicationInstructionActions, getMedicationInstructionAction, getMedicationInstructionConcept, parseInstructionActions, buildMedicationInstructionConceptCodeSystem, buildMedicationInstructionActionCodeSystem } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
@@ -617,15 +617,61 @@ describe("review51 broader anatomy with selected laterality", () => {
   ])("keeps the exact anatomy relation for site Coding %s", (code, english, thai) => {
     const row: FhirDosage = {
       method: { text: "Apply" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
-      site: { text: "left shoulder", coding: [{ system: SNOMED, code }],
+      site: { text: english, coding: [{ system: SNOMED, code }],
         extension: [{ url: "urn:clinic:site-note", valueString: "Retain side wording" }] }
     };
     const before = JSON.stringify(row);
     const rows = JSON.parse(JSON.stringify([row])) as FhirDosage[];
     for (const input of [row, rows, JSON.parse(JSON.stringify(toDosageDetails(rows)))]) {
-      expect(formatSig(input, "long", { locale: "en" })).toContain(english);
-      expect(formatSig(input, "long", { locale: "th" })).toContain(thai);
+      const en = formatSig(input, "long", { locale: "en" });
+      const th = formatSig(input, "long", { locale: "th" });
+      expect(en).toContain(english);
+      expect(en).toContain("1 g");
+      expect(en).not.toMatch(code === "16982005" ? /right shoulder|both shoulders/iu : /left shoulder|both shoulders/iu);
+      expect(th).toContain(thai);
+      expect(th).toContain("1 g");
+      expect(th).not.toMatch(code === "16982005" ? /ไหล่ขวา|ไหล่ทั้งสอง/u : /ไหล่ซ้าย|ไหล่ทั้งสอง/u);
+      expect(projectCanonicalCourse(importCanonicalCourse(input)).fhir[0].site?.extension).toEqual(row.site?.extension);
     }
     expect(JSON.stringify(row)).toBe(before);
+  });
+});
+
+
+describe("review814 current site refinement and spatial identity", () => {
+  const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it("retains the supplied sole of foot with a compatible broader Foot code", () => {
+    const note = { url: "urn:clinic:site-note", valueString: "sole only" };
+    const row: FhirDosage = {
+      method: { text: "Apply" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+      site: { text: "sole of foot", coding: [{ system: SNOMED, code: "56459004" }], extension: [note] }
+    };
+    const before = JSON.stringify(row);
+    const r6 = toDosageDetails([persist(row)]);
+    for (const input of [importCanonicalCourse([row]), persist(toFhirR5Dosages(r6)), persist(r6)]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Apply 1 g to the sole of the foot.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("ทาครั้งละ 1 g ที่ฝ่าเท้า.");
+      const site = projectCanonicalCourse(importCanonicalCourse(input)).fhir[0].site!;
+      expect(site.text).toBe("sole of foot");
+      expect(site.coding).toEqual(row.site!.coding);
+      expect(site.extension).toContainEqual(note);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it("does not add a system to a supplied local spatial target code", () => {
+    const target = { text: "local left canal", coding: [{ code: "EAR-CANAL-L", id: "current-local-code" }] };
+    const supplied = { url: "urn:ezmedicationinput:body-site-spatial-relation", extension: [
+      { url: "relationText", valueString: "near" },
+      { url: "target", valueCodeableConcept: target }
+    ] };
+    const before = JSON.stringify(supplied);
+    const decoded = parseBodySiteSpatialRelationExtension({ extension: [supplied] })!;
+    const rebuilt = buildBodySiteSpatialRelationExtension(decoded)!;
+    expect(rebuilt.extension!.find(node => node.url === "target")!.valueCodeableConcept).toEqual(target);
+    expect(decoded.targetCoding?.system).toBeUndefined();
+    expect(JSON.stringify(supplied)).toBe(before);
   });
 });

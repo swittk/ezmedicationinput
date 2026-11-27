@@ -1492,8 +1492,9 @@ export function describeClockWindow(
   schedule: CanonicalScheduleExpr | undefined, timing = ENGLISH_CLAUSE_TIMING
 ): string | undefined {
   const window = schedule?.clockWindow;
-  return window ? timing.clockWindow(window.start.slice(0, 5), window.end.slice(0, 5),
-    Boolean(window.endInclusive)) : undefined;
+  if (!window) return undefined;
+  const clock = (value: string): string => value.length === 8 && value.slice(5) === ":00" ? value.slice(0, 5) : value;
+  return timing.clockWindow(clock(window.start), clock(window.end), Boolean(window.endInclusive));
 }
 
 export function appendLongAdministrationTiming(
@@ -1877,8 +1878,9 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     const parts = [formatPatientInstructionSentence(preGraphInstruction),
       formatPatientInstructionSentence(graphInstruction), fallbackPatientInstruction]
       .filter((value): value is string => Boolean(value));
-    if (authoredPrimary || condition || hasCalendarQualifiers)
-      parts.unshift(composeNativePrimaryDirections(authoredPrimary ? "" : verb, authoredPrimary, condition, words, deferredDirections, clause));
+    if (deferredDirections?.current || authoredPrimary || condition || hasCalendarQualifiers)
+      parts.unshift(formatPatientInstructionSentence(composeNativePrimaryDirections(
+        authoredPrimary ? "" : verb, authoredPrimary, condition, words, deferredDirections, clause))!);
     return parts.join(" ").trim() || `${verb}.`;
   }
   const leadingInstructionText = preFlowsIntoAdministration
