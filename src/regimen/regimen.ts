@@ -354,8 +354,9 @@ export function scopeSequentialPhaseSemantics(
       const followingEvent = !followingSchedule?.timeOfDay?.length &&
         followingSchedule?.when?.some(event => event !== SequenceEventTiming.Immediate);
       if (precedingClock && states[prior[0]].primaryClause.prn?.enabled !== true &&
-          (followingEvent || followingEarlierClock)) {
-        // The existing clock-order construction kept these daughters sequential.
+          (followingEvent || followingEarlierClock || hasIndependentRecurrence(followingSchedule, false))) {
+        // The selected sequential construction kept this bare point before
+        // an independent recurrence, earlier clock, or event.
         // Complete its initial point; native phase completion owns the next
         // eligible clock or caller-resolved event without adding an event clock.
         schedules[0]!.count = 1;

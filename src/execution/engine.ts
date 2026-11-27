@@ -31,6 +31,7 @@ import {
   TimingEvent,
   numericAdministrationLimits,
   administrationHasDatedStart,
+  administrationHasDatedClockStart,
   absoluteEventCycleDisplacement,
   hasPeriodLimits,
   measureOperator as getQuantityComparator,
@@ -1167,7 +1168,7 @@ function resolveFrequencyCadence(
   const configured = config.frequencyDefaults;
   const collected = new Set<string>();
   const normalizedCode = coding?.code?.toUpperCase();
-  const repeat = timing.recurrence;
+  const repeat = effectiveRepeat;
   const codeFrequency = standardTimingCodeFrequency(coding);
   const liveDailyFrequency =
     repeat?.frequency !== undefined && repeat.period === 1 && repeat.periodUnit === "d"
@@ -1239,10 +1240,16 @@ function resolveFrequencyCadence(
   if (codeAnchors) result.anchors = codeAnchors;
   return result;
 }
-/** Realize known code cadence without changing the authored recurrence:
- * QOD uses alternate-day institution clocks; hourly codes retain elapsed spacing. */
-function codedExecutionRecurrence(timing: CanonicalTiming | undefined, config: NextDueDoseConfig): CanonicalRecurrence | undefined {
-  const repeat = timing?.recurrence;
+/** Resolve execution cadence without changing the authored recurrence:
+ * an omitted daily frequency means once; QOD uses alternate-day institution
+ * clocks, while hourly codes and intervals retain elapsed spacing. */
+function executionRecurrence(timing: CanonicalTiming | undefined, config: NextDueDoseConfig): CanonicalRecurrence | undefined {
+  let repeat = timing?.recurrence;
+  // An authored window already owns its cadence; ordinary one-day repeats
+  // use the daily clock default without adding frequency to the prescription.
+  if (repeat?.frequency === undefined && repeat?.frequencyMax === undefined &&
+      repeat?.period === 1 && repeat.periodUnit === DurationUnit.Day && !isWakingHoursInterval(repeat))
+    repeat = { ...repeat, frequency: 1 };
   if (!repeat || !timing?.code || repeat.clocks?.length || repeat.anchors?.length ||
       timing.explicitEvents?.length) return repeat;
   const coding = executionTimingCoding(timing);
@@ -2673,10 +2680,12 @@ function resolveAdministrationWindow(
   // origins remain authoritative; no unrelated track supplies this boundary.
   const implicitPredecessor = !administration.phaseStart && !administration.phaseOrigin ? ownPredecessor : undefined;
   if (implicitPredecessor?.point) successorFloor = implicitPredecessor.end;
-  const implicitStart = stage.start && !implicitPredecessor
-    ? start
+  const implicitWindow = stage.start && !implicitPredecessor
+    ? { recurrenceOrigin: start, eligibleFrom: start }
     : successorIntervalStart(administration, implicitPredecessor ? implicitPredecessor.point : predecessorPoint,
-        implicitPredecessor ? implicitPredecessor.point ?? implicitPredecessor.end : start, timeZone);
+        implicitPredecessor ? implicitPredecessor.point ?? implicitPredecessor.end : start,
+        timeZone, displacement, options);
+  const implicitStart = implicitWindow.recurrenceOrigin;
   const componentClock = implicitStart > start ? getTimeParts(implicitStart, timeZone) : capClock;
   const cadence = recurrence?.calendarWindow && !administration.phaseStart &&
       (!administration.phaseOrigin || absoluteStart)
@@ -2691,7 +2700,8 @@ function resolveAdministrationWindow(
         ownPredecessor?.end ?? (index > 0 ? previousEnd : undefined)
       );
   const initialStart = index === 0 && !stage.start && !implicitPredecessor
-    ? absoluteEventCycleBoundary(administration, implicitStart) ?? implicitStart : implicitStart;
+    ? absoluteEventCycleBoundary(administration, implicitWindow.eligibleFrom) ?? implicitWindow.eligibleFrom
+    : implicitWindow.eligibleFrom;
   const stageStart = index === 0 && !stage.start && recurrence?.calendarWindow
     ? actualStart ?? initialStart : initialStart;
   let eligibleFrom = actualStart && actualStart > stageStart ? actualStart : stageStart;
@@ -2828,7 +2838,11 @@ function datedSuccessorBoundary(
   successor: CanonicalAdministration, precedingStart: Date | undefined,
   zone: string, options?: NextDueDoseOptions
 ): Date | undefined {
-  if (!administrationHasDatedStart(successor)) {
+  let recurrence = successor.schedule?.recurrence;
+  const displacement = (getAdministrationOffsetMinutes(successor) ?? 0) * 60000;
+  let bounds = recurrence?.calendarWindow?.start ? resolveRepeatBoundsPeriod(recurrence, zone, displacement) : undefined;
+  if (!administrationHasDatedStart(successor, bounds?.nominalStart) &&
+      !administrationHasDatedClockStart(successor, bounds?.nominalStart)) {
     // A selected same-track calendar cut may be carried by a date list.
     // Its day boundary is already owned by that dependency, not by a clock
     // inferred from the event or by the predecessor's administration delay.
@@ -2843,7 +2857,6 @@ function datedSuccessorBoundary(
     return start && (!precedingStart || getLocalDayNumber(start, zone) >= getLocalDayNumber(precedingStart, zone))
       ? start : undefined;
   }
-  let recurrence = successor.schedule?.recurrence;
   if (!recurrence?.calendarWindow?.start) {
     // The shared dated-start owner also admits complete calendar dates with
     // explicit clocks. Resolve that same opening without rewriting the source.
@@ -2851,11 +2864,12 @@ function datedSuccessorBoundary(
     for (const date of successor.schedule!.explicitEvents!) if (date < firstDate) firstDate = date;
     recurrence = { ...recurrence, calendarWindow: { ...recurrence?.calendarWindow, start: firstDate } };
   }
-  const bounds = resolveRepeatBoundsPeriod(recurrence, zone,
-    (getAdministrationOffsetMinutes(successor) ?? 0) * 60000);
+  bounds ??= resolveRepeatBoundsPeriod(recurrence, zone, displacement);
   if (!bounds.start || !bounds.nominalStart ||
       precedingStart && getLocalDayNumber(bounds.start, zone) < getLocalDayNumber(precedingStart, zone)) return undefined;
-  if (!successor.schedule?.recurrence?.clocks?.length) return bounds.start;
+  // A precise timestamp already owns its cutoff; only a calendar date
+  // needs its explicit clock to refine that opening.
+  if (!administrationHasDatedClockStart(successor)) return bounds.start;
   const execution = { ...successor, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined,
     phaseOriginIssue: undefined, phasePredecessors: undefined };
   const first = nextDueDoses(execution, {
@@ -5226,15 +5240,21 @@ function generateWakingHoursIntervalSeries(
   const calendarCadence = normalizedCalendarInterval(repeat.period, repeat.periodUnit);
   const elapsedPeriod = calendarCadence ? undefined : elapsedPeriodMilliseconds(repeat);
   const continuousElapsed = elapsedPeriod !== undefined && elapsedPeriod >= MINUTES_PER_DAY * 60000;
-  const cadenceAnchor = calendarCadence || continuousElapsed
+  let cadenceAnchor = calendarCadence || continuousElapsed
     ? resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from : undefined;
   const results: string[] = [];
-  let currentDay = startOfLocalDay(from, timeZone);
-  if (overnight) currentDay = addLocalDays(currentDay, -1, timeZone);
+  let queryDay = startOfLocalDay(from, timeZone);
+  if (overnight) queryDay = addLocalDays(queryDay, -1, timeZone);
+  // Whole elapsed-day grids keep the same clock and cannot enter a window
+  // from an outside clock. Other intervals retain their already reachable grid.
+  let openingPending = continuousElapsed &&
+    Number.isInteger(elapsedPeriod! / (MINUTES_PER_DAY * 60000)) && Boolean(cadenceAnchor);
+  let currentDay = openingPending ? startOfLocalDay(cadenceAnchor!, timeZone) : queryDay;
+  if (openingPending && overnight) currentDay = addLocalDays(currentDay, -1, timeZone);
   let dayIterations = 0;
-  const maxDays = calendarScanLimit(currentDay, courseEnd, limit, repeat);
+  const maxDays = calendarScanLimit(queryDay, courseEnd, limit, repeat);
   while (results.length < limit && dayIterations < maxDays && (!courseEnd || currentDay < courseEnd)) {
-    if (
+    if (openingPending ||
       (!firstWindowDay || currentDay >= firstWindowDay) &&
       matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
       (!calendarCadence || !cadenceAnchor || clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter))
@@ -5246,7 +5266,16 @@ function generateWakingHoursIntervalSeries(
         throw new Error("Cannot execute a waking-hours interval unless configured WAKE precedes HS");
       }
       if (wake && sleep) {
-        if (clockWindow && repeat.frequency! > 1 && repeat.period === 1 && repeat.periodUnit === DurationUnit.Day) {
+        if (openingPending) {
+          // Resolve the window clock origin, then jump to the query's window.
+          // Later slices retain this origin and the authored elapsed grid.
+          if (cadenceAnchor! < sleep || includeEnd && cadenceAnchor!.getTime() === sleep.getTime()) {
+            if (cadenceAnchor! < wake) cadenceAnchor = wake;
+            openingPending = false;
+            if (currentDay < queryDay) currentDay = queryDay;
+            continue;
+          }
+        } else if (clockWindow && repeat.frequency! > 1 && repeat.period === 1 && repeat.periodUnit === DurationUnit.Day) {
           // The authored window bounds the same evenly distributed frequency
           // plan as any elapsed period; institution clocks cannot escape it.
           const generated = generateFrequencyPerPeriodSeries(wake, from, limit - results.length,
@@ -5421,7 +5450,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   }
   const config = resolveExecutionConfig(options, timeZone);
   const timing: CanonicalTiming | undefined = dosage.schedule;
-  const repeat = codedExecutionRecurrence(timing, config);
+  const repeat = executionRecurrence(timing, config);
   const boundsPeriod = validateRepeatBoundsPeriod(repeat, timeZone);
   const boundsStart = boundsPeriod.start;
   if (boundsStart && boundsStart > from) {
@@ -6516,7 +6545,7 @@ function countScheduleEvents(
   derivePriorCount = true
 ): number {
   const timing = dosage.schedule;
-  const repeat = codedExecutionRecurrence(timing, config);
+  const repeat = executionRecurrence(timing, config);
   if (!timing || !repeat)
     throw new MedicationQuantityCalculationError("timing-required",
       "The dosage has no executable frequency or dosing time for supply calculation.");
@@ -8856,14 +8885,41 @@ function clockCadenceEligible(
  */
 /** An unanchored interval successor starts one interval after a point event. */
 function successorIntervalStart(
-  dosage: {
-    schedule?: CanonicalAdministration["schedule"];
-  },
+  dosage: CanonicalAdministration,
   predecessorPoint: Date | undefined,
   fallback: Date,
-  zone: string
-): Date {
+  zone: string,
+  displacement: number,
+  options?: NextDueDoseOptions
+): Pick<ResolvedAdministrationWindow, "recurrenceOrigin" | "eligibleFrom"> {
   const repeat = dosage.schedule?.recurrence;
+  if (predecessorPoint && repeat?.clocks?.length && !repeat.anchors?.length &&
+      (repeat.courseLength || repeat.courseLengthRange) &&
+      !repeat.calendarWindow?.start && !dosage.phaseStart && !dosage.phaseOrigin &&
+      !dosage.schedule?.explicitEvents?.length) {
+    // The finite successor owns its duration from its first post-completion
+    // clock. This standalone cadence query has no phase origin or predecessor,
+    // so it cannot re-enter successor resolution. Actual eligibility and
+    // count/quantity admission remain on the original administration.
+    const first = nextDueDoses({
+      kind: "administration", delayMinutes: dosage.delayMinutes,
+      excludedDates: dosage.excludedDates, excludedWeekdays: dosage.excludedWeekdays,
+      schedule: { ...dosage.schedule, recurrence: { ...repeat,
+        courseLength: undefined, courseLengthRange: undefined,
+        count: undefined, countMax: undefined, sharedCount: undefined } },
+    }, { ...options, from: new Date(predecessorPoint.getTime() + 1),
+      orderedAt: displacement ? new Date(predecessorPoint.getTime() - displacement) : predecessorPoint,
+      timeZone: zone, priorCount: 0, priorDoseTimes: undefined, limit: 1, candidateOnly: true,
+      countEligibilityStart: undefined, countedActualTimes: undefined, prnOpportunityFrom: undefined,
+      explicitEventStatus: undefined, roundingLimits: undefined } as PhaseCountOptions)[0];
+    // Keep the actual opening distinct from the nominal cadence origin;
+    // the caller displaces only the latter and its duration fence.
+    if (first) {
+      const eligibleFrom = new Date(first);
+      return { recurrenceOrigin: new Date(eligibleFrom.getTime() - displacement), eligibleFrom };
+    }
+    return { recurrenceOrigin: fallback, eligibleFrom: fallback };
+  }
   if (
     predecessorPoint &&
     repeat?.period &&
@@ -8876,17 +8932,16 @@ function successorIntervalStart(
     !dosage.schedule?.explicitEvents?.length &&
     !dosage.schedule?.code?.coding?.length
   ) {
-    return (
-      createIntervalStepper(
-        {
-          period: repeat.period / (repeat.frequency ?? 1),
-          periodUnit: repeat.periodUnit,
-        },
-        zone
-      )?.(predecessorPoint) ?? fallback
-    );
+    const origin = createIntervalStepper(
+      {
+        period: repeat.period / (repeat.frequency ?? 1),
+        periodUnit: repeat.periodUnit,
+      },
+      zone
+    )?.(predecessorPoint) ?? fallback;
+    return { recurrenceOrigin: origin, eligibleFrom: origin };
   }
-  return fallback;
+  return { recurrenceOrigin: fallback, eligibleFrom: fallback };
 }
 /** Completion of a finite administration count, independent of query window. */
 /** Finite explicit events end at their authored final opportunity. Local

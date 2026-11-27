@@ -312,22 +312,27 @@ export function absoluteEventCycleDisplacement(administration: CanonicalAdminist
     ? (administration.delayMinutes ?? 0) * 60000 : undefined;
 }
 
-/** An unconditional dated phase owns its calendar opening. An explicit
- * clock refines a calendar bound or date list; event-relative timing and
- * conditions cannot prove an opening. */
-export function administrationHasDatedStart(a: CanonicalAdministration): boolean {
+/** Calendar facts own the opening separately from actual PRN use.
+ * Execution may supply its already-resolved bound; calendar-only consumers
+ * retain their existing date admission. Conditions and event-relative timing
+ * cannot prove an opening. */
+function administrationHasCalendarOpening(a: CanonicalAdministration, resolvedStart?: Date | null): boolean {
   const repeat = a.schedule?.recurrence, dates = a.schedule?.explicitEvents;
-  const dated = repeat?.calendarWindow?.start?.length === 10 ||
+  const dated = resolvedStart || repeat?.calendarWindow?.start?.length === 10 ||
     repeat?.clocks?.length && dates?.length && dates.every(date => date.length === 10);
   return Boolean(dated &&
-    (repeat.clocks?.length || !a.schedule?.explicitEvents?.length) &&
-    !repeat.anchors?.length && !a.asNeeded && !a.predicate && !a.calendarPredicate &&
+    (repeat?.clocks?.length || !a.schedule?.explicitEvents?.length) &&
+    !repeat?.anchors?.length && !a.predicate && !a.calendarPredicate &&
     !a.choice && !a.choiceIssue);
 }
+export function administrationHasDatedStart(a: CanonicalAdministration, resolvedStart?: Date | null): boolean {
+  return !a.asNeeded && administrationHasCalendarOpening(a, resolvedStart);
+}
 
-/** A clocked replacement defers its projected calendar cut to execution. */
-export function administrationHasDatedClockStart(a: CanonicalAdministration): boolean {
-  return Boolean(a.schedule?.recurrence?.clocks?.length && administrationHasDatedStart(a));
+/** A clocked replacement defers its projected calendar cut to execution.
+ * PRN use does not move an independently authored opening clock to midnight. */
+export function administrationHasDatedClockStart(a: CanonicalAdministration, resolvedStart?: Date | null): boolean {
+  return Boolean(a.schedule?.recurrence?.clocks?.length && administrationHasCalendarOpening(a, resolvedStart));
 }
 
 /** The earliest successor date owns any calendar-only cutoff. A clock on that
