@@ -7375,9 +7375,15 @@ describe("review51 recorded counts and civil duration bounds", () => {
         .toMatchObject({ totalUnits: expected.length, unit: "tab" });
       const current = importCanonicalCourse(dosage).stages[0].administrations[0];
       expect(current.schedule?.recurrence?.calendarWindow?.start).toBe(start);
-      expect(current.schedule?.recurrence?.courseLength).toMatchObject({ value: 1, unit: "d" });
+      expect(current.schedule?.recurrence?.courseLength ?? current.anchoredLength?.quantity).toMatchObject({ value: 1, unit: "d" });
       expect(current.amounts?.[0].quantity?.extension).toEqual([note]);
       expect(JSON.stringify(dosage)).toBe(before);
+    }
+    for (const row of [courseToR5(course)[0], courseToR6(course).step![0].component[0]]) {
+      const repeat = row.timing!.repeat!;
+      expect(repeat.boundsPeriod).toEqual({ start });
+      expect(repeat.boundsDuration).toBeUndefined();
+      expect(repeat.boundsRange).toBeUndefined();
     }
   });
 });

@@ -5655,13 +5655,16 @@ describe("current calendar openings and finite clock continuations", () => {
     }
   });
 
-  it.each([false, true])("keeps an end-only fence separate from a finite successor origin (exclude Monday=%s)", excludeMonday => {
+  it.each([[false, false], [true, false], [false, true], [true, true]] as const)(
+    "keeps an end-only fence separate from a finite successor origin (exclude Monday=%s, ranged=%s)", (excludeMonday, ranged) => {
     const loading = tablet(1);
     loading.schedule = { recurrence: { count: 1, clocks: ["22:00:00"] } };
     const successor = tablet(2);
     if (excludeMonday) successor.excludedWeekdays = [FhirDayOfWeek.Monday];
+    const duration = { value: 2, unit: "d" };
+    const durationRange = { low: { value: 1, unit: "d" }, high: duration };
     successor.schedule = { recurrence: { frequency: 1, period: 1, periodUnit: Unit.Day,
-      clocks: ["08:00:00"], courseLength: { value: 2, unit: "d" },
+      clocks: ["08:00:00"], ...(ranged ? { courseLengthRange: durationRange } : { courseLength: duration }),
       calendarWindow: { end: "2027-01-08T00:00:00Z" } } };
     const course: CanonicalCourse = { kind: "course", stages: [
       { administrations: [loading] }, { administrations: [successor] }
@@ -5694,7 +5697,8 @@ describe("current calendar openings and finite clock continuations", () => {
       expect(result.lastDaySupply.totalUnits).toBe(excludeMonday ? 2 : 0);
       expect(result.afterEndSupply.totalUnits).toBe(0);
       const current = importCanonicalCourse(dosage).stages[1].administrations[0];
-      expect(current.schedule?.recurrence?.courseLength).toMatchObject({ value: 2, unit: "d" });
+      if (ranged) expect(current.schedule?.recurrence?.courseLengthRange ?? current.anchoredLength?.range).toMatchObject(durationRange);
+      else expect(current.schedule?.recurrence?.courseLength ?? current.anchoredLength?.quantity).toMatchObject(duration);
       expect(current.schedule?.recurrence?.calendarWindow).toEqual({ end: "2027-01-08T00:00:00Z" });
       expect(current.schedule?.recurrence?.clocks).toEqual(["08:00:00"]);
       expect(current.excludedWeekdays ?? []).toEqual(excludeMonday ? [FhirDayOfWeek.Monday] : []);
@@ -5703,6 +5707,12 @@ describe("current calendar openings and finite clock continuations", () => {
       return result;
     });
     for (const output of outputs.slice(1)) expect(output).toEqual(outputs[0]);
+    for (const row of [courseToR5(course)[1], courseToR6(course).step![1].component[0]]) {
+      const repeat = row.timing!.repeat!;
+      expect(repeat.boundsPeriod).toEqual({ end: "2027-01-08T00:00:00Z" });
+      expect(repeat.boundsDuration).toBeUndefined();
+      expect(repeat.boundsRange).toBeUndefined();
+    }
     expect(JSON.stringify(query)).toBe(queryBefore);
   });
 

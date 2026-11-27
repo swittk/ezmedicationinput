@@ -8920,7 +8920,7 @@ function successorIntervalStart(
 ): Pick<ResolvedAdministrationWindow, "recurrenceOrigin" | "eligibleFrom"> {
   const repeat = dosage.schedule?.recurrence;
   if (predecessorPoint && repeat?.clocks?.length && !repeat.anchors?.length &&
-      (repeat.courseLength || repeat.courseLengthRange) &&
+      (repeat.courseLength || repeat.courseLengthRange || getAnchoredCourseDuration(dosage)) &&
       !repeat.calendarWindow?.start && !dosage.phaseStart && !dosage.phaseOrigin &&
       !dosage.schedule?.explicitEvents?.length) {
     const nominalPredecessor = displacement
