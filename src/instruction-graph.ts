@@ -169,11 +169,19 @@ function resultativeLeadAt(
   return resolveMedicationInstructionConcept(key(next), options)?.role === AdviceArgumentRole.Result;
 }
 
+function actionAtDirectiveBoundary(parts: Lexeme[], index: number): boolean {
+  const previous = parts[index - 1];
+  return !previous || /^[,;.!?:]$/u.test(key(previous)) ||
+    ACTION_SEQUENCE_MARKERS.has(key(previous)) || ACTION_COORDINATION_CONNECTORS.has(key(previous));
+}
+
 function actionAtIsGovernedByDirective(parts: Lexeme[], index: number): boolean {
   return ACTION_DIRECTIVE_PREFIXES.some((prefix) => {
     const start = index - prefix.parts.length;
     if (start < 0) return false;
-    return prefix.parts.every((part, offset) => key(parts[start + offset]) === part);
+    if (!prefix.parts.every((part, offset) => key(parts[start + offset]) === part)) return false;
+    return prefix.force !== AdviceForce.Warning || prefix.polarity === AdvicePolarity.Negate ||
+      actionAtDirectiveBoundary(parts, start);
   });
 }
 
@@ -265,11 +273,8 @@ export function actionMatchAt(
           resolveMedicationInstructionAction(candidate, options)
         : resolveMedicationInstructionAction(candidate, options);
       if (definition) {
-        if ((definition.directiveOnlyAliases?.indexOf(normalizeActionSurface(candidate)) ?? -1) >= 0 && previous &&
-            !/^[,;.!?:]$/u.test(key(previous)) &&
-            !ACTION_SEQUENCE_MARKERS.has(key(previous)) &&
-            !ACTION_COORDINATION_CONNECTORS.has(key(previous)) &&
-            !actionAtIsGovernedByDirective(parts, index)) continue;
+        if ((definition.directiveOnlyAliases?.indexOf(normalizeActionSurface(candidate)) ?? -1) >= 0 &&
+            !actionAtDirectiveBoundary(parts, index) && !actionAtIsGovernedByDirective(parts, index)) continue;
         // A recognized nominal owns its modifier, even when the modifier is
         // also a verb: "contact lenses" is an object, "open wounds" a site,
         // and "double vision" is diplopia, not an instruction to double a dose.
@@ -2179,7 +2184,9 @@ function actionCandidateBelongsToCurrentFrame(
 }
 
 const ACTION_DIRECTIVE_BOUNDARIES = new Set(
-  ACTION_DIRECTIVE_PREFIXES.map((prefix) => prefix.parts[0])
+  ACTION_DIRECTIVE_PREFIXES
+    .filter(prefix => prefix.force !== AdviceForce.Warning || prefix.polarity === AdvicePolarity.Negate)
+    .map(prefix => prefix.parts[0])
 );
 
 interface PreposedActionRelation {

@@ -2107,6 +2107,17 @@ describe("selected optional action meaning", () => {
 });
 
 describe("qualified composite technique ownership", () => {
+  it("keeps a modal continuation inside its existing descriptive complement", () => {
+    const source = "Causes drowsiness which may continue the next day.";
+    expect(parseInstructionActions(source).some(frame => frame.predicate.lemma === "continue-treatment")).toBe(false);
+    for (const source of ["May continue", "Wait 1 hour then may continue"]) {
+      const frames = parseInstructionActions(source);
+      const continuation = frames.find(frame => frame.predicate.lemma === "continue-treatment");
+      expect(continuation).toMatchObject({ modality: "may", force: AdviceForce.Warning });
+      expect(continuation?.sourceText.toLowerCase()).toBe("may continue");
+    }
+  });
+
   it.each(["may", "can", "might", "could"])("retains the registered %s action prefix as an optional warning", modality => {
     const source = `${modality} cover with occlusive dressing`;
     const [frame] = parseInstructionActions(source);
