@@ -16585,3 +16585,14 @@ tracks remain schedulable.
 Oral doses written with a 24-hour denominator retain their amount and cadence beside compact cumulative limits. The shared quantity owner recognizes an already-admitted dose before a later qualified quantity seeks an administration head. Genuine infusion rates and standalone comparative amounts retain their existing meaning.
 
 Regression cases cover the separate dose and cap, due dates, supply, English and Thai previews, and source preservation across native and fresh FHIR forms.
+
+
+## 2026-11-27 — Preserve dose, advice and occurrence ownership
+
+Explicit divided totals use their authored time denominator through the shared quantity owner. Compact quantities, context-licensed doses, comparative limits and patient-history conditions retain their separate meanings. Independent infusion rates and administration durations keep their existing ownership.
+
+Previews place labelled and ranged quantities with the primary dose and its guard. Whole-clause callbacks receive complete defaults and retain control of their returned wording. Action relations, amounts, source occurrences and independent advice survive composition; Thai realization selects patch wording from the typed object or amount. Current anatomical refinements and complete authored restrictions remain visible.
+
+Count ceilings bound supply without inventing administration times. Shared allowances belong to one stage occurrence across member start dates. Terminal ranged supply can use later eligible opportunities while dependent courses retain chronological completion. Calendar-selected predecessors keep contextual NEXT, and daily institution clocks remain inside their typed waking window.
+
+FHIR conversion preserves period values, quantity operators, coded measurement units, translation datatypes and unknown annotations. Calendar bounds and member-relative course lengths retain their distinct origins. Code-derived event offsets keep their valid extension carrier. Clinical assertions cover complete dates, guards, laterality, quantities and wording across native and fresh wire forms.
