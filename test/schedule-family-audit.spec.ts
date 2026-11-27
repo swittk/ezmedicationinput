@@ -7201,6 +7201,60 @@ describe("execution cadence defaults and reachable elapsed window origins", () =
     }
   });
 
+  const positioned: {
+    label: string; clock: string;
+    recurrence?: Partial<NonNullable<NonNullable<CanonicalAdministration["schedule"]>["recurrence"]>>;
+    timing?: Partial<NonNullable<CanonicalAdministration["schedule"]>>;
+  }[] = [
+    { label: "MORN anchor", clock: "08:00:00", recurrence: { anchors: [EventTiming.Morning] } },
+    { label: "PM code", clock: "15:00:00", timing: {
+      code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "PM" }] }
+    } },
+    { label: "BED code", clock: "22:00:00", timing: {
+      code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BED" }] }
+    } },
+    { label: "explicit clock", clock: "07:15:00", recurrence: { clocks: ["07:15:00"] } },
+    { label: "explicit events", clock: "07:45:00", timing: {
+      explicitEvents: ["2027-01-01T07:45:00Z", "2027-01-02T07:45:00Z"]
+    } },
+    { label: "clock window", clock: "06:00:00", recurrence: {
+      clockWindow: { start: "06:00", end: "10:00", endInclusive: false }
+    } },
+    { label: "event window", clock: "06:00:00", recurrence: {
+      eventWindow: { start: EventTiming.Wake, end: EventTiming["Before Sleep"] }
+    } },
+  ];
+  it.each(positioned)("retains $label without manufacturing a daily frequency", row => {
+    const administration: CanonicalAdministration = {
+      kind: "administration", text: "Retain the supplied current temporal position.",
+      amounts: [{ quantity: { value: 1, unit: "tab", extension: [note] } }],
+      schedule: { recurrence: { period: 1, periodUnit: FhirPeriodUnit.Day, count: 2, ...row.recurrence },
+        ...row.timing },
+    };
+    const query = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC",
+      eventClock: { WAKE: "06:00", HS: "22:00" } };
+    for (const dosage of forms({ kind: "course", stages: [{ administrations: [administration] }] })) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...query, limit: 3 })).toEqual([
+        "2027-01-01T" + row.clock + "+00:00", "2027-01-02T" + row.clock + "+00:00",
+      ]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Hour }))
+        .toMatchObject({ totalUnits: row.clock < "08:00:00" ? 1 : 0, unit: "tab" });
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 2, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      const current = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(current.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(current.schedule?.recurrence).toMatchObject({
+        period: 1, periodUnit: FhirPeriodUnit.Day, count: 2, ...row.recurrence,
+      });
+      expect(current.schedule?.code).toEqual(row.timing?.code);
+      expect(current.schedule?.explicitEvents).toEqual(row.timing?.explicitEvents);
+      expect(current.amounts?.[0].quantity?.extension).toEqual([note]);
+      expect(current.text).toBe(administration.text);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
   it.each([
     { label: "24h before daytime wake", hours: 24, event: true, start: "08:00", end: "20:00",
       order: "2027-01-01T00:00:00Z", expected: ["01T08", "02T08", "03T08", "04T08"], total: 5,

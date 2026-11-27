@@ -1245,10 +1245,10 @@ function resolveFrequencyCadence(
  * clocks, while hourly codes and intervals retain elapsed spacing. */
 function executionRecurrence(timing: CanonicalTiming | undefined, config: NextDueDoseConfig): CanonicalRecurrence | undefined {
   let repeat = timing?.recurrence;
-  // Authored event anchors and windows already own their clock placement;
-  // ordinary one-day repeats use the daily default only in the execution copy.
+  // Only positionless one-day repeats need the daily execution default;
+  // authored clocks, events, codes and windows retain their existing owner.
   if (repeat?.frequency === undefined && repeat?.frequencyMax === undefined &&
-      !repeat?.clocks?.length && !repeat?.anchors?.length &&
+      !repeat?.clocks?.length && !repeat?.anchors?.length && !timing?.code && !timing?.explicitEvents?.length &&
       repeat?.period === 1 && repeat.periodUnit === DurationUnit.Day && !isWakingHoursInterval(repeat))
     repeat = { ...repeat, frequency: 1 };
   if (!repeat || !timing?.code || repeat.clocks?.length || repeat.anchors?.length ||
