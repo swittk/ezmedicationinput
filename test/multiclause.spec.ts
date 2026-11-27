@@ -5454,3 +5454,40 @@ it("moves a qualified inherited infusion duration with its comparator", () => {
   }
   expect(JSON.stringify(parsed)).toBe(before);
 });
+
+
+describe("ordinal weekday cadence wording", () => {
+  it.each([
+    [1, 1, ["2026-01-05", "2026-02-02", "2026-03-02"]],
+    [2, 1, ["2026-01-05", "2026-03-02", "2026-05-04"]],
+    [1, -1, ["2026-01-26", "2026-02-23", "2026-03-30"]],
+    [2, -1, ["2026-01-26", "2026-03-30", "2026-05-25"]]
+  ] as const)("describes a %s-month cadence with ordinal %s", (period, weekdayOrdinal, dates) => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{
+      kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { frequency: 1, period, periodUnit: FhirPeriodUnit.Month,
+        dayOfWeek: ["mon"], weekdayOrdinal, clocks: ["08:00:00"] } }
+    }] }] };
+    const before = JSON.stringify(course), projected = projectCanonicalCourse(course);
+    for (const input of [course, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+      const current = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ period, periodUnit: FhirPeriodUnit.Month,
+        dayOfWeek: ["mon"], weekdayOrdinal, clocks: ["08:00:00"] });
+      const english = formatSig(input, "long", { locale: "en" });
+      const thai = formatSig(input, "long", { locale: "th" });
+      expect(english).toContain(weekdayOrdinal === -1 ? "last Monday" : "first Monday");
+      expect(thai).toContain(weekdayOrdinal === -1 ? "วันจันทร์สุดท้าย" : "วันจันทร์ครั้งที่ 1");
+      expect(english.includes("of each month")).toBe(period === 1);
+      expect(/ของทุกเดือน|ของแต่ละเดือน/u.test(thai)).toBe(period === 1);
+      if (period === 2) {
+        expect(english).toContain("every 2 months");
+        expect(thai).toContain("ทุก 2 เดือน");
+      }
+      expect(nextDueDoses(input, { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z",
+        timeZone: "UTC", limit: 3 })).toEqual(dates.map(date => `${date}T08:00:00+00:00`));
+      expect(JSON.stringify(input)).toBe(current);
+    }
+    expect(JSON.stringify(course)).toBe(before);
+  });
+});

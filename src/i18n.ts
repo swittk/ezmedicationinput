@@ -1786,8 +1786,9 @@ function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): str
     }
   }
   if (days.length && schedule?.weekdayOrdinal !== undefined) {
-    return schedule.weekdayOrdinal === -1 ? `ใน${joinWithAndThai(days)}สุดท้ายของทุกเดือน` :
-      `ใน${joinWithAndThai(days)}ครั้งที่ ${schedule.weekdayOrdinal} ของแต่ละเดือน`;
+    const monthly = dayOfMonthUsesSingleMonth(schedule);
+    return schedule.weekdayOrdinal === -1 ? `ใน${joinWithAndThai(days)}สุดท้าย${monthly ? "ของทุกเดือน" : ""}` :
+      `ใน${joinWithAndThai(days)}ครั้งที่ ${schedule.weekdayOrdinal}${monthly ? " ของแต่ละเดือน" : ""}`;
   }
   return days.length ? `ใน${joinWithAndThai(days)}` : undefined;
 }

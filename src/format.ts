@@ -1068,7 +1068,8 @@ function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string 
   }
   if (days.length && schedule?.weekdayOrdinal !== undefined) {
     const names: Record<number, string> = { [-1]: "last", 1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth" };
-    return `on the ${names[schedule.weekdayOrdinal]} ${joinWithAnd(days)} of each month`;
+    const period = dayOfMonthUsesSingleMonth(schedule) ? " of each month" : "";
+    return `on the ${names[schedule.weekdayOrdinal]} ${joinWithAnd(days)}${period}`;
   }
   return days.length ? `on ${joinWithAnd(days)}` : undefined;
 }
