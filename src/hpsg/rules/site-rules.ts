@@ -178,10 +178,11 @@ function anchoredModifierLeadsToResolvableSite(
   start: number
 ): boolean {
   const maxEnd = Math.min(context.limit, start + 5);
+  const attributive = BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(normalizeTokenLower(context.tokens[start]));
   for (let index = start + 1; index < maxEnd; index += 1) {
     const candidate = context.tokens[index];
     if (!candidate || context.state.consumed.has(candidate.index) || isPunctuation(normalizeTokenLower(candidate))) break;
-    const phrase = joinTokenText(context.tokens.slice(start, index + 1));
+    const phrase = attributive ? candidate.original : joinTokenText(context.tokens.slice(start, index + 1));
     const resolved = resolveBodySiteLexeme(phrase, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     });
