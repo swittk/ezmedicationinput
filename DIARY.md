@@ -16520,3 +16520,12 @@ Supplied conflicting facts and independently authored advice remain distinct.
 
 - Instruction actions stop at independent sentence and semicolon boundaries. The Thai lexical provider retains periods that belong to its existing declared quantity-unit abbreviations.
 - Selected opaque advice stays independent of typed actions. Current patient-instruction synthesis preserves the original source slice across both, including advice that follows a warning.
+
+
+## 2026-11-27 — Preserve instruction source boundaries
+
+- Keep independent advice separate across sentence punctuation, including exclamation and question marks.
+- Preserve complete quantity-token spans for prepared doses and carry the selected withholding condition through the existing HPSG scope.
+- Retain complete authored modal wording while realizing inherited facts and shorter generated rows.
+- License dotted-unit continuations through the existing duration vocabulary; keep independent advice after a unit separate.
+- Extend native and fresh R5/R6 checks for duration ownership, opaque advice, and one typed warning quantity.
