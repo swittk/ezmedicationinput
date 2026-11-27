@@ -16396,3 +16396,23 @@ its subordinate warnings with the complete conditional instruction. Native and
 fresh FHIR previews project that scope consistently while preserving independent
 advice and annotations. Shared schedule wording remains within the private native
 locale provider, preserving the existing public provider contract.
+
+
+## 2026-11-27 — Typed advice and shared lexical ownership
+
+Procedural advice retains its selected action frame before conditional composition.
+Trailing warnings inherit through typed source occurrences and their relations,
+preserving independent instructions with identical wording. FHIR adapters project
+the selected canonical advice and complete instruction graph without synthesizing
+standalone prohibitions from graph text. Registered source-language detection owns
+authored wording when instructions are cloned.
+
+Alternative branches receive their canonical membership before projection. The
+unused regimen projection bridge is removed; its clinical checks now use the
+existing canonical compiler and FHIR adapters directly.
+
+Weekday tokens and calendar patterns derive from one lexical inventory. Short Thai
+forms retain their contextual license, and calendar exclusion groups retain their
+established vocabulary while sharing its weekday meaning. Workday and holiday
+exclusions remain unresolved where no fixed calendar interpretation is licensed.
+The boundary planner reuses the existing calendar cue and explicit guard lead.
