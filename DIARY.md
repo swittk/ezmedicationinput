@@ -16544,3 +16544,25 @@ resolved first-clock origin. Explicit calendar starts and phase starts retain
 their existing precedence. Native and fresh R5/R6 regressions cover a counted
 loading dose followed by a two-day course, including an excluded opening day,
 later queries, supply totals and retained quantity annotations.
+
+## 2026-11-27 — Retain current dose, schedule and preview facts
+
+Scaled doses, attached slash fractions and oral daily amounts retain their selected
+quantity meaning. Relative meal endings and quantified holds use their existing
+HPSG scope, including the complete selected event and dose opportunities.
+
+Dated replacements retain predecessor doses before their first selected clock or
+weekday. Recorded administrations spend finite counts through the same decision
+for scheduling and supply, while explicit counts remain authoritative. Daily clinic
+clocks, elapsed intervals and authored midnight duration bounds keep their distinct
+existing cadence rules.
+
+Current previews retain repeat cycles, conditional advice, independent clock
+windows, anatomical laterality and complete site restrictions. Preparation Time
+uses the shared selected-argument realizer, including complete clock choices. The
+stock Thai driving label is supplied by the terminology owner.
+
+FHIR projection keeps a single timing-bounds choice while retaining both calendar
+and duration constraints. Quantity annotations, markdown companions and typed
+arguments without display text survive current R5/R6 conversion. Regression checks
+retain original annotations, independent clinical oracles and fresh R6 coverage.
