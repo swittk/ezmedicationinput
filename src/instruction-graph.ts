@@ -8,6 +8,10 @@ import {
   resolveAdviceMannerModifier,
   resolveAdviceNominalArgument,
   matchComposedAdviceCodings,
+  preservesAdviceFrameFacts,
+  preservesAdviceArgumentFacts,
+  preservesAdviceCodings,
+  preservesAdviceComponents,
   adviceCodingNeedsComposedScope
 } from "./advice";
 import {
@@ -3618,15 +3622,13 @@ function reconcileComposedAdviceCoding(
             if (candidate === frame) return true;
             if (frame.modality !== undefined && candidate.predicate.lemma === frame.predicate.lemma &&
                 candidate.polarity === frame.polarity && candidate.modality === frame.modality &&
-                candidate.span.start === frame.span.start && candidate.span.end === frame.span.end) return true;
+                candidate.span.start === frame.span.start && candidate.span.end === frame.span.end)
+              return preservesAdviceFrameFacts(frame, candidate);
             if (coding?.code || frame.predicate.display !== undefined || frame.predicate.realizer !== undefined ||
                 frame.predicate.realizerConfig !== undefined || frame.predicate.codings?.length ||
                 frame.predicate.i18n || frame.predicate.semanticComponents?.length ||
                 frame.span.end > candidate.span.end ||
-                frame.predicate.semanticClass !== candidate.predicate.semanticClass ||
-                frame.polarity !== candidate.polarity || frame.modality !== undefined && frame.modality !== candidate.modality ||
-                frame.force !== candidate.force && !(frame.force === AdviceForce.Instruction && candidate.force === AdviceForce.Sequence) ||
-                frame.relation !== undefined && frame.relation !== candidate.relation) return false;
+                !preservesAdviceFrameFacts(frame, candidate)) return false;
             let selectedStart = frame.span.start;
             if (candidate.span.start > selectedStart) {
               const prefix = frame.sourceText.slice(0, candidate.span.start - selectedStart);
@@ -3643,23 +3645,23 @@ function reconcileComposedAdviceCoding(
                 other.predicate.semanticClass === frame.predicate.semanticClass &&
                 other.polarity === frame.polarity && (frame.modality === undefined || other.modality === frame.modality))) return false;
             // The selected valence may divide a provisional nominal into Site,
-            // Material and Time. Every already-typed fact must survive in order.
-            const typed = frame.args.filter(arg => arg.conceptId || arg.coding || arg.codings?.length ||
-              arg.quantity || arg.relation || arg.administrationTargetCount || arg.components?.length || arg.i18n);
-            return correspondingAdviceArguments(typed, candidate.args, (arg, actual) =>
-              (arg.conceptId === undefined || arg.conceptId === actual.conceptId) &&
-              (arg.relation === undefined || arg.relation === actual.relation) &&
-              (arg.coding === undefined || equalStructuredValues(arg.coding, actual.coding)) &&
-              (!arg.codings?.length || equalStructuredValues(arg.codings, actual.codings)) &&
-              (arg.quantity === undefined || equalStructuredValues(arg.quantity, actual.quantity)) &&
-              (arg.administrationTargetCount === undefined || arg.administrationTargetCount === actual.administrationTargetCount) &&
-              (!arg.components?.length || equalStructuredValues(arg.components, actual.components)) &&
-              Object.keys(arg.i18n ?? {}).every(locale => arg.i18n![locale] === actual.i18n?.[locale]), false);
+            // Material and Time; the shared fact owner has preserved its typed facts.
+            return true;
           }) ?? frame;
           if (frames.indexOf(semantic) < 0) frames.push(semantic);
         }
-        if (frames.length !== instruction.frames.length || frames.some((frame, index) => frame !== instruction.frames![index]))
+        if (frames.length !== instruction.frames.length || frames.some((frame, index) => frame !== instruction.frames![index])) {
           selected = { ...instruction, frames };
+          const previous = instruction.frames.length === 1 ? instruction.frames[0] : undefined;
+          const refined = frames.length === 1 ? frames[0] : undefined;
+          if (previous && refined && previous.modality === undefined && refined.modality !== undefined &&
+              refined.span.start <= previous.span.start && previous.span.end <= refined.span.end) {
+            // The same selected native directive that supplies the newly owned
+            // modality also supplies its complete standard-field wording.
+            const source = refined.sourceText.trim();
+            if (source) selected.text = source.charAt(0).toUpperCase() + source.slice(1);
+          }
+        }
       }
       if (!coding?.code && selected.frames?.length) {
         const definitions = matchComposedAdviceCodings(selected.frames);
@@ -4633,47 +4635,23 @@ function correspondingAdviceArguments(
   return true;
 }
 
-/** Coding annotations stay on their wire element; only declared Coding facts
- * participate in directed selected-meaning correspondence. */
-function selectedCodingMatches(selected: FhirCoding | undefined, actual: FhirCoding | undefined): boolean {
-  if (!selected) return true;
-  for (const field of ["system", "version", "code", "display", "userSelected"] as const)
-    if (selected[field] !== undefined && selected[field] !== actual?.[field]) return false;
-  for (const locale of Object.keys(selected.i18n ?? {}))
-    if (selected.i18n![locale] !== actual?.i18n?.[locale]) return false;
-  return true;
-}
-function selectedCodingsMatch(selected: readonly FhirCoding[] | undefined, actual: readonly FhirCoding[] | undefined): boolean {
-  return !selected?.length || selected.length === actual?.length &&
-    selected.every((coding, index) => selectedCodingMatches(coding, actual[index]));
-}
-function selectedComponentsMatch(
-  selected: readonly { role: string; text?: string; coding?: FhirCoding }[] | undefined,
-  actual: readonly { role: string; text?: string; coding?: FhirCoding }[] | undefined
-): boolean {
-  return !selected?.length || selected.length === actual?.length && selected.every((component, index) =>
-    component.role === actual[index].role && component.text === actual[index].text &&
-    selectedCodingMatches(component.coding, actual[index].coding));
-}
 function sameAdviceArgumentMeaning(left: AdviceArgument, right: AdviceArgument): boolean {
   for (const field of ["role", "text", "normalized", "relation", "conceptId", "administrationTargetCount"] as const)
     if (left[field] !== right[field]) return false;
-  return equalStructuredValues(left.span, right.span) && equalStructuredValues(left.i18n, right.i18n) &&
-    sameArgumentQuantity(left, right) &&
-    selectedCodingMatches(left.coding, right.coding) && selectedCodingMatches(right.coding, left.coding) &&
-    selectedCodingsMatch(left.codings, right.codings) && selectedCodingsMatch(right.codings, left.codings) &&
-    selectedComponentsMatch(left.components, right.components) && selectedComponentsMatch(right.components, left.components);
+  return equalStructuredValues(left.span, right.span) &&
+    preservesAdviceArgumentFacts(left, right) && preservesAdviceArgumentFacts(right, left);
 }
 
-/** Typed warning equivalence retains the established negative-force tolerance. */
+/** Typed warning equivalence retains complete qualifiers and the established negative-force tolerance. */
 export function sameTypedWarning(left: AdviceFrame, right: AdviceFrame): boolean {
   return left.predicate.lemma === right.predicate.lemma &&
     left.predicate.semanticClass === right.predicate.semanticClass &&
     (left.polarity ?? AdvicePolarity.Affirm) === (right.polarity ?? AdvicePolarity.Affirm) &&
     (right.polarity === AdvicePolarity.Negate || left.force === right.force) &&
     left.modality === right.modality && left.relation === right.relation &&
-    selectedComponentsMatch(left.predicate.semanticComponents, right.predicate.semanticComponents) &&
-    selectedComponentsMatch(right.predicate.semanticComponents, left.predicate.semanticComponents) &&
+    preservesAdviceCodings(left.predicate.codings, right.predicate.codings) &&
+    preservesAdviceComponents(left.predicate.semanticComponents, right.predicate.semanticComponents) &&
+    preservesAdviceComponents(right.predicate.semanticComponents, left.predicate.semanticComponents) &&
     correspondingAdviceArguments(left.args, right.args, sameAdviceArgumentMeaning);
 }
 
@@ -4689,40 +4667,20 @@ function selectedAdviceFrameMatchesGraph(selected: AdviceFrame, actual: AdviceFr
     const code = resolveMedicationInstructionAction(selected.predicate.lemma)?.code;
     samePredicate = code !== undefined && code === resolveMedicationInstructionAction(actual.predicate.lemma)?.code;
   }
-  if (!samePredicate ||
-      selected.predicate.semanticClass !== undefined && selected.predicate.semanticClass !== actual.predicate.semanticClass ||
-      (selected.polarity ?? AdvicePolarity.Affirm) !== (actual.polarity ?? AdvicePolarity.Affirm) ||
-      selected.modality !== actual.modality ||
-      selected.force !== actual.force && !(selected.force === AdviceForce.Instruction && actual.force === AdviceForce.Sequence) ||
-      selected.relation !== undefined && selected.relation !== actual.relation) return false;
-  for (const field of ["display", "realizer", "realizerConfig"] as const)
-    if (selected.predicate[field] !== undefined && !equalStructuredValues(selected.predicate[field], actual.predicate[field])) return false;
-  if (!selectedCodingsMatch(selected.predicate.codings, actual.predicate.codings) ||
-      !selectedComponentsMatch(selected.predicate.semanticComponents, actual.predicate.semanticComponents)) return false;
-  for (const locale of Object.keys(selected.predicate.i18n ?? {}))
-    if (selected.predicate.i18n![locale] !== actual.predicate.i18n?.[locale]) return false;
-  if (!selectedCodingMatches(selected.coding, actual.coding) ||
-      !selectedCodingMatches(selected.sourceRelationCoding, actual.sourceRelationCoding) ||
-      selected.polaritySource !== undefined && selected.polaritySource !== actual.polaritySource) return false;
+  if (!samePredicate || selected.modality !== actual.modality ||
+      !preservesAdviceFrameFacts(selected, actual)) return false;
   return correspondingAdviceArguments(selected.args, actual.args, (expected, candidate) => {
     const extendedTime = timeExtension && expected === selected.args.find(arg => arg.role === AdviceArgumentRole.Time) &&
       candidate === actual.args.find(arg => arg.role === AdviceArgumentRole.Time);
     if (!extendedTime && (expected.normalized ?? expected.text) !== (candidate.normalized ?? candidate.text)) return false;
-    for (const field of ["relation", "conceptId", "administrationTargetCount", "span"] as const)
-      if (expected[field] !== undefined && !(extendedTime && field === "span") &&
-          !equalStructuredValues(expected[field], candidate[field])) return false;
-    if (!selectedCodingMatches(expected.coding, candidate.coding) ||
-        !selectedCodingsMatch(expected.codings, candidate.codings) ||
-        !selectedComponentsMatch(expected.components, candidate.components) ||
-        expected.quantity && !sameArgumentQuantity(expected, candidate)) return false;
-    for (const locale of Object.keys(expected.i18n ?? {}))
-      if (expected.i18n![locale] !== candidate.i18n?.[locale]) return false;
+    if (!extendedTime && expected.span !== undefined &&
+        !equalStructuredValues(expected.span, candidate.span)) return false;
     return true;
   }, false);
 }
 
 /** Locate an authored fragment; this is correspondence, not action identity. */
-function instructionSourceRange(graph: CanonicalInstructionGraph, text: string | undefined,
+export function instructionSourceRange(graph: CanonicalInstructionGraph, text: string | undefined,
   source = graph.sourceText.toLocaleLowerCase("en")): TextRange | undefined {
   if (!text?.trim()) return undefined;
   const phrase = text.trim().toLocaleLowerCase("en");
@@ -5503,6 +5461,41 @@ export function attachInstructionGraphPrimaryConditions(
   return body.charAt(0).toUpperCase() + body.slice(1) + ending;
 }
 
+/** Associate selected advice with current typed action occurrences; no display coverage is inferred. */
+export function instructionGraphAdviceAssociation(
+  graph: CanonicalInstructionGraph,
+  instruction: CanonicalAdditionalInstructionExpr
+): { actionIndices: number[]; representedActionIndices: number[]; codingProved: boolean } {
+  let actionIndices: number[] = [];
+  if (instruction.frames?.length) {
+    const selected = instruction.frames.map(frame => graph.actions.findIndex(action =>
+      selectedAdviceFrameMatchesGraph(frame, action)));
+    if (selected.every(index => index >= 0)) actionIndices = selected;
+  }
+  // This existing coded matcher retains its selected frame identity instead
+  // of projecting it to a source string and finding that occurrence again.
+  let codingProved = false;
+  const firstFrame = instruction.frames?.[0];
+  const templateFrames = !actionIndices.length && firstFrame && instruction.coding?.code && !instruction.evidence?.length
+    ? buildAdditionalInstructionFramesFromCoding(instruction.coding.system ?? SNOMED_SYSTEM,
+      instruction.coding.code, firstFrame.sourceText, firstFrame.span) : undefined;
+  const onlyCodedTemplate = templateFrames && equalStructuredValues(instruction.frames, templateFrames);
+  if (!actionIndices.length && (!instruction.frames?.length || onlyCodedTemplate) && instruction.coding?.code) {
+    actionIndices = composedCodedAdviceActions(graph.actions, instruction.coding)
+      .map(frame => graph.actions.indexOf(frame));
+    codingProved = actionIndices.length > 0;
+  }
+  // Association may license a richer graph realization. Standard materialization
+  // additionally needs every current qualifier represented by the selected row.
+  const representedFrames = actionIndices.length && instruction.frames?.length ? instruction.frames
+    : actionIndices.length && instruction.coding?.code
+      ? buildAdditionalInstructionFramesFromCoding(instruction.coding.system ?? SNOMED_SYSTEM, instruction.coding.code)
+      : undefined;
+  const representedActionIndices = representedFrames?.length ? actionIndices.filter(index =>
+    representedFrames.some(frame => sameTypedWarning(frame, graph.actions[index]))) : [];
+  return { actionIndices, representedActionIndices, codingProved };
+}
+
 interface InstructionAdviceBinding {
   instruction: CanonicalAdditionalInstructionExpr;
   actionIndices: number[];
@@ -5523,28 +5516,9 @@ function collectGraphInstructionOwnership(
   source: string
 ): InstructionAdviceBinding[] {
   return instructions.map((instruction, rowIndex) => {
-    let actionIndices: number[] = [];
-    if (instruction.frames?.length) {
-      const selected = instruction.frames.map(frame => graph.actions.findIndex(action =>
-        selectedAdviceFrameMatchesGraph(frame, action)));
-      if (selected.every(index => index >= 0)) actionIndices = selected;
-    }
-    // This existing coded matcher retains its selected frame identity instead
-    // of projecting it to a source string and finding that occurrence again.
-    let derivedQualifier = false;
-    let codingProved = false;
-    const firstFrame = instruction.frames?.[0];
-    const templateFrames = !actionIndices.length && firstFrame && instruction.coding?.code && !instruction.evidence?.length
-      ? buildAdditionalInstructionFramesFromCoding(instruction.coding.system ?? SNOMED_SYSTEM,
-        instruction.coding.code, firstFrame.sourceText, firstFrame.span) : undefined;
-    const onlyCodedTemplate = templateFrames && equalStructuredValues(instruction.frames, templateFrames);
-    if (!actionIndices.length && (!instruction.frames?.length || onlyCodedTemplate) && instruction.coding?.code) {
-      actionIndices = composedCodedAdviceActions(graph.actions, instruction.coding)
-        .map(frame => graph.actions.indexOf(frame));
-      codingProved = actionIndices.length > 0;
-      derivedQualifier = actionIndices.length > 0 && actionIndices.every(index =>
-        !isInstructionGraphDisplayWarning(graph.actions[index]));
-    }
+    let { actionIndices, codingProved } = instructionGraphAdviceAssociation(graph, instruction);
+    const derivedQualifier = codingProved && actionIndices.every(index =>
+      !isInstructionGraphDisplayWarning(graph.actions[index]));
     const completeFrames = instructionHasCompleteFrameEvidence(instruction);
     let range = completeFrames && actionIndices.length === 1 ? graph.actions[actionIndices[0]].span
       : instructionSourceRange(graph, instruction.text, source);
