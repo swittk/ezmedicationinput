@@ -3,6 +3,7 @@ import { deserializeCanonicalContext, TIMING_ADMINISTRATION_DURATION_EXTENSION_U
 import { courseFromR6 } from "../src/adapters/canonical-course";
 import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, EventTiming, type AdviceFrame, type CanonicalInstructionGraph, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
 import { describe, expect, it } from "vitest";
+import { getInstructionActionLocaleAdapter, registerInstructionActionLocaleAdapter } from "../src/index";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
 import { setDosageCondition, withDosageEditProvenance, getDosageSourceOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
@@ -6143,6 +6144,11 @@ describe("complete typed action participants", () => {
         { role: AdviceArgumentRole.Activity, text: "brushing", normalized: "brushing", relation: AdviceRelation.Before, i18n: { th: "แปรงฟัน" } },
         { role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00:00", relation: AdviceRelation.On }
       ], en: "Rinse mouth before brushing at 08:00:00", th: "ล้างปากก่อนแปรงฟัน เวลา 08:00:00" },
+    { head: "Rinse the mouth", relation: undefined, polarity: AdvicePolarity.Affirm,
+      args: [
+        { role: AdviceArgumentRole.Site, text: "mouth", normalized: "mouth", i18n: { th: "ปาก" } },
+        { role: AdviceArgumentRole.Time, text: "Mondays", relation: AdviceRelation.On }
+      ], en: "Rinse mouth on Monday", th: "ล้างปากเมื่อวันจันทร์" },
     { head: "Apply cream", relation: undefined, polarity: AdvicePolarity.Affirm,
       args: [
         { role: AdviceArgumentRole.Object, text: "cream", normalized: "cream", i18n: { th: "ครีม" } },
@@ -6188,6 +6194,64 @@ describe("complete typed action participants", () => {
     expect(JSON.stringify(parsed.fhirNext)).toBe(before);
     expect(realizeInstructionAction(parseInstructionActions(source)[0], "en"))
       .toBe("Chew 2 tablets of calcium carbonate");
+  });
+
+  it("preserves explicit weekday wording beside a selective clock and date exclusion", () => {
+    const source = "Take 1 tablet at 08:00 and 20:00 daily for 3 days except 2026-11-24. On Mondays, do not take the 1-tablet morning dose.";
+    const parsed = parsePublicSig(source);
+    const query = { orderedAt: "2026-11-23T00:00:00Z", from: "2026-11-23T00:00:00Z", timeZone: "UTC", limit: 10 };
+    const expectedTimes = ["2026-11-23T20:00:00+00:00", "2026-11-25T08:00:00+00:00", "2026-11-25T20:00:00+00:00"];
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    for (const value of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(value);
+      const members = importCanonicalCourse(value).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(2);
+      for (const member of members) {
+        const recurrence = member.schedule!.recurrence!;
+        expect(member.amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+        expect(recurrence.courseLength).toMatchObject({ value: 3 });
+        expect(recurrence.courseLength!.code ?? recurrence.courseLength!.unit).toBe("d");
+        expect(recurrence.clocks).toHaveLength(1);
+        expect(member.excludedDates).toEqual(["2026-11-24"]);
+        expect(member.excludedWeekdays ?? []).toEqual(recurrence.clocks![0] === "08:00:00" ? ["mon"] : []);
+        const warning = member.syntax!.instructionGraph!.actions[0];
+        expect(warning.polarity).toBe(AdvicePolarity.Negate);
+        expect(warning.args).toContainEqual(expect.objectContaining({
+          role: AdviceArgumentRole.Time, relation: AdviceRelation.On, text: "Mondays"
+        }));
+      }
+      expect(members.map(member => member.schedule!.recurrence!.clocks![0]).sort()).toEqual(["08:00:00", "20:00:00"]);
+      expect(nextDueDoses(value, query)).toEqual(expectedTimes);
+      for (const durationValue of [3, 7]) expect(calculateTotalUnits({
+        dosage: value, ...query, durationValue, durationUnit: "d"
+      })).toMatchObject({ totalUnits: 3, unit: "tab" });
+      const en = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(value, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("On Mondays, do not take the 1-tablet morning dose");
+      expect(th).toContain("เมื่อวันจันทร์");
+      expect(th).not.toContain("ตอนเช้าMondays");
+      expect(JSON.stringify(value)).toBe(before);
+    }
+  });
+
+  it("preserves a registered direct-time callback for an explicit weekday", () => {
+    const original = getInstructionActionLocaleAdapter("th");
+    const calls: string[][] = [];
+    registerInstructionActionLocaleAdapter({ ...original, directTime: (...args: [string]) => {
+      calls.push(args);
+      return "CUSTOM-WEEKDAY";
+    } });
+    try {
+      const frame: AdviceFrame = { ...parseInstructionActions("Rinse the mouth")[0], sourceText: "", args: [
+        { role: AdviceArgumentRole.Site, text: "mouth", normalized: "mouth", i18n: { th: "ปาก" } },
+        { role: AdviceArgumentRole.Time, text: "Mondays", relation: AdviceRelation.On }
+      ] };
+      expect(realizeInstructionAction(frame, "th")).toBe("ล้างปากCUSTOM-WEEKDAY");
+      expect(calls).toEqual([["Mondays"]]);
+    } finally {
+      registerInstructionActionLocaleAdapter(original);
+    }
   });
 
   it("keeps both marked dilution clocks out of the destination slot", () => {

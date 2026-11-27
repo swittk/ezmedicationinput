@@ -4254,9 +4254,9 @@ function realizeAction(
     for (const adjunct of temporalAdjuncts) {
       if (entailed?.has(adjunct.role + "\0" + adjunct.conceptId + "\0" + adjunct.relation)) continue;
       const value = translatedArgument(adjunct, locale);
-      const direct = adjunct.role === AdviceArgumentRole.Time &&
-        (!adjunct.relation || relationHasGrammarFeature(adjunct.relation, "directTimeRealization"));
-      const temporalPhrase = (direct && adapter.directTime?.(value)) || joinLocalizedTokens(locale, [
+      const temporalPhrase = (adjunct.role === AdviceArgumentRole.Time && realizeTimeArgument({
+        locale, time: value, timeRelation: adjunct.relation
+      })) || joinLocalizedTokens(locale, [
         localizeAdviceRelation(adjunct.relation!, locale) ?? adjunct.relation, value
       ]);
       if (!temporalPhrase) continue;

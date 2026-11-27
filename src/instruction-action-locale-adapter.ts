@@ -1,5 +1,6 @@
 import { getMedicationInstructionAction, medicationInstructionActionLocaleRealizerConfig } from "./instruction-action-terminology";
 import { INSTRUCTION_QUANTITY_UNIT_LABELS } from "./hpsg/lexical-classes";
+import lexicalClasses from "./hpsg/lexical-classes.json";
 import {
   getAdviceRelationDefinition,
   getUniqueAdviceRelationByGrammarFeature,
@@ -9,8 +10,8 @@ import {
 } from "./relation-terminology";
 import { baseLanguageTag, localizedValue } from "./localization";
 import { joinLocalizedTokens } from "./locale-realization";
-import { ENGLISH_COURSE } from "./locales/course/en";
-import { THAI_COURSE } from "./locales/course/th";
+import { ENGLISH_COURSE, ENGLISH_DAY_NAMES } from "./locales/course/en";
+import { THAI_COURSE, THAI_DAY_NAMES } from "./locales/course/th";
 import {
   AdviceArgument,
   AdviceArgumentRole,
@@ -210,7 +211,7 @@ export const EN_POSITIVE_MODALITY_PREFIX: Partial<Record<AdviceModality, string>
 };
 
 /** Consume the selected typed Time once; locale adapters own direct wording. */
-export function realizeTimeArgument(c: InstructionActionRealizationInput): string | undefined {
+export function realizeTimeArgument(c: Pick<InstructionActionRealizationInput, "locale" | "time" | "timeRelation" | "timeWasRendered">): string | undefined {
   if (!c.time) return undefined;
   const relation = c.timeRelation;
   const text = !relation || relationHasGrammarFeature(relation, "directTimeRealization")
@@ -367,7 +368,28 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
     coextensiveAmount, primaryAmount, substanceAmount };
 }
 
+const WEEKDAY_ARGUMENTS = new Map<string, Record<string, string>>();
+for (const entry of lexicalClasses.calendarWeekdayLexemes) {
+  const labels = { en: ENGLISH_DAY_NAMES[entry.day], th: THAI_DAY_NAMES[entry.day] };
+  for (const form of entry.en) WEEKDAY_ARGUMENTS.set(form, labels);
+  // Contextual short Thai aliases remain the calendar parser's responsibility.
+  for (const form of entry.th) {
+    WEEKDAY_ARGUMENTS.set(form, labels);
+    WEEKDAY_ARGUMENTS.set(lexicalClasses.calendarWeekdayPrefix + form, labels);
+  }
+}
+
+/** Realize an already selected weekday Time through the existing locale labels. */
+function localizedWeekdayArgument(value: string, locale: string | undefined): string | undefined {
+  const labels = WEEKDAY_ARGUMENTS.get(value.trim().toLowerCase());
+  return localizedValue(labels, locale) ?? localizedValue(labels, "en");
+}
+
 function englishDirectTime(time: string): string {
+  const weekday = localizedWeekdayArgument(time, "en");
+  if (weekday) return joinLocalizedTokens("en", [
+    localizeAdviceRelation(AdviceRelation.On, "en", "temporal"), weekday
+  ]);
   const lower = time.toLowerCase();
   return lower === "night" ? "at night"
     : lower === "bed" || lower === "bedtime" || lower === "sleep" ? "at bedtime"
@@ -534,6 +556,10 @@ function renderThaiRelationDuration(c: InstructionActionRealizationInput): strin
 }
 
 function thaiDirectTime(time: string): string {
+  const weekday = localizedWeekdayArgument(time, "th");
+  if (weekday) return joinLocalizedTokens("th", [
+    localizeAdviceRelation(AdviceRelation.On, "th", "temporal"), weekday
+  ]);
   if (/^[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?$/.test(time)) return ` เวลา ${time}`;
   return time === "กลางคืน" ? "ตอนกลางคืน"
     : time === "นอน" || time === "bedtime" ? "ก่อนนอน" : time;
