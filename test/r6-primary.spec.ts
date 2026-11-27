@@ -7195,23 +7195,29 @@ describe("review51 current single-row and locale defaults", () => {
     }
   });
 
-  it.each([false, true])("retains an untranslated raw site restriction's complete authored source (ranged=%s)", ranged => {
-    const sourceText = "where the skin directly beneath the dressing is intact";
-    const predicateText = ranged ? "the skin directly beneath the dressing is intact" : "skin is intact";
+  it.each([
+    { name: "spanless detailed source", sourceText: "where the skin directly beneath the dressing is intact",
+      predicateText: "skin is intact", predicateStart: undefined },
+    { name: "complete ranged predicate", sourceText: "where the skin directly beneath the dressing is intact",
+      predicateText: "the skin directly beneath the dressing is intact", predicateStart: 6 },
+    { name: "partial final-word predicate", sourceText: "where the skin is intact and dry",
+      predicateText: "dry", predicateStart: 29 }
+  ])("retains an untranslated raw site restriction's complete authored source: $name", ({ sourceText, predicateText, predicateStart }) => {
     const note: FhirExtension = { url: "urn:clinic:restriction-note", valueString: "Independent annotation" };
     const restriction: FhirExtension = { id: "selected-restriction", url: BODY_SITE_RESTRICTION_EXTENSION_URL, extension: [
       { url: "relation", valueCode: "where" }, { url: "sourceText", valueString: sourceText },
       { url: "predicateText", valueString: predicateText }, { url: "predicateForm", valueCode: "raw" },
-      ...(ranged ? [
+      ...(predicateStart !== undefined ? [
         { url: "sourceStart", valueInteger: 0 }, { url: "sourceEnd", valueInteger: sourceText.length },
-        { url: "predicateStart", valueInteger: 6 }, { url: "predicateEnd", valueInteger: sourceText.length }
+        { url: "predicateStart", valueInteger: predicateStart }, { url: "predicateEnd", valueInteger: sourceText.length }
       ] : []), note
     ] };
     const row: FhirDosage = {
       method: { text: "Apply" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
       site: { text: "skin", extension: [restriction] }
     };
-    for (const input of [fresh([row]), fresh(toDosageDetails([row]))]) {
+    if (predicateStart !== undefined) expect(sourceText.slice(predicateStart)).toBe(predicateText);
+    for (const input of [fresh(row), fresh([row]), fresh(toDosageDetails([row]))]) {
       const before = fresh(input);
       expect(formatSig(input, "long", { locale: "th" })).toContain("(" + sourceText + ")");
       const wire = projectCanonicalCourse(importCanonicalCourse(input)).fhir[0];

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, fromFhir, fromFhirDosage, getTimingOccurrenceCap, nextDueDoses, parseSig as parseCompleteSig, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src";
+import { formatSig, fromFhir, fromFhirDosage, FhirPeriodUnit, getTimingOccurrenceCap, nextDueDoses, parseSig as parseCompleteSig, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src";
 import type { FhirDosage, FhirR6DosageInstruction } from "../src";
 import { parseSig } from "./helpers/r5-parser";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
-import { deserializeCanonicalContext } from "../src/fhir";
+import { BODY_SITE_RESTRICTION_EXTENSION_URL, deserializeCanonicalContext } from "../src/fhir";
 import { TIMING_ADMINISTRATION_DURATION_EXTENSION_URL } from "../src/fhir";
 import { TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
 import { courseFromR6 } from "../src/adapters/canonical-course";
@@ -1016,13 +1016,14 @@ describe("round36 rich primary rendered argument ownership", () => {
     expect(JSON.stringify(saved)).toBe(before);
   });
 
-  it("shows the current restricted primary site once while retaining an independent action site and saved wording", () => {
+  it("shows a current restricted primary site once beside independent action meaning", () => {
     const source = "Apply 1 g to the skin gently";
-    const row = JSON.parse(JSON.stringify(parsePublicSig(source).fhir[0]));
+    const primaryFacts = parsePublicSig(source).fhir[0];
+    const site = JSON.parse(JSON.stringify(parsePublicSig("Apply 1 g to skin where skin is itchy").fhir[0].site));
     const primary = parseInstructionActions(source)[0];
     primary.args = [
       { role: AdviceArgumentRole.Amount, text: "1 g", normalized: "g", quantity: { value: 1, unit: "g" } },
-      { role: AdviceArgumentRole.Site, text: "skin", normalized: "skin", coding: row.site.coding[0] },
+      { role: AdviceArgumentRole.Site, text: "skin", normalized: "skin", coding: site.coding[0] },
       { role: AdviceArgumentRole.Manner, text: "gently", normalized: "gently", i18n: { en: "gently", th: "เบาๆ" } }
     ];
     const warning = parseInstructionActions("Do not touch right eye")[0];
@@ -1030,18 +1031,19 @@ describe("round36 rich primary rendered argument ownership", () => {
     warning.sequenceIndex = 1;
     const marker = buildInstructionGraphExtension({ sourceText: source + "; Do not touch right eye", sourceLocale: "en",
       primaryAdministrationSpan: { start: 0, end: 5 }, actions: [primary, warning] })!;
-    row.extension = row.extension.filter((x: { url: string }) => x.url !== marker.url && x.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
-    row.extension.push(marker);
-    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
-    saved.site = JSON.parse(JSON.stringify(parsePublicSig("Apply 1 g to skin where skin is red").fhir[0].site));
-    saved.site.extension[0].extension.find((x: { url: string }) => x.url === "predicateText").valueString = "skin is itchy";
-    const before = JSON.stringify(saved);
-    for (const input of [saved, toDosageDetails([saved])]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+    const current: FhirDosage = {
+      doseAndRate: primaryFacts.doseAndRate, method: primaryFacts.method, route: primaryFacts.route,
+      site, extension: [marker]
+    };
+    const before = JSON.stringify(current);
+    for (const input of [current, toDosageDetails([current])]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
       const en = formatSig(input, "long", { locale: "en", realizationMode });
       const th = formatSig(input, "long", { locale: "th", realizationMode });
       expect(en.match(/to the skin where skin is itchy/gu)).toHaveLength(1);
       expect(en.match(/skin is itchy/gu)).toHaveLength(1);
       expect(en).toContain("gently");
+      expect(en).toMatch(/1 g/u);
+      expect(th).toMatch(/1 (?:g|กรัม)/u);
       expect(en).toMatch(/Do not touch (?:the )?right eye/u);
       expect(en.match(/right eye/gu)).toHaveLength(1);
       expect(th.match(/ผิวหนัง/gu)).toHaveLength(1);
@@ -1050,9 +1052,10 @@ describe("round36 rich primary rendered argument ownership", () => {
       expect(th).toContain("ห้ามสัมผัสตาขวา");
       expect(en + th).not.toContain("skin is red");
     }
-    expect(JSON.stringify(saved)).toBe(before);
-    expect(before).toContain("where skin is red");
-    expect(parseInstructionGraphExtension(saved.extension)?.sourceText).toBe(source + "; Do not touch right eye");
+    expect(JSON.stringify(current)).toBe(before);
+    expect(before).toContain("where skin is itchy");
+    expect(toFhirR5Dosages(toDosageDetails([current]))[0].site?.extension).toEqual(current.site?.extension);
+    expect(parseInstructionGraphExtension(current.extension)?.sourceText).toBe(source + "; Do not touch right eye");
   });
 
   it("omits only the covered amountless primary when preparation owns the amount", () => {
@@ -1139,14 +1142,23 @@ describe("round36 selected Time output evidence", () => {
 
 
 describe("round36 live predicate and explicit amountless primary controls", () => {
-  it("uses the current predicate from fresh submitted wire restrictions in both locales", () => {
-    const source = "Apply 1 g to skin where skin is red daily max 2 g/day";
-    const row = structuredClone(parsePublicSig(source).fhir[0]);
-    for (const locale of ["en", "th"])
-      formatSig(structuredClone(row), "long", { locale, realizationMode: "roundtrip" });
+  it("preserves a current raw restriction with its dose, cadence and limit in both locales", () => {
+    const source = "Apply 1 g to skin where skin is itchy daily max 2 g/day";
+    const sourced = structuredClone(parsePublicSig(source).fhir[0]);
+    const row: FhirDosage = {
+      doseAndRate: sourced.doseAndRate, method: sourced.method, route: sourced.route,
+      site: sourced.site, timing: sourced.timing, maxDosePerPeriod: sourced.maxDosePerPeriod
+    };
     const restriction = row.site!.extension!.find(item => item.url.endsWith("medication-body-site-restriction"))!;
-    restriction.extension!.find(item => item.url === "predicateText")!.valueString = "skin is itchy";
-    const before = JSON.stringify(row);
+    const before = JSON.stringify({ row, sourced });
+    expect(formatSig(sourced, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
+    for (const current of [row, toFhirR5Dosages(toDosageDetails([row]))[0]]) {
+      expect(current.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "g" });
+      expect(current.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day });
+      expect(current.maxDosePerPeriod).toMatchObject([{
+        numerator: { value: 2, unit: "g" }, denominator: { value: 1, unit: "d" }
+      }]);
+    }
     for (const input of [row, toDosageDetails(JSON.parse(JSON.stringify([row])))])
       for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
         const text = formatSig(input, "long", { locale, realizationMode });
@@ -1154,10 +1166,12 @@ describe("round36 live predicate and explicit amountless primary controls", () =
         expect(text).not.toContain("skin is red");
         expect(text).toMatch(locale === "en" ? /to the skin where skin is itchy/u : /ผิวหนัง.*skin is itchy/u);
         expect(text).toMatch(locale === "en" ? /1 g/u : /1 (?:g|กรัม)/u);
+        expect(text).toContain(locale === "en" ? "once daily" : "วันละครั้ง");
+        expect(text).toContain("max per period: 2 g / 1 d");
       }
-    expect(row.text).toBe(source);
-    expect(restriction.extension!.find(item => item.url === "sourceText")!.valueString).toBe("where skin is red");
-    expect(JSON.stringify(row)).toBe(before);
+    expect(sourced.text).toBe(source);
+    expect(restriction.extension!.find(item => item.url === "sourceText")!.valueString).toBe("where skin is itchy");
+    expect(JSON.stringify({ row, sourced })).toBe(before);
   });
 
   it.each([
@@ -3363,18 +3377,33 @@ describe("round55: current clinical facts and independent graph meaning", () => 
       expect(parseInstructionGraphExtension(row.extension)?.relations?.[0].text).toBe(relationText);
     });
 
-  it.each(["existential", "state"] as const)("uses current restriction text over a retained inferred lemma: %s", form => {
-    const row = persisted(parsePublicSig("Apply 1 g to skin where there is rash daily").fhir[0]);
-    const marker = row.site!.extension!.find(item => item.url.endsWith("medication-body-site-restriction"))!;
-    marker.extension!.find(item => item.url === "predicateText")!.valueString = "skin is itchy";
-    marker.extension!.find(item => item.url === "predicateForm")!.valueCode = form;
-    marker.extension!.push({ url: "urn:round55:restriction-note", valueString: "retain source annotation" });
+  it.each([
+    { form: "existential", predicate: "there is rash", lemma: "rash", focus: "rash",
+      en: "where there is rash", th: "ที่มีผื่น" },
+    { form: "state", predicate: "irritated", lemma: "irritated", focus: undefined,
+      en: "where irritated", th: "ที่ระคายเคือง" }
+  ] as const)("preserves a current $form restriction and its independent annotation", test => {
+    const marker: FhirExtension = { url: BODY_SITE_RESTRICTION_EXTENSION_URL, extension: [
+      { url: "relation", valueCode: "where" }, { url: "sourceText", valueString: "where " + test.predicate },
+      { url: "predicateText", valueString: test.predicate }, { url: "predicateForm", valueCode: test.form },
+      { url: "predicateLemma", valueString: test.lemma },
+      ...(test.focus ? [{ url: "predicateFocusText", valueString: test.focus }] : []),
+      { url: "urn:round55:restriction-note", valueString: "retain source annotation" }
+    ] };
+    const row: FhirDosage = {
+      method: { text: "Apply" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      site: { text: "skin", extension: [marker] }
+    };
     const original = persisted(marker), before = JSON.stringify(row);
     for (const input of views(row)) for (const locale of ["en", "th"])
       for (const realizationMode of ["normalized", "roundtrip"] as const) {
         const text = formatSig(input, "long", { locale, realizationMode });
-        expect(text.match(/skin is itchy/gu)).toHaveLength(1);
-        expect(text).not.toMatch(/rash|ผื่น/u);
+        const condition = locale === "en" ? test.en : test.th;
+        expect(text.split(condition)).toHaveLength(2);
+        expect(text).toContain(locale === "en" ? "skin" : "ผิวหนัง");
+        expect(text).toMatch(locale === "en" ? /1 g/u : /1 (?:g|กรัม)/u);
+        expect(text).toContain(locale === "en" ? "once daily" : "วันละครั้ง");
       }
     expect(JSON.stringify(row)).toBe(before);
     expect(toFhirR5Dosages(toDosageDetails(persisted([row])))[0].site?.extension).toContainEqual(original);
