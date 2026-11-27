@@ -347,24 +347,55 @@ export function prefersSourceInstruction(course: CanonicalCourse): boolean {
   );
 }
 
-/** One pass organizes native choice membership. It never decodes a wire
- * marker or repeatedly scans the entire component array for each branch. */
+/** One pass organizes native choice and shared-allowance membership. */
 export function formatCourseChoices<T>(
   members: readonly T[],
-  render: (member: T) => string,
+  render: (member: T, sharedCountAlreadyDisplayed?: boolean) => string,
   choiceOf: (member: T) => CanonicalAdministration["choice"],
   words: CourseLanguage,
   separator = "; ",
-  courseLabels?: ReadonlyMap<string, ReadonlyMap<string, string>>
+  courseLabels?: ReadonlyMap<string, ReadonlyMap<string, string>>,
+  sharedGroupOf?: (member: T) => string | undefined
 ): string {
   if (members.length === 1 && !choiceOf(members[0])) return render(members[0]).trim();
-  const slots: Array<{ text: string } | { group: string }> = [];
-  const groups = new Map<string, Map<string, string[]>>();
+  type RenderedMember = { text: string; sharedGroup?: string };
+  const groupMembers = (items: readonly RenderedMember[]): string[] => {
+    const slots: Array<RenderedMember | { group: string }> = [];
+    const groups = new Map<string, string[]>();
+    for (const item of items) {
+      if (item.sharedGroup === undefined) {
+        slots.push(item);
+        continue;
+      }
+      let group = groups.get(item.sharedGroup);
+      if (!group) {
+        groups.set(item.sharedGroup, group = []);
+        slots.push({ group: item.sharedGroup });
+      }
+      group.push(item.text);
+    }
+    const output: string[] = [];
+    for (const slot of slots) {
+      if ("text" in slot) output.push(slot.text);
+      else {
+        const group = groups.get(slot.group)!;
+        const body = joinGeneratedClauses(group, separator);
+        output.push(group.length > 1 ? "(" + body + ")" : body);
+      }
+    }
+    return output;
+  };
+  const slots: Array<RenderedMember | { group: string }> = [];
+  const groups = new Map<string, Map<string, RenderedMember[]>>();
+  let displayedSharedGroups: Set<string> | undefined;
   for (const member of members) {
-    const text = render(member).trim(),
+    const sharedGroup = sharedGroupOf?.(member);
+    const sharedCountAlreadyDisplayed = sharedGroup !== undefined && displayedSharedGroups?.has(sharedGroup) === true;
+    const text = render(member, sharedCountAlreadyDisplayed).trim(),
       choice = choiceOf(member);
+    if (text && sharedGroup !== undefined) (displayedSharedGroups ??= new Set()).add(sharedGroup);
     if (!choice) {
-      if (text) slots.push({ text });
+      if (text) slots.push({ text, sharedGroup });
       continue;
     }
     let branches = groups.get(choice.groupId);
@@ -374,26 +405,26 @@ export function formatCourseChoices<T>(
     }
     let branch = branches.get(choice.branchId);
     if (!branch) branches.set(choice.branchId, (branch = []));
-    if (text) branch.push(text.replace(/[.!?]+$/u, ""));
+    if (text) branch.push({ text: text.replace(/[.!?]+$/u, ""), sharedGroup });
   }
-  const output: string[] = [];
+  const output: RenderedMember[] = [];
   for (const slot of slots) {
     if ("text" in slot) {
-      output.push(slot.text);
+      output.push(slot);
       continue;
     }
     let body = "";
     const labels = courseLabels?.get(slot.group);
     for (const [branchId, branch] of groups.get(slot.group)!) {
-      const text = branch.join(separator);
+      const text = (displayedSharedGroups ? groupMembers(branch) : branch.map(item => item.text)).join(separator);
       if (!text) continue;
       if (body) body += labels ? separator : words.anySeparator;
       const grouped = branch.length > 1 ? "(" + text + ")" : text;
       body += labels ? "(" + labels.get(branchId) + ") " + grouped : grouped;
     }
-    if (body) output.push((labels ? "" : words.choicePrefix) + body + ".");
+    if (body) output.push({ text: (labels ? "" : words.choicePrefix) + body + "." });
   }
-  return joinGeneratedClauses(output, separator);
+  return joinGeneratedClauses(displayedSharedGroups ? groupMembers(output) : output.map(item => item.text), separator);
 }
 type PreviewChoiceGroups = Map<string, { branches: Set<string>; stages: Set<number> }>;
 /** Branch labels are stable across stage headings. The choice is made once
@@ -573,7 +604,7 @@ function administrationHasClinicalFacts(a: CanonicalAdministration, includeMembe
   const timing = a.schedule;
   if (timing?.explicitEvents?.length || timing?.code) return true;
   const r = timing?.recurrence;
-  return !!r && (r.count !== undefined || r.countMax !== undefined || r.frequency !== undefined ||
+  return !!r && (r.count !== undefined || r.countMax !== undefined || !!r.sharedCount || r.frequency !== undefined ||
     r.frequencyMax !== undefined || r.period !== undefined || r.periodMax !== undefined || !!r.periodUnit ||
     r.occurrenceDuration !== undefined || r.occurrenceDurationMax !== undefined || !!r.occurrenceDurationUnit || !!r.occurrenceDurationRange ||
     !!r.courseLength || !!r.courseLengthRange || !!r.calendarWindow || !!r.dayOfWeek?.length ||
@@ -669,7 +700,8 @@ function formatCanonicalBaseNative(
   environment?: CourseFormatEnvironment,
   source: CanonicalAdministration = a,
   authored?: AuthoredDirectionsState,
-  deferredDirections?: { text?: string; current?: string }
+  deferredDirections?: { text?: string; current?: string },
+  sharedCountAlreadyDisplayed = false
 ): string {
   // Member bounds and safety limits qualify the directions; they cannot
   // replace the only authored dose, manner and cadence.
@@ -679,9 +711,11 @@ function formatCanonicalBaseNative(
       !a.additionalInstructions?.length && !a.patientInstruction) return a.text!;
   const env = environment ?? courseEnvironment(options),
     words = env.words;
+  // This one compiled view carries native and imported source-agreement proof.
+  const clause = compiled ?? clauseForAdministration(a, options);
   if (authoredDirectionsOnly) {
     const advice = a.additionalInstructions?.length || a.patientInstruction
-      ? formatNativeCanonicalClause(compiled ?? clauseForAdministration(a, options), style, env.localization, options) : "";
+      ? formatNativeCanonicalClause(clause, style, env.localization, options) : "";
     return appendDoseLimits(joinGeneratedClauses([a.text!, advice].filter(Boolean)), a.limits, words, undefined, a.safety?.ifExceeded);
   }
   const primary = a.amounts?.[0];
@@ -698,16 +732,12 @@ function formatCanonicalBaseNative(
     a.siteReference ||
     a.excludedDates?.length ||
     a.excludedWeekdays?.length;
-  if (source.provenance?.format !== "r6" && source.provenance?.sourceTextVerified !== false &&
+  if (source.provenance?.format !== "r6" && clause.sourceProjectionVerified !== false &&
       options?.realizationMode !== "normalized" && !a.predicate && !a.safety?.ifExceeded &&
       a.text?.trim() && (maxima || rich)) {
     if (authored && authored.text === a.text) authored.rendered = true;
     return a.text;
   }
-  // A structured import already built this exact scoped clause for item
-  // metadata. Reuse it for both item and whole-course EN/TH previews instead
-  // of reconstructing the same dose/timing from native fields five times.
-  const clause = compiled ?? clauseForAdministration(a, options);
   // With no structured administration, the live guard qualifies the supplied
   // directions. Independent advice (for example, "Otherwise hold") is not
   // the administration and must not acquire that guard. Do not parse the text.
@@ -732,7 +762,7 @@ function formatCanonicalBaseNative(
   const primaryDirections = deferredDirections?.current ? deferredDirections
     : authoredPrimary && hasPrimaryQualifiers ? deferredDirections ?? {} : undefined;
   let rendered = formatNativeCanonicalClause(displayClause, style, env.localization, options,
-    style === "long" ? authoredPrimary : undefined, primaryDirections);
+    style === "long" ? authoredPrimary : undefined, primaryDirections, sharedCountAlreadyDisplayed);
   if (authoredQualifiers) {
     const directions = composeNativePrimaryDirections("", a.text!, a.predicate, words, undefined, clause);
     rendered = a.additionalInstructions?.length || a.patientInstruction
@@ -943,7 +973,7 @@ export function formatCanonicalCourse(
     const displayEnd = datedEnd ? undefined : step.end;
     let rendered = formatCourseChoices(
       step.administrations,
-      (component) => {
+      (component, sharedCountAlreadyDisplayed) => {
         const clause = compiled?.get(component) ?? clauseForAdministration(component, options);
         const nativeDefault = (style: "short" | "long"): string => {
           const repeat = component.schedule?.recurrence;
@@ -1153,7 +1183,8 @@ export function formatCanonicalCourse(
             environment,
             component,
             authored,
-            deferredDirections
+            deferredDirections,
+            sharedCountAlreadyDisplayed
           );
           let body = joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
           if (deferredDirections?.text)
@@ -1209,7 +1240,8 @@ export function formatCanonicalCourse(
       (member) => member.choice,
       words,
       options?.separator,
-      labels
+      labels,
+      (member) => member.schedule?.recurrence?.sharedCount?.groupId
     );
     if (step.safety)
       rendered = appendDoseLimits(rendered, step.safety.limits, words, "stage", step.safety.ifExceeded);

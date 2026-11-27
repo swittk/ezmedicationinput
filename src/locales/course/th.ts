@@ -75,6 +75,7 @@ export const THAI_COURSE: CourseLanguage = {
   expression: (kind, detail) => `unevaluated ${kind} expression${detail ? ": " + detail : ""}`,
   upTo: (value) => "ไม่เกิน " + value,
   administrations: (frequency, period) => `ให้ยา ${frequency} ครั้ง${period ? "ต่อช่วง " + period : ""}`,
+  sharedAdministration: (body, total) => `ตารางให้ยาที่ใช้ข้อจำกัดร่วมกัน${total ? " และ" + total + "รวมทั้งชุด" : ""}: ${body}`,
   dosingPeriod: (period) => `ช่วงเวลาการให้ยา ${period}`,
   periodContext: (period) => ` (รอบละ ${period})`,
   startsWithinPeriod: (offset, context) => `เริ่มให้ยาหลังเริ่มรอบ ${offset}${context}`,

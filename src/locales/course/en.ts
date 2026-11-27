@@ -75,6 +75,7 @@ export const ENGLISH_COURSE: CourseLanguage = {
   expression: (kind, detail) => `unevaluated ${kind} expression${detail ? ": " + detail : ""}`,
   upTo: (value) => "up to " + value,
   administrations: (frequency, period) => `${frequency} ${frequency === "1" ? "administration" : "administrations"}${period ? " per " + period : ""}`,
+  sharedAdministration: (body, total) => `Schedule sharing its limits${total ? " and a total of " + total : ""}: ${body}`,
   dosingPeriod: (period) => `Dosing period: ${period}`,
   periodContext: (period) => ` (each period lasts ${period})`,
   startsWithinPeriod: (offset, context) => `Dosing starts ${offset} after the period begins${context}`,

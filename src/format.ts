@@ -2228,7 +2228,8 @@ export function formatNativeCanonicalClause(
   localization?: SigLocalization,
   options?: TimingSummaryOptions,
   authoredPrimary?: string,
-  deferredDirections?: { text?: string; current?: string }
+  deferredDirections?: { text?: string; current?: string },
+  sharedCountAlreadyDisplayed = false
 ): string {
   // Per-call vocabulary can declare method identities beyond the built-in
   // compiler dictionary. Resolve that head for every locale's display view
@@ -2240,6 +2241,19 @@ export function formatNativeCanonicalClause(
       clause = { ...clause, method: { ...clause.method, text: resolvedMethod.display } };
   }
   const native = resolveNativeClauseRendering(localization);
+  const shared = clause.schedule?.sharedCount;
+  if (shared) {
+    const words = localization?.course ?? ENGLISH_COURSE;
+    const count = shared.count === undefined
+      ? shared.countMax === undefined ? undefined : words.upTo(String(shared.countMax))
+      : shared.countMax !== undefined && shared.countMax !== shared.count
+        ? `${shared.count}-${shared.countMax}` : String(shared.count);
+    const rendered = formatNativeCanonicalClause({ ...clause,
+      schedule: { ...clause.schedule, sharedCount: undefined }
+    }, style, localization, options, authoredPrimary, deferredDirections);
+    return sharedCountAlreadyDisplayed ? rendered
+      : words.sharedAdministration(rendered, count === undefined ? undefined : words.administrations(count));
+  }
   const cycle = clause.schedule?.cycleDayConstraint;
   if (cycle) {
     const retainedQualifier = cycle.sourceText.trim();

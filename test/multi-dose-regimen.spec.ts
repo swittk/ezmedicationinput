@@ -4343,3 +4343,128 @@ describe("round76 partial-event selectors and supply qualifications", () => {
   });
 });
 }
+
+
+describe("shared administration totals in current previews", () => {
+  const member = (clock: string, count?: number, countMax?: number): CanonicalAdministration => ({
+    kind: "administration",
+    amounts: [{ quantity: { value: 1, unit: "tab" } }],
+    schedule: { recurrence: {
+      frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: [clock],
+      sharedCount: { groupId: "morning-evening", ...(count === undefined ? {} : { count }),
+        ...(countMax === undefined ? {} : { countMax }) }
+    } }
+  });
+  const independent = (): CanonicalAdministration => ({
+    kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }],
+    schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      clocks: ["12:00:00"], count: 2 } }
+  });
+  const views = (course: CanonicalCourse) => {
+    const unknown = { url: "urn:clinic:shared-schedule-note", valueString: "keep current group metadata" };
+    const r6 = { ...courseToR6(course), extension: [unknown] };
+    const r5 = JSON.parse(JSON.stringify(toFhirR5Dosages(r6))) as FhirDosage[];
+    expect(toDosageDetails(r5).extension).toContainEqual(unknown);
+    return [course, r6, r5] as const;
+  };
+
+  it("states one four-dose allowance for the two current clocks and preserves the prescribed exclusion", () => {
+    const source = "Take 1 tablet at 08:00 and 20:00 for 4 doses. On Mondays, do not take the 1-tablet morning dose";
+    const parsed = parseProductionSig(source);
+    const course = parsed.meta.canonical.course!;
+    const members = course.stages[0].administrations;
+    expect(members).toHaveLength(2);
+    expect(members.map(value => value.schedule?.recurrence?.sharedCount?.count)).toEqual([4, 4]);
+    expect(members.every(value => value.schedule?.recurrence?.count === undefined)).toBe(true);
+    for (const input of [course, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        const text = formatSig(input, style, { locale, realizationMode: "normalized" });
+        expect(text.match(/\b4\b/gu)).toHaveLength(1);
+        expect(text).toContain(locale === "en" ? "sharing its limits" : "ใช้ข้อจำกัดร่วมกัน");
+        expect(text).toMatch(locale === "en" && style === "long" ? /8:00 am/u : /08:00/u);
+        expect(text).toMatch(locale === "en" && style === "long" ? /8:00 pm/u : /20:00/u);
+        expect(text).toContain(locale === "en" ? "except Monday" : "ยกเว้นวันจันทร์");
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(formatParseBatch(parsed, "long").match(/\b4\b/gu)).toHaveLength(1);
+    for (const item of parsed.items) {
+      expect(item.longText.match(/\b4\b/gu)).toHaveLength(1);
+      expect(item.longText).toContain("sharing its limits");
+      expect(item.longText.match(/8:00 (?:am|pm)/gu)).toHaveLength(1);
+    }
+  });
+
+  it("keeps an unrelated noon dose outside a shared four-dose group", () => {
+    const am = { ...member("08:00:00", 4), excludedWeekdays: ["mon" as const] };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [am, independent(), member("20:00:00", 4)] }] };
+    const expected = {
+      en: "(Schedule sharing its limits and a total of 4 administrations: Use 1 tablet once daily at 8:00 am except Monday; Use 1 tablet once daily at 8:00 pm.); Use 2 tablets once daily at 12:00 pm for 2 doses.",
+      th: "(ตารางให้ยาที่ใช้ข้อจำกัดร่วมกัน และให้ยา 4 ครั้งรวมทั้งชุด: ใช้ครั้งละ 1 เม็ด วันละครั้ง เวลา 08:00 ยกเว้นวันจันทร์; ใช้ครั้งละ 1 เม็ด วันละครั้ง เวลา 20:00.); ใช้ครั้งละ 2 เม็ด วันละครั้ง เวลา 12:00 จำนวน 2 ครั้ง."
+    };
+    for (const input of views(course)) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"] as const)
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toBe(expected[locale]);
+      const current = importCanonicalCourse(input);
+      expect(current.stages[0].administrations[1].schedule?.recurrence?.sharedCount).toBeUndefined();
+      expect(current.stages[0].administrations[1].schedule?.recurrence?.count).toBe(2);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    for (const locale of ["en", "th"] as const) {
+      const text = formatSig(am, "long", { locale });
+      expect(text).toContain(locale === "en" ? "a total of 4 administrations" : "ให้ยา 4 ครั้งรวมทั้งชุด");
+      expect(text).not.toMatch(/20:00|8:00 pm|12:00/u);
+    }
+  });
+
+  it("distinguishes a shared upper count and a shared daily ceiling without a finite total", () => {
+    const upper: CanonicalCourse = { kind: "course", stages: [{ administrations: [member("08:00:00", undefined, 4), member("20:00:00", undefined, 4)] }] };
+    const capped: CanonicalCourse = { kind: "course", stages: [{ administrations: ["08:00:00", "20:00:00"].map(clock => ({
+      ...member(clock), limits: [{ scope: "period", amount: { value: 1, unit: "tab" },
+        period: { value: 1, unit: "d", system: "http://unitsofmeasure.org", code: "d" } }]
+    })) }] };
+    for (const input of views(upper)) for (const locale of ["en", "th"]) {
+      const text = formatSig(input, "long", { locale });
+      expect(text.match(/\b4\b/gu)).toHaveLength(1);
+      expect(text).toContain(locale === "en" ? "up to 4 administrations" : "ให้ยา ไม่เกิน 4 ครั้งรวมทั้งชุด");
+    }
+    for (const input of views(capped)) for (const locale of ["en", "th"]) {
+      const text = formatSig(input, "long", { locale });
+      expect(text).toContain(locale === "en" ? "Schedule sharing its limits:" : "ตารางให้ยาที่ใช้ข้อจำกัดร่วมกัน:");
+      expect(text).toContain("max per period: 1 tab / 1 d");
+      expect(text).not.toContain("a total of");
+      expect(text).not.toContain("รวมทั้งชุด");
+    }
+  });
+
+  it("keeps full shared facts and cached defaults available to one authoritative callback", () => {
+    const input = member("08:00:00", 4), before = JSON.stringify(input);
+    for (const locale of ["en", "th"]) {
+      let calls = 0;
+      const expected = formatSig(input, "long", { locale });
+      const text = formatSig(input, "long", { locale, i18n: { inherit: locale, formatLong: context => {
+        calls++;
+        expect(context.clause.schedule?.sharedCount).toEqual({ groupId: "morning-evening", count: 4 });
+        expect(context.defaultText).toBe(expected);
+        expect(context.formatDefault("long")).toBe(expected);
+        expect(context.formatDefault("short")).toContain("4");
+        return "Clinic directions exactly.";
+      } } });
+      expect(text).toBe("Clinic directions exactly.");
+      expect(calls).toBe(1);
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it("preserves the ordinary independent multi-member output", () => {
+    const first: CanonicalAdministration = { kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: ["08:00:00"] } } };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [first, independent()] }] };
+    for (const input of views(course))
+      expect(formatSig(input, "long", { locale: "en" })).toBe("Use 1 tablet once daily at 8:00 am; Use 2 tablets once daily at 12:00 pm for 2 doses.");
+  });
+});

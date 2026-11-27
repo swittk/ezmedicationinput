@@ -121,7 +121,7 @@ import {
 } from "./hpsg/projection";
 import { formatCanonicalClause, independentTimingText } from "./format";
 import { preferredTimingCoding } from "./timing-summary";
-import { canonicalFromFhir, canonicalToFhir, createEmptyCanonicalClause, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
+import { canonicalFromFhir, canonicalToFhir, createEmptyCanonicalClause, getTimingSharedCount, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
 import { resolveSigLocalization, resolveCourseLanguage, type CourseLanguage } from "./i18n";
 import { ParserState } from "./parser-state";
@@ -1274,7 +1274,7 @@ export function formatSigBatch(
   // One classification walk. Do not format through an R6 intermediary or
   // repeat a whole-array scan for each independent classification flag.
   for(const dosage of dosages){
-    if((dosage.sequence??1)!==sequence)hasCourse=true;
+    if((dosage.sequence??1)!==sequence || getTimingSharedCount(dosage.timing?.repeat))hasCourse=true;
     for(const e of dosage.modifierExtension??[])
       if(e.url===DOSAGE_DETAILS_R5_URL||e.url===PARALLEL_COMPONENT_PHASE_ORIGIN_URL)hasCourse=true;
     if(!hasChoice&&getDosageAlternativeChoice(dosage))hasChoice=true;
@@ -1322,7 +1322,8 @@ function formatParseBatchContents(
   let memberIndex=0;
   for(const item of batch.items){
     const member=members?.[memberIndex++];
-    if(member?.phaseOrigin||member?.phaseStart||member?.phasePredecessors?.length||getDosageAlternativeChoice(item.fhir))
+    if(member?.phaseOrigin||member?.phaseStart||member?.phasePredecessors?.length||
+        member?.schedule?.recurrence?.sharedCount||getDosageAlternativeChoice(item.fhir))
       return style==="short"?batch.shortText:batch.longText;
     const value=style==="short"?item.shortText:item.longText;if(value?.trim())text.push(value);
   }
@@ -1759,7 +1760,7 @@ function buildParseResult(
         )))
     )
   );
-  const useOriginalText = Boolean(
+  const useOriginalText = clause.sourceProjectionVerified !== false && Boolean(
     clause.clinicalQuantity ||
     (adjunct?.localRanges?.length && !guardRenderedByInstruction) ||
     clause.schedule?.maxDosePerPeriod?.length ||

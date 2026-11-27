@@ -200,6 +200,7 @@ export interface CourseLanguage {
   expression(kind: "dose" | "rate", detail: string | undefined): string;
   upTo(value: string): string;
   administrations(frequency: string, period?: string): string;
+  sharedAdministration(body: string, total?: string): string;
   dosingPeriod(period: string): string;
   periodContext(period: string): string;
   startsWithinPeriod(offset: string, context: string): string;
