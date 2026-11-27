@@ -5930,3 +5930,121 @@ describe("shared current cadence, phase and quantity owners", () => {
     expect(formatSig(source(0), "long", { locale: "en", realizationMode: "normalized" })).toMatch(/no (?:dose|medication)/i);
   });
 });
+
+
+describe("current rolling limits and finite range capacity", () => {
+  const ucum = "http://unitsofmeasure.org";
+  const quantity = (value: number, code: string) => ({ value, code, system: ucum });
+  const options = { orderedAt: "2026-11-01T00:00:00Z", from: "2026-11-01T00:00:00Z", timeZone: "UTC" };
+  const member = (): CanonicalAdministration => ({ kind: "administration", amounts: [{ quantity: quantity(5, "mL") }],
+    schedule: { recurrence: { frequency: 2, period: 1, periodUnit: Unit.Day,
+      clocks: ["08:00:00", "20:00:00"], courseLength: quantity(1, "d") } } });
+  const views = (administration: CanonicalAdministration) => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [administration] }] };
+    return [course, JSON.parse(JSON.stringify(courseToR5(course))) as FhirDosage[],
+      JSON.parse(JSON.stringify(courseToR6(course))) as FhirR6DosageInstruction];
+  };
+
+  it("uses the registered annotated strength unit without changing the dose or concentration", () => {
+    const administration = member();
+    administration.limits = [{ scope: "period", amount: quantity(100, "mg"), period: quantity(24, "h") }];
+    for (const code of ["mg", "mg{amoxicillin}"]) {
+      const context = { strengthRatio: { numerator: quantity(100, code), denominator: quantity(5, "mL") } };
+      const originalContext = JSON.stringify(context);
+      for (const dosage of views(administration)) {
+        const original = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, { ...options, context, limit: 4 })).toEqual(["2026-11-01T08:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage, ...options, context, durationValue: 1, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: 5, unit: "mL" });
+        expect(JSON.stringify(dosage)).toBe(original);
+      }
+      expect(JSON.stringify(context)).toBe(originalContext);
+    }
+  });
+
+  it("retains an open rolling ceiling through ranged admission and maximum attainability", () => {
+    const administration = member();
+    administration.asNeeded = true;
+    administration.amounts = [{ range: { low: quantity(1, "mL"), high: quantity(2, "mL") } }];
+    for (const comparator of ["<", "<="] as const) {
+      administration.limits = [{ scope: "period", amount: { ...quantity(2, "mL"), comparator }, period: quantity(24, "h") }];
+      for (const dosage of views(administration)) {
+        const original = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual(comparator === "<"
+          ? ["2026-11-01T08:00:00+00:00"]
+          : ["2026-11-01T08:00:00+00:00", "2026-11-01T20:00:00+00:00"]);
+        const supply = () => calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day });
+        if (comparator === "<") expect(supply).toThrowError(expect.objectContaining({ code: "ranged-capacity-open-maximum" }));
+        else expect(supply()).toMatchObject({ totalUnits: 2, unit: "mL", quantityKind: "maximum" });
+        expect(JSON.stringify(dosage)).toBe(original);
+      }
+    }
+    // An independent closed allowance inside the open bound is attainable.
+    administration.limits = [
+      { scope: "period", amount: { ...quantity(2, "mL"), comparator: "<" }, period: quantity(24, "h") },
+      { scope: "lifetime", amount: quantity(1.5, "mL") },
+    ];
+    for (const dosage of views(administration))
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 1.5, unit: "mL", quantityKind: "maximum" });
+    // Untimed capacity uses the same open constraint and creates no due clock.
+    administration.schedule = { recurrence: { occurrenceCap: { max: 2, period: 1, periodUnit: Unit.Day } } };
+    administration.limits = administration.limits.slice(0, 1);
+    for (const dosage of views(administration)) {
+      expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual([]);
+      expect(() => calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toThrowError(expect.objectContaining({ code: "ranged-capacity-open-maximum" }));
+    }
+  });
+
+  it("resolves upper-only BID at its licensed clocks before counting a partial day", () => {
+    for (const frequency of [undefined, 0, 2]) {
+      const administration = member();
+      administration.amounts = [{ quantity: { value: 1, unit: "tab" } }];
+      administration.schedule = { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID" }] },
+        recurrence: { ...(frequency === undefined ? {} : { frequency }), frequencyMax: 2, period: 1, periodUnit: Unit.Day } };
+      for (const dosage of views(administration)) {
+        const original = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([
+          "2026-11-01T08:00:00+00:00", "2026-11-01T20:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+        expect(calculateTotalUnits({ dosage, ...options, from: "2026-11-01T08:00:00Z", durationValue: 1,
+          durationUnit: Unit.Hour }).totalUnits).toBe(1);
+        expect(JSON.stringify(dosage)).toBe(original);
+      }
+    }
+  });
+
+  it("excludes all possible partial dates before deciding whether supply needs a resolved event", () => {
+    const administration = member();
+    administration.amounts = [{ quantity: { value: 1, unit: "tab" } }];
+    administration.schedule = { explicitEvents: ["2026-11"], recurrence: { clocks: ["09:00:00"] } };
+    administration.excludedDates = ["2026-11-30"];
+    for (const dosage of views(administration)) {
+      const original = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, from: "2026-11-30T00:00:00Z", timeZone: "UTC", durationValue: 1,
+        durationUnit: Unit.Day }).totalUnits).toBe(0);
+      expect(nextDueDoses(dosage, { from: "2026-11-30T00:00:00Z", timeZone: "UTC", limit: 2 })).toEqual([]);
+      expect(() => calculateTotalUnits({ dosage, from: "2026-11-29T00:00:00Z", timeZone: "UTC", durationValue: 1,
+        durationUnit: Unit.Day })).toThrowError(expect.objectContaining({ code: "timing-required" }));
+      expect(JSON.stringify(dosage)).toBe(original);
+    }
+  });
+
+  it("attains a lifetime amount with smaller complete doses across distinct untimed days", () => {
+    const administration = member();
+    administration.asNeeded = true;
+    administration.amounts = [{ range: { low: quantity(2, "mL"), high: quantity(3, "mL") } }];
+    administration.schedule = { recurrence: { occurrenceCap: { max: 1, period: 1, periodUnit: Unit.Day } } };
+    administration.limits = [{ scope: "lifetime", amount: quantity(4, "mL") }];
+    for (const dosage of views(administration)) {
+      const original = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 3 })).toEqual([]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "mL", quantityKind: "maximum" });
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 2, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 4, unit: "mL", quantityKind: "maximum" });
+      expect(JSON.stringify(dosage)).toBe(original);
+    }
+  });
+});

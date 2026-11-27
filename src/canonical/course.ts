@@ -309,10 +309,13 @@ export function absoluteEventCycleDisplacement(administration: CanonicalAdminist
 }
 
 /** An unconditional dated phase owns its calendar opening. An explicit
- * clock refines that date; an event or condition cannot prove an opening. */
+ * clock refines a calendar bound or date list; event-relative timing and
+ * conditions cannot prove an opening. */
 export function administrationHasDatedStart(a: CanonicalAdministration): boolean {
-  const repeat = a.schedule?.recurrence;
-  return Boolean(repeat?.calendarWindow?.start?.length === 10 &&
+  const repeat = a.schedule?.recurrence, dates = a.schedule?.explicitEvents;
+  const dated = repeat?.calendarWindow?.start?.length === 10 ||
+    repeat?.clocks?.length && dates?.length && dates.every(date => date.length === 10);
+  return Boolean(dated &&
     (repeat.clocks?.length || !a.schedule?.explicitEvents?.length) &&
     !repeat.anchors?.length && !a.asNeeded && !a.predicate && !a.calendarPredicate &&
     !a.choice && !a.choiceIssue);

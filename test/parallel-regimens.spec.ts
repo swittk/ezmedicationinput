@@ -1438,7 +1438,13 @@ describe("round45 explicit onset and parallel successor ownership", () => {
     expect(parsed.meta.canonical.clauses[1].schedule?.calendarEvents?.map(event => event.isoDate)).toEqual(events);
     const strict = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
     for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], strict[0]])
-      expect(row.timing?.repeat?.boundsPeriod).toEqual({ end: "2026-12-04" });
+      expect(row.timing?.repeat?.boundsPeriod?.end).toBeUndefined();
+    // The selected same-eye dependency carries its exact replacement clock;
+    // no previous-day bound is invented on the predecessor.
+    for (const input of [parsed.meta.canonical.course!, parsed.fhirNext, strict]) {
+      const members = importCanonicalCourse(input).stages[0].administrations;
+      expect(members[1].phasePredecessors).toEqual([members[0].sourceMember]);
+    }
     for (const row of [parsed.fhir[1], parsed.fhirNext.step[0].component[1], strict[1]]) {
       expect(row.timing?.event).toEqual(events);
       expect(row.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
@@ -5233,6 +5239,15 @@ describe("dated replacement with several target members", () => {
     const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
     const query = { orderedAt: "2026-12-04T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 4 };
     for (const dosage of [parsed, parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const members = importCanonicalCourse(dosage).stages.flatMap(stage => stage.administrations);
+      expect(members.filter(member => member.schedule?.recurrence?.clocks?.includes("20:00:00"))
+        .map(member => ({ eye: member.target?.coding?.find(coding => coding.system === "http://snomed.info/sct")?.code,
+          dose: member.amounts?.[0]?.quantity?.value, unit: member.amounts?.[0]?.quantity?.unit,
+          clocks: member.schedule?.recurrence?.clocks })))
+        .toEqual([
+          { eye: "1290032005", dose: 2, unit: "drop", clocks: ["20:00:00"] },
+          { eye: "1290031003", dose: 1, unit: "drop", clocks: ["20:00:00"] },
+        ]);
       expect(nextDueDoses(dosage, query)).toEqual(independent ? [
         "2026-12-05T08:00:00+00:00", "2026-12-05T10:00:00+00:00",
         "2026-12-05T20:00:00+00:00", "2026-12-05T20:00:00+00:00"] : [
@@ -5412,17 +5427,23 @@ describe("dated replacement boundaries retain their successor owner", () => {
     expect(calculateTotalUnits({ ...query, from: "2027-03-14T00:00:00-05:00" }).totalUnits).toBe(2);
   });
 
-  it.each(versions)("keeps an event-only successor's calendar cut independent of predecessor delay (%s)", version => {
+  it.each(versions)("keeps an explicit replacement clock independent of predecessor delay (%s)", version => {
     for (const delayed of [false, true]) {
       const parsed = parseSig("Instill 1 drop OD " + (delayed ? "in 6 hours " : "") +
         "every 6 hours, then instill 2 drops OD on 2027-01-02 at 08:00; instill 1 drop OS daily at 09:00");
       const input = wire(parsed.meta.canonical.course!, version), original = JSON.stringify(input);
       const query = { dosage: input, orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-02T00:00:00Z",
         timeZone: "UTC", durationValue: 1, durationUnit: Unit.Day };
-      expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([
+      expect(nextDueDoses(input, { ...query, limit: 5 })).toEqual([
+        "2027-01-02T00:00:00+00:00", "2027-01-02T06:00:00+00:00",
         "2027-01-02T08:00:00+00:00", "2027-01-02T09:00:00+00:00", "2027-01-03T09:00:00+00:00"
       ]);
-      expect(calculateTotalUnits(query)).toMatchObject({ totalUnits: 3, unit: "drop" });
+      // The explicit replacement opens at08:00, so both preceding q6h doses
+      // remain; the separate left-eye dose still owns09:00.
+      for (const [clock, total] of [["00:00:00", 1], ["06:00:00", 1], ["08:00:00", 2], ["09:00:00", 1]] as const)
+        expect(calculateTotalUnits({ ...query, from: "2027-01-02T" + clock + "Z", durationValue: 1,
+          durationUnit: Unit.Hour }).totalUnits).toBe(total);
+      expect(calculateTotalUnits(query)).toMatchObject({ totalUnits: 5, unit: "drop" });
       expect(JSON.stringify(input)).toBe(original);
     }
   });
@@ -5465,4 +5486,23 @@ describe("absolute-event leads across cycle boundaries", () => {
         durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(1);
     }
   });
+});
+
+
+it("preserves the same-day predecessor before an exact date-list replacement clock", () => {
+  const source = "Take 1 tablet daily at 08:00, then take 2 tablets on 5 December 2026 at 20:00";
+  const parsed = parseSig(source), original = JSON.stringify(parsed);
+  const options = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC" };
+  for (const dosage of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)) as FhirDosage[],
+    JSON.parse(JSON.stringify(parsed.fhirNext)) as FhirR6DosageInstruction]) {
+    const before = JSON.stringify(dosage);
+    expect(nextDueDoses(dosage, { ...options, limit: 3 })).toEqual([
+      "2026-12-05T08:00:00+00:00", "2026-12-05T20:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+      .toMatchObject({ totalUnits: 3, unit: "tab" });
+    expect(calculateTotalUnits({ dosage, ...options, from: options.orderedAt, durationValue: 7,
+      durationUnit: Unit.Day })).toMatchObject({ totalUnits: 7, unit: "tab" });
+    expect(JSON.stringify(dosage)).toBe(before);
+  }
+  expect(JSON.stringify(parsed)).toBe(original);
 });

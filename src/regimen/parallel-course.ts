@@ -3,7 +3,7 @@ import { fromDosageDetails } from '../dosage-course';
 import { type FhirProjectionOptions } from '../fhir';
 import { courseFromParallel, precedingCalendarDay, orderedCalendarBounds } from '../canonical/compile';
 import { projectFreshlyCompiledCourseToR6 } from '../adapters/canonical-course';
-import { compareRegimenPositions, type CanonicalCourse, type CanonicalBoundary, type RegimenPosition } from '../canonical/course';
+import { administrationHasDatedClockStart, compareRegimenPositions, type CanonicalCourse, type CanonicalBoundary, type RegimenPosition } from '../canonical/course';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan } from '../hpsg/signature';
 import { anchoredScheduleDurationEnd, hasExactScheduleDuration, type RegimenGraph } from './regimen';
@@ -135,10 +135,16 @@ function calendarPhaseMembers(
     const schedule = clause.schedule;
     // Every authored date keeps its explicit clock; undated concurrent
     // members still receive their phase opening during execution.
-    if (value && !(schedule?.boundsStart?.length === 10 && schedule.timeOfDay?.length &&
-        !schedule.when?.length && !clause.prn?.enabled &&
-        !clause.clinicalAdjuncts?.condition && !clause.clinicalAdjuncts?.calendarDayCondition))
-      clockBoundary = false;
+    if (value && !administrationHasDatedClockStart({
+      kind: "administration", asNeeded: clause.prn?.enabled,
+      predicate: clause.clinicalAdjuncts?.condition,
+      calendarPredicate: clause.clinicalAdjuncts?.calendarDayCondition,
+      schedule: {
+        recurrence: { calendarWindow: { start: schedule?.boundsStart },
+          clocks: schedule?.timeOfDay, anchors: schedule?.when },
+        explicitEvents: schedule?.calendarEvents?.map(event => event.fhirDateTime ?? event.isoDate),
+      },
+    })) clockBoundary = false;
   }
   if (nextClauses?.length && !nextStart) return 'parallel-regimen-next-calendar-start-required';
   const inferredEnd = nextStart && !clockBoundary ? precedingCalendarDay(nextStart) : undefined;

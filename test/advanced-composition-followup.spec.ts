@@ -5913,14 +5913,14 @@ describe("round68 numeric member safety qualification", () => {
     const source = liquidCourse(), before = fresh(source);
     for (const dosage of views(source)) {
       const original = fresh(dosage);
-      expect(calculateTotalUnits({ dosage, ...query, context }))
-        .toMatchObject({ totalUnits: 16, unit: "mL", quantityKind: "maximum" });
+      const result = calculateTotalUnits({ dosage, ...query, context });
+      expect(result).toMatchObject({ totalUnits: 16, unit: "mL", quantityKind: "maximum" });
       expect(calculateTotalUnits({ dosage: fresh(dosage), ...query, durationValue: 1, context }))
         .toMatchObject({ totalUnits: 10, unit: "mL", quantityKind: "maximum" });
       expect(calculateTotalUnits({ dosage: fresh(dosage), ...query, from: "2026-12-02T00:00:00Z",
         durationValue: 1, context }))
         .toMatchObject({ totalUnits: 6, unit: "mL", quantityKind: "maximum" });
-      expect(calculateTotalUnits({ dosage, ...query, context }).explanation).not.toContain("not evaluated");
+      expect(result.explanation).not.toMatch(/not evaluated|unevaluable maximum-dose constraint/i);
       const saved = toDosageDetails(savedRows(dosage)).step[0].component[0];
       expect(saved.safety).toEqual(source.step[0].component[0].safety);
       expect(saved.extension).toContainEqual(source.step[0].component[0].extension![0]);
