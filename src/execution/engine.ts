@@ -1245,9 +1245,10 @@ function resolveFrequencyCadence(
  * clocks, while hourly codes and intervals retain elapsed spacing. */
 function executionRecurrence(timing: CanonicalTiming | undefined, config: NextDueDoseConfig): CanonicalRecurrence | undefined {
   let repeat = timing?.recurrence;
-  // An authored window already owns its cadence; ordinary one-day repeats
-  // use the daily clock default without adding frequency to the prescription.
+  // Authored event anchors and windows already own their clock placement;
+  // ordinary one-day repeats use the daily default only in the execution copy.
   if (repeat?.frequency === undefined && repeat?.frequencyMax === undefined &&
+      !repeat?.clocks?.length && !repeat?.anchors?.length &&
       repeat?.period === 1 && repeat.periodUnit === DurationUnit.Day && !isWakingHoursInterval(repeat))
     repeat = { ...repeat, frequency: 1 };
   if (!repeat || !timing?.code || repeat.clocks?.length || repeat.anchors?.length ||
