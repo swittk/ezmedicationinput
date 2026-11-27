@@ -3152,3 +3152,67 @@ describe("registered withholding calendar and maximum constituents", () => {
     }
   });
 });
+
+
+describe("withholding target identity", () => {
+  const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 8 };
+  it.each([
+    ["in the left eye", ["20:00:00"], 2],
+    ["", ["08:00:00", "20:00:00"], 0]
+  ] as const)("keeps a named site on its own conditional target: %s", (site, guardedClocks, expectedTotal) => {
+    const source = "Instill 1 drop in the right eye at 08:00 and 1 drop in the left eye at 20:00 daily for 2 days. " +
+      `If dizzy, do not instill 1 drop${site ? " " + site : ""}.`;
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(2);
+      expect(members.map(member => member.amounts?.[0].quantity)).toMatchObject([
+        { value: 1, unit: "drop" }, { value: 1, unit: "drop" }
+      ]);
+      expect(members.map(member => member.target?.coding?.[0]?.code)).toEqual(["1290032005", "1290031003"]);
+      expect(members.filter(member => member.predicate).flatMap(member => member.schedule?.recurrence?.clocks ?? []))
+        .toEqual(guardedClocks);
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => false })).toEqual(expectedTotal ?
+        ["2026-12-01T08:00:00+00:00", "2026-12-02T08:00:00+00:00"] : []);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d", evaluateCondition: () => false }))
+        .toMatchObject({ totalUnits: expectedTotal, unit: "drop" });
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d", evaluateCondition: () => true }))
+        .toMatchObject({ totalUnits: 4, unit: "drop" });
+      const warning = members.flatMap(member => member.syntax?.instructionGraph?.actions ?? [])
+        .find(action => action.polarity === "negate");
+      if (site) expect(warning?.args).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: "site", coding: expect.objectContaining({ code: "1290031003" }) })
+      ]));
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
+    ["about ", "5-mL", true], ["", "5-mL", true],
+    ["about ", "15-mL", false], ["about ", "5-mg", false]
+  ] as const)("matches an unqualified target without replacing the standing dose: %s / %s", (qualifier, target, matches) => {
+    const source = `Take ${qualifier}5 mL at 08:00 and 10 mL at 20:00 daily for 2 days. If dizzy, do not take the ${target} morning dose.`;
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const all = ["2026-12-01T08:00:00+00:00", "2026-12-01T20:00:00+00:00",
+      "2026-12-02T08:00:00+00:00", "2026-12-02T20:00:00+00:00"];
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(2);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 5, unit: "mL" });
+      expect(members[0].amounts?.[0].quantity?.comparator).toBe(qualifier ? "~" : undefined);
+      expect(members[1].amounts?.[0].quantity).toMatchObject({ value: 10, unit: "mL" });
+      expect(members.filter(member => member.predicate).flatMap(member => member.schedule?.recurrence?.clocks ?? []))
+        .toEqual(matches ? ["08:00:00"] : []);
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => false })).toEqual(matches ? [all[1], all[3]] : all);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d", evaluateCondition: () => false }))
+        .toMatchObject({ totalUnits: matches ? 20 : 30, unit: "mL" });
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d", evaluateCondition: () => true }))
+        .toMatchObject({ totalUnits: 30, unit: "mL" });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+});

@@ -2165,6 +2165,8 @@ export interface CanonicalClinicalAdjuncts {
   conditionTarget?: {
     /** Quantified prohibition binds only to the same existing administration dose. */
     dose?: CanonicalDoseExpr;
+    /** A named administration site narrows this target independently of its dose. */
+    site?: CanonicalSiteExpr;
     when?: EventTiming[];
     /** Explicit existing clock slots selected by the nominal dose object. */
     timeOfDay?: string[];

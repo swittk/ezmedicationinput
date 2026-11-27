@@ -1212,8 +1212,20 @@ function composeMedicationCondition(
 function hasExplicitConditionTarget(
   target: NonNullable<NonNullable<CanonicalSigClause["clinicalAdjuncts"]>["conditionTarget"]>
 ): boolean {
-  return Boolean(target.dose || target.when?.length || target.timeOfDay?.length ||
+  return Boolean(target.dose || target.site || target.when?.length || target.timeOfDay?.length ||
     target.clockRange || target.quantifier || target.members?.some(hasExplicitConditionTarget));
+}
+
+/** An unqualified nominal amount names the standing dose without replacing
+ * its authored operator. Explicit target operators and sites still constrain it. */
+function matchesConditionTarget(
+  clause: CanonicalSigClause,
+  target: NonNullable<NonNullable<CanonicalSigClause["clinicalAdjuncts"]>["conditionTarget"]>
+): boolean {
+  const dose = target.dose && target.dose.comparator === undefined && clause.dose?.comparator !== undefined
+    ? { ...clause.dose, comparator: undefined } : clause.dose;
+  return (!target.dose || sameDose(dose, target.dose)) &&
+    (!target.site || sameSite(clause.site, target.site));
 }
 
 /**
@@ -1400,7 +1412,7 @@ function partitionConditionTargetStates(
       if (member === undefined || !paths?.has(member)) continue;
     }
     const state = states[index], schedule = state.primaryClause.schedule;
-    if (!schedule || target.dose && !sameDose(state.primaryClause.dose, target.dose)) continue;
+    if (!schedule || !matchesConditionTarget(state.primaryClause, target)) continue;
     const selected = selectedConditionAnchors(schedule, target);
     const total = (schedule.timeOfDay?.length ?? 0) + (schedule.when?.length ?? 0);
     const count = selected.times.length + selected.events.length;
@@ -1475,14 +1487,14 @@ export function scopeMedicationConditionTargets(
         }
         const clause = states[index].primaryClause;
         if (!clause.dose && !clause.method && !clause.schedule) continue;
-        if (member.dose && !sameDose(clause.dose, member.dose)) continue;
+        if (!matchesConditionTarget(clause, member)) continue;
         if (member.when?.length || member.timeOfDay?.length || member.clockRange) {
           const anchors = selectedConditionAnchors(clause.schedule, member);
           if (!anchors.times.length && !anchors.events.length) continue;
         }
         selected.push(index);
       }
-      if (!selected.length && member.dose) continue;
+      if (!selected.length && (member.dose || member.site)) continue;
       if (!selected.length || member.quantifier === 'both' && selected.length !== 2) {
         unresolved = true;
         continue;

@@ -370,6 +370,11 @@ function withholdingDoseTarget(
       target.dose = argument.quantity;
       continue;
     }
+    if (argument.role === AdviceArgumentRole.Site) {
+      target.site = { text: argument.normalized ?? argument.text,
+        coding: argument.coding?.code ? { ...argument.coding, code: argument.coding.code } : undefined };
+      continue;
+    }
     if (argument.role !== AdviceArgumentRole.Object && argument.role !== AdviceArgumentRole.Time) continue;
     // Exact source anchoring only: the grammatical tokens are reused, not
     // reparsed from a rendered phrase or interpreted by a second parser.
