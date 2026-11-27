@@ -10,7 +10,8 @@ import {
 } from "./relation-terminology";
 import { baseLanguageTag, localizedValue } from "./localization";
 import { inferMedicationLocale } from "./locale-detection";
-import { joinLocalizedTokens } from "./locale-realization";
+import { joinLocalizedTokens, localizedTimeArgument } from "./locale-realization";
+import { resolveMedicationInstructionConcept } from "./instruction-concept-terminology";
 import { ENGLISH_COURSE, ENGLISH_DAY_NAMES } from "./locales/course/en";
 import { THAI_COURSE, THAI_DAY_NAMES } from "./locales/course/th";
 import {
@@ -228,13 +229,32 @@ export const EN_POSITIVE_MODALITY_PREFIX: Partial<Record<AdviceModality, string>
   [AdviceModality.Should]: "Should ", [AdviceModality.Must]: "Must "
 };
 
+const CLOCK_ARGUMENT = /^[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?$/;
+
+/** Internal selection metadata; public locale inputs and callbacks stay unchanged. */
+type SelectedTimeInput = Pick<InstructionActionRealizationInput,
+  "locale" | "time" | "timeRelation" | "timeWasRendered"> & { selectedTime?: AdviceArgument };
+
 /** Consume the selected typed Time once; locale adapters own direct wording. */
-export function realizeTimeArgument(c: Pick<InstructionActionRealizationInput, "locale" | "time" | "timeRelation" | "timeWasRendered">): string | undefined {
+export function realizeTimeArgument(c: SelectedTimeInput): string | undefined {
   if (!c.time) return undefined;
   const relation = c.timeRelation;
-  const text = !relation || relationHasGrammarFeature(relation, "directTimeRealization")
+  let direct = !relation;
+  if (relation && relationHasGrammarFeature(relation, "directTimeRealization")) {
+    const selected = c.selectedTime;
+    const value = selected?.normalized ?? c.time;
+    // An opaque temporal nominal retains its explicit governor. Only the
+    // existing clock/event/weekday/concept owners license direct-time wording.
+    direct = Boolean(selected?.conceptId) || CLOCK_ARGUMENT.test(value) ||
+      Boolean(localizedTimeArgument(value, c.locale)) || Boolean(localizedWeekdayArgument(value, c.locale));
+    // Current value-only locale inputs may have only the realized value. A selected
+    // concept (including configured concepts) already owns its typed identity.
+    if (!direct && !selected)
+      direct = resolveMedicationInstructionConcept(value)?.role === AdviceArgumentRole.Time;
+  }
+  const text = direct
     ? getInstructionActionLocaleAdapter(c.locale).directTime?.(c.time) ?? c.time
-    : joinLocalizedTokens(c.locale, [localizeAdviceRelation(relation, c.locale, "temporal") ?? relation, c.time]);
+    : joinLocalizedTokens(c.locale, [localizeAdviceRelation(relation!, c.locale, "temporal") ?? relation, c.time]);
   if (c.timeWasRendered !== undefined) c.timeWasRendered = true;
   return text;
 }
@@ -409,7 +429,8 @@ function englishDirectTime(time: string): string {
     localizeAdviceRelation(AdviceRelation.On, "en", "temporal"), weekday
   ]);
   const lower = time.toLowerCase();
-  return lower === "night" ? "at night"
+  return lower === "immediately" || lower === "immediate" ? "immediately"
+    : lower === "night" ? "at night"
     : lower === "bed" || lower === "bedtime" || lower === "sleep" ? "at bedtime"
       : /^(?:the )?(?:morning|afternoon|evening)$/.test(lower)
         ? `in ${lower.startsWith("the ") ? lower : `the ${lower}`}`
@@ -503,13 +524,8 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     }
     case "object-duration": {
       const object = c.theme && c.site ? siteRelationObject(c) : c.theme ?? c.site;
-      const timeRelation = c.timeRelation;
-      const relation = c.time && timeRelation &&
-        relationHasGrammarFeature(timeRelation, "timeComplement")
-        ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation
-        : undefined;
-      if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
-      return `${c.label}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}${c.time ? ` ${relation ? relation + " " : ""}${c.time}` : ""}`;
+      const time = realizeTimeArgument(c);
+      return `${c.label}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}${time ? ` ${time}` : ""}`;
     }
     case "object-time": {
       const object = c.theme ?? c.site;
@@ -580,7 +596,7 @@ function thaiDirectTime(time: string): string {
   if (weekday) return joinLocalizedTokens("th", [
     localizeAdviceRelation(AdviceRelation.On, "th", "temporal"), weekday
   ]);
-  if (/^[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?$/.test(time)) return ` เวลา ${time}`;
+  if (CLOCK_ARGUMENT.test(time)) return ` เวลา ${time}`;
   return time === "กลางคืน" ? "ตอนกลางคืน"
     : time === "นอน" || time === "bedtime" ? "ก่อนนอน" : time;
 }
@@ -668,13 +684,8 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
     }
     case "object-duration": {
       const object = c.theme && c.site ? siteRelationObject(c) : c.theme ?? c.site;
-      const timeRelation = c.timeRelation;
-      const relation = c.time && timeRelation &&
-        relationHasGrammarFeature(timeRelation, "timeComplement")
-        ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation
-        : undefined;
-      if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
-      return `${c.label}${object ?? ""}${c.duration ? ` ${c.duration}` : ""}${c.time ? `${relation ?? ""}${c.time}` : ""}`;
+      const time = realizeTimeArgument(c);
+      return `${c.label}${object ?? ""}${c.duration ? ` ${c.duration}` : ""}${time ?? ""}`;
     }
     case "object-time": {
       const object = c.theme ?? c.site;

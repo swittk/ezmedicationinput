@@ -6543,6 +6543,72 @@ describe("current graph realization families", () => {
   };
 
   it.each([
+    { name: "weekday and site", relation: AdviceRelation.On, time: "Mondays", site: true,
+      en: "Withhold administration the drops in the left eye on Monday",
+      th: "งดการให้ยายาหยอดในตาซ้ายเมื่อวันจันทร์" },
+    { name: "clock", relation: AdviceRelation.On, time: "08:00",
+      en: "Withhold administration the drops at 08:00",
+      th: "งดการให้ยายาหยอด เวลา 08:00" },
+    { name: "Before clock", relation: AdviceRelation.Before, time: "08:00",
+      en: "Withhold administration the drops before 08:00",
+      th: "งดการให้ยายาหยอดก่อน08:00" },
+    { name: "duration", duration: true,
+      en: "Withhold administration the drops for 2 hours",
+      th: "งดการให้ยายาหยอด 2 ชั่วโมง" },
+    { name: "opaque Time", relation: AdviceRelation.Before, time: "the next dressing change",
+      en: "Withhold administration the drops before the next dressing change",
+      th: "งดการให้ยายาหยอดก่อนthe next dressing change" },
+    { name: "opaque On", relation: AdviceRelation.On, time: "fasting days",
+      en: "Withhold administration the drops on fasting days",
+      th: "งดการให้ยายาหยอดเมื่อfasting days" },
+    { name: "selected custom Time", relation: AdviceRelation.On, time: "clinic opening",
+      conceptId: "clinic-opening", i18n: { en: "clinic opening", th: "เวลาคลินิกเปิด" },
+      en: "Withhold administration the drops at clinic opening",
+      th: "งดการให้ยายาหยอดเวลาคลินิกเปิด" }
+  ])("realizes object-duration Time through its selected relation: $name", fixture => {
+    const args: AdviceFrame["args"] = [
+      { role: AdviceArgumentRole.Object, text: "the drops", i18n: { th: "ยาหยอด" } }
+    ];
+    if (fixture.site) args.push({
+      role: AdviceArgumentRole.Site, text: "the left eye", relation: AdviceRelation.In,
+      coding: { system: "http://snomed.info/sct", code: "1290031003", display: "Structure of left eye" },
+      i18n: { th: "ตาซ้าย" }
+    });
+    if (fixture.time) args.push({
+      role: AdviceArgumentRole.Time, text: fixture.time, relation: fixture.relation,
+      ...(fixture.conceptId ? { conceptId: fixture.conceptId, i18n: fixture.i18n } : {})
+    });
+    if (fixture.duration) args.push({
+      role: AdviceArgumentRole.Duration, text: "2 hours", quantity: { value: 2, unit: "h" }
+    });
+    const action: AdviceFrame = {
+      force: AdviceForce.Sequence, polarity: AdvicePolarity.Affirm,
+      predicate: { lemma: "withhold-administration", display: "Withhold administration",
+        semanticClass: "withhold-administration", realizer: "object-duration", i18n: { th: "งดการให้ยา" } },
+      relation: fixture.relation, sourceText: "", span: { start: 0, end: 0 }, args
+    };
+    const graph: CanonicalInstructionGraph = { sourceText: "", sourceLocale: "en", actions: [action] };
+    const before = JSON.stringify(graph), views = publicViews(graph);
+    expect(realizeInstructionAction(action, "en")).toBe(fixture.en);
+    expect(realizeInstructionAction(action, "th")).toBe(fixture.th);
+    for (const value of [views.native, JSON.parse(JSON.stringify([views.row])),
+      JSON.parse(JSON.stringify(views.course))]) {
+      const inputBefore = JSON.stringify(value);
+      expect(formatSig(value, "long", { locale: "en", realizationMode: "normalized" })).toBe(fixture.en + ".");
+      expect(formatSig(value, "long", { locale: "th", realizationMode: "normalized" })).toBe(fixture.th + ".");
+      const current = importCanonicalCourse(value);
+      const saved = current.stages[0].administrations[0].syntax!.instructionGraph!.actions[0];
+      expect(saved.relation).toBe(fixture.relation);
+      expect(saved.args).toMatchObject(args);
+      expect(projectCanonicalCourse(current).fhir[0].extension).toContainEqual({
+        url: "urn:clinic:instruction-note", valueString: "Keep supplied graph"
+      });
+      expect(JSON.stringify(value)).toBe(inputBefore);
+    }
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it.each([
     [AdviceRelation.On, false, "Do not drive at 08:00", "ห้ามขับรถ เวลา 08:00"],
     [AdviceRelation.Before, false, "Do not drive before 08:00", "ห้ามขับรถก่อน08:00"],
     [AdviceRelation.Before, true, "Do not drive before 08:00 before taking the first dose",

@@ -4061,7 +4061,7 @@ function actionLabel(
     frame.predicate.lemma;
 }
 
-type ActionRealizationContext = InstructionActionRealizationInput;
+type ActionRealizationContext = InstructionActionRealizationInput & { selectedTime?: AdviceArgument };
 
 type ActionRealizer = (context: ActionRealizationContext) => string;
 function defaultActionArguments(frame: AdviceFrame) {
@@ -4383,9 +4383,10 @@ function realizeAction(
   const duration = first(AdviceArgumentRole.Duration);
   const material = first(AdviceArgumentRole.Material);
   const manner = first(AdviceArgumentRole.Manner);
-  let input: InstructionActionRealizationInput = {
+  let input: ActionRealizationContext = {
     frame, locale, label, amount, theme, container, destination, site,
-    substance, result, activity, time, timeRelation: timeArg ? timeArg.relation ?? inheritedTimeRelation : undefined, duration, material, manner,
+    substance, result, activity, time, selectedTime: timeArg,
+    timeRelation: timeArg ? timeArg.relation ?? inheritedTimeRelation : undefined, duration, material, manner,
     realizerConfig: frame.predicate.realizerConfig ?? definition?.realizerConfig,
     definition,
     timeWasRendered: coverage || frame.polarity === AdvicePolarity.Negate ? false : undefined,
@@ -4433,7 +4434,7 @@ function realizeAction(
       if (entailed?.has(adjunct.role + "\0" + adjunct.conceptId + "\0" + adjunct.relation)) continue;
       const value = translatedArgument(adjunct, locale);
       const temporalPhrase = (adjunct.role === AdviceArgumentRole.Time && realizeTimeArgument({
-        locale, time: value, timeRelation: adjunct.relation
+        locale, time: value, selectedTime: adjunct, timeRelation: adjunct.relation
       })) || joinLocalizedTokens(locale, [
         localizeAdviceRelation(adjunct.relation!, locale) ?? adjunct.relation, value
       ]);
