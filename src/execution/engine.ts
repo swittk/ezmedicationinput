@@ -1337,6 +1337,12 @@ function unscheduledOccurrenceCapacity(
     ? cap
     : undefined;
 }
+/** Hour/minute/second occurrence periods are elapsed windows. Calendar occurrence
+ * periods retain their civil buckets; duration arithmetic stays shared. */
+function elapsedOccurrencePeriod(cap: CanonicalOccurrenceCapExpr | undefined): number | undefined {
+  return cap && (cap.periodUnit === DurationUnit.Second || cap.periodUnit === DurationUnit.Minute ||
+    cap.periodUnit === DurationUnit.Hour) ? elapsedPeriodMilliseconds(cap) : undefined;
+}
 function occurrenceCapBucketIndex(date: Date, cap: CanonicalOccurrenceCapExpr, timeZone: string): number {
   switch (cap.periodUnit) {
     case DurationUnit.Second:
@@ -1467,8 +1473,10 @@ function maximumCapacityWithRollingLimits(
   }));
   if (weightedPrior?.length) prior.push(...weightedPrior);
   const allocated: SupplyAllocation[] = allocations ?? [];
+  const rollingOccurrence = elapsedOccurrencePeriod(cap);
+  const rollingCaps: readonly ExecutableQuantityCap[] = rollingOccurrence ? [...quantityCaps, cap] : quantityCaps;
   const used = new Map<number, number>();
-  for (const item of prior) {
+  if (!rollingOccurrence) for (const item of prior) {
     const bucket = occurrenceCapBucketIndex(new Date(item.at), cap, zone);
     used.set(bucket, (used.get(bucket) ?? 0) + item.count);
   }
@@ -1489,11 +1497,12 @@ function maximumCapacityWithRollingLimits(
   for (const interval of intervals) {
     at = Math.max(at, interval.start);
     while (at < interval.end && count < remainingCount) {
-      const bucket = occurrenceCapBucketIndex(new Date(at), cap, zone);
+      const bucket = rollingOccurrence ? 0 : occurrenceCapBucketIndex(new Date(at), cap, zone);
       const quotaRoom = interval.quota === undefined ? Infinity
         : (quotaLimits?.get(interval.quota) ?? Infinity) - (quotaUsed?.get(interval.quota) ?? 0);
       if (quotaRoom <= 0) break;
-      let room = Math.min(cap.max - (used.get(bucket) ?? 0), remainingCount - count, quotaRoom);
+      let room = Math.min(rollingOccurrence ? Infinity : cap.max - (used.get(bucket) ?? 0),
+        remainingCount - count, quotaRoom);
       if (room <= 0) {
         at = firstInstant(at + 1, (value) => occurrenceCapBucketIndex(new Date(value), cap, zone) > bucket);
         continue;
@@ -1504,24 +1513,25 @@ function maximumCapacityWithRollingLimits(
         if (!rangeDoseFits(quantityRoom, range)) return count;
         room = Math.min(room, rangeDoseCapacity(quantityRoom, range));
       }
-      for (const limit of quantityCaps) {
+      for (const limit of rollingCaps) {
+        const amountBound = range && limit !== cap;
         const first = quantityCapWindowStart(new Date(at), limit, zone);
         let occupied = 0,
           oldest = Number.POSITIVE_INFINITY;
         for (const history of [prior, allocated]) {
           for (const item of history) {
             if (item.at > first && item.at <= at) {
-              occupied += range ? item.quantity ?? item.count * range.high : item.count;
+              occupied += amountBound ? item.quantity ?? item.count * range!.high : item.count;
               oldest = Math.min(oldest, item.at);
             }
           }
         }
         const available = Math.max(0, limit.max - occupied);
-        if (range) {
+        if (amountBound) {
           quantityRoom = Math.min(quantityRoom, available);
-          room = Math.min(room, rangeDoseCapacity(available, range, limit.strict));
+          room = Math.min(room, rangeDoseCapacity(available, range!, limit.strict));
         } else room = Math.min(room, available);
-        if (range ? !rangeDoseFits(available, range, limit.strict) : occupied >= limit.max) {
+        if (amountBound ? !rangeDoseFits(available, range!, limit.strict) : occupied >= limit.max) {
           release = Math.max(
             release,
             limit.periodUnit === DurationUnit.Month || limit.periodUnit === DurationUnit.Year
@@ -1543,7 +1553,7 @@ function maximumCapacityWithRollingLimits(
         if (interval.quota !== undefined) quotaUsed?.set(interval.quota, (quotaUsed.get(interval.quota) ?? 0) + taken);
         count += taken;
         allocatedQuantity += quantity ?? 0;
-        used.set(bucket, (used.get(bucket) ?? 0) + taken);
+        if (!rollingOccurrence) used.set(bucket, (used.get(bucket) ?? 0) + taken);
       }
     }
   }
@@ -1675,8 +1685,9 @@ function maximumRangedCapacity(
     at: coerceDate(value, "priorDoseTimes").getTime(), count: 1, quantity: range.high,
   }));
   if (weightedPrior?.length) prior.push(...weightedPrior);
+  const rollingOccurrence = elapsedOccurrencePeriod(cap);
   const priorByBucket = new Map<number, number>();
-  for (const item of prior) {
+  if (!rollingOccurrence) for (const item of prior) {
     const key = occurrenceCapBucketIndex(new Date(item.at), cap, zone);
     priorByBucket.set(key, (priorByBucket.get(key) ?? 0) + item.count);
   }
@@ -1687,7 +1698,7 @@ function maximumRangedCapacity(
   for (const interval of intervals) {
     base.add(interval.start);
     let at = interval.start;
-    while (at < interval.end) {
+    while (!rollingOccurrence && at < interval.end) {
       spend();
       const bucket = occurrenceCapBucketIndex(new Date(at), cap, zone);
       if (occurrenceCapBucketIndex(new Date(interval.end - 1), cap, zone) === bucket) break;
@@ -1700,8 +1711,9 @@ function maximumRangedCapacity(
       base.add(low); at = low;
     }
   }
+  const releaseCaps = rollingOccurrence ? [...quantityCaps, cap] : quantityCaps;
   const expiries = (oldest: number, out: Set<number>) => {
-    for (const limit of quantityCaps) {
+    for (const limit of releaseCaps) {
       const width = elapsedPeriodMilliseconds(limit);
       if (width) {
         const at = oldest + width;
@@ -1751,8 +1763,14 @@ function maximumRangedCapacity(
     for (const at of candidates) {
       if (at < minimum) continue;
       spend();
-      const bucket = occurrenceCapBucketIndex(new Date(at), cap, zone);
-      if ((used.get(bucket) ?? 0) + (priorByBucket.get(bucket) ?? 0) >= cap.max) continue;
+      const bucket = rollingOccurrence ? 0 : occurrenceCapBucketIndex(new Date(at), cap, zone);
+      let occurrenceUsed = (used.get(bucket) ?? 0) + (priorByBucket.get(bucket) ?? 0);
+      if (rollingOccurrence) {
+        const since = quantityCapWindowStart(new Date(at), cap, zone);
+        occurrenceUsed = times.length - upperBoundTimestamp(times, since);
+        for (const item of prior) if (item.at > since && item.at <= at) occurrenceUsed += item.count;
+      }
+      if (occurrenceUsed >= cap.max) continue;
       for (const quota of eligibleQuotas(at)) {
         if (quotaLimits) spend();
         const quotaCount = quota === undefined ? 0 : usedQuotas.get(quota) ?? 0;
@@ -1769,12 +1787,12 @@ function maximumRangedCapacity(
                 ...(chosenQuotas[index] === undefined ? {} : { quota: chosenQuotas[index] }) });
           }
           if (times.length < slotBudget && plan.quantity + (slotBudget - times.length) * range.high > bestQuantity + 1e-9) {
-            used.set(bucket, (used.get(bucket) ?? 0) + 1);
+            if (!rollingOccurrence) used.set(bucket, (used.get(bucket) ?? 0) + 1);
             if (quota !== undefined) usedQuotas.set(quota, quotaCount + 1);
             const next = new Set(candidates);
             expiries(at, next);
             explore(Array.from(next).sort((a, b) => a - b));
-            used.set(bucket, used.get(bucket)! - 1);
+            if (!rollingOccurrence) used.set(bucket, used.get(bucket)! - 1);
             if (quota !== undefined) usedQuotas.set(quota, quotaCount);
           }
         }
@@ -1816,6 +1834,7 @@ function maximumUnscheduledCapCount(
 ): number {
   if (from >= end) return 0;
   const repeat = dosage.schedule?.recurrence;
+  const rollingOccurrence = elapsedOccurrencePeriod(cap);
   const allowed = new Set((repeat?.dayOfWeek ?? []).map((day) => day.toLowerCase()));
   const excluded = new Set<string>(getDosageExcludedWeekdays(dosage));
   const dates = new Set(getDosageExcludedDates(dosage));
@@ -1854,17 +1873,19 @@ function maximumUnscheduledCapCount(
       ) {
         const start = Math.max(+begin, +day),
           stop = Math.min(+stopAt, +next);
-        if (quantityCaps.length || allocations) {
+        if (quantityCaps.length || allocations || rollingOccurrence) {
           const previous = intervals[intervals.length - 1];
           if (activeWindows && previous && previous.quota === quota?.id && previous.end >= start)
             previous.end = Math.max(previous.end, stop);
           else intervals.push({ start, end: stop, ...(quota ? { quota: quota.id } : {}) });
         }
-        const first = occurrenceCapBucketIndex(new Date(start), cap, timeZone);
-        const last = occurrenceCapBucketIndex(new Date(stop - 1), cap, timeZone);
-        const previous = ranges[ranges.length - 1];
-        if (previous && first <= previous.last + 1) previous.last = Math.max(previous.last, last);
-        else ranges.push({ first, last });
+        if (!rollingOccurrence) {
+          const first = occurrenceCapBucketIndex(new Date(start), cap, timeZone);
+          const last = occurrenceCapBucketIndex(new Date(stop - 1), cap, timeZone);
+          const previous = ranges[ranges.length - 1];
+          if (previous && first <= previous.last + 1) previous.last = Math.max(previous.last, last);
+          else ranges.push({ first, last });
+        }
       }
       day = next;
     }
@@ -1882,15 +1903,18 @@ function maximumUnscheduledCapCount(
     }
   }
   const remaining = total === undefined ? Infinity : Math.max(0, total - Math.floor(allowanceUsed));
-  if (quantityCaps.length || allocations) {
+  if (quantityCaps.length || allocations || rollingOccurrence) {
     const packed = allocations ?? [];
     const count = maximumCapacityWithRollingLimits(
       intervals, cap, quantityCaps, options.priorDoseTimes, timeZone, packed, range, weightedPrior, remaining, quotaLimits
     );
     if (!range || (!range.strictLow && !range.strictHigh && !quantityCaps.some(cap => cap.strict) &&
         (!quantityCaps.length && range.maximum === undefined || (range.low === range.high && !quotaLimits)))) return count;
-    let possibleSlots = ranges.reduce((total, range) => total + (range.last - range.first + 1) * cap.max, 0);
-    if (options.priorDoseTimes?.length || weightedPrior?.length) {
+    let possibleSlots = rollingOccurrence
+      ? maximumCapacityWithRollingLimits(intervals, cap, [], options.priorDoseTimes, timeZone,
+        undefined, undefined, weightedPrior, remaining, quotaLimits)
+      : ranges.reduce((total, range) => total + (range.last - range.first + 1) * cap.max, 0);
+    if (!rollingOccurrence && (options.priorDoseTimes?.length || weightedPrior?.length)) {
       const used = new Map<number, number>();
       const record = (at: number, count: number) => {
         const bucket = occurrenceCapBucketIndex(new Date(at), cap, timeZone);
@@ -1929,6 +1953,8 @@ function applyOccurrenceCap(
   timeZone: string,
   limit: number
 ): string[] {
+  if (elapsedOccurrencePeriod(cap))
+    return applyQuantityCaps(candidates, [cap], priorDoseTimes, timeZone, limit);
   const priorCounts = new Map<string, number>();
   for (const value of priorDoseTimes ?? []) {
     const date = coerceDate(value, "priorDoseTimes");
@@ -2264,6 +2290,10 @@ function applyQuantityCaps(
       if (quota.remaining === 0) break;
     }
     return accepted;
+  }
+  if (elapsedOccurrencePeriod(occurrence)) {
+    caps = [...caps, occurrence!];
+    occurrence = undefined;
   }
   if (!caps.length) return occurrence
     ? applyOccurrenceCap(candidates, occurrence, priorDoseTimes, zone, limit)
@@ -3379,7 +3409,10 @@ function trimRollingCycleHistory<T extends string | SupplyAllocation>(
         found=true;
       }
       const occurrence=getTimingOccurrenceCap(member.schedule?.recurrence);
-      const occurrenceBucket = occurrence ? occurrenceCapBucketIndex(upcoming, occurrence, zone) : undefined;
+      const rollingOccurrence = elapsedOccurrencePeriod(occurrence);
+      const occurrenceBucket = occurrence && !rollingOccurrence
+        ? occurrenceCapBucketIndex(upcoming, occurrence, zone) : undefined;
+      if (rollingOccurrence) oldest = Math.min(oldest, quantityCapHistoryFloor(upcoming, occurrence!, zone));
       if(occurrence)found=true;
       if(!found){usage.delete(key);continue;}
       // A source's events can overlap adjacent cycles. Keep stable event
@@ -3387,9 +3420,9 @@ function trimRollingCycleHistory<T extends string | SupplyAllocation>(
       let write=0;
       for(const item of times) {
         const at = typeof item === "string" ? Date.parse(item) : item.at;
-        // Occurrence ceilings use civil buckets, including the bucket's first
-        // instant. Quantity ceilings retain their separate rolling cutoff.
-        if(at>oldest || occurrence && occurrenceCapBucketIndex(new Date(at), occurrence, zone)>=occurrenceBucket!)
+        // Calendar occurrence ceilings include their civil bucket's first
+        // instant. Elapsed count and quantity ceilings share the rolling cutoff.
+        if(at>oldest || occurrenceBucket !== undefined && occurrenceCapBucketIndex(new Date(at), occurrence!, zone)>=occurrenceBucket)
           times[write++]=item;
       }
       times.length=write;
@@ -3748,13 +3781,15 @@ function maximumTimedRangePlan(
     }
     return result;
   };
-  const occurrence = getTimingOccurrenceCap(candidates[0].member.schedule?.recurrence);
+  const authoredOccurrence = getTimingOccurrenceCap(candidates[0].member.schedule?.recurrence);
+  const rollingOccurrence = elapsedOccurrencePeriod(authoredOccurrence);
+  const occurrence = rollingOccurrence ? undefined : authoredOccurrence;
   const lifetimeUpper = range.maximum === undefined ? undefined : Math.min(range.maximum,
     rangeDoseCapacity(range.maximum, range) * range.high);
   // With only a lifetime allowance, accepted complete-dose slots already
   // attain the count bound. Prove their uniform amount before preparing
   // rolling-window partitions or search state; selected events are chronological.
-  if (lifetimeUpper !== undefined && !range.caps.length && !occurrence && !priorTimes.length &&
+  if (lifetimeUpper !== undefined && !range.caps.length && !authoredOccurrence && !priorTimes.length &&
       (!ledger.selected.length || ledger.selected[0].at >= from)) {
     const uniform = uniformRangeQuantity(ledger.selected.length, range, lifetimeUpper);
     if (uniform && uniform.count === ledger.selected.length)
@@ -3777,6 +3812,8 @@ function maximumTimedRangePlan(
     const width = elapsedPeriodMilliseconds(cap);
     if (width) capPartitions.push({ width, maximum: cap.max, bucket: 0, slots: 0, last: 0, total: 0 });
   }
+  if (rollingOccurrence) capPartitions.push({ width: rollingOccurrence,
+    maximum: authoredOccurrence!.max * range.high, bucket: 0, slots: 0, last: 0, total: 0 });
   const partitionSupply = (partition: typeof capPartitions[number]) => {
     const recorded = priorTimes.length && partition.slots
       ? (upperBoundTimestamp(priorTimes, partition.last) -
@@ -3905,8 +3942,14 @@ function maximumTimedRangePlan(
       const event = candidates[index], quotaCount = usedQuota.get(event.quota) ?? 0;
       const quotaMax = ledger.quotas.get(event.quota), bucket = buckets[index];
       const bucketCount = usedBucket.get(bucket) ?? 0;
+      let occurrenceUsed = bucketCount + supplied[index];
+      if (rollingOccurrence) {
+        const since = quantityCapWindowStart(new Date(event.at), authoredOccurrence!, zone);
+        occurrenceUsed = upperBoundTimestamp(priorTimes, event.at) - upperBoundTimestamp(priorTimes, since);
+        for (let prior = chosen.length - 1; prior >= 0 && chosen[prior].at > since; prior--) occurrenceUsed++;
+      }
       if ((quotaMax === undefined || quotaCount < quotaMax) &&
-          (!occurrence || bucketCount + supplied[index] < occurrence.max)) {
+          (!authoredOccurrence || occurrenceUsed < authoredOccurrence.max)) {
         chosen.push(event); usedQuota.set(event.quota, quotaCount + 1); usedBucket.set(bucket, bucketCount + 1);
         if (consider(chosen) && bestQuantity < upper - 1e-9) explore(index + 1);
         chosen.pop(); usedQuota.set(event.quota, quotaCount); usedBucket.set(bucket, bucketCount);
@@ -3941,10 +3984,12 @@ function chronologicalCapAcceptor(
       }
       const range = executableDoseRange(event.member, context, requireExactPeriod, maximum);
       if (range && optimizeRanges) hasRanges = true;
-      const caps = range?.caps ?? executableQuantityCaps(event.member, context, false, requireExactPeriod);
+      let caps = range?.caps ?? executableQuantityCaps(event.member, context, false, requireExactPeriod);
       const occurrence = getTimingOccurrenceCap(event.member.schedule?.recurrence);
+      const rollingOccurrence = elapsedOccurrencePeriod(occurrence);
+      if (rollingOccurrence) caps = [...caps, occurrence!];
       let priorByBucket: Map<string, number[]> | undefined;
-      if (occurrence && prior.length) {
+      if (occurrence && !rollingOccurrence && prior.length) {
         priorByBucket = new Map();
         for (const timestamp of prior) {
           const bucket = occurrenceCapBucketKey(new Date(timestamp), occurrence, zone);
@@ -3978,6 +4023,7 @@ function chronologicalCapAcceptor(
     if (state.range && state.remainingQuantity !== undefined && at >= from &&
         !rangeDoseFits(state.remainingQuantity, state.range)) return false;
     const occurrence = state.occurrence;
+    const rollingOccurrence = elapsedOccurrencePeriod(occurrence);
     const date = state.caps.length || occurrence ? new Date(at) : undefined;
     for (let index = 0; index < state.caps.length; index++) {
       const cap = state.caps[index],
@@ -3995,7 +4041,7 @@ function chronologicalCapAcceptor(
       const previously = prior.length
         ? upperBoundTimestamp(prior, at) - upperBoundTimestamp(prior, since)
         : 0;
-      if (state.range && state.quantityPrefix) {
+      if (state.range && state.quantityPrefix && cap !== occurrence) {
         const used = state.quantityPrefix[state.times.length] - state.quantityPrefix[head] +
           previously * state.range.high;
         const available = cap.max - used;
@@ -4003,7 +4049,7 @@ function chronologicalCapAcceptor(
           ? available <= state.range.low + 1e-10 : available < state.range.low - 1e-10) return false;
       } else if (state.times.length - head + previously >= cap.max) return false;
     }
-    if (occurrence) {
+    if (occurrence && !rollingOccurrence) {
       const bucket = occurrenceCapBucketKey(date!, occurrence, zone);
       if (state.occurrenceKey !== bucket) {
         state.occurrenceKey = bucket;
@@ -4042,7 +4088,7 @@ function chronologicalCapAcceptor(
         }
       }
     }
-    if (occurrence) state.occurrenceUsed++;
+    if (occurrence && !rollingOccurrence) state.occurrenceUsed++;
     return true;
   };
   return Object.assign(accept, { finish(events: UncommittedCycleEvent[], from: number) {
@@ -8350,8 +8396,10 @@ function calculateCourseTotalUnits(
         const repeat = dosage.schedule?.recurrence;
         const count = repeat ? repeatOccurrenceCap(repeat) : undefined;
         const cap = unscheduledOccurrenceCapacity(dosage)!;
-        const buckets = occurrenceCapBucketIndex(new Date(end.getTime() - 1), cap, zone) -
-          occurrenceCapBucketIndex(begin, cap, zone) + 1;
+        const rollingOccurrence = elapsedOccurrencePeriod(cap);
+        const buckets = rollingOccurrence ? Math.ceil((end.getTime() - begin.getTime()) / rollingOccurrence)
+          : occurrenceCapBucketIndex(new Date(end.getTime() - 1), cap, zone) -
+            occurrenceCapBucketIndex(begin, cap, zone) + 1;
         if (count === undefined || (options.priorCount === undefined &&
             ((dosage.amounts?.[0]?.range && hasPeriodLimits(dosage)) ||
              (!options.priorDoseTimes?.length && buckets * cap.max <= count)))) {

@@ -6048,3 +6048,71 @@ describe("current rolling limits and finite range capacity", () => {
     }
   });
 });
+
+
+describe("elapsed occurrence ceilings share the rolling count ledger", () => {
+  const options = { orderedAt: "2026-12-01T18:00:00Z", from: "2026-12-01T18:00:00Z", timeZone: "UTC" };
+  const expected = ["2026-12-01T18:00:00+00:00", "2026-12-02T00:00:00+00:00",
+    "2026-12-02T18:00:00+00:00", "2026-12-03T00:00:00+00:00"];
+  const member = (): CanonicalAdministration => ({ kind: "administration", asNeeded: true,
+    amounts: [{ range: { low: { value: 2, unit: "mL" }, high: { value: 3, unit: "mL" } } }],
+    schedule: { recurrence: { period: 6, periodUnit: Unit.Hour,
+      occurrenceCap: { max: 2, period: 24, periodUnit: Unit.Hour } } } });
+  const course = (administration: CanonicalAdministration): CanonicalCourse =>
+    ({ kind: "course", stages: [{ administrations: [administration] }] });
+
+  it.each([[24, Unit.Hour], [1440, Unit.Minute]] as const)(
+    "keeps elapsed occurrence counts separate from ranged medication quantities (%s %s)", (period, periodUnit) => {
+      const administration = member();
+      administration.schedule!.recurrence!.occurrenceCap = { max: 2, period, periodUnit };
+      administration.limits = [{ scope: "period", amount: { value: 5, unit: "mL" }, period: { value: 24, unit: "h" } }];
+      const dosage = course(administration), before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual(expected);
+      for (const [hours, amount] of [[24, 5], [48, 10]] as const)
+        expect(calculateTotalUnits({ dosage, ...options, durationValue: hours, durationUnit: Unit.Hour }))
+          .toMatchObject({ totalUnits: amount, unit: "mL", quantityKind: "maximum" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    });
+
+  it("uses elapsed untimed count capacity without creating doses or midnight resets", () => {
+    const administration = member();
+    administration.schedule = { recurrence: { occurrenceCap: { max: 2, period: 24, periodUnit: Unit.Hour } } };
+    administration.limits = [{ scope: "period", amount: { value: 5, unit: "mL" }, period: { value: 24, unit: "h" } }];
+    const dosage = course(administration), before = JSON.stringify(dosage);
+    expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual([]);
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 24, durationUnit: Unit.Hour }))
+      .toMatchObject({ totalUnits: 5, unit: "mL", quantityKind: "maximum" });
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 48, durationUnit: Unit.Hour }))
+      .toMatchObject({ totalUnits: 10, unit: "mL", quantityKind: "maximum" });
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+  it("counts a bilateral administration once while its quantity includes both eyes", () => {
+    const administration = member();
+    administration.amounts = [{ range: { low: { value: 1, unit: "drop" }, high: { value: 2, unit: "drop" } } }];
+    administration.targetCount = 2;
+    administration.target = { text: "both eyes", coding: [{ system: "http://snomed.info/sct", code: "40638003" }] };
+    administration.limits = [{ scope: "period", amount: { value: 6, unit: "drop" }, period: { value: 24, unit: "h" } }];
+    const dosage = course(administration), before = JSON.stringify(dosage);
+    expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual(expected);
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 24, durationUnit: Unit.Hour }))
+      .toMatchObject({ totalUnits: 6, unit: "drop", quantityKind: "maximum" });
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+  it("retains the elapsed allowance across repeated phase boundaries and actual-dose history", () => {
+    const administration = member();
+    administration.amounts = [{ quantity: { value: 1, unit: "tab" } }];
+    administration.asNeeded = undefined;
+    administration.schedule!.recurrence!.courseLength = { value: 12, unit: "h" };
+    const dosage: CanonicalCourse = { ...course(administration), cycleInterval: { value: 12, unit: "h" }, cycleCount: 4 };
+    const before = JSON.stringify(dosage);
+    expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual(expected);
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 48, durationUnit: Unit.Hour }).totalUnits).toBe(4);
+    const history = { ...options, from: "2026-12-02T06:00:00Z",
+      priorDoseTimes: ["2026-12-01T18:00:00Z", "2026-12-02T00:00:00Z"] };
+    expect(nextDueDoses(dosage, { ...history, limit: 2 })).toEqual(expected.slice(2));
+    expect(calculateTotalUnits({ dosage, ...history, durationValue: 24, durationUnit: Unit.Hour }).totalUnits).toBe(2);
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+});
