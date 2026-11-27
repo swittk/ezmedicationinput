@@ -91,7 +91,6 @@ import {
 } from "../dosage-course";
 import {
   serializeCanonicalContext,
-  instructionTextRepresented,
   serializeCanonicalSchedule,
   getTimingClocks,
   getTimingEvents, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL,
@@ -1656,14 +1655,6 @@ function administrationToWire(
       assign(projected, "coding", instruction.coding);
       return projected;
     });
-  }
-  // Active negated graph advice also belongs in the standard instruction field.
-  for (const action of (clause ?? a.syntax)?.instructionGraph?.actions ?? []) {
-    if (action.polarity !== AdvicePolarity.Negate) continue;
-    const text = action.sourceText.trim();
-    if (!text || instructionTextRepresented(text, additionalInstructions)) continue;
-    if (additionalInstructions === a.additionalInstructions) additionalInstructions = additionalInstructions?.slice() ?? [];
-    (additionalInstructions ??= []).push({ text });
   }
   assign(output, "additionalInstruction", additionalInstructions);
   // A supplied indication already expresses PRN meaning. Keep an absent

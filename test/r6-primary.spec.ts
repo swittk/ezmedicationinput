@@ -9178,3 +9178,60 @@ describe("conditional warning ownership on fresh projections", () => {
     expect({ row, r6 }).toEqual(before);
   });
 });
+
+
+describe("typed graph warnings without synthesized wire advice", () => {
+  it("preserves a supplied conditional graph without projecting its bare action as independent advice", () => {
+    const warning = "If dizzy, do not take the morning dose";
+    const start = warning.indexOf("do not");
+    const note = { url: "urn:clinic:condition-note", valueString: "Preserve conditional ownership" };
+    const graph: CanonicalInstructionGraph = {
+      sourceText: warning, sourceLocale: "en", primaryOwnership: {},
+      actions: [{ force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
+        predicate: { lemma: "take", display: "Take", semanticClass: "administration" },
+        args: [{ role: AdviceArgumentRole.Object, text: "the morning dose",
+          normalized: "the morning dose", i18n: { th: "ยาเช้า" } }],
+        span: { start, end: warning.length }, sourceText: warning.slice(start)
+      }],
+      relations: [{ kind: AdviceRelation.If, toActionIndex: 0, text: "If dizzy,",
+        span: { start: 0, end: "If dizzy,".length }, sourceExtensions: [note] }]
+    };
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      extension: [note, buildInstructionGraphExtension(graph)!]
+    };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [structuredClone(row)] }] };
+    const before = structuredClone({ row, r6 });
+    const native = importCanonicalCourse(r6);
+    for (const input of [row, r6, native]) {
+      const course = importCanonicalCourse(input);
+      expect(course.stages[0].administrations[0].additionalInstructions).toBeUndefined();
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain(warning);
+      expect(en.match(/do not take/giu)).toHaveLength(1);
+      expect(en).toContain("1 tablet");
+      expect(th).toContain("ถ้าเวียนศีรษะห้ามรับประทานยาเช้า");
+      expect(th.match(/ห้ามรับประทาน/gu)).toHaveLength(1);
+      expect(th).toContain("1 เม็ด");
+    }
+    const projected = [
+      toFhirR5Dosages(r6)[0],
+      toDosageDetails([row]).step[0].component[0],
+      courseToR6(native).step[0].component[0]
+    ];
+    for (const output of projected) expect(output.extension).toContainEqual(note);
+    for (const output of [canonicalToFhir(canonicalFromFhir(row)), ...projected]) {
+      expect(output.additionalInstruction).toBeUndefined();
+      expect(output.doseAndRate).toMatchObject(row.doseAndRate!);
+      const retained = parseInstructionGraphExtension(output.extension);
+      expect(retained?.sourceText).toBe(warning);
+      expect(retained?.actions[0].polarity).toBe(AdvicePolarity.Negate);
+      expect(retained?.relations?.[0]).toMatchObject({
+        kind: AdviceRelation.If, toActionIndex: 0, sourceExtensions: [note]
+      });
+    }
+    expect({ row, r6 }).toEqual(before);
+  });
+});

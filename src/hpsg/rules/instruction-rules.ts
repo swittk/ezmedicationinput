@@ -196,6 +196,11 @@ export function proceduralActionLexicalRule(): HpsgLexicalRule<HpsgClauseContext
       const directiveInstructions = frame.polarity === AdvicePolarity.Negate
         ? parseInstructionCandidates(text, frame.span)
         : [];
+      // A bare directive still owns the action already selected above. Keep
+      // that identity so conditional composition can scope its advice daughter.
+      for (const instruction of directiveInstructions) {
+        if (!instruction.frames?.length) instruction.frames = [frame];
+      }
       let sign: HpsgSign = lexicalSign({
         type: "instruction-sign",
         rule: "hpsg.lex.patientInstruction.procedure",
