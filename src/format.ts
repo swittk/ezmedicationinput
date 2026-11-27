@@ -41,6 +41,7 @@ import {
   instructionGraphTextParticipatesInRelation,
   realizeInstructionAction,
   realizeInstructionGraph,
+  realizeInstructionGraphWithSources,
   attachInstructionGraphPrimaryConditions,
   type InstructionGraphPrimaryCondition,
   instructionGraphPostAdministrationDiscourseConnector
@@ -1642,6 +1643,22 @@ export function instructionGraphAdviceSourceTexts(
   return sources;
 }
 
+/** Direct advice and emitted graph actions already own this patient fragment. */
+export function instructionGraphPatientInstructionAlreadyRendered(
+  clause: CanonicalSigClause,
+  directSourceTexts: readonly string[],
+  renderedGraphSources?: readonly string[]
+): boolean {
+  if (!clause.instructionGraph || !clause.patientInstruction) return false;
+  const sources = instructionGraphSourceOwnedByAdvice(clause.instructionGraph, {
+    text: clause.patientInstruction, frames: []
+  });
+  return sources.length > 0 && sources.every(source =>
+    directSourceTexts.indexOf(source) !== -1 ||
+    Boolean(renderedGraphSources && renderedGraphSources.indexOf(source) !== -1)
+  );
+}
+
 export function instructionGraphAdministrationFlow(
   clause: CanonicalSigClause,
   roundTrip: boolean,
@@ -1964,6 +1981,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       )
     : undefined;
   const instructionPhrases: string[] = [];
+  const renderedGraphSources: string[] | undefined = clause.patientInstruction && clause.instructionGraph
+    ? [] : undefined;
   const { codedWarningSources, codedWarningSourcesByInstruction, graphOwnedAdditional, graphWarnings } =
     collectGraphInstructionOwnership(clause, hasCanonicalAdministration, true);
   const hasCodedAdditionalInstruction = Boolean(
@@ -2013,14 +2032,14 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     const directInstruction = formatAdditionalInstructions(additionalForDirectRendering, baseVerb);
     if (directInstruction) instructionPhrases.push(directInstruction);
     const graphWarning = clause.instructionGraph && !positionedGraph
-      ? realizeInstructionGraph(clause.instructionGraph, "en", {
+      ? realizeInstructionGraphWithSources(clause.instructionGraph, "en", {
           onlyWarnings: true,
           omitCanonicalAdministration: clause,
           instructionActionMap: options?.instructionActionMap,
           preferSourceText: roundTrip,
           roundtripSafe: roundTrip,
           omitSourceTexts: additionalSemanticSourceTexts
-        })
+        }, renderedGraphSources)
       : undefined;
     const graphWarningText = graphWarning ? formatPatientInstructionSentence(graphWarning) : undefined;
     if (graphWarningText) instructionPhrases.push(graphWarningText);
@@ -2076,7 +2095,9 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const postFlowsFromAdministration = graphFlow.postFlowsFromAdministration &&
     !instructionGraphPostAdministrationDiscourseConnector(clause.instructionGraph!);
 
-  const graphOwnsPatientInstruction = Boolean(
+  const graphOwnsPatientInstruction = instructionGraphPatientInstructionAlreadyRendered(
+    clause, additionalSemanticSourceTexts, renderedGraphSources
+  ) || Boolean(
     clause.patientInstruction && clause.instructionGraph && (
       richPrimaryGraphAction &&
       instructionGraphSingleActionRepresentsText(clause.instructionGraph, clause.patientInstruction) ||

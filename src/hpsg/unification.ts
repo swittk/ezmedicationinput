@@ -345,6 +345,20 @@ function mergePrnLookupRequests(
   return result.length ? result : undefined;
 }
 
+/** Keep separately selected occurrences while retaining unframed instruction deduplication. */
+export function sameInstructionSourceOccurrence(
+  left: HpsgInstructionFeature,
+  right: HpsgInstructionFeature
+): boolean {
+  const leftFrames = left.frames;
+  const rightFrames = right.frames;
+  if (!leftFrames?.length || !rightFrames?.length) return true;
+  return leftFrames.length === rightFrames.length && leftFrames.every((frame, index) =>
+    frame.span.start === rightFrames[index].span.start &&
+    frame.span.end === rightFrames[index].span.end
+  );
+}
+
 function mergeInstructions(
   left: HpsgInstructionFeature[] | undefined,
   right: HpsgInstructionFeature[] | undefined
@@ -354,7 +368,8 @@ function mergeInstructions(
     if (
       !result.some((candidate) =>
         candidate.text === instruction.text &&
-        sameCoding(candidate.coding, instruction.coding)
+        sameCoding(candidate.coding, instruction.coding) &&
+        sameInstructionSourceOccurrence(candidate, instruction)
       )
     ) {
       result.push(instruction);

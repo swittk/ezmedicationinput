@@ -19,6 +19,7 @@ import {
   normalizeInstructionText,
   collectGraphInstructionOwnership,
   instructionGraphAdviceSourceTexts,
+  instructionGraphPatientInstructionAlreadyRendered,
   instructionGraphAdministrationFlow,
   instructionGraphActionHasSequenceSuccessor,
   instructionGraphCanStandAlone,
@@ -79,6 +80,7 @@ import {
   instructionGraphSingleActionRepresentsText,
   realizeInstructionAction,
   realizeInstructionGraph,
+  realizeInstructionGraphWithSources,
   attachInstructionGraphPrimaryConditions,
   type InstructionGraphPrimaryCondition
 } from "./instruction-graph";
@@ -2288,6 +2290,8 @@ function formatLongThai(
   );
   const additionalSemanticSourceTexts = instructionGraphAdviceSourceTexts(clause, directAdditional);
   const graphRealizationOmissions = [...additionalSemanticSourceTexts, ...codedWarningSources];
+  const renderedGraphSources: string[] | undefined = clause.patientInstruction && clause.instructionGraph
+    ? [] : undefined;
   const primaryConditions: InstructionGraphPrimaryCondition[] | undefined =
     clause.instructionGraph?.relations?.length ? [] : undefined;
   const graphRealizationOptions = {
@@ -2301,19 +2305,19 @@ function formatLongThai(
     omitRenderedAction: richPrimaryGraphAction
   } as const;
   const preGraphInstruction = positionedGraph && clause.instructionGraph
-    ? realizeInstructionGraph(clause.instructionGraph, "th", {
+    ? realizeInstructionGraphWithSources(clause.instructionGraph, "th", {
         ...graphRealizationOptions,
         position: "pre"
-      })
+      }, renderedGraphSources)
     : undefined;
   const postGraphInstruction = positionedGraph && clause.instructionGraph
-    ? realizeInstructionGraph(clause.instructionGraph, "th", {
+    ? realizeInstructionGraphWithSources(clause.instructionGraph, "th", {
         ...graphRealizationOptions,
         position: "post"
-      })
+      }, renderedGraphSources)
     : undefined;
   const wholeGraphInstruction = !positionedGraph && clause.instructionGraph
-    ? realizeInstructionGraph(clause.instructionGraph, "th", graphRealizationOptions)
+    ? realizeInstructionGraphWithSources(clause.instructionGraph, "th", graphRealizationOptions, renderedGraphSources)
     : undefined;
 
   const directInstruction = formatAdditionalInstructionsThai(directAdditional, baseVerb);
@@ -2334,7 +2338,9 @@ function formatLongThai(
     ? `${sequenceSurface}${rawGraphInstructionText}`
     : rawGraphInstructionText;
   const patientSource = clause.patientInstruction?.trim();
-  const patientSourceRepresented = Boolean(
+  const patientSourceRepresented = instructionGraphPatientInstructionAlreadyRendered(
+    clause, graphRealizationOmissions, renderedGraphSources
+  ) || Boolean(
     // Complete direct advice already owns these exact graph action sources.
     // Do not re-emit the shorter patient fragment after its full instruction.
     patientSource && directInstruction && additionalSemanticSourceTexts.some((source) =>

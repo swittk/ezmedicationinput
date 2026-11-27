@@ -2063,6 +2063,73 @@ describe("selected optional action meaning", () => {
     }
   });
 
+  it("preserves an independently supplied patient instruction beside a selected ordered program", () => {
+    const source = "Instill 1 drop in the right eye at 08:00 and 1 drop in the left eye at 20:00 daily for 7 days. " +
+      "Skip the drops in the left eye on Mondays. Skip the drops in the right eye on Fridays. May cause drowsiness.";
+    const parsed = parsePublicSig(source);
+    const patientInstruction = "Use the independent clinic schedule.";
+    const current = JSON.parse(JSON.stringify(parsed.fhir)) as FhirDosage[];
+    const row = current.find(value => value.additionalInstruction?.length === 3)!;
+    row.patientInstruction = patientInstruction;
+    row._patientInstruction = { id: "independent-patient-instruction" };
+    const before = JSON.stringify(current);
+    const projected = projectCanonicalCourse(importCanonicalCourse(current));
+    for (const input of [current, JSON.parse(JSON.stringify(projected.fhirNext))]) {
+      const projection = projectCanonicalCourse(importCanonicalCourse(input));
+      const selected = projection.fhir.find(value => value.additionalInstruction?.length === 3)!;
+      expect(selected.patientInstruction).toBe(patientInstruction);
+      expect(selected._patientInstruction).toEqual({ id: "independent-patient-instruction" });
+      expect(toFhirR5Dosages(projection.fhirNext).find(value => value.additionalInstruction?.length === 3)?.patientInstruction)
+        .toBe(patientInstruction);
+      for (const locale of ["en", "th"] as const) {
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toContain(patientInstruction);
+      }
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" })).toContain(patientInstruction);
+    }
+    expect(JSON.stringify(current)).toBe(before);
+  });
+
+  it.each([
+    ["Shake well then measure 5 mL with a dosing syringe.",
+      "Shake well then measure 5 mL with a dosing syringe", ["shake", "measure"]],
+    ["Wipe the lesion then wait 5 minutes then rinse.",
+      "Wipe the lesion then wait 5 minutes then rinse", ["wipe", "wait", "rinse"]]
+  ])("preserves every procedure step in the standard patient instruction: %s", (source, patientInstruction, lemmas) => {
+    const parsed = parsePublicSig(source as string), before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const inputBefore = JSON.stringify(input), course = importCanonicalCourse(input);
+      const member = course.stages.flatMap(stage => stage.administrations)[0];
+      expect(member.patientInstruction).toBe(patientInstruction);
+      expect(member.syntax?.instructionGraph?.actions.map(frame => frame.predicate.lemma)).toEqual(lemmas);
+      const projected = projectCanonicalCourse(course);
+      expect(projected.fhir[0].patientInstruction).toBe(patientInstruction);
+      expect(projected.fhirNext.step?.[0]?.component?.[0]?.patientInstruction).toBe(patientInstruction);
+      expect(toFhirR5Dosages(JSON.parse(JSON.stringify(projected.fhirNext)))[0].patientInstruction)
+        .toBe(patientInstruction);
+      expect(projected.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(inputBefore);
+    }
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
+    ["Apply ointment then cover with occlusive dressing if instructed", "if instructed"],
+    ["Take 1 tablet at 08:00 daily for 2 days; hold the morning dose unless you are able to swallow; call the clinic.",
+      "unless you are able to swallow"],
+    ["Remove contact lenses before instilling eye drops", "before instilling eye drops"]
+  ])("retains uncovered conditional or temporal program meaning: %s", (source, qualifier) => {
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase())
+        .toContain(qualifier);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members.some(member => Boolean(member.patientInstruction))).toBe(true);
+    }
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
   it("keeps incomplete instruction ranges and distinct typed occurrences outside graph ownership", () => {
     const source = "Instill 1 drop in the left eye daily. Skip the drops in the left eye on Mondays.";
     const parsed = parsePublicSig(source);

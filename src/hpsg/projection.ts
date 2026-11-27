@@ -1,4 +1,5 @@
 import { equalStructuredValues } from "../stable-structure";
+import { sameInstructionSourceOccurrence } from "./unification";
 import { NEXT_DAY_SCHEDULE_RULE, NEXT_DAY_ONSET_RULE } from "./lexical-classes";
 import { ParserState, Token } from "../parser-state";
 import {
@@ -521,7 +522,8 @@ export function projectHpsgSignToState(
       if (
         !existing.some((candidate) =>
           candidate.text === instruction.text &&
-          candidate.coding?.code === instruction.coding?.code
+          candidate.coding?.code === instruction.coding?.code &&
+          sameInstructionSourceOccurrence(candidate, instruction)
         )
       ) {
         const projected: CanonicalAdditionalInstructionExpr = {

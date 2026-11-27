@@ -8,6 +8,7 @@ import {
   formatSig, importCanonicalCourse, projectCanonicalCourse, lintSig, nextDueDoses, toDosageDetails, toFhirR5Dosages, getMedicationInstructionAction, parseSig as parsePublicSig
 } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
+import { parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { courseToR5 } from '../src/adapters/canonical-course';
 import { shiftCanonicalSigClauses } from '../src/ir';
 import { ParserState } from '../src/parser-state';
@@ -3338,6 +3339,163 @@ describe("withholding target identity", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 
+  it.each([". Skip", ", then skip"])("keeps mixed calendar holds and coded advice once in source order: %s", connector => {
+    const source = "Instill 1 drop in the right eye at 08:00 and 1 drop in the left eye at 20:00 daily for 7 days. " +
+      "Skip the drops in the left eye on Mondays" + connector +
+      " the drops in the right eye on Fridays. May cause drowsiness.";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const query = { from: "2026-11-23T00:00:00Z", orderedAt: "2026-11-23T00:00:00Z", timeZone: "UTC", limit: 20 };
+    const expected = [
+      "2026-11-23T08:00:00+00:00",
+      "2026-11-24T08:00:00+00:00", "2026-11-24T20:00:00+00:00",
+      "2026-11-25T08:00:00+00:00", "2026-11-25T20:00:00+00:00",
+      "2026-11-26T08:00:00+00:00", "2026-11-26T20:00:00+00:00",
+      "2026-11-27T20:00:00+00:00",
+      "2026-11-28T08:00:00+00:00", "2026-11-28T20:00:00+00:00",
+      "2026-11-29T08:00:00+00:00", "2026-11-29T20:00:00+00:00"
+    ];
+    for (const [index, input] of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))].entries()) {
+      const inputBefore = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 12, unit: "drop" });
+      const member = course.stages.flatMap(stage => stage.administrations)
+        .find(value => value.syntax?.additionalInstructions?.length)!;
+      expect(member.patientInstruction).toBe(source.slice(source.indexOf("Skip"), -1));
+      expect(member.syntax?.instructionGraph?.relations).toContainEqual(expect.objectContaining({
+        kind: "then", fromActionIndex: 0, toActionIndex: 1,
+        text: connector === ". Skip" ? "." : ", then"
+      }));
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase();
+        const left = "skip the drops in the left eye on mondays";
+        const right = "skip the drops in the right eye on fridays";
+        const cause = locale === "en" ? "may cause drowsiness" : "อาจทำให้ง่วงซึม";
+        expect(text.split(left)).toHaveLength(2);
+        expect(text.split(right)).toHaveLength(2);
+        expect(text.split(cause)).toHaveLength(2);
+        expect(text.indexOf(left)).toBeLessThan(text.indexOf(right));
+        expect(text.indexOf(right)).toBeLessThan(text.indexOf(cause));
+      }
+      if (index < 2) {
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
+      }
+      expect(member.syntax?.instructionGraph?.sourceText).toContain(source.slice(source.indexOf("Skip")));
+      const projected = projectCanonicalCourse(course);
+      expect(projected.fhir.find(row => row.additionalInstruction?.length === 3)?.patientInstruction)
+        .toBe(source.slice(source.indexOf("Skip"), -1));
+      expect(projected.fhirNext.renderedInstruction).toBe(source);
+      expect(projected.fhir.flatMap(row => row.additionalInstruction ?? []).map(row => row.text))
+        .toEqual(["Skip the drops in the left eye on Mondays", connector === ". Skip" ? "Skip the drops in the right eye on Fridays" : "skip the drops in the right eye on Fridays", "May cause drowsiness"]);
+      expect(JSON.stringify(input)).toBe(inputBefore);
+    }
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each(["Do not drive.", "Do not drive if dizzy."])(
+    "combines direct holds with the actually rendered graph warning: %s", warning => {
+      const source = "Instill 1 drop in the right eye at 08:00 and 1 drop in the left eye at 20:00 daily for 7 days. " +
+        "Skip the drops in the left eye on Mondays. Skip the drops in the right eye on Fridays. " + warning;
+      const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+      const query = { from: "2026-11-23T00:00:00Z", orderedAt: "2026-11-23T00:00:00Z", timeZone: "UTC", limit: 20 };
+      const expected = [
+        "2026-11-23T08:00:00+00:00",
+        "2026-11-24T08:00:00+00:00", "2026-11-24T20:00:00+00:00",
+        "2026-11-25T08:00:00+00:00", "2026-11-25T20:00:00+00:00",
+        "2026-11-26T08:00:00+00:00", "2026-11-26T20:00:00+00:00",
+        "2026-11-27T20:00:00+00:00",
+        "2026-11-28T08:00:00+00:00", "2026-11-28T20:00:00+00:00",
+        "2026-11-29T08:00:00+00:00", "2026-11-29T20:00:00+00:00"
+      ];
+      const patientInstruction = "Skip the drops in the left eye on Mondays. " +
+        "Skip the drops in the right eye on Fridays. Do not drive";
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const inputBefore = JSON.stringify(input), course = importCanonicalCourse(input);
+        expect(nextDueDoses(input, query)).toEqual(expected);
+        expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: 12, unit: "drop" });
+        const member = course.stages.flatMap(stage => stage.administrations)
+          .find(value => value.syntax?.additionalInstructions?.length)!;
+        expect(member.patientInstruction).toBe(patientInstruction);
+        expect(member.syntax?.instructionGraph?.actions[2]).toMatchObject({
+          predicate: { lemma: "drive" }, polarity: "negate"
+        });
+        if (warning === "Do not drive if dizzy.") {
+          expect(member.syntax?.instructionGraph?.relations).toContainEqual(expect.objectContaining({
+            kind: "if", toActionIndex: 2, text: "if dizzy"
+          }));
+        }
+        for (const locale of ["en", "th"] as const) {
+          const text = formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase();
+          const left = "skip the drops in the left eye on mondays";
+          const right = "skip the drops in the right eye on fridays";
+          const prohibition = locale === "en" ? "do not drive" : "ห้าม";
+          expect(text.split(left)).toHaveLength(2);
+          expect(text.split(right)).toHaveLength(2);
+          expect(text.split(prohibition)).toHaveLength(2);
+          expect(text.indexOf(left)).toBeLessThan(text.indexOf(right));
+          expect(text.indexOf(right)).toBeLessThan(text.indexOf(prohibition));
+          if (warning === "Do not drive if dizzy.") {
+            expect(text).toContain(locale === "en" ? "do not drive if dizzy" : "ถ้าเวียนศีรษะ");
+          }
+        }
+        const projected = projectCanonicalCourse(course);
+        expect(projected.fhir.find(row => row.site?.coding?.some(coding =>
+          coding.system === "http://snomed.info/sct" && coding.code === "1290031003"
+        ))?.patientInstruction).toBe(patientInstruction);
+        expect(projected.fhirNext.renderedInstruction).toBe(source);
+        expect(JSON.stringify(input)).toBe(inputBefore);
+      }
+      expect(JSON.stringify(parsed)).toBe(before);
+    }
+  );
+
+  it("retains both identical authored holds beside an independent coded warning", () => {
+    const source = "Instill 1 drop in the right eye at 08:00 and 1 drop in the left eye at 20:00 daily for 7 days. " +
+      "Skip the drops in the left eye on Mondays. Skip the drops in the left eye on Mondays. May cause drowsiness.";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const query = { from: "2026-11-23T00:00:00Z", orderedAt: "2026-11-23T00:00:00Z", timeZone: "UTC", limit: 20 };
+    const expected = [
+      "2026-11-23T08:00:00+00:00",
+      "2026-11-24T08:00:00+00:00", "2026-11-24T20:00:00+00:00",
+      "2026-11-25T08:00:00+00:00", "2026-11-25T20:00:00+00:00",
+      "2026-11-26T08:00:00+00:00", "2026-11-26T20:00:00+00:00",
+      "2026-11-27T08:00:00+00:00", "2026-11-27T20:00:00+00:00",
+      "2026-11-28T08:00:00+00:00", "2026-11-28T20:00:00+00:00",
+      "2026-11-29T08:00:00+00:00", "2026-11-29T20:00:00+00:00"
+    ];
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const inputBefore = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 13, unit: "drop" });
+      const member = course.stages.flatMap(stage => stage.administrations)
+        .find(value => value.syntax?.additionalInstructions?.length)!;
+      const holds = member.syntax!.additionalInstructions!.flatMap(row => row.frames ?? [])
+        .filter(frame => frame.predicate.lemma === "withhold-administration");
+      expect(holds).toHaveLength(2);
+      expect(holds[0].span.end).toBeLessThan(holds[1].span.start);
+      expect(member.patientInstruction).toBe(source.slice(source.indexOf("Skip"), -1));
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase();
+        const hold = "skip the drops in the left eye on mondays";
+        const cause = locale === "en" ? "may cause drowsiness" : "อาจทำให้ง่วงซึม";
+        expect(text.split(hold)).toHaveLength(3);
+        expect(text.split(cause)).toHaveLength(2);
+        expect(text.lastIndexOf(hold)).toBeLessThan(text.indexOf(cause));
+      }
+      const projected = projectCanonicalCourse(course);
+      expect(projected.fhir.flatMap(row => row.additionalInstruction ?? []).map(row => row.text))
+        .toEqual(["Skip the drops in the left eye on Mondays", "Skip the drops in the left eye on Mondays", "May cause drowsiness"]);
+      expect(projected.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(inputBefore);
+    }
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
   it("retains complete current row occurrences and nested annotations through both wire forms", () => {
     const source = "Instill 1 drop in the right eye at 08:00 and 1 drop in the left eye at 20:00 daily for 7 days. " +
       "Skip the drops in the left eye on Mondays. Skip the drops in the left eye on Mondays.";
@@ -3354,7 +3512,13 @@ describe("withholding target identity", () => {
       ] }];
     for (const input of [JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
       const rows = Array.isArray(input) ? input : input.step.flatMap((step: any) => step.component ?? []);
-      const advice = rows.flatMap((row: any) => row.additionalInstruction ?? [])[0];
+      const selectedRows = rows.flatMap((row: any) => row.additionalInstruction ?? []);
+      expect(selectedRows).toHaveLength(2);
+      const advice = selectedRows.find((row: any) =>
+        parseInstructionGraphExtension(row.extension)?.actions[0].sequenceIndex === 0);
+      expect(parseInstructionGraphExtension(advice.extension)?.actions[0]).toMatchObject({
+        sequenceIndex: 0, span: { start: 50, end: 91 }
+      });
       advice.id = "owned-row";
       advice._text = textElement;
       advice.coding = labelCoding;
@@ -3371,16 +3535,38 @@ describe("withholding target identity", () => {
         const normalized = formatSig(current, "long", { locale: "en", realizationMode: "normalized" });
         expect(normalized.match(/withhold administration/gi)).toHaveLength(2);
         const rebuilt = projectCanonicalCourse(importCanonicalCourse(JSON.parse(JSON.stringify(current))));
-        for (const row of rebuilt.fhir) for (const instruction of row.additionalInstruction ?? []) {
-          expect(instruction).toMatchObject({ id: "owned-row", _text: textElement, coding: labelCoding });
-          expect(instruction.extension).toContainEqual(rowNote);
-          const retained = instruction.extension?.find(field => field.url === graphUrl)?.extension
-            ?.find(field => field.url === "coverage");
-          expect(retained?.id).toBe("owned-coverage");
-          expect(retained?.extension).toContainEqual(coverageNote);
-          expect(retained?.extension?.find(field => field.url === "complete"))
-            .toMatchObject({ id: "complete-annotation", valueBoolean: true });
-        }
+        const rebuiltRows = rebuilt.fhir.flatMap(row => row.additionalInstruction ?? []);
+        expect(rebuiltRows).toHaveLength(2);
+        const occurrence0 = rebuiltRows.find(row =>
+          parseInstructionGraphExtension(row.extension)?.actions[0].sequenceIndex === 0)!;
+        const occurrence1 = rebuiltRows.find(row =>
+          parseInstructionGraphExtension(row.extension)?.actions[0].sequenceIndex === 1)!;
+        expect(parseInstructionGraphExtension(occurrence0.extension)?.actions[0]).toMatchObject({
+          sequenceIndex: 0, span: { start: 50, end: 91 }
+        });
+        expect(parseInstructionGraphExtension(occurrence1.extension)?.actions[0]).toMatchObject({
+          sequenceIndex: 1, span: { start: 93, end: 134 }
+        });
+        expect(rebuiltRows.map(row => row.text)).toEqual([
+          "Skip the drops in the left eye on Mondays", "Skip the drops in the left eye on Mondays"
+        ]);
+        expect(occurrence0).toMatchObject({ id: "owned-row", _text: textElement, coding: labelCoding });
+        expect(occurrence0.extension).toContainEqual(rowNote);
+        const retained = occurrence0.extension?.find(field => field.url === graphUrl)?.extension
+          ?.find(field => field.url === "coverage");
+        expect(retained?.id).toBe("owned-coverage");
+        expect(retained?.extension).toContainEqual(coverageNote);
+        expect(retained?.extension?.find(field => field.url === "complete"))
+          .toMatchObject({ id: "complete-annotation", valueBoolean: true });
+        expect(occurrence1.id).toBeUndefined();
+        expect(occurrence1._text).toBeUndefined();
+        expect(occurrence1.coding).toBeUndefined();
+        expect(occurrence1.extension).not.toContainEqual(rowNote);
+        const independent = occurrence1.extension?.find(field => field.url === graphUrl)?.extension
+          ?.find(field => field.url === "coverage");
+        expect(independent?.id).toBeUndefined();
+        expect(independent?.extension).not.toContainEqual(coverageNote);
+        expect(independent?.extension?.find(field => field.url === "complete")?.id).toBeUndefined();
         expect(formatSig(rebuilt.fhirNext, "long", { locale: "th", realizationMode: "normalized" }))
           .toBe(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }));
       }

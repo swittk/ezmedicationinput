@@ -5587,6 +5587,16 @@ export function realizeInstructionGraph(
     instructionActionMap?: ParseOptions["instructionActionMap"];
   }
 ): string | undefined {
+  return realizeInstructionGraphWithSources(graph, locale, options);
+}
+
+/** Internal formatter receipt from the same graph realization walk. */
+export function realizeInstructionGraphWithSources(
+  graph: CanonicalInstructionGraph,
+  locale: string,
+  options: Parameters<typeof realizeInstructionGraph>[2],
+  renderedSourceTexts?: string[]
+): string | undefined {
   const omittedSources = (options?.omitSourceTexts ?? [])
     .map(normalizedInstructionSurface)
     .filter(Boolean);
@@ -5871,6 +5881,9 @@ export function realizeInstructionGraph(
   let output = "";
   for (let index = 0; index < nodes.length; index += 1) {
     const node = nodes[index];
+    if (node.actionIndex !== undefined) {
+      renderedSourceTexts?.push(graph.actions[node.actionIndex].sourceText);
+    }
     if (!output) {
       output = node.text;
       continue;
