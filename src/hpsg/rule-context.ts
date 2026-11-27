@@ -241,6 +241,7 @@ interface QuantityLexicalContext {
   options?: ParseOptions;
   limit?: number;
   state?: Pick<ParserState, "consumed">;
+  clinicalCache?: HpsgClauseContext["clinicalCache"];
 }
 
 export function quantityTokenAvailable(context: QuantityLexicalContext, index: number): boolean {
@@ -340,6 +341,11 @@ export function directDoseUnitAfter(
 export function medicationAmountAt(context: QuantityLexicalContext, index: number): boolean {
   const token = context.tokens[index];
   if (!token) return false;
+  // A complete dimensional dose already owns its amount, including a compact
+  // daily denominator. Reuse that admitted daughter before scalar morphology.
+  const quantities = context.clinicalCache?.quantityLookahead?.get(index);
+  if (quantities) for (const sign of quantities)
+    if (sign.synsem.head.dose?.clinicalQuantity?.representation === "dose") return true;
   const lower = normalizeTokenLower(token);
   const number = plainClinicalNumberAt(context, index);
   if ((number || token.kind === LexKind.NumberRange) &&

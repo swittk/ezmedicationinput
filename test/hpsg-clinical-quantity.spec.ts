@@ -5561,6 +5561,43 @@ describe("reviewed numeric dose and denominator ownership", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 
+  it.each([
+    "Give 5mg/24h by mouth, no more than 10mg/48h",
+    "Give 5 mg per 24 hours by mouth, no more than 10mg/48h"
+  ])("keeps the oral daily dose separate from its compact comparative cap: %s", source => {
+    const parsed = parsePublicSig(source), parsedBefore = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 5, unit: "mg" });
+      expect(member.amounts?.[0].rate).toBeUndefined();
+      expect(member.amounts?.[0].rateRatio).toBeUndefined();
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 24, periodUnit: "h" });
+      expect(member.limits).toHaveLength(1);
+      expect(member.limits?.[0]).toMatchObject({
+        scope: "period", amount: { value: 10, unit: "mg" }, period: { value: 48, unit: "h" }
+      });
+      expect(nextDueDoses(input, { orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
+        timeZone: "UTC", limit: 3 })).toEqual([
+        "2026-12-01T08:00:00+00:00", "2026-12-02T08:00:00+00:00", "2026-12-03T08:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
+        timeZone: "UTC", durationValue: 2, durationUnit: "d" })).toMatchObject({ totalUnits: 10, unit: "mg" });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Give 5 mg orally every 24 hours; max per period: 10 mg / 48 h");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("ให้ครั้งละ 5 มิลลิกรัม ทุก 24 ชั่วโมง; max per period: 10 mg / 48 h");
+      expect(course.instruction).toBe(source);
+      expect(member.text).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+
   it.each(["Give 5 mg per hour", "Infuse 5 mg per 24 hours"])("retains the rate owner for %s", source => {
     const parsed = parsePublicSig(source);
     for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext)]) {
