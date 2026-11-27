@@ -105,8 +105,17 @@ function bodySiteCodingToFhir(coding: BodySiteCode | undefined): FhirCoding | un
   return wire;
 }
 
-function firstCodingWithCode(concept: FhirR6CodeableConcept | undefined): FhirR6Coding | undefined {
-  return concept?.coding?.find((coding) => Boolean(coding.code));
+/** Top-level and nested sites share the existing anatomical Coding preference. */
+export function selectPreferredSiteCoding<TCoding extends FhirR6Coding>(
+  site: { coding?: TCoding[] } | undefined
+): TCoding | undefined {
+  let first: TCoding | undefined;
+  for (const coding of site?.coding ?? []) {
+    if (!coding.code) continue;
+    if (coding.system === SNOMED_SYSTEM) return coding;
+    first ??= coding;
+  }
+  return first;
 }
 
 export function cloneBodySiteSpatialRelation(
@@ -232,7 +241,7 @@ export function parseBodySiteSpatialRelationExtension(
   const relationCoding=sharedCodingFields(relationNode?.valueCoding);
   const relationText=relationTextNode?.valueString??relationCoding?.display??"";
   const targetConcept=targetNode?.valueCodeableConcept;
-  const targetCoding=firstCodingWithCode(targetConcept);
+  const targetCoding=selectPreferredSiteCoding(targetConcept);
   const targetText=targetConcept?.text??targetTextNode?.valueString;
   const sourceText=sourceNode?.valueString;
   const retainedTarget = targetConcept && ((targetConcept.coding?.length ?? 0) > 1 ||

@@ -15,6 +15,7 @@ import { convertQuantityValue } from "../utils/units";
 import { AdviceArgumentRole, AdvicePolarity } from "../types";
 import { buildAdditionalInstructionFramesFromCoding } from "../advice";
 import type {
+  BodySiteSpatialRelation,
   CanonicalSigClause,
   CanonicalScheduleExpr,
   CanonicalActivityTimingExpr,
@@ -204,6 +205,7 @@ export interface CanonicalAdministration {
   targetCount?: number;
   target?: CanonicalConcept;
   siteReference?: CanonicalReference;
+  siteSpatialRelation?: BodySiteSpatialRelation;
   route?: CanonicalConcept;
   method?: CanonicalConcept;
   text?: string;

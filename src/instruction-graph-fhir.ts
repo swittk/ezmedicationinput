@@ -112,10 +112,10 @@ function addRelation(
   extensions: FhirExtension[], name: string, relation: AdviceRelation | undefined,
   sourceCoding?: FhirCoding
 ): FhirExtension | undefined {
-  const currentCoding = sourceCoding && relation !== undefined &&
-    getAdviceRelationByCoding(sourceCoding) === relation;
-  if (relation) {
-    const coding = currentCoding ? sourceCoding : getAdviceRelationCoding(relation);
+  const currentCoding = sourceCoding && (relation === undefined ||
+    getAdviceRelationByCoding(sourceCoding) === relation);
+  if (relation || currentCoding) {
+    const coding = currentCoding ? sourceCoding : relation && getAdviceRelationCoding(relation);
     if (coding) add(extensions, valueCoding(`${name}Coding`, coding));
     else add(extensions, valueCode(name, relation));
   }

@@ -44,6 +44,7 @@ import {
   instructionGraphPostAdministrationDiscourseConnector
 } from "./instruction-graph";
 import { resolveBodySitePhrase, realizeBodySiteRestriction } from "./body-site-grammar";
+import { resolveBodySiteTargetText } from "./body-site-target";
 import {
   getUniqueAdviceRelationByGrammarFeature,
   getBodySiteRelationRealization,
@@ -867,7 +868,8 @@ function renderSpatialSiteEnglish(
   if (!relation?.relationText) {
     return undefined;
   }
-  const rawTarget = relation.targetText ?? relation.targetCoding?.display;
+  const rawTarget = relation.targetText ?? relation.targetCoding?.display ??
+    resolveBodySiteTargetText({ coding: relation.targetCoding });
   if (!rawTarget) {
     return undefined;
   }

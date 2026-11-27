@@ -5099,12 +5099,12 @@ describe("round68 graph relation metadata and precise realization", () => {
     const rebuilt = buildInstructionGraphExtension(decoded)!;
     expect(selectedNode(rebuilt, slot).extension!.find(field => field.url === "relationCoding")?.valueCoding)
       .toEqual(originalCoding);
-    for (const next of [AdviceRelation.Before, undefined]) {
+    for (const next of [AdviceRelation.Before]) {
       const edited = fresh(decoded), owner = slot === "frame" ? edited.actions[0] : edited.actions[0].args[0];
       owner.relation = next;
       const changed = buildInstructionGraphExtension(edited)!, fields = selectedNode(changed, slot).extension!;
       expect(fields.find(field => field.url === "relationCoding")?.valueCoding?.code)
-        .toBe(next ? "421718005" : undefined);
+        .toBe("421718005");
       expect(fields.filter(field => field.url === "sourceRelationCoding")).toEqual([
         { url: "sourceRelationCoding", valueCoding: originalCoding }
       ]);
@@ -6823,5 +6823,40 @@ describe("conditional driving qualifier evidence", () => {
     expect(explicit).toContainEqual(expect.objectContaining({ predicate: expect.objectContaining({ lemma: "drive" }),
       polarity: AdvicePolarity.Negate, relation: AdviceRelation.If,
       args: [expect.objectContaining({ role: AdviceArgumentRole.Free, text: "affected" })] }));
+  });
+});
+
+
+describe("annotated current graph relation coding", () => {
+  it.each([false, true])("preserves one annotated action and argument relation per rebuild (recognized=%s)", recognized => {
+    const coding = recognized
+      ? { system: "http://snomed.info/sct", code: "421463005", display: "With", _code: { id: "known-relation-code" } }
+      : { system: "urn:clinic:relation", code: "clinic-adjunct", display: "Clinic adjunct", _code: { id: "clinic-relation-code" } };
+    const relation = { url: "relationCoding", id: "relation-field", valueCoding: coding,
+      extension: [{ url: "urn:clinic:relation-note", valueString: "retain relation metadata" }] };
+    const source: FhirExtension = { url: "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph", extension: [
+      { url: "action", extension: [
+        { url: "predicateLemma", valueString: "rinse" }, { url: "semanticClass", valueString: "rinse" },
+        { url: "force", valueCode: "sequence" }, { url: "spanStart", valueInteger: 0 }, { url: "spanEnd", valueInteger: 11 },
+        { url: "sourceText", valueString: "rinse wound" }, relation, { url: "argument", extension: [
+          { url: "role", valueCode: "object" }, { url: "text", valueString: "wound" }, relation
+        ] }
+      ] }
+    ] };
+    const before = JSON.stringify(source);
+    let current = source;
+    for (let iteration = 0; iteration < 3; iteration++) {
+      const graph = parseInstructionGraphExtension([current])!;
+      expect(graph.actions[0].relation).toBe(recognized ? AdviceRelation.With : undefined);
+      expect(graph.actions[0].args[0].relation).toBe(recognized ? AdviceRelation.With : undefined);
+      current = buildInstructionGraphExtension(graph)!;
+      const action = current.extension!.find(child => child.url === "action")!;
+      const argument = action.extension!.find(child => child.url === "argument")!;
+      for (const owner of [action, argument]) {
+        expect(owner.extension!.filter(child => child.url === "relationCoding")).toEqual([relation]);
+        expect(owner.extension!.filter(child => child.url === "sourceRelationCoding")).toEqual([]);
+      }
+    }
+    expect(JSON.stringify(source)).toBe(before);
   });
 });

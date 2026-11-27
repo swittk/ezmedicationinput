@@ -601,7 +601,7 @@ function safetyHasClinicalFacts(safety: CanonicalSafety | undefined): boolean {
 
 function administrationHasClinicalFacts(a: CanonicalAdministration, includeMemberBounds = true, includeSafety = true, includeAdvice = true): boolean {
   if (administrationHasAmountFacts(a)) return true;
-  if (a.asNeeded === true || a.target || a.targetCount !== undefined || a.siteReference ||
+  if (a.asNeeded === true || a.target || a.targetCount !== undefined || a.siteReference || a.siteSpatialRelation ||
       a.route || a.method || a.predicate || a.calendarPredicate || a.syntax?.instructionGraph?.actions.length ||
       (includeAdvice && (a.patientInstruction || a.additionalInstructions?.length)) ||
       a.excludedDates?.length || a.excludedWeekdays?.length ||

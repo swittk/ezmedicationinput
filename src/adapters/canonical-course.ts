@@ -1,4 +1,6 @@
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../instruction-graph-fhir";
+import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL, buildBodySiteSpatialRelationExtension,
+  parseBodySiteSpatialRelationExtension } from "../body-site-spatial";
 import { projectR6ModifierWrapper, reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, sourceOwnership, isSourceAgreementMarker } from "../dosage-course";
 import { courseFromR5 } from "./r5-import";
 import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../dosage-course";
@@ -812,6 +814,10 @@ function baseAdministration(
   if (sourceFields?.clocks !== undefined) output.provenance!.sourceHasStructuredClocks = sourceFields.clocks;
   if (sourceFields?.events !== undefined) output.provenance!.sourceHasStructuredEvents = sourceFields.events;
   if (sourceFields?.site !== undefined) output.provenance!.sourceHasStructuredSite = sourceFields.site;
+  const siteSpatialRelation = (format === "r6"
+    ? parseBodySiteSpatialRelationExtension((raw as FhirR6Dosage).site) : undefined) ??
+    parseBodySiteSpatialRelationExtension(target);
+  if (siteSpatialRelation) output.siteSpatialRelation = siteSpatialRelation;
   if (dosageHasAgreedSourceText(raw)) output.provenance!.sourceTextAgreed = true;
   if (phasePredecessors !== undefined) {
     output.sourceMember = sourceMember;
@@ -1792,7 +1798,9 @@ function administrationToWire(
       return rate;
     })
   );
-  const oldSite = a.provenance?.format === "r6" ? (output.site as object) : a.provenance?.retained?.site;
+  const oldSite = a.provenance?.format === "r6"
+    ? output.site as FhirR6Dosage["site"] : a.provenance?.retained?.site;
+  const elementSpatial = oldSite?.extension?.find(e => e.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL);
   let concept: FhirCodeableConcept | undefined = clause ? context?.site : a.target;
   if (!clause && a.targetCount !== getBodySiteAdministrationTargetCount(concept)) {
     const marker = buildBodySiteAdministrationTargetCountExtension(a.targetCount);
@@ -1803,17 +1811,39 @@ function administrationToWire(
     if (concept || marker) concept = { ...concept, ...(extensions.length ? { extension: extensions } : {}) };
     if (concept && !extensions.length) delete concept.extension;
   }
+  if (a.siteSpatialRelation) {
+    const conceptSpatial = concept?.extension?.find(e => e.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL);
+    if (target === "r5" && !conceptSpatial) {
+      const spatial = elementSpatial
+        ? quantityAnnotationExtensions([elementSpatial], "r5")[0] as FhirExtension
+        : buildBodySiteSpatialRelationExtension(a.siteSpatialRelation);
+      if (spatial) concept = { ...concept, extension: [...(concept?.extension ?? []), spatial] };
+    } else if (target === "r6" && elementSpatial && conceptSpatial && a.provenance?.format === "r5") {
+      // The R5 concept carries the same relation that the retained R6 Element
+      // already owns. Restore that location without emitting a second copy.
+      const extension = concept!.extension!.filter(e => e.url !== BODY_SITE_SPATIAL_RELATION_EXTENSION_URL);
+      concept = { ...concept };
+      if (extension.length) concept.extension = extension;
+      else delete concept.extension;
+      if (!Object.keys(concept).length) concept = undefined;
+    }
+  }
   if (target === "r5") {
     assign(output, "site", concept);
     delete output.siteReference;
   } else if (
     concept ||
-    a.siteReference ||
+    a.siteReference || a.siteSpatialRelation ||
     (oldSite && Object.keys(oldSite).some((key) => key !== "concept" && key !== "reference"))
   ) {
     const site: Record<string, unknown> = { ...oldSite };
     assign(site, "concept", concept);
     assign(site, "reference", a.siteReference);
+    if (a.siteSpatialRelation && !elementSpatial &&
+        !concept?.extension?.some(e => e.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL)) {
+      const spatial = buildBodySiteSpatialRelationExtension(a.siteSpatialRelation);
+      if (spatial) site.extension = [...(oldSite?.extension ?? []), spatial];
+    }
     output.site = site;
   } else delete output.site;
   // A retained R6 delta is sparse; unrelated live lifted R5 fields remain

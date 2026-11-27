@@ -9316,3 +9316,125 @@ describe("current FHIR header and annotation ownership", () => {
     expect(input).toEqual(before);
   });
 });
+
+
+describe("fresh coded measurement and spatial target identity", () => {
+  it("retains an exact code-only SBP threshold through native and both wire consumers", () => {
+    const condition = { id: "sbp-threshold", code: { coding: [
+      { system: "urn:ezmedicationinput:CodeSystem:medication-condition", code: "measurement" },
+      { system: "http://loinc.org", code: "8480-6", _code: { id: "sbp-code" } }
+    ] }, operation: "gt" as const, _operation: { id: "comparison" },
+      valueQuantity: { value: 160, unit: "mmHg", code: "mm[Hg]", system: "http://unitsofmeasure.org" },
+      extension: [{ url: "urn:clinic:condition-note", valueString: "retain calibration" }] };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"],
+        boundsDuration: { value: 2, unit: "d", code: "d", system: "http://unitsofmeasure.org" } } },
+      condition: [condition]
+    }] }] };
+    const before = JSON.stringify(input), rows = toFhirR5Dosages(input);
+    const restored = toDosageDetails(JSON.parse(JSON.stringify(rows)));
+    expect(restored.step[0].component[0].condition).toEqual([condition]);
+    for (const value of [input, importCanonicalCourse(input), JSON.parse(JSON.stringify(rows)), restored]) {
+      const member = importCanonicalCourse(value).stages[0].administrations[0];
+      expect(member.predicate).toMatchObject({ kind: "measurement", name: "sbp", operation: "gt", value: 160, unit: "mmHg" });
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(evaluateMedicationCondition(member.predicate!, { sbp: 170 })).toBe(true);
+      expect(evaluateMedicationCondition(member.predicate!, { sbp: 160 })).toBe(false);
+      const options = { from: "2026-11-27T08:00:00Z", orderedAt: "2026-11-27T08:00:00Z", timeZone: "UTC", limit: 2 };
+      expect(nextDueDoses(value, { ...options, evaluateCondition: predicate => evaluateMedicationCondition(predicate, { sbp: 170 }) }))
+        .toEqual(["2026-11-27T08:00:00+00:00", "2026-11-28T08:00:00+00:00"]);
+      expect(nextDueDoses(value, { ...options, evaluateCondition: predicate => evaluateMedicationCondition(predicate, { sbp: 160 }) })).toEqual([]);
+      const preview = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
+      expect(preview).toContain("160");
+      expect(preview).toContain("mmHg");
+      expect(preview).not.toContain("Unresolved condition");
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it("keeps authored measurement labels and unresolved foreign measurement codes", () => {
+    for (const [coding, text, expected] of [
+      [{ system: "http://loinc.org", code: "8480-6" }, "clinic systolic reading", "clinic systolic reading"],
+      [{ system: "urn:clinic:measurement", code: "8480-6" }, undefined, undefined]
+    ] as const) {
+      const condition = { code: { coding: [coding], ...(text ? { text } : {}) }, operation: "gt" as const,
+        valueQuantity: { value: 160, unit: "mmHg" } };
+      const input: FhirR6DosageInstruction = { step: [{ component: [{ condition: [condition] }] }] };
+      const before = JSON.stringify(input);
+      const predicate = importCanonicalCourse(input).stages[0].administrations[0].predicate;
+      expect(predicate).toMatchObject(expected ? { kind: "measurement", name: expected, value: 160 }
+        : { kind: "text", text: "Unresolved condition" });
+      expect(toDosageDetails(toFhirR5Dosages(input)).step[0].component[0].condition).toEqual([condition]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("retains an R6 site Element spatial relation without inventing a target concept", () => {
+    const target = { id: "right-eye-target", coding: [
+      { system: "urn:clinic:site", code: "eye-right", _code: { id: "local-code" } },
+      { system: "http://snomed.info/sct", code: "1290032005", _code: { id: "anatomical-code" } }
+    ] };
+    const spatial = { id: "spatial-relation", url: BODY_SITE_SPATIAL_RELATION_EXTENSION_URL, extension: [
+      { url: "relationText", valueString: "around" }, { url: "target", valueCodeableConcept: target },
+      { url: "urn:clinic:relation-note", valueString: "retain relation annotation" }
+    ] };
+    const site = { id: "current-site", reference: { reference: "BodyStructure/right-eye", id: "site-reference" },
+      extension: [spatial, { url: "urn:clinic:site-note", valueString: "retain site annotation" }] };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ site,
+      method: { text: "Apply", coding: [{ system: "http://snomed.info/sct", code: "738991002" }] },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }]
+    }] }] };
+    const before = JSON.stringify(input), native = importCanonicalCourse(input);
+    const member = native.stages[0].administrations[0];
+    expect(member.target).toBeUndefined();
+    expect(member.siteReference).toEqual(site.reference);
+    expect(member.siteSpatialRelation).toMatchObject({ relationText: "around", targetConcept: target,
+      targetCoding: { system: "http://snomed.info/sct", code: "1290032005" } });
+    expect(courseToR6(native).step[0].component[0].site).toEqual(site);
+    const rows = toFhirR5Dosages(input);
+    expect(rows[0].site?.text).toBeUndefined();
+    expect(rows[0].site?.coding).toBeUndefined();
+    expect(rows[0].site?.extension?.filter(field => field.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL)).toEqual([spatial]);
+    const restored = toDosageDetails(JSON.parse(JSON.stringify(rows)));
+    expect(restored.step[0].component[0].site).toEqual(site);
+    for (const value of [input, native, JSON.parse(JSON.stringify(rows)), restored]) {
+      const current = importCanonicalCourse(value).stages[0].administrations[0];
+      expect(current.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "g" });
+      expect(current.siteSpatialRelation?.targetConcept).toEqual(target);
+      expect(formatSig(value, "long", { locale: "en", realizationMode: "normalized" })).toContain("around the right eye");
+      expect(formatSig(value, "long", { locale: "th", realizationMode: "normalized" })).toContain("รอบตาขวา");
+      const projected = courseToR6(importCanonicalCourse(value)).step[0].component[0].site!;
+      expect(projected.extension?.filter(field => field.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL)).toEqual([spatial]);
+      expect(projected.concept).toBeUndefined();
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each([undefined, "authored target"])("retains a nested coded anatomical target and its authored text: %s", text => {
+    const target = { id: "spatial-target", ...(text ? { text } : {}), coding: [
+      { system: "urn:clinic:site", code: "eye-right", _code: { id: "local-site-code" } },
+      { system: "http://snomed.info/sct", code: "1290032005", extension: [{ url: "urn:clinic:site-note", valueString: "retain site" }] }
+    ] };
+    const site = { extension: [{ url: BODY_SITE_SPATIAL_RELATION_EXTENSION_URL, extension: [
+      { url: "relationText", valueString: "around" }, { url: "target", valueCodeableConcept: target }
+    ] }] };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ site: { concept: site }, method: { text: "Apply", coding: [
+      { system: "http://snomed.info/sct", code: "738991002" }
+    ] }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }] }] }] };
+    const before = JSON.stringify(input);
+    const relation = parseBodySiteSpatialRelationExtension(site)!;
+    expect(relation.targetCoding).toMatchObject({ system: "http://snomed.info/sct", code: "1290032005" });
+    expect(relation.targetText).toBe(text);
+    expect(buildBodySiteSpatialRelationExtension(relation)!.extension!.find(child => child.url === "target")!.valueCodeableConcept).toEqual(target);
+    const rows = toFhirR5Dosages(input), restored = toDosageDetails(JSON.parse(JSON.stringify(rows)));
+    expect(restored.step[0].component[0].site?.concept).toEqual(site);
+    for (const value of [input, importCanonicalCourse(input), JSON.parse(JSON.stringify(rows)), restored]) {
+      const en = formatSig(value, "long", { locale: "en", realizationMode: "normalized" });
+      expect(en).toContain(text ? "around the authored target" : "around the right eye");
+      if (!text) expect(formatSig(value, "long", { locale: "th", realizationMode: "normalized" })).toContain("รอบตาขวา");
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+});

@@ -268,6 +268,7 @@ export function administrationFromClause(
       period: quantity(limit.period, limit.periodUnit, limit.periodComparator),
     })),
   };
+  if (clause.site?.spatialRelation) administration.siteSpatialRelation = clause.site.spatialRelation;
   if (text !== undefined && clause.instructionGraph?.actions.length && !administrationHasAmountFacts(administration))
     administration.provenance = { format: "syntax", data: {}, sourceTextAgreed: true };
   return administration;
@@ -722,6 +723,7 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     if(targetCode?.code)result.site.coding=Object.assign({},targetCode,{code:targetCode.code});
   }else if(a.siteReference?.display)result.site={text:a.siteReference.display,administrationTargetCount:a.targetCount};
   else result.site=undefined;
+  if (a.siteSpatialRelation) (result.site ??= {}).spatialRelation = a.siteSpatialRelation;
   const methodCode=selectMedicationInstructionMethodCoding(a.method?.coding, options);
   if(a.method){
     const liveMethod={text:a.method.text,coding:methodCode};

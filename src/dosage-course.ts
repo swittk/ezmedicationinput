@@ -372,6 +372,11 @@ const CONDITION_MEASUREMENT_CODES: Record<string, { code: string; display: strin
   weight: { code: "29463-7", display: "Body weight" },
   spo2: { code: "59408-5", display: "Oxygen saturation in Arterial blood by Pulse oximetry" }
 };
+const CONDITION_MEASUREMENT_NAMES = new Map<string, string>();
+for (const name of Object.keys(CONDITION_MEASUREMENT_CODES)) {
+  const code = CONDITION_MEASUREMENT_CODES[name].code;
+  if (!CONDITION_MEASUREMENT_NAMES.has(code)) CONDITION_MEASUREMENT_NAMES.set(code, name);
+}
 
 function replacementExtensions(
   dosage: Pick<FhirDosage, "modifierExtension">, url: string, value: FhirExtension | undefined
@@ -745,7 +750,12 @@ function conditionFromR6(value: FhirR6DosageCondition): MedicationCondition {
     if (problem !== undefined) break;
   }
   problem ??= value.code?.text;
-  const name = problem ?? value.code?.coding?.[0]?.display;
+  let name = problem ?? value.code?.coding?.[0]?.display;
+  if (name === undefined) for (const coding of value.code?.coding ?? []) {
+    if (coding.system !== "http://loinc.org" || !coding.code) continue;
+    name = CONDITION_MEASUREMENT_NAMES.get(coding.code);
+    if (name !== undefined) break;
+  }
   if (problem && value.valueBoolean !== undefined &&
       (!value.operation || value.operation === "eq" || value.operation === "ne")) {
     for (const coding of value.code?.coding ?? []) {

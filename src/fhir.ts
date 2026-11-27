@@ -21,6 +21,7 @@ import {
   getBodySiteAdministrationTargetCount, resolveBodySiteTargetText
 } from "./body-site-target";
 import {
+  selectPreferredSiteCoding,
   buildBodySiteSpatialRelationExtensions,
   parseBodySiteSpatialRelationExtension
 } from "./body-site-spatial";
@@ -1122,18 +1123,6 @@ function selectFirstCodingWithCode<TCoding extends FhirR6Coding>(
     }
   }
   return undefined;
-}
-
-function selectPreferredSiteCoding<TCoding extends FhirR6Coding>(site: { coding?: TCoding[] } | undefined): TCoding | undefined {
-  if (!site?.coding?.length) {
-    return undefined;
-  }
-  for (const coding of site.coding) {
-    if (coding.system === SNOMED_SYSTEM && coding.code) {
-      return coding;
-    }
-  }
-  return selectFirstCodingWithCode(site);
 }
 
 type CanonicalSite = NonNullable<CanonicalSigClause["site"]>;
