@@ -31,7 +31,7 @@ import {
   TimingEvent,
   numericAdministrationLimits,
   administrationHasDatedStart,
-  administrationHasDatedClockStart,
+  administrationHasDatedSelectedStart,
   absoluteEventCycleDisplacement,
   hasPeriodLimits,
   measureOperator as getQuantityComparator,
@@ -380,13 +380,14 @@ function parseBoundsDurationUnit(quantity: CanonicalMeasure | undefined): Durati
   return getQuantityDurationUnit(quantity);
 }
 
+const CALENDAR_DATE_BOUND = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/u;
 function resolveRepeatBoundsStart(
   repeat: Pick<CanonicalRecurrence, "calendarWindow"> | undefined,
   timeZone: string
 ): Date | null {
   const value = repeat?.calendarWindow?.start;
   if (!value) return null;
-  const dateOnly = value.match(/^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/u);
+  const dateOnly = value.match(CALENDAR_DATE_BOUND);
   if (dateOnly) {
     return calendarBoundaryDate(timeZone, Number(dateOnly[1]), Number(dateOnly[2] ?? 1), Number(dateOnly[3] ?? 1), 0, 0, 0);
   }
@@ -399,7 +400,7 @@ function resolveRepeatBoundsEndExclusive(
 ): Date | null {
   const value = repeat?.calendarWindow?.end;
   if (!value) return null;
-  const dateOnly = value.match(/^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/u);
+  const dateOnly = value.match(CALENDAR_DATE_BOUND);
   if (dateOnly) {
     const endDay = calendarBoundaryDate(
       timeZone,
@@ -452,12 +453,16 @@ function resolveRepeatDurationCapEnd(
   const repeat = dosage.schedule?.recurrence;
   const retained = getAnchoredCourseDuration(dosage);
   if (!repeat && !retained) return null;
-  const durationAnchor = retained ? resolveRepeatBoundsStart(repeat, timeZone) ?? anchor : anchor;
+  const calendarStart = resolveRepeatBoundsStart(repeat, timeZone);
+  const durationAnchor = retained ? calendarStart ?? anchor : anchor;
+  // A skipped date-only midnight is still an authored midnight duration clock.
+  const calendarClock = calendarStart && durationAnchor.getTime() === calendarStart.getTime() &&
+    CALENDAR_DATE_BOUND.test(repeat!.calendarWindow!.start!) ? LOCAL_DAY_START_CLOCK : undefined;
   const advance = (quantity: CanonicalMeasure | undefined): Date | null => {
     // A <=7-day course has a usable upper horizon, unlike a <=7-day
     // recurrence with no single interval. Reuse calendar/elapsed stepping
     // while keeping those two semantic owners explicit and the source intact.
-    const capClock = retained && resolveRepeatBoundsStart(repeat, timeZone) ? undefined : sourceClock;
+    const capClock = calendarClock ?? (retained && calendarStart ? undefined : sourceClock);
     const result = durationStepper(
       quantity,
       timeZone,
@@ -2834,9 +2839,9 @@ function completePhaseDependency(
   }
   return ready;
 }
-/** A dated replacement owns its calendar opening or explicit clock.
- * Resolve clocks with the ordinary admission owner in the requested zone;
- * inferred event clocks and conditional opportunities prove no boundary. */
+/** A dated replacement owns its calendar opening and selected clock/weekday.
+ * Resolve these with the ordinary scheduling owner in the requested zone;
+ * a clinical guard governs actual use after this structural opening. */
 function datedSuccessorBoundary(
   successor: CanonicalAdministration, precedingStart: Date | undefined,
   zone: string, options?: NextDueDoseOptions
@@ -2845,7 +2850,7 @@ function datedSuccessorBoundary(
   const displacement = (getAdministrationOffsetMinutes(successor) ?? 0) * 60000;
   let bounds = recurrence?.calendarWindow?.start ? resolveRepeatBoundsPeriod(recurrence, zone, displacement) : undefined;
   if (!administrationHasDatedStart(successor, bounds?.nominalStart) &&
-      !administrationHasDatedClockStart(successor, bounds?.nominalStart)) {
+      !administrationHasDatedSelectedStart(successor, bounds?.nominalStart)) {
     // A selected same-track calendar cut may be carried by a date list.
     // Its day boundary is already owned by that dependency, not by a clock
     // inferred from the event or by the predecessor's administration delay.
@@ -2871,10 +2876,10 @@ function datedSuccessorBoundary(
   if (!bounds.start || !bounds.nominalStart ||
       precedingStart && getLocalDayNumber(bounds.start, zone) < getLocalDayNumber(precedingStart, zone)) return undefined;
   // A precise timestamp already owns its cutoff; only a calendar date
-  // needs its explicit clock to refine that opening.
-  if (!administrationHasDatedClockStart(successor)) return bounds.start;
+  // needs its selected recurrence to refine that opening.
+  if (!administrationHasDatedSelectedStart(successor)) return bounds.start;
   const execution = { ...successor, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined,
-    phaseOriginIssue: undefined, phasePredecessors: undefined };
+    phaseOriginIssue: undefined, phasePredecessors: undefined, predicate: undefined };
   const first = nextDueDoses(execution, {
     ...options, from: bounds.start, orderedAt: bounds.nominalStart, timeZone: zone, limit: 1,
     // This is the independently authored phase opening, not the next query
@@ -5349,12 +5354,6 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     }
   }
   let priorCount = priorCountInput !== undefined ? Math.floor(priorCountInput) : 0;
-  // A PRN opportunity is not proof of administration. Apply known history
-  // when supplied; otherwise enumerate the maximum remaining opportunity set.
-  const prnCountCapped =
-    !!dosage.asNeeded &&
-    (dosage.schedule?.recurrence?.count !== undefined || dosage.schedule?.recurrence?.countMax !== undefined);
-  const needsDerivedPriorCount = priorCountInput === undefined && !dosage.asNeeded;
   const providedConfig = options.config;
   const timeZone = options.timeZone ?? providedConfig?.timeZone;
   if (!timeZone) {
@@ -5461,12 +5460,10 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   }
   const effectiveOrderedAt = boundsStart && (!orderedAt || boundsStart > orderedAt) ? boundsStart : orderedAt;
   const historyOrigin = effectiveOrderedAt ?? boundsStart;
-  if (prnCountCapped && historyOrigin && from > historyOrigin && priorCountInput === undefined) {
-    for (const stamp of options.priorDoseTimes ?? []) {
-      const actual = coerceDate(stamp, "priorDoseTimes");
-      if (actual >= historyOrigin && actual < from) priorCount++;
-    }
-  }
+  const recordedPriorCount = priorCountInput === undefined && repeatOccurrenceCap(repeat ?? {}) !== undefined
+    ? recordedCountInWindow(options.priorDoseTimes, historyOrigin, from) : undefined;
+  if (recordedPriorCount !== undefined) priorCount = recordedPriorCount;
+  const needsDerivedPriorCount = priorCountInput === undefined && !dosage.asNeeded && recordedPriorCount === undefined;
   const baseCandidate = effectiveOrderedAt ?? boundsStart ?? from;
   const baseTime = boundsStart && boundsStart > baseCandidate ? boundsStart : baseCandidate;
   const courseEnd =
@@ -5484,7 +5481,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
       timeZone,
       Math.floor(limit),
       priorCount,
-      priorCountInput === undefined && !dosage.asNeeded,
+      needsDerivedPriorCount,
       requiresCompleteSupplyTiming(options),
       (options as PhaseCountOptions).explicitEventStatus
     );
@@ -5730,6 +5727,19 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     throw new MedicationQuantityCalculationError("timing-required",
       "The dosage has no executable frequency or dosing time for supply calculation.");
   return [];
+}
+/** Recorded in-course administrations replace nominal history for a finite
+ * count. Outside-window or absent history leaves the existing replay intact. */
+function recordedCountInWindow(
+  stamps: readonly (Date | string)[] | undefined, origin: Date | null, before: Date
+): number | undefined {
+  if (!origin || before <= origin || !stamps?.length) return undefined;
+  let count = 0;
+  for (const stamp of stamps) {
+    const actual = coerceDate(stamp, "priorDoseTimes");
+    if (actual >= origin && actual < before) count++;
+  }
+  return count || undefined;
 }
 function derivePriorCountFromHistory(
   dosage: CanonicalAdministration,
@@ -6430,9 +6440,22 @@ function generateDayFilteredPeriodSeries(options: DayFilteredPeriodSeriesOptions
   const seen = new Set<string>();
   const clocks = [defaultClock ?? "08:00:00"];
   let currentDay = startOfLocalDay(startDay, timeZone);
+  const weeklyFrequency = repeat.periodUnit === DurationUnit.Week ? positiveInteger(repeat.frequency) : undefined;
+  const anchorNumber = weeklyFrequency === undefined ? 0 : getLocalDayNumber(anchorDay, timeZone);
+  if (weeklyFrequency !== undefined) {
+    // Earlier selected days in this same treatment week still spend its
+    // frequency when a later query begins. The existing cycle stays anchored.
+    const week = Math.max(0, Math.floor((getLocalDayNumber(currentDay, timeZone) - anchorNumber) / 7));
+    currentDay = addLocalDays(anchorDay, week * 7, timeZone);
+  }
+  let selectedWeek = -1, selectedInWeek = 0;
   let iterations = 0;
   const maxIterations = calendarScanLimit(currentDay, to, limit, repeat);
   while (results.length < limit && iterations < maxIterations && (!to || currentDay < to)) {
+    if (weeklyFrequency !== undefined) {
+      const week = Math.floor((getLocalDayNumber(currentDay, timeZone) - anchorNumber) / 7);
+      if (week !== selectedWeek) { selectedWeek = week; selectedInWeek = 0; }
+    }
     const inPeriodCycle = clockCadenceEligible(currentDay, anchorDay, repeat, timeZone, dayFilter.size > 0);
     if (inPeriodCycle && matchesCalendarDay(currentDay, dayFilter, dayFilter.size > 0, calendarDays, timeZone)) {
       for (const clock of clocks) {
@@ -6440,13 +6463,14 @@ function generateDayFilteredPeriodSeries(options: DayFilteredPeriodSeriesOptions
         if (!zoned) {
           continue;
         }
-        if (zoned < from) {
-          continue;
-        }
         if (to && zoned >= to) {
           continue;
         }
         if (orderedAt && zoned < orderedAt) {
+          continue;
+        }
+        if (weeklyFrequency !== undefined && selectedInWeek++ >= weeklyFrequency) continue;
+        if (zoned < from) {
           continue;
         }
         const iso = formatZonedIso(zoned, timeZone);
@@ -7796,16 +7820,10 @@ function calculateTotalUnitsSingle(
     count = scheduled.filter((date) => Date.parse(date) < endDay.getTime()).length;
     if (supplyAccounting?.acceptedTimes) selectedTimes = scheduled;
   } else {
-    let recordedPriorCount = 0;
-    if ((dosage.asNeeded || dosage.schedule?.explicitEvents?.length) && options.priorCount === undefined &&
-        repeatOccurrenceCap(repeat ?? {}) !== undefined) {
-      const origin = effectiveOrderedAt ?? boundsStart;
-      if (origin) for (const stamp of options.priorDoseTimes ?? []) {
-        const actual = coerceDate(stamp, "priorDoseTimes");
-        if (actual >= origin && actual < countFrom) recordedPriorCount++;
-      }
-    }
-    const suppliedPriorCount = options.priorCount === undefined ? recordedPriorCount : Math.floor(options.priorCount);
+    const recordedPriorCount = options.priorCount === undefined && repeatOccurrenceCap(repeat ?? {}) !== undefined
+      ? recordedCountInWindow(options.priorDoseTimes, effectiveOrderedAt ?? boundsStart, countFrom) : undefined;
+    const suppliedPriorCount = options.priorCount === undefined ? recordedPriorCount ?? 0 : Math.floor(options.priorCount);
+    const derivePriorCount = options.priorCount === undefined && !dosage.asNeeded && recordedPriorCount === undefined;
     const exactEvents = dosage.schedule
       ? exactTimingEventOccurrences(
           dosage.schedule,
@@ -7817,7 +7835,7 @@ function calculateTotalUnitsSingle(
           timeZone,
           100000,
           suppliedPriorCount,
-          options.priorCount === undefined && !dosage.asNeeded,
+          derivePriorCount,
           true
         )
       : undefined;
@@ -7835,8 +7853,8 @@ function calculateTotalUnitsSingle(
             baseTime,
             effectiveOrderedAt,
             100000,
-            options.priorCount === undefined ? Math.max(activityPriorCount, recordedPriorCount) : suppliedPriorCount,
-            options.priorCount === undefined && !dosage.asNeeded && !unresolvedOneTimeActivity
+            options.priorCount === undefined ? Math.max(activityPriorCount, recordedPriorCount ?? 0) : suppliedPriorCount,
+            derivePriorCount && !unresolvedOneTimeActivity
           );
   }
   if (countOnlyRange) {
@@ -8983,7 +9001,8 @@ function successorIntervalStart(
     !repeat.monthDays?.length &&
     !isWakingHoursInterval(repeat) &&
     !dosage.schedule?.explicitEvents?.length &&
-    !dosage.schedule?.code?.coding?.length
+    !dosage.schedule?.code?.coding?.length &&
+    usesIntervalCadence(executionRecurrence(dosage.schedule, resolveExecutionConfig(options ?? {}, zone)) ?? repeat)
   ) {
     const origin = createIntervalStepper(
       {

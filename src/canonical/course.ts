@@ -314,33 +314,36 @@ export function absoluteEventCycleDisplacement(administration: CanonicalAdminist
 
 /** Calendar facts own the opening separately from actual PRN use.
  * Execution may supply its already-resolved bound; calendar-only consumers
- * retain their existing date admission. Conditions and event-relative timing
- * cannot prove an opening. */
+ * retain their existing date admission. Event-relative timing and unresolved
+ * choices cannot prove an opening. Clinical use retains its own guard. */
 function administrationHasCalendarOpening(a: CanonicalAdministration, resolvedStart?: Date | null): boolean {
   const repeat = a.schedule?.recurrence, dates = a.schedule?.explicitEvents;
   const dated = resolvedStart || repeat?.calendarWindow?.start?.length === 10 ||
     repeat?.clocks?.length && dates?.length && dates.every(date => date.length === 10);
   return Boolean(dated &&
     (repeat?.clocks?.length || !a.schedule?.explicitEvents?.length) &&
-    !repeat?.anchors?.length && !a.predicate && !a.calendarPredicate &&
+    !repeat?.anchors?.length && !a.calendarPredicate &&
     !a.choice && !a.choiceIssue);
 }
 export function administrationHasDatedStart(a: CanonicalAdministration, resolvedStart?: Date | null): boolean {
-  return !a.asNeeded && administrationHasCalendarOpening(a, resolvedStart);
+  return !a.asNeeded && !a.predicate && administrationHasCalendarOpening(a, resolvedStart);
 }
 
-/** A clocked replacement defers its projected calendar cut to execution.
- * PRN use does not move an independently authored opening clock to midnight. */
-export function administrationHasDatedClockStart(a: CanonicalAdministration, resolvedStart?: Date | null): boolean {
-  return Boolean(a.schedule?.recurrence?.clocks?.length && administrationHasCalendarOpening(a, resolvedStart));
+/** Clock and weekday selection defer a calendar cut to the execution owner.
+ * A clinical guard or PRN use does not move an authored clock to midnight;
+ * clockless clinical conditions retain their existing admission. */
+export function administrationHasDatedSelectedStart(a: CanonicalAdministration, resolvedStart?: Date | null): boolean {
+  const repeat = a.schedule?.recurrence;
+  return Boolean((repeat?.clocks?.length || repeat?.dayOfWeek?.length && !a.predicate && !a.asNeeded) &&
+    administrationHasCalendarOpening(a, resolvedStart));
 }
 
-/** The earliest successor date owns any calendar-only cutoff. A clock on that
- * opening leaves its exact cut to execution; a later date-only member cannot
- * erase it. A date-only member on the same day opens first, at midnight. */
+/** The earliest successor date owns any calendar-only cutoff. Selected clocks
+ * or weekdays leave the exact cut to execution; an unselected date-only member
+ * on the same day opens first, at midnight. */
 export function earliestCalendarOpening(administrations: readonly CanonicalAdministration[]):
-  { start: string; clocked: boolean } | undefined {
-  let opening: { start: string; clocked: boolean } | undefined;
+  { start: string; deferred: boolean } | undefined {
+  let opening: { start: string; deferred: boolean } | undefined;
   for (const administration of administrations) {
     const timing = administration.schedule;
     let start = timing?.recurrence?.calendarWindow?.start;
@@ -348,9 +351,9 @@ export function earliestCalendarOpening(administrations: readonly CanonicalAdmin
       if (start === undefined || event < start) start = event;
     }
     if (!start) continue;
-    const clocked = administrationHasDatedClockStart(administration);
-    if (!opening || start < opening.start) opening = { start, clocked };
-    else if (start === opening.start && !clocked) opening.clocked = false;
+    const deferred = administrationHasDatedSelectedStart(administration);
+    if (!opening || start < opening.start) opening = { start, deferred };
+    else if (start === opening.start && !deferred) opening.deferred = false;
   }
   return opening;
 }

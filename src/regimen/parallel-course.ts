@@ -113,13 +113,13 @@ function calendarPhaseMembers(
     calendarPredicate: clause.clinicalAdjuncts?.calendarDayCondition,
     schedule: {
       recurrence: { calendarWindow: { start: clause.schedule?.boundsStart },
-        clocks: clause.schedule?.timeOfDay, anchors: clause.schedule?.when },
+        clocks: clause.schedule?.timeOfDay, anchors: clause.schedule?.when, dayOfWeek: clause.schedule?.dayOfWeek },
       explicitEvents: clause.schedule?.calendarEvents?.map(event => event.fhirDateTime ?? event.isoDate),
     },
   })));
   const nextStart = opening?.start;
   if (nextClauses?.length && !nextStart) return 'parallel-regimen-next-calendar-start-required';
-  const inferredEnd = opening && !opening.clocked ? precedingCalendarDay(opening.start) : undefined;
+  const inferredEnd = opening && !opening.deferred ? precedingCalendarDay(opening.start) : undefined;
   const normalized: CanonicalParallelComponent[] = [];
   for (const item of members) {
     const schedule = item.clause.schedule;

@@ -834,7 +834,7 @@ export function courseFromAdministrations(
     const previous = stages[stages.length - 1];
     if (previous) {
       const opening = earliestCalendarOpening(administrations);
-      const cutoff = opening && !opening.clocked ? precedingCalendarDay(opening.start) : undefined;
+      const cutoff = opening && !opening.deferred ? precedingCalendarDay(opening.start) : undefined;
       if (cutoff) previous.administrations = previous.administrations.map(administration => {
         const timing = administration.schedule, recurrence = timing?.recurrence;
         const window = recurrence?.calendarWindow;
