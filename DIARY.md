@@ -16507,3 +16507,11 @@ Current uncoded advice carries its selected frame separately from complete sourc
 coverage, keeping fresh projections stable. Coding and argument annotations remain
 at their original wire owners without changing clinical occurrence correspondence.
 Supplied conflicting facts and independently authored advice remain distinct.
+
+## 2026-11-27 — Preserve selected instruction meaning
+
+- Shared typed-fact refinement now serves HPSG instruction merging, native row refinement and current graph-to-advice association. Presentation-only Coding metadata does not split an occurrence; conflicting system, version or code facts remain distinct.
+- Native advice rows retain selected modality, shared negation and shared argument scope in their standard English and Thai wording. Existing rows are refined in place, preserving their metadata and evidence.
+- A containing whole-input typed action supplies scope that a smaller fragment cannot recover, including coordinated prohibitions after a comma.
+- Whole-swallow coding no longer adds an unauthored crushing prohibition. Alcohol avoidance and the compound drowsiness warning require their declared action and polarity evidence.
+- Complete regression groups were moved into existing subject suites to keep substantive tests reviewable. Their assertions and registration context are retained.
