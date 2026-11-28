@@ -130,7 +130,7 @@ function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | unde
   for (const source of sources ?? []) {
     // Uninterpreted repeated components retain their own occurrence; they do
     // not annotate the first independently understood component.
-    if (source.url === "component") { parts.push(source); continue; }
+    if (source.url === "component" || source.url === "predicateComponent") { parts.push(source); continue; }
     let index = -1;
     const optionalField = source.url === "normalized" || source.url === "conceptId" || source.url === "quantity";
     const translation = source.url === "translation" || source.url === "predicateTranslation";
@@ -828,6 +828,7 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
         value==="target-object"||value==="operation"||value==="orientation"||value==="mechanism"||value==="situation")&&code?.system&&code.code)
         semanticComponents.push({role:value,coding:code,...(field.id?{sourceId:field.id}:{}),
           ...(componentSource?{sourceExtensions:componentSource}:{})});
+      else (sourceExtensions??=[]).push(field);
       break;
     }
     default:(sourceExtensions??=[]).push(field);break;

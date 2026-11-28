@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -227,3 +229,39 @@ describe("published package entrypoints", () => {
   });
 
 });
+
+
+it("accepts typed current duration annotations and literal weekday codes from the distribution", () => {
+  const directory = mkdtempSync(join(ROOT_DIR, ".declaration-consumer-"));
+  try {
+    const entry = join(directory, "consumer.ts");
+    writeFileSync(entry, `
+      import { FhirDayOfWeek, type FhirDosage, type FhirR6DosageInstruction, type FhirExtension,
+        type FhirR6Extension, type FhirTimingRepeat } from "ezmedicationinput";
+      const annotation: FhirR6Extension = { url: "urn:clinic:duration", valueDuration: {
+        value: 30, comparator: "~", system: "http://unitsofmeasure.org", code: "min"
+      } };
+      const current: FhirR6DosageInstruction = { step: [{ component: [{
+        timing: { repeat: { dayOfWeek: ["mon", "wed", "fri", FhirDayOfWeek.Sunday, null],
+          _dayOfWeek: [null, null, null, null, { id: "unspecified-day" }] } },
+        doseAndRate: [{ doseQuantity: { value: 1, _value: { extension: [annotation] } } }]
+      }] }] };
+      const r5: FhirDosage = { timing: { repeat: { dayOfWeek: ["mon", "wed", "fri"] } },
+        extension: [{ url: "urn:clinic:duration", valueDuration: { value: 30, comparator: ">", code: "min" } }] };
+      const invalidWeekday: FhirTimingRepeat = {
+        // @ts-expect-error weekday vocabulary remains bounded
+        dayOfWeek: ["holiday"]
+      };
+      const invalidR5: FhirExtension = { url: "urn:clinic:duration", valueDuration: {
+        // @ts-expect-error native approximate comparators are R6 only
+        comparator: "~"
+      } };
+      void [current, r5, invalidWeekday, invalidR5];
+    `);
+    execFileSync(process.execPath, [join(ROOT_DIR, "node_modules/typescript/bin/tsc"), "--noEmit", "--strict",
+      "--skipLibCheck", "false", "--target", "ES2022", "--module", "ESNext", "--moduleResolution", "Bundler", entry],
+      { cwd: ROOT_DIR, encoding: "utf8" });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 30000);

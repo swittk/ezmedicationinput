@@ -151,7 +151,7 @@
         "sliceName": "countScope",
         "min": 0,
         "max": "1",
-        "definition": "Current count semantics: step.count repeats that step. The previous unversioned owned R5 encoding used the first step count as the whole-course bound when repeatCycle was present; import migrates that saved representation and preserves its source."
+        "definition": "Newly authored rows must include countScope=step: step.count repeats that step. Omission is reserved for the previous unversioned encoding. In an unmarked first phase with repeatCycle and no explicit whole-course count, step.count is the whole-course repetition bound; import migrates that legacy meaning and preserves the supplied source."
       },
       {
         "id": "Extension.extension:countScope.extension",

@@ -720,7 +720,7 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     // A failed whole-row source proof does not invalidate a live site's
     // qualified text. Only an exact known contradictory label licenses
     // replacing it; a coarse code keeps the authored lateralized anatomy.
-    const resolvedText = a.provenance?.sourceTextVerified === false
+    const resolvedText = a.provenance?.sourceTextVerified === false || a.target.text === undefined
       ? resolveBodySiteTargetText(a.target) : a.target.text;
     const text = resolvedText ?? (targetCode?.code ? getBodySiteText(targetCode) ?? targetCode.display : undefined) ??
       a.siteReference?.display;

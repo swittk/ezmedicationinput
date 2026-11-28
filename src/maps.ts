@@ -282,6 +282,18 @@ const BODY_SITE_LATERALITIES = [
   }
 ] as const;
 
+/** Read canonical anatomical laterality from the same vocabulary that creates it. */
+export function splitBodySiteLaterality(text: string): {
+  baseText: string; lateralityCode: string; localeSuffixes: Readonly<Record<string, readonly string[]>>
+} | undefined {
+  for (const laterality of BODY_SITE_LATERALITIES) {
+    const prefix = laterality.textPrefix + " ";
+    if (text.startsWith(prefix)) return { baseText: text.slice(prefix.length),
+      lateralityCode: laterality.code, localeSuffixes: laterality.localeSuffixes };
+  }
+  return undefined;
+}
+
 const LATERALIZABLE_DIGIT_BODY_SITES: LateralizableBodySiteDefinition[] = [
   {
     text: "thumb",
@@ -2035,6 +2047,7 @@ const UCUM_DOSE_UNIT_CODES: Record<string, string> = {
   kg: "kg", g: "g", mg: "mg", mcg: "ug", ug: "ug", microg: "ug", ng: "ng",
   L: "L", mL: "mL", dL: "dL", mcL: "uL", uL: "uL", nL: "nL", cm3: "cm3",
   IU: "[iU]", U: "[iU]", "[iU]": "[iU]", tsp: "5.mL", tbsp: "15.mL",
+  "[tsp_m]": "[tsp_m]", "[tbs_m]": "[tbs_m]",
   // The source labels retain *what* is measured (product ribbon, BSA, drops).
   // UCUM conveys only the physical measure, never a calibrated device dose.
   cm: "cm", "[in_i]": "[in_i]", "%": "%",

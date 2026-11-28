@@ -17,6 +17,7 @@ import { projectNativeR5Course } from "./r5-course";
  */
 import type {
   FhirDosage,
+  FhirDayOfWeek,
   EzDosage,
   FhirR6Dosage,
   FhirR6DosageInstruction,
@@ -399,7 +400,7 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
       calendarWindow: r.boundsPeriod,
       clocks: r.timeOfDay !== undefined ? getTimingClocks(r) : annotations?.clocks,
       anchors: timingPrimitiveValues(r.when),
-      dayOfWeek: timingPrimitiveValues(r.dayOfWeek),
+      dayOfWeek: timingPrimitiveValues(r.dayOfWeek) as FhirDayOfWeek[] | undefined,
       offset: annotations?.offset ?? r.offset,
       offsetMin: annotations?.offsetMin,
       offsetMax: annotations?.offsetMax,
@@ -1668,6 +1669,13 @@ function administrationToWire(
     wireTiming = { ...wireTiming, repeat };
   } else if (projection && wireTiming?.repeat?.boundsRange && projection.range !== currentRange)
     wireTiming = { ...wireTiming, repeat: { ...wireTiming.repeat, boundsRange: projection.range } };
+  // A qualified carrier duration can leave no core Timing fields after its
+  // existing annotation projection. Keep supplied Timing metadata intact.
+  if (wireTiming?.repeat && !a.schedule?.recurrence?.provenance &&
+      Object.keys(wireTiming.repeat).length === 0) {
+    const { repeat: _emptyRepeat, ...remaining } = wireTiming;
+    wireTiming = a.schedule?.provenance || Object.keys(remaining).length ? remaining : undefined;
+  }
   assign(output, "timing", wireTiming);
   assign(output, "text", a.text);
   assign(output, "patientInstruction", a.patientInstruction);

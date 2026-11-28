@@ -58,6 +58,7 @@ export interface FhirExtension {
   valueDecimal?: number;
   _valueDecimal?: FhirPrimitiveElement;
   valueQuantity?: FhirQuantity;
+  valueDuration?: FhirQuantity;
   valueCoding?: FhirCoding;
   valueCodeableConcept?: FhirCodeableConcept;
   valueUri?: string;
@@ -77,7 +78,7 @@ export interface FhirExtension {
 }
 
 /** R6 Extension values retain their native datatype contracts. */
-export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity" | "valueRatio" | "valueTiming" | "valueReference" | "valueCodeableReference" |
+export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity" | "valueDuration" | "valueRatio" | "valueTiming" | "valueReference" | "valueCodeableReference" |
   "valueCoding" | "valueCodeableConcept" | "valueRange" | "valueExpression" | "valuePeriod" |
   "_valueCode" | "_valueString" | "_valueMarkdown" | "_valueDecimal" | "_valueTime" | "_valueInteger" | "_valueBoolean"> {
   _valueBoolean?: FhirR6PrimitiveElement;
@@ -89,6 +90,7 @@ export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valu
   _valueInteger?: FhirR6PrimitiveElement;
   extension?: FhirR6Extension[];
   valueQuantity?: FhirR6Quantity;
+  valueDuration?: FhirR6Quantity;
   valueCoding?: FhirR6Coding;
   valueCodeableConcept?: FhirR6CodeableConcept;
   valueRange?: FhirR6Range;
@@ -493,7 +495,7 @@ export interface FhirTimingRepeat extends FhirElement {
   _periodMax?: FhirPrimitiveElement;
   periodUnit?: FhirPeriodUnit;
   _periodUnit?: FhirPrimitiveElement;
-  dayOfWeek?: Array<FhirDayOfWeek | null>;
+  dayOfWeek?: Array<`${FhirDayOfWeek}` | null>;
   /** Primitive metadata corresponding positionally to dayOfWeek. */
   _dayOfWeek?: Array<FhirPrimitiveElement | null>;
   timeOfDay?: Array<string | null>;

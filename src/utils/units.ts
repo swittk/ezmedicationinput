@@ -21,7 +21,10 @@ export const VOLUME_UNITS: Record<string, number> = {
     microl: 0.001,
     cm3: 1,
     tsp: 5,
-    tbsp: 15
+    tbsp: 15,
+    // UCUM metric spoons, distinct from U.S. customary spoon codes.
+    "[tsp_m]": 5,
+    "[tbs_m]": 15
 };
 
 const VOLUME_PER_WEIGHT_UNITS: Record<string, number> = {};

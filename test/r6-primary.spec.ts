@@ -8319,3 +8319,144 @@ describe("current coded laterality with registered anatomical refinements", () =
     }
   });
 });
+
+
+it.each([undefined, "~"] as const)("bridges a %s duration annotation without turning it into an administration duration", comparator => {
+  const annotation: FhirR6Extension = { url: "urn:clinic:observation-window", valueDuration: {
+    value: 30, unit: "min", system: "http://unitsofmeasure.org", code: "min", ...(comparator ? { comparator } : {}),
+    _value: { id: "authored-duration" }, extension: [{ url: "urn:clinic:duration-note", valueString: "Keep for review" }]
+  } };
+  const input: FhirR6DosageInstruction = { step: [{ component: [{
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab", _value: { extension: [annotation] } } }],
+    timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+  }] }] };
+  const before = JSON.parse(JSON.stringify(input));
+  const rows = JSON.parse(JSON.stringify(toFhirR5Dosages(input))) as FhirDosage[];
+  const retained = rows[0].doseAndRate![0].doseQuantity!._value!.extension![0].valueDuration!;
+  expect(retained).toMatchObject({ value: 30, unit: "min", system: "http://unitsofmeasure.org", code: "min",
+    _value: { id: "authored-duration" } });
+  expect(retained.comparator).toBeUndefined();
+  expect(getEmaQuantityComparator(retained)).toBe(comparator);
+  expect(retained.extension).toContainEqual(annotation.valueDuration!.extension![0]);
+  for (const source of [input, rows, importCanonicalCourse(input)]) {
+    const current = courseToR6(importCanonicalCourse(source)).step[0].component[0];
+    expect(current.doseAndRate![0].doseQuantity!._value!.extension).toEqual([annotation]);
+    expect(current.timing!.repeat!.duration).toBeUndefined();
+    expect(current.timing!.repeat!.durationMax).toBeUndefined();
+    expect(calculateTotalUnits({ dosage: source, orderedAt: "2027-01-01T08:00:00Z", from: "2027-01-01T08:00:00Z",
+      timeZone: "UTC", durationValue: 2, durationUnit: "d" }).totalUnits).toBe(2);
+  }
+  expect(input).toEqual(before);
+});
+
+
+it("preserves uninterpreted predicate components beside independently typed components", () => {
+  const known: FhirExtension = { url: "predicateComponent", extension: [
+    { url: "role", valueCode: "technique" }, { url: "coding", valueCoding: { system: "urn:clinic:technique", code: "gentle" } }
+  ] };
+  const opaque: FhirExtension = { url: "predicateComponent", id: "clinic-target-state", extension: [
+    { url: "role", valueCode: "target-state" }, { url: "coding", valueCoding: { code: "clean", display: "Clean",
+      _code: { id: "state-code" }, extension: [{ url: "urn:clinic:state-note", valueString: "Preserve" }] } },
+    { url: "urn:clinic:component-note", valueString: "Retain supplied state" }
+  ] };
+  const marker: FhirExtension = { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: [
+    { url: "sourceText", valueString: "Rinse wound" }, { url: "action", extension: [
+      { url: "predicateLemma", valueString: "rinse" }, { url: "force", valueCode: "sequence" },
+      { url: "spanStart", valueInteger: 0 }, { url: "spanEnd", valueInteger: 11 },
+      { url: "sourceText", valueString: "Rinse wound" }, known, opaque
+    ] }
+  ] };
+  const before = JSON.stringify(marker);
+  let current = marker;
+  for (let iteration = 0; iteration < 2; iteration++) {
+    const graph = parseInstructionGraphExtension([JSON.parse(JSON.stringify(current))])!;
+    expect(graph.actions[0].predicate.semanticComponents).toEqual([
+      { role: "technique", coding: { system: "urn:clinic:technique", code: "gentle" } }
+    ]);
+    current = buildInstructionGraphExtension(graph)!;
+    expect(current.extension!.find(part => part.url === "action")!.extension!
+      .filter(part => part.url === "predicateComponent")).toEqual([known, opaque]);
+    expect(graph.actions[0].sourceText).toBe("Rinse wound");
+  }
+  expect(JSON.stringify(marker)).toBe(before);
+});
+
+
+it.each([undefined, { id: "authored-timing", extension: [{ url: "urn:clinic:timing-note", valueString: "Keep" }] },
+  { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }])(
+  "omits only a synthesized empty repeat for a qualified ratio duration with timing %j", timing => {
+    const rateRatio = { numerator: { value: 500, unit: "mL", system: "http://unitsofmeasure.org", code: "mL" },
+      denominator: simpleQuantityForR5({ value: 2, unit: "h", system: "http://unitsofmeasure.org", code: "h", comparator: "~",
+        extension: [{ url: "urn:clinic:rate-note", valueString: "Keep" }] })! };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ ...(timing ? { timing } : {}),
+      doseAndRate: [{ doseQuantity: { value: 500, unit: "mL" }, rateRatio }]
+    }] }] };
+    const before = JSON.stringify(input);
+    const native = importCanonicalCourse(input), projected = projectCanonicalCourse(native);
+    for (const component of [projected.fhirNext.step[0].component[0], ...projected.fhir,
+      courseToR6(importCanonicalCourse(JSON.parse(JSON.stringify(projected.fhir)))).step[0].component[0]]) {
+      expect(component.timing).toEqual(timing);
+      expect(component.doseAndRate![0].rateRatio).toEqual(rateRatio);
+      expect(component.doseAndRate![0].doseQuantity).toEqual({ value: 500, unit: "mL" });
+    }
+    expect(fromFhir(input).longText).toContain("approximately 2 hours");
+    expect(JSON.stringify(input)).toBe(before);
+  }
+);
+
+it.each([["[tsp_m]", 5], ["[tbs_m]", 15]] as const)("uses the exact metric volume of %s for a period ceiling", (code, volume) => {
+  const quantity = { value: 1, unit: code === "[tsp_m]" ? "teaspoon" : "tablespoon", system: "http://unitsofmeasure.org", code,
+    _value: { id: "authored-spoon" }, extension: [{ url: "urn:clinic:spoon-note", valueString: "Keep" }] };
+  const timing = { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00", "20:00:00"] } };
+  const input: FhirR6DosageInstruction = { step: [{ component: [{ timing,
+    doseAndRate: [{ doseQuantity: quantity }], safety: { doseLimit: [{ scope: "period",
+      valueQuantity: { value: volume, system: "http://unitsofmeasure.org", code: "mL" },
+      period: { value: 24, system: "http://unitsofmeasure.org", code: "h" } }] }
+  }] }] };
+  const before = JSON.stringify(input), native = importCanonicalCourse(input), projected = projectCanonicalCourse(native);
+  const options = { from: "2027-01-01T08:00:00Z", orderedAt: "2027-01-01T08:00:00Z", timeZone: "UTC" };
+  for (const source of [input, native, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+    expect(nextDueDoses(source, { ...options, limit: 2 })).toEqual(["2027-01-01T08:00:00+00:00", "2027-01-02T08:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage: source, ...options, durationValue: 2, durationUnit: "d" }).totalUnits).toBe(2);
+    expect(courseToR6(importCanonicalCourse(source)).step[0].component[0].doseAndRate![0].doseQuantity).toEqual(quantity);
+  }
+  expect(JSON.stringify(input)).toBe(before);
+});
+
+
+it.each([
+  { name: "equivalent local label", site: { coding: [{ system: "urn:clinic:site", code: "site-1" },
+    { system: "urn:clinic:site", code: "eye-label", display: "left eye", _display: { id: "site-label" } }] }, en: /left eye/u, th: /ตาซ้าย/u },
+  { name: "known code before local label", site: { coding: [{ system: "urn:clinic:site", code: "eye-label", display: "right eye" },
+    { system: "http://snomed.info/sct", code: "1290031003" }] }, en: /left eye/u, th: /ตาซ้าย/u },
+  { name: "authored concept text", site: { text: "left eye", coding: [{ system: "urn:clinic:site", code: "eye-label", display: "right eye" }] },
+    en: /left eye/u, th: /ตาซ้าย/u },
+  { name: "left plantar refinement", site: { text: "sole of foot", coding: [{ system: "http://snomed.info/sct", code: "22335008" }] },
+    en: /left.*sole|sole.*left foot/u, th: /ฝ่าเท้าซ้าย/u },
+  { name: "right plantar refinement", site: { text: "sole of foot", coding: [{ system: "http://snomed.info/sct", code: "7769000" }] },
+    en: /right.*sole|sole.*right foot/u, th: /ฝ่าเท้าขวา/u },
+  { name: "unqualified plantar refinement", site: { text: "sole of foot", coding: [{ system: "http://snomed.info/sct", code: "56459004" }] },
+    en: /sole of (the )?foot/u, th: /ฝ่าเท้า/u },
+  { name: "bilateral text with unilateral code", site: { text: "both soles", coding: [{ system: "http://snomed.info/sct", code: "22335008" }] },
+    en: /left foot/u, th: /เท้าซ้าย/u },
+  { name: "bilateral text with unqualified parent", site: { text: "both soles", coding: [{ system: "http://snomed.info/sct", code: "56459004" }] },
+    en: /both soles/u, th: /ฝ่าเท้าทั้งสองข้าง/u },
+  { name: "conflicting coded laterality", site: { text: "right foot", coding: [{ system: "http://snomed.info/sct", code: "22335008" }] },
+    en: /left foot/u, th: /เท้าซ้าย/u }
+])("preserves current site meaning and full supplied concept: $name", ({ site, en, th }) => {
+  const concept = { ...site, extension: [{ url: "urn:clinic:site-note", valueString: "Keep" }] };
+  const input: FhirR6DosageInstruction = { step: [{ component: [{ site: { concept },
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+    timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+  }] }] };
+  const before = JSON.stringify(input), native = importCanonicalCourse(input), projected = projectCanonicalCourse(native);
+  for (const source of [input, native, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+    expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized" })).toMatch(en);
+    expect(formatSig(source, "long", { locale: "th", realizationMode: "normalized" })).toMatch(th);
+    const wire = projectCanonicalCourse(importCanonicalCourse(source));
+    expect(wire.fhirNext.step[0].component[0].site!.concept).toEqual(concept);
+    expect(wire.fhir[0].site).toEqual(concept);
+    expect(wire.fhirNext.step[0].component[0].doseAndRate).toEqual(input.step[0].component[0].doseAndRate);
+  }
+  expect(JSON.stringify(input)).toBe(before);
+});

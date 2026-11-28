@@ -1,6 +1,6 @@
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { bodySiteTextWithLaterality, getBodySiteText } from "./body-site-lookup";
-import { DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey } from "./maps";
+import { DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey, splitBodySiteLaterality } from "./maps";
 import { SNOMED_SYSTEM, SNOMED_CT_BILATERAL_QUALIFIER_CODE } from "./snomed";
 import { parseSnomedBodySiteLateralityPostcoordinationCode } from "./snomed-postcoordination";
 import {
@@ -99,9 +99,20 @@ function compatibleBodySiteText(text: string, coding: Pick<FhirCoding, "system" 
   if (textCode.code === codedCode) return text;
   const combined = combinedBodySiteRefinement(textCode.code, codedCode);
   if (combined) return getBodySiteText({ code: combined, system: coding.system }) ?? text;
+  const canonical = definition.text ?? key;
+  const textLaterality = splitBodySiteLaterality(canonical);
   const textRefinement = BODY_SITE_REFINEMENTS[textCode.code];
   const codedRefinement = BODY_SITE_REFINEMENTS[codedCode];
   if (refinesBodySite(textCode.code, codedCode)) return text;
+  if (textRefinement && !textRefinement.lateralized && !textLaterality) {
+    const codedText = getBodySiteText(coding as BodySiteCode);
+    const lateralized = codedText ? splitBodySiteLaterality(codedText) : undefined;
+    const parent = lateralized ? DEFAULT_BODY_SITE_SNOMED[lateralized.baseText]?.coding : undefined;
+    if (parent?.code && refinesBodySite(textCode.code, parent.code)) {
+      const refined = bodySiteTextWithLaterality(definition.text ?? text, lateralized!.lateralityCode);
+      if (refined) return refined;
+    }
+  }
   if (textRefinement && codedRefinement && textRefinement.broader === codedRefinement.broader) {
     if (!codedRefinement.lateralized) return text;
     // A paired refinement can agree with the registered paired broader site.
@@ -116,8 +127,7 @@ function compatibleBodySiteText(text: string, coding: Pick<FhirCoding, "system" 
       }
     }
   }
-  const canonical = definition.text ?? key;
-  const unqualified = canonical?.replace(/^(?:left|right|both) /u, "");
+  const unqualified = textLaterality?.baseText;
   if (unqualified && unqualified !== canonical) {
     const baseCode = DEFAULT_BODY_SITE_SNOMED[unqualified]?.coding;
     if (baseCode?.code && (baseCode.code === codedCode || refinesBodySite(baseCode.code, codedCode) ||
@@ -167,7 +177,7 @@ export function resolveBodySiteTargetText(
     }
     if (resolved) return resolved;
   }
-  return text;
+  return text ?? coding?.display ?? (Array.isArray(codings) ? codings.find(value => value.display)?.display : undefined);
 }
 
 /** Realization may use a retained equivalent Coding's label without changing

@@ -123,7 +123,7 @@ function editedOperator(
   } };
 }
 
-/** Quantity annotations and typed Ratio/Range endpoints share their owner's operator bridge.
+/** Quantity/Duration annotations and typed Ratio/Range endpoints share their owner's operator bridge.
  * Coding and CodeableConcept annotations use that bridge without interpreting their terminology.
  * Other Extension value choices remain opaque. */
 const codingPrimitiveFields = ["_system", "_version", "_code", "_display", "_userSelected"] as const;
@@ -140,6 +140,7 @@ export function quantityAnnotationExtensions(
       continue;
     }
     const quantity = target === "r5" ? quantityForR5(item.valueQuantity) : quantityFromWire(item.valueQuantity);
+    const duration = target === "r5" ? quantityForR5(item.valueDuration) : quantityFromWire(item.valueDuration);
     let ratio = item.valueRatio;
     if (ratio) {
       const numerator = target === "r5" ? quantityForR5(ratio.numerator) : quantityFromWire(ratio.numerator);
@@ -181,10 +182,11 @@ export function quantityAnnotationExtensions(
       };
     }
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
-    let current = quantity === item.valueQuantity && ratio === item.valueRatio &&
+    let current = quantity === item.valueQuantity && duration === item.valueDuration && ratio === item.valueRatio &&
       range === item.valueRange && period === item.valuePeriod && coding === item.valueCoding && concept === item.valueCodeableConcept &&
       directReference === item.valueReference && reference === item.valueCodeableReference && children === item.extension ? item : {
       ...item, ...(quantity !== item.valueQuantity ? { valueQuantity: quantity } : {}),
+      ...(duration !== item.valueDuration ? { valueDuration: duration } : {}),
       ...(ratio !== item.valueRatio ? { valueRatio: ratio } : {}),
       ...(range !== item.valueRange ? { valueRange: range } : {}),
       ...(period !== item.valuePeriod ? { valuePeriod: period } : {}),

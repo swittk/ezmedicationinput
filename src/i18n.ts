@@ -50,7 +50,7 @@ import {
 import {
   DEFAULT_BODY_SITE_SNOMED_SOURCE,
   findPrnReasonDefinitionByCoding,
-  normalizeBodySiteKey,
+  normalizeBodySiteKey, splitBodySiteLaterality,
   WORD_FREQUENCIES
 } from "./maps";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
@@ -1695,7 +1695,12 @@ function translateSiteThai(
   if (spatial) {
     return qualified(spatial);
   }
-  const definitionTranslation = THAI_SITE_DEFINITION_TRANSLATIONS[normalized] ?? THAI_SITE_TRANSLATIONS[normalized];
+  const exactTranslation = THAI_SITE_DEFINITION_TRANSLATIONS[normalized] ?? THAI_SITE_TRANSLATIONS[normalized];
+  const lateralized = exactTranslation ? undefined : splitBodySiteLaterality(normalized);
+  const baseTranslation = lateralized
+    ? THAI_SITE_DEFINITION_TRANSLATIONS[lateralized.baseText] ?? THAI_SITE_TRANSLATIONS[lateralized.baseText] : undefined;
+  const definitionTranslation = exactTranslation ?? (baseTranslation
+    ? baseTranslation + (lateralized!.localeSuffixes.th?.[0] ?? "") : undefined);
   if (definitionTranslation && (!code || !bodySiteTextConflictsWithCoding(site, { code }))) {
     return qualified(applyBodySiteAttributiveModifiersThai(
       site, definitionTranslation, resolvedPhrase?.resolutionCanonical

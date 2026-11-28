@@ -5674,6 +5674,9 @@ describe("fresh structured quantity and annotation ownership", () => {
     expect(convertQuantityValue(1, { system: ucum, code: "ml" }, { system: ucum, code: "mL" })).toBe(1);
     expect(convertQuantityValue(1, { system: ucum, code: "ML" }, { system: ucum, code: "mL" })).toBeNull();
     expect(convertQuantityValue(1, { system: ucum, code: "5.mL" }, { system: ucum, code: "mL" })).toBe(5);
+    expect(convertQuantityValue(1, { system: ucum, code: "[tsp_m]" }, { system: ucum, code: "mL" })).toBe(5);
+    expect(convertQuantityValue(1, { system: ucum, code: "[tbs_m]" }, { system: ucum, code: "mL" })).toBe(15);
+    expect(convertQuantityValue(1, { system: ucum, code: "[tsp_us]", unit: "teaspoon" }, { system: ucum, code: "mL" })).toBeNull();
     const limits = [{ scope: "administration" as const, valueQuantity: { ...enzyme, value: 20 } },
       { scope: "administration" as const, valueQuantity: { ...international, value: 1 } }];
     const input: FhirR6DosageInstruction = { step: [{ component: [{
