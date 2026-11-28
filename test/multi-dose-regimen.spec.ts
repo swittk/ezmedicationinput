@@ -2464,7 +2464,7 @@ describe("round 53: saved graph and calendar realization ownership", () => {
           expect(text).toContain(locale === "en"
             ? `Take 1 tablet orally once daily ${mode === "current-threshold" ? "only if" : "if"} SBP > ${threshold}.`
             : `รับประทานครั้งละ 1 เม็ด วันละครั้ง ${mode === "current-threshold" ? "เฉพาะเมื่อ" : "if"} SBP > ${threshold}.`);
-          expect(text).toContain(locale === "en" ? "Call clinic if dizzy." : "Call clinicถ้าเวียนศีรษะ.");
+          expect(text).toContain(locale === "en" ? "Call clinic if dizzy." : "Call clinic ถ้าเวียนศีรษะ.");
         }
         const exported = toFhirR5Dosages(input);
         expect(exported[0].extension).toContainEqual(annotation);
