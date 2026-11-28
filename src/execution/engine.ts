@@ -3673,45 +3673,48 @@ function scheduleTreatmentRelativeCourse(
         const nominalEnd = effectiveEnd && originalRepeat && (collect || rollingUsage)
           ? new Date(effectiveEnd.getTime() - (getAdministrationOffsetMinutes(original) ?? 0) * 60000 - 1).toISOString()
           : undefined;
-        const execution: CanonicalAdministration = {
-          ...original, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined, phasePredecessors: undefined,
-          // Lazy members offer raw opportunities; the chronological owner
-          // evaluates their original condition before spending shared limits.
-          ...(collect && (deferred || shared) ? { predicate: undefined } : {}),
-          ...(collect ? { limits: original.limits?.filter(item => item.scope !== "period") } : {}),
-          ...(collect && originalRepeat ? {
-            schedule: { ...original.schedule, recurrence: {
-              ...executionRepeat, occurrenceCap: undefined,
-              ...(effectiveEnd ? { calendarWindow: {
-                ...executionRepeat?.calendarWindow,
-                end: nominalEnd,
-              } } : {}),
-            } },
-          } : rollingUsage && effectiveEnd && originalRepeat ? {
-            schedule: { ...original.schedule, recurrence: {
-              ...executionRepeat, calendarWindow: {
-                ...executionRepeat?.calendarWindow,
-                end: nominalEnd,
-              },
-            } },
-          } : executionRepeat !== originalRepeat ? {
-            schedule: { ...original.schedule, recurrence: executionRepeat },
-          } : {}),
-        };
+        const execution: CanonicalAdministration = { ...original };
+        execution.phaseOrigin = undefined;
+        execution.phaseStart = undefined;
+        execution.phaseEnd = undefined;
+        execution.phaseOriginIssue = undefined;
+        execution.phasePredecessors = undefined;
+        // Lazy members offer raw opportunities; the chronological owner
+        // evaluates their original condition before spending shared limits.
+        if (collect && (deferred || shared)) execution.predicate = undefined;
+        if (collect) execution.limits = original.limits?.filter(item => item.scope !== "period");
+        if (originalRepeat && (collect || (rollingUsage && effectiveEnd))) {
+          const recurrence = { ...executionRepeat };
+          if (collect) recurrence.occurrenceCap = undefined;
+          if (effectiveEnd) {
+            const calendarWindow = { ...executionRepeat?.calendarWindow };
+            calendarWindow.end = nominalEnd;
+            recurrence.calendarWindow = calendarWindow;
+          }
+          const schedule = { ...original.schedule };
+          schedule.recurrence = recurrence;
+          execution.schedule = schedule;
+        } else if (executionRepeat !== originalRepeat) {
+          const schedule = { ...original.schedule };
+          schedule.recurrence = executionRepeat;
+          execution.schedule = schedule;
+        }
         const eventStatus = collect && requiresCompleteSupplyTiming(options) &&
           original.schedule?.explicitEvents?.length
           ? quota.explicitEventStatus = { possible: false,
             from: eventQueryFrom && eventQueryFrom > effectiveFrom ? eventQueryFrom : effectiveFrom,
             end: earlierDate(effectiveEnd ?? null, eventQueryEnd ?? null) ?? undefined }
           : undefined;
-        const localOptions = {
-          ...options, from: effectiveFrom, orderedAt: member.recurrenceOrigin, priorCount: member.priorCount,
-          eligibleFrom: member.allowanceStart,
-          ...(eventStatus ? { explicitEventStatus: eventStatus } : {}),
-          ...(collect ? { priorDoseTimes: undefined } : rollingUsage
-            ? { priorDoseTimes: rollingPriorTimes(rollingUsage, key, options.priorDoseTimes) } : {}),
-          ...(member.countEligibilityStart ? { countEligibilityStart: member.countEligibilityStart } : {}),
-        } as PhaseCountOptions;
+        const localOptions = { ...options } as PhaseCountOptions;
+        localOptions.from = effectiveFrom;
+        localOptions.orderedAt = member.recurrenceOrigin;
+        localOptions.priorCount = member.priorCount;
+        localOptions.eligibleFrom = member.allowanceStart;
+        if (eventStatus) localOptions.explicitEventStatus = eventStatus;
+        if (collect) localOptions.priorDoseTimes = undefined;
+        else if (rollingUsage)
+          localOptions.priorDoseTimes = rollingPriorTimes(rollingUsage, key, options.priorDoseTimes);
+        if (member.countEligibilityStart) localOptions.countEligibilityStart = member.countEligibilityStart;
         if ((deferred || shared) && collect) {
           const completeMember = (completion: AcceptedStageCompletion) => {
             if (quota.shared) quota.advance = undefined;
