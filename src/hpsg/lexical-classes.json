@@ -24,6 +24,7 @@
     "ทั้งสอง": "both"
   },
   "doseTargetEventMembers": {
+    "MORN.early": ["MORN.early"],
     "MORN": [
       "MORN",
       "MORN.early",
@@ -2681,7 +2682,7 @@
     },
     "MORN.early": {
       "startHour": 0,
-      "endHour": 12
+      "endHour": 9
     },
     "AFT": {
       "startHour": 12,

@@ -257,9 +257,9 @@ function siteBoundary(token: Token, context: HpsgClauseContext, allowRelativeMar
     mapFrequencyAdverb(lower) ||
     mapIntervalUnit(lower)
   ) return true;
-  // A registered route owns its token unless the same surface is anatomical.
-  // Resolve this ambiguity only for route candidates, using the site owner.
-  if ((!getRouteMeaning(token) && !context.options?.routeMap?.[lower]) ||
+  // A registered route or dose unit owns its token unless the same surface is anatomical.
+  // Resolve this ambiguity only for those candidates, using the site owner.
+  if ((!getRouteMeaning(token) && !context.options?.routeMap?.[lower] && !normalizeUnit(lower, context.options)) ||
       getPrimarySiteMeaningCandidate(token)) return false;
   const site = resolveBodySiteLexeme(lower, context.options?.siteCodeMap, {
     bodySiteContext: context.options?.context?.bodySiteContext

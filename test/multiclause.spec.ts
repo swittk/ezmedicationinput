@@ -3926,7 +3926,7 @@ describe("review 21 current structured course preview", () => {
       fromFhir(raw, normalized).longText,
       formatCanonicalCourse(courseFromR6(raw), "long", normalized),
     ]) {
-      expect(text).toMatch(/2 tablets/i);
+      expect(text).toMatch(/(?:^|[^\d.])2 tablets\b/i);
       expect(text).toMatch(/three times daily/i);
       expect(text).toContain("8 tab / 1 d");
       expect(text).not.toContain("twice daily");

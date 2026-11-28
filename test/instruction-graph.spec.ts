@@ -6517,7 +6517,7 @@ describe("independent primary graph rendering owners", () => {
       expect(text.match(/SBP > 160/gu)).toHaveLength(1);
       expect(text).toMatch(locale === "en" ? /Swallow 1 tablet whole if SBP > 160/u : /กลืน.*1 เม็ด.*SBP > 160/u);
       if (independent) {
-        expect(text).toMatch(locale === "en" ? /Call the clinic if dizzy/iu : /Call the clinicถ้าเวียนศีรษะ/u);
+        expect(text).toMatch(locale === "en" ? /Call the clinic if dizzy/iu : /Call the clinic ถ้าเวียนศีรษะ/u);
         expect(text.indexOf("160")).toBeLessThan(text.indexOf("Call"));
       }
       expect(JSON.stringify(input)).toBe(before);

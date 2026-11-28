@@ -4,7 +4,7 @@ import {
 import { AdviceArgumentRole, AdvicePolarity, EventTiming, type AdviceFrame } from "../types";
 import { EVENT_TIMING_TOKENS } from "../maps";
 import { ACTION_SEQUENCE_RELATION_SURFACES, relationHasGrammarFeature, relationHasSemanticClass, resolveActionRelationSurface } from "../relation-terminology";
-import { medicationGuardForContext, normalizeTokenLower, parseClockToken, plainClinicalNumberAt, type HpsgClauseContext } from "./rule-context";
+import { medicationGuardForContext, normalizeTokenLower, parseClockToken, type HpsgClauseContext } from "./rule-context";
 import { guardHasMeasurement } from "./constructions";
 import { LexKind } from "../lexer/token-types";
 import { MEAL_TIMING_BY_RELATION } from "./lexical-classes";
@@ -105,11 +105,10 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
         ? actionMatchAt(context.tokens, headIndex, context.options) : undefined;
       const doseEnd = head && contextualDoseLexicalEnd(context.tokens, headIndex + head.length, context.options);
       if (doseEnd !== undefined && context.tokens[doseEnd - 1].sourceEnd <= frame.span.end) continue;
-      // A complete measurement guard already selects the following numeric
-      // administration, even when its medication unit is still unstated.
-      const numeric = head && guard?.start === token.sourceStart && guardHasMeasurement(guard.condition)
-        ? plainClinicalNumberAt(context, headIndex + head.length) : undefined;
-      if (numeric && context.tokens[numeric.numericIndex].sourceEnd <= frame.span.end) continue;
+      // The complete measurement guard owns its selected administration head,
+      // including an omitted amount handled by the existing dose-default policy.
+      if (head && guard?.start === token.sourceStart && guardHasMeasurement(guard.condition) &&
+          guard.end === frame.span.start) continue;
       let clauseStart = 0;
       for (const boundary of context.tokens) {
         if (boundary.sourceEnd > frame.span.start) break;

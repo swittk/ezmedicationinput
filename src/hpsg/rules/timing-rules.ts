@@ -79,6 +79,7 @@ import {
   OCCURRENCE_COUNT_WORDS,
   MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
   MAXIMUM_COUNT_LEAD_TOKENS,
+  INSTRUCTION_LEADING_SEPARATORS,
   OCCURRENCE_COUNT_MODIFIERS,
   RANGE_CONNECTORS,
   RELATIVE_INTERVAL_TRAILING_RELATIONS,
@@ -829,15 +830,23 @@ export function maximumOccurrenceAt(
     ...(period ? { period } : {}) };
 }
 
-/** A comparative maximum can remain inside an opaque predicate, including
- * its period. Separators or explicit maximum heads establish an independent
- * limit; the enclosing condition owner can also license a completed predicate. */
+/** A comparative maximum needs a complete preceding predicate and its own
+ * complete daughter. A conjunction alone cannot detach a count prefix from
+ * an opaque Boolean predicate. Explicit separators/maximum heads retain their
+ * independent instruction license. */
 export function isIndependentMaximum(
   context: Parameters<typeof maximumCountLeadAt>[0], start: number,
-  maximum: NonNullable<ReturnType<typeof maximumOccurrenceAt> | ReturnType<typeof maximumDosePerPeriodAt>>
+  maximum: NonNullable<ReturnType<typeof maximumOccurrenceAt> | ReturnType<typeof maximumDosePerPeriodAt>>,
+  completePredicate = false
 ): boolean {
-  return maximum.headStart !== start ||
-    MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[maximum.headStart]));
+  if (MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[maximum.headStart])) ||
+      context.tokens.slice(start, maximum.headStart).some(token =>
+        INSTRUCTION_LEADING_SEPARATORS.has(token.original))) return true;
+  if (!completePredicate) return false;
+  const nextIndex = maximum.headStart + maximum.tokens.length;
+  const next = nextIndex < (context.limit ?? context.tokens.length) ? context.tokens[nextIndex] : undefined;
+  return !next || isPunctuation(normalizeTokenLower(next)) ||
+    coordinationConnectorKind(next.original) !== "unknown";
 }
 
 function frequencyRangeConnector(token: Token | undefined): boolean {

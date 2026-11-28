@@ -14,7 +14,7 @@ import { courseToR5 } from '../src/adapters/canonical-course';
 import { shiftCanonicalSigClauses } from '../src/ir';
 import { ParserState } from '../src/parser-state';
 import { calendarExclusionLexicalRule, matchCalendarExclusion } from '../src/hpsg/rules/condition-rules';
-import type { HpsgClauseContext } from '../src/hpsg/rule-context';
+import { compactMaximumPeriodAt, maximumDosePeriodAt, type HpsgClauseContext } from '../src/hpsg/rule-context';
 import {
   parseClauseSign,
   parseClauseState, tokenize
@@ -2727,7 +2727,7 @@ describe("condition and successor timing ownership", () => {
   });
 
   it.each([
-    ["Call the clinic if dizzy.", "Call the clinicถ้าเวียนศีรษะ."],
+    ["Call the clinic if dizzy.", "Call the clinic ถ้าเวียนศีรษะ."],
     ["Call the clinic if อาการ persists.", "Call the clinic if อาการ persists."]
   ])("preserves the realized condition boundary beside opaque fallback words: %s", (source, expected) => {
     const parsed = parsePublicSig(source);
@@ -4693,5 +4693,139 @@ describe("measurement comparisons inside mixed postfix advice guards", () => {
     expect(parsed.input).toBe(source);
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(saved);
+  });
+});
+
+
+describe("reviewed guard ownership", () => {
+  const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it("retains a fronted measurement guard on an omitted context-defaulted dose", () => {
+    const source = "If SBP > 160 take by mouth twice daily";
+    const parsed = parsePublicSig(source, { context: { dosageForm: "tablet" }, assumeSingleDiscreteDose: true });
+    const saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject({ kind: "measurement", name: "sbp", operation: "gt", value: 160, text: "SBP > 160" });
+      expect(members[0].route?.coding?.[0].code).toBe(RouteCode["Oral route"]);
+      expect(members[0].schedule?.recurrence).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+      expect(nextDueDoses(input, { ...query, limit: 2, evaluateCondition: () => true })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00"]);
+      expect(nextDueDoses(input, { ...query, limit: 2, evaluateCondition: () => false })).toEqual([]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d", evaluateCondition: () => true }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe("Take 1 tablet orally twice daily only if SBP > 160.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe("รับประทานครั้งละ 1 เม็ด วันละ 2 ครั้ง เฉพาะเมื่อ SBP > 160.");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+});
+
+
+describe("reviewed Boolean history ownership", () => {
+  it.each([false, true])("keeps a history predicate distinct from an independent cap (cap=%s)", cap => {
+    const history = "no more than 2 doses were taken today";
+    const source = cap ? "Take 1 tablet only if SBP > 160, no more than 2 doses in 24 hours" :
+      "Take 1 tablet only if SBP > 160 and " + history;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence?.countMax).toBeUndefined();
+      expect(member.limits).toBeUndefined();
+      if (cap) {
+        expect(member.predicate).toMatchObject({ kind: "measurement", name: "sbp", operation: "gt", value: 160, text: "SBP > 160" });
+        expect(member.schedule?.recurrence?.occurrenceCap).toEqual({ max: 2, period: 24, periodUnit: "h" });
+      } else {
+        expect(member.predicate).toMatchObject({ kind: "all", conditions: [
+          { kind: "measurement", name: "sbp", operation: "gt", value: 160 },
+          { kind: "not", condition: { text: "more than 2 doses were taken today" } }] });
+        expect(member.schedule?.recurrence?.occurrenceCap).toBeUndefined();
+        for (const locale of ["en", "th"] as const) {
+          const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          expect(text).toContain("SBP > 160");
+          expect(text).toContain((locale === "en" ? "not" : "ไม่") + " (more than 2 doses were taken today)");
+          expect(text.split("more than 2 doses were taken today")).toHaveLength(2);
+        }
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+});
+
+
+describe("reviewed qualified dose-slot ownership", () => {
+  it("selects the early-morning clock without withholding the late-morning dose", () => {
+    const source = "Take 1 tablet daily at 06:00 and 11:30. If dizzy, do not take the early morning dose.";
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(2);
+      const early = members.find(member => member.schedule?.recurrence?.clocks?.includes("06:00:00"))!;
+      const late = members.find(member => member.schedule?.recurrence?.clocks?.includes("11:30:00"))!;
+      expect(early.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(late.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(early.predicate).toMatchObject({ kind: "not", condition: { kind: "state", name: "dizzy", expected: true } });
+      expect(late.predicate).toBeUndefined();
+      expect(nextDueDoses(input, { ...query, limit: 2, evaluateCondition: () => false })).toEqual([
+        "2026-01-01T11:30:00+00:00", "2026-01-02T11:30:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d", evaluateCondition: () => false }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+});
+
+
+describe("reviewed site and amount boundaries", () => {
+  it("stops the anchored left-knee constituent before a registered pea-sized amount", () => {
+    const phrase = "to the left knee a pea-sized amount daily", tokens = tokenize(phrase);
+    const context: HpsgClauseContext = { state: new ParserState(phrase, tokens), tokens, limit: tokens.length,
+      dateSpans: [], clinicalCache: {}, deps: {} as HpsgClauseContext["deps"] };
+    const site = siteLexicalRule().match(context, 0).find(sign => sign.type === "site-sign")!;
+    expect(site.synsem.valence.site).toMatchObject({ text: "left knee", coding: { code: "82169009" } });
+    expect(site.tokens.every(token => token.sourceEnd <= phrase.indexOf("pea-sized"))).toBe(true);
+    const source = "Apply " + phrase, parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].target).toMatchObject({ text: "left knee", coding: [{ code: "82169009" }] });
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "pea-sized amount" });
+      expect(members[0].schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe("Apply 1 pea-sized amount once daily to the left knee.");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+});
+
+
+describe("reviewed maximum-period token windows", () => {
+  it("does not read the bare period unit beyond the exclusive clause limit", () => {
+    const tokens = tokenize("maximum 2 tablets per hour"), start = tokens.findIndex(token => token.lower === "per");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(maximumDosePeriodAt({ tokens, limit: start + 1 }, start)).toBeUndefined();
+    expect(maximumDosePeriodAt({ tokens, limit: tokens.length }, start)).toMatchObject({ period: 1, periodUnit: "h" });
+  });
+  it("does not read the hybrid compact period unit beyond the exclusive clause limit", () => {
+    const tokens = tokenize("maximum 2 tablets/24 hours"), start = tokens.findIndex(token => token.lower.includes("/24"));
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(compactMaximumPeriodAt({ tokens, limit: start + 1 }, start, tokens[start].lower)).toBeUndefined();
+    expect(compactMaximumPeriodAt({ tokens, limit: tokens.length }, start, tokens[start].lower)).toMatchObject({ unitSurface: "tablets", period: { period: 24, periodUnit: "h" } });
   });
 });

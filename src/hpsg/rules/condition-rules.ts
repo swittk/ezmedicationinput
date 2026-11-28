@@ -18,6 +18,7 @@ import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt,
 import { hasSymptomOnsetPrnAt, prnAt } from "./prn-rules";
 import { LIST_SEPARATORS, coordinationConnectorKind, CALENDAR_WEEKDAY_LEXEMES, CALENDAR_WEEKDAY_GROUPS, CALENDAR_DAY_LIST_CONNECTORS, CALENDAR_EXCLUSION_CUE, CALENDAR_EXCLUSION_DAY_HEADS, NEGATIVE_ACTION_DIRECTIVE_LEADS, SUPPLEMENTAL_DOSE_MODIFIERS, CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../../maps";
+import { MAX_EVENT_TIMING_EXPRESSION_PARTS, resolveEventTimingExpression } from "../../event-timing-expression";
 import { countAndDurationRule, countFrequencyRule, timingLexicalRule, dayRangeLexicalRule, maximumOccurrenceAt, isIndependentMaximum } from "./timing-rules";
 import { LexKind } from "../../lexer/token-types";
 import { hasPrnMeaning } from "../../lexer/meaning";
@@ -370,6 +371,7 @@ function withholdingDoseTarget(
   context: HpsgClauseContext, frame: AdviceFrame
 ): NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]> {
   const target: NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]> = {};
+  const nominalSpans: AdviceFrame["span"][] = [];
   for (const argument of frame.args) {
     if (argument.role === AdviceArgumentRole.Amount && argument.quantity) {
       target.dose = argument.quantity;
@@ -384,10 +386,18 @@ function withholdingDoseTarget(
     if (argument.role !== AdviceArgumentRole.Object && argument.role !== AdviceArgumentRole.Time) continue;
     // Resolve source ownership once, then reuse the grammatical tokens.
     const span = actionArgumentSpan(context, frame, argument);
-    if (!span) continue;
-    for (const token of context.tokens) {
-      if (token.sourceStart < span.start || token.sourceEnd > span.end) continue;
-      const word = normalizeTokenLower(token);
+    if (span) nominalSpans.push(span);
+  }
+  // Wider, earlier nominals own their complete event phrase before overlapping
+  // Time arguments can contribute a less-specific token from the same source.
+  nominalSpans.sort((a, b) => a.start - b.start || b.end - a.end);
+  const eventTokens = new Set<number>();
+  const words = context.tokens.map(normalizeTokenLower);
+  for (const span of nominalSpans) {
+    for (let index = 0; index < context.tokens.length; index++) {
+      const token = context.tokens[index];
+      if (token.sourceStart < span.start || token.sourceEnd > span.end || eventTokens.has(index)) continue;
+      const word = words[index];
       if (token.kind === LexKind.TimeLike) {
         const next = context.tokens[token.index + 1];
         const clock = parseClockToken(token, next && next.sourceEnd <= span.end ? next : undefined);
@@ -397,10 +407,13 @@ function withholdingDoseTarget(
       if (meridiemRange) target.clockRange = { ...meridiemRange };
       const quantifier = DOSE_TARGET_QUANTIFIERS.get(word);
       if (quantifier) target.quantifier = quantifier;
-      const event = EVENT_TIMING_TOKENS[word];
+      let eventEnd = Math.min(context.tokens.length, index + MAX_EVENT_TIMING_EXPRESSION_PARTS);
+      while (eventEnd > index && context.tokens[eventEnd - 1].sourceEnd > span.end) eventEnd--;
+      const event = resolveEventTimingExpression(words, index, eventEnd);
       if (!event) continue;
-      const members = doseTargetEventFamily(event);
-      const clockRange = DOSE_TARGET_DAYPART_CLOCK_RANGES.get(event);
+      for (let offset = 0; offset < event.length; offset++) eventTokens.add(index + offset);
+      const members = doseTargetEventFamily(event.timing);
+      const clockRange = DOSE_TARGET_DAYPART_CLOCK_RANGES.get(event.timing);
       if (clockRange) target.clockRange = { ...clockRange };
       target.when = [...new Set([...(target.when ?? []), ...members])];
     }
@@ -837,15 +850,14 @@ function conditionTokens(
 }
 
 
-/** A selected measurement keeps its comparison inside the complete Boolean
- * predicate, including when another daughter is a state or opaque condition. */
+/** The selected guard already owns its complete Boolean predicate and any
+ * independent-limit boundary; the condition consumer retains that extent. */
 function postfixConditionEnd(
   context: HpsgClauseContext, start: number, guard: ParsedMedicationGuard | undefined
 ): number {
   const first = context.tokens[start];
   if (!first) return 0;
-  const comparisonEnd = guard?.start === first.sourceStart && guardHasMeasurement(guard.condition)
-    ? guard.end : first.sourceStart;
+  const predicateEnd = guard?.start === first.sourceStart ? guard.end : first.sourceStart;
   let end = context.state.input.length;
   // A postfix predicate ends before the next coordinated action clause.
   // The selected action and existing connector tokens own this boundary;
@@ -869,7 +881,7 @@ function postfixConditionEnd(
       end = current.sourceStart;
       break;
     }
-    if (current.sourceStart < comparisonEnd) continue;
+    if (current.sourceStart < predicateEnd) continue;
     const maximumHead = maximumCountLeadAt(context, index);
     if (!maximumHead) continue;
     const maximum = maximumDosePerPeriodAt(context, index, maximumHead) ??
@@ -877,8 +889,8 @@ function postfixConditionEnd(
     if (maximum) {
       // A complete lexical PRN predicate has no comparative complement;
       // an opaque observation history can still own the following count.
-      if (!isIndependentMaximum(context, index, maximum) &&
-          !(index === start + 2 && hasPrnMeaning(context.tokens[start + 1]))) continue;
+      if (!isIndependentMaximum(context, index, maximum,
+          index === start + 2 && hasPrnMeaning(context.tokens[start + 1]))) continue;
     } else if (maximumHead.headStart !== index) continue;
     end = current.sourceStart;
     break;

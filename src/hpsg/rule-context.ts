@@ -438,7 +438,8 @@ export function compactMaximumPeriodAt(
   const compactAmount = compactUnitPeriod ? attachedNumberUnitAt(compactUnitPeriod[2]) : undefined;
   const hybridValue = compactUnitPeriod && /^(?:\d+(?:\.\d+)?|\.\d+)$/u.test(compactUnitPeriod[2])
     ? Number(compactUnitPeriod[2]) : undefined;
-  const followingUnit = hybridValue !== undefined && hybridValue > 0 ? context.tokens[unitIndex + 1] : undefined;
+  const followingUnit = hybridValue !== undefined && hybridValue > 0 && quantityTokenAvailable(context, unitIndex + 1)
+    ? context.tokens[unitIndex + 1] : undefined;
   const hybridUnit = followingUnit && !context.state?.consumed.has(followingUnit.index)
     ? mapIntervalUnit(normalizeTokenLower(followingUnit)) : undefined;
   const compactPeriodSurface = compactAmount?.rawUnit ?? (hybridUnit ? normalizeTokenLower(followingUnit!) : compactUnitPeriod?.[2]);
@@ -476,7 +477,7 @@ export function maximumDosePeriodAt(
   if (rollingModifier) cursor++;
   const rolling = connectorFeatures.rolling || rollingModifier;
   const value = context.tokens[cursor];
-  if (!value || context.state?.consumed.has(value.index)) return undefined;
+  if (!quantityTokenAvailable(context, cursor)) return undefined;
   const lower = normalizeTokenLower(value);
   const bareUnit = mapIntervalUnit(lower);
   const unitDenominator = Boolean(connectorFeatures.unitDenominator);

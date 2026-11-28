@@ -11,7 +11,7 @@ import type { MedicationCondition, ParseOptions } from "../types";
 import { actionMatchAt } from "../instruction-graph";
 import { ACTION_DIRECTIVE_PREFIXES, normalizeTokenLower } from "./lexical-classes";
 import { contextualDoseLexicalEnd } from "./rules/core-rules";
-import { maximumDosePerPeriodAt, maximumCountLeadAt, plainClinicalNumberAt } from "./rule-context";
+import { maximumDosePerPeriodAt, maximumCountLeadAt } from "./rule-context";
 import { maximumOccurrenceAt, isIndependentMaximum } from "./rules/timing-rules";
 import { lexicalSign, type HpsgGuardExpression, type HpsgSynsem, type HpsgPhraseRule } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
@@ -901,7 +901,6 @@ export function parseMedicationGuard(
       const match = administrationAt(index);
       if (!match) continue;
       const doseEnd = contextualDoseLexicalEnd(tokens, index + match.length, options);
-      if (doseEnd === undefined && !plainClinicalNumberAt({ tokens, options }, index + match.length)) continue;
       let consequentStart = token.sourceStart;
       for (const directive of ACTION_DIRECTIVE_PREFIXES) {
         const start = index - directive.parts.length;
@@ -923,8 +922,9 @@ export function parseMedicationGuard(
     }
   } else if (scope?.end === undefined) {
     end = Math.min(end, lead.end + medicationGuardClauseBoundary(tail));
-    const lexicalContext = { tokens, options };
-    for (let index = 0; index < tokens.length; index++) {
+    const boundaryIndex = tokens.findIndex(token => token.sourceStart >= end);
+    const lexicalContext = { tokens, options, limit: boundaryIndex < 0 ? tokens.length : boundaryIndex };
+    for (let index = 0; index < lexicalContext.limit; index++) {
       const token = tokens[index];
       if (token.sourceStart < lead.end) continue;
       if (token.sourceStart >= end) break;
@@ -948,8 +948,8 @@ export function parseMedicationGuard(
       // Separators, maximum heads or a complete structured predicate retain
       // independent limit ownership; a period can still belong to history.
       const expression = predicate?.synsem.cont.guard?.expression;
-      if (!isIndependentMaximum(lexicalContext, index, maximum) &&
-          (!expression || !guardFinalPredicateLicensesLimit(expression, options))) continue;
+      if (!isIndependentMaximum(lexicalContext, index, maximum,
+          Boolean(expression && guardFinalPredicateLicensesLimit(expression, options)))) continue;
       end = capStart;
       scopedGuard = guard;
       break;

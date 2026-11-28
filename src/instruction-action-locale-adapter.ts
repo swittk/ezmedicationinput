@@ -63,7 +63,7 @@ export interface InstructionActionLocaleAdapter {
   renderConditionBody(base: string, conditionForm: string | undefined, persists: boolean): string;
   joinConditionLead(lead: string, body: string): string;
   conditionalContinuation(text: string, imperative: boolean): string;
-  postposedCondition(text: string): string;
+  postposedCondition(text: string, precedingText?: string): string;
   sequenceSeparator(): string;
   continuationText(text: string, understood: boolean): string;
   withAuthoredDirections?(current: string, source: string): string;
@@ -918,9 +918,12 @@ const TH_ADAPTER: InstructionActionLocaleAdapter = {
   },
   joinConditionLead(lead, body) { return `${lead}${body}`.trim(); },
   conditionalContinuation(text, imperative) { return `${imperative ? "ให้" : ""}${text}`; },
-  postposedCondition(text) {
-    // Join the realized lead, independently of the language of its opaque body.
-    return inferMedicationLocale(text.charAt(0), "en") === "th" ? text : ` ${text}`;
+  postposedCondition(text, precedingText) {
+    // The realized action head owns joining even when its tail is a clock or
+    // opaque material; a Latin fallback action still needs a word boundary.
+    return inferMedicationLocale(text.charAt(0), "en") === "th" &&
+      (precedingText === undefined || inferMedicationLocale(precedingText.charAt(0), "en") === "th")
+      ? text : ` ${text}`;
   },
   sequenceSeparator() { return " จากนั้น"; },
   continuationText(text) { return text; }

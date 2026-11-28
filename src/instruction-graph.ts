@@ -5537,7 +5537,7 @@ export function attachInstructionGraphPrimaryConditions(
   let body = ending ? text.slice(0, -ending.length) : text;
   if (conditions.length > 1) conditions.sort((a, b) => a.start - b.start);
   for (const condition of conditions) if (condition.position === "post" && !guardedPrimary) {
-    const continuation = adapter.postposedCondition(condition.text);
+    const continuation = adapter.postposedCondition(condition.text, body);
     body += /^\s/u.test(continuation) ? continuation : " " + continuation;
   }
   for (let index = conditions.length - 1; index >= 0; index -= 1) {
@@ -6063,7 +6063,7 @@ function realizeInstructionGraphInternal(
       continue;
     }
     if (!relation.span) {
-      if (targetNode) targetNode.text += localeAdapter.postposedCondition(condition.text);
+      if (targetNode) targetNode.text += localeAdapter.postposedCondition(condition.text, targetNode.text);
       continue;
     }
     coveredRanges?.push(relation.span);
@@ -6227,7 +6227,7 @@ function realizeInstructionGraphInternal(
         const target = conditionTargets.get(node.actionIndex);
         output += localeAdapter.conditionalContinuation(node.text,
           Boolean(target && !target.modality && target.polarity !== AdvicePolarity.Negate));
-      } else if (postposedConditional) output += localeAdapter.postposedCondition(node.text);
+      } else if (postposedConditional) output += localeAdapter.postposedCondition(node.text, previous.text);
       else if (discourseConnector) output += " " + localeAdapter.continuationText(node.text, true);
       else {
         const explicitRelation = previous.understood && node.understood
