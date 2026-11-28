@@ -4,7 +4,8 @@ import {
 import { AdviceArgumentRole, AdvicePolarity, EventTiming, type AdviceFrame } from "../types";
 import { EVENT_TIMING_TOKENS } from "../maps";
 import { ACTION_SEQUENCE_RELATION_SURFACES, relationHasGrammarFeature, relationHasSemanticClass, resolveActionRelationSurface } from "../relation-terminology";
-import { medicationGuardForContext, normalizeTokenLower, parseClockToken, type HpsgClauseContext } from "./rule-context";
+import { medicationGuardForContext, normalizeTokenLower, parseClockToken, plainClinicalNumberAt, type HpsgClauseContext } from "./rule-context";
+import { guardHasMeasurement } from "./constructions";
 import { LexKind } from "../lexer/token-types";
 import { MEAL_TIMING_BY_RELATION } from "./lexical-classes";
 import { explicitDoseLexicalEnd, contextualDoseLexicalEnd } from "./rules/core-rules";
@@ -71,11 +72,9 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
     const relation = resolveActionRelationSurface(token.canonical ?? token.lower);
     if (!relationHasGrammarFeature(relation, "conditionalTail")) continue;
     frames ??= getProceduralFrames(context);
-    let frame = frames.find(candidate => candidate.span.start >= token.sourceEnd &&
-      !context.tokens.some(boundary => boundary.sourceStart >= token.sourceEnd &&
-        boundary.sourceEnd <= candidate.span.start && /^[;.!?]$/u.test(boundary.original)));
+    let frame: AdviceFrame | undefined;
     let postfix = false;
-    if (!frame) for (const candidate of frames) {
+    for (const candidate of frames) {
       if (candidate.span.end > token.sourceStart ||
           context.state.input.slice(candidate.span.end, token.sourceStart).trim()) continue;
       const definition = frameActionDefinition(candidate, context.options);
@@ -86,6 +85,9 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
         postfix = true;
       }
     }
+    frame ??= frames.find(candidate => candidate.span.start >= token.sourceEnd &&
+      !context.tokens.some(boundary => boundary.sourceStart >= token.sourceEnd &&
+        boundary.sourceEnd <= candidate.span.start && /^[;.!?]$/u.test(boundary.original)));
     if (!frame) continue;
     // A registered action word inside the typed predicate is not its consequent.
     const guard = medicationGuardForContext(context);
@@ -103,6 +105,11 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
         ? actionMatchAt(context.tokens, headIndex, context.options) : undefined;
       const doseEnd = head && contextualDoseLexicalEnd(context.tokens, headIndex + head.length, context.options);
       if (doseEnd !== undefined && context.tokens[doseEnd - 1].sourceEnd <= frame.span.end) continue;
+      // A complete measurement guard already selects the following numeric
+      // administration, even when its medication unit is still unstated.
+      const numeric = head && guard?.start === token.sourceStart && guardHasMeasurement(guard.condition)
+        ? plainClinicalNumberAt(context, headIndex + head.length) : undefined;
+      if (numeric && context.tokens[numeric.numericIndex].sourceEnd <= frame.span.end) continue;
       let clauseStart = 0;
       for (const boundary of context.tokens) {
         if (boundary.sourceEnd > frame.span.start) break;

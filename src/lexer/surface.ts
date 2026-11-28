@@ -73,7 +73,7 @@ function asciiLetterRunLength(input: string, start: number, step: -1 | 1): numbe
   return length;
 }
 
-function isSentenceBoundaryChar(input: string, index: number): boolean {
+export function isSentenceBoundaryChar(input: string, index: number): boolean {
   const char = input[index];
   if (char === "!" || char === "?") {
     const before = index > 0 ? input[index - 1] : "";
@@ -95,9 +95,8 @@ function isSentenceBoundaryChar(input: string, index: number): boolean {
       (/[0-9๐-๙]/u.test(before) || index === 0 || isWhitespaceChar(before) || SEPARATOR_CHARS.has(before) ||
         before === "/" || before === "@" || before === "~" || before === "≈" ||
         before === "≥" || before === "≤" ||
-        before === "<" || before === ">" ||
-        /[-–—]/u.test(before) && rangeLeft >= 0 && /[0-9๐-๙]/u.test(input[rangeLeft]) ||
-        before === "=" && index >= 2 && /[<>]/u.test(input[index - 2]))) {
+        before === "<" || before === ">" || before === "=" ||
+        /[-–—]/u.test(before) && rangeLeft >= 0 && /[0-9๐-๙]/u.test(input[rangeLeft]))) {
     return false;
   }
   // Keep clinical dotted abbreviations intact (O.D., I.U., b.i.d.). A period

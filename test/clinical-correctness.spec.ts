@@ -3782,6 +3782,9 @@ describe("round79 current clinical preview ownership", () => {
       expect(text).toContain(locale === "en" ? "Do not crush" : "ห้ามบด");
       expect(text.includes("after dialysis")).toBe(timed);
       if (!timed) expect(text).toBe(locale === "en" ? "Do not crush." : "ห้ามบด.");
+      else expect(text).toBe(locale === "en"
+        ? "Use the medication after dialysis. Do not crush."
+        : "ใช้ยา after dialysis. ห้ามบด.");
     }
   });
 

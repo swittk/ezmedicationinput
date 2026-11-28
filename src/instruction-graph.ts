@@ -2518,7 +2518,8 @@ function withinActionDirectiveScope(
     const end = baseOffset + part.sourceEnd;
     if (start < previousEnd || end > currentStart) continue;
     const surface = part.original.trim();
-    if (/^[;.!?:]$/u.test(surface) || ACTION_SEQUENCE_MARKERS.has(key(part))) return false;
+    if (/^[;.!?:]$/u.test(surface) || ACTION_SEQUENCE_MARKERS.has(key(part)) ||
+        relationHasGrammarFeature(resolveActionRelationSurface(key(part)), "conditionalTail")) return false;
   }
   return true;
 }

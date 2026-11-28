@@ -3611,6 +3611,7 @@ describe("negative meal complements with articles", () => {
         .not.toContain("with meals");
     }
     expect(parsed.fhir[0].timing?.repeat?.when).toBeUndefined();
+    expect(parsed.fhirNext.step[0].component[0].timing?.repeat?.when).toBeUndefined();
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });

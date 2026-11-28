@@ -855,9 +855,24 @@ function postfixConditionEnd(context: HpsgClauseContext, start: number): number 
   const comparisonEnd = guard?.start === first.sourceStart && isQuantifiedCondition(guard.condition)
     ? guard.end : first.sourceStart;
   let end = context.state.input.length;
+  // A postfix predicate ends before the next coordinated action clause.
+  // The selected action and existing connector tokens own this boundary;
+  // an activity inside an already admitted predicate remains inside it.
+  for (const frame of getProceduralFrames(context)) {
+    if (frame.span.start < first.sourceEnd ||
+        guard && guard.start === first.sourceStart && frame.span.start < guard.end) continue;
+    let boundary = context.tokens.findIndex(token => token.sourceStart >= frame.span.start);
+    const actionStart = boundary;
+    while (boundary > start + 1 && (LIST_SEPARATORS.has(normalizeTokenLower(context.tokens[boundary - 1])) ||
+        coordinationConnectorKind(normalizeTokenLower(context.tokens[boundary - 1])) !== "unknown")) boundary--;
+    if (boundary < actionStart) {
+      end = context.tokens[boundary].sourceStart;
+      break;
+    }
+  }
   for (let index = start + 1; index < context.limit; index += 1) {
     const current = context.tokens[index];
-    if (!current) break;
+    if (!current || current.sourceStart >= end) break;
     if (/^[.;!?]$/u.test(current.original.trim())) {
       end = current.sourceStart;
       break;
@@ -918,8 +933,10 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       guard = parseMedicationGuard(context.state.input, context.tokens, undefined, context.options,
         { relation, start: lead.sourceStart, markerEnd });
     }
+    const selectedOwner = conditionalAdviceOwnerAt(context, start);
+    const postfixOwner = selectedOwner && selectedOwner.span.end <= lead.sourceStart ? selectedOwner : undefined;
     let nextIndex = -1;
-    for (let index = 0; index < frames.length; index++) {
+    for (let index = 0; !postfixOwner && index < frames.length; index++) {
       const frame = frames[index];
       if (frame.span.start < lead.sourceEnd) continue;
       // An activity inside the admitted predicate is not its consequent.
@@ -971,7 +988,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       })];
     }
 
-    const previous = frames
+    const previous = postfixOwner ?? frames
       .filter((frame) => frame.span.end <= lead.sourceStart &&
         (targetHasClinicalCondition(context, start, frame, guard) || isScopeTarget(context, frame)))
       .sort((a, b) => b.span.end - a.span.end)[0];

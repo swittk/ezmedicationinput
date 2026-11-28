@@ -4,13 +4,14 @@ import {
 } from "../medication-condition";
 import { lexInput } from "../lexer/lex";
 import { LexKind } from "../lexer/token-types";
+import { resolveSymptomDefinition } from "../symptom-terminology";
 import { annotateLexTokens } from "../lexer/meaning";
 import type { Token } from "../parser-state";
 import type { MedicationCondition, ParseOptions } from "../types";
 import { actionMatchAt } from "../instruction-graph";
 import { ACTION_DIRECTIVE_PREFIXES, normalizeTokenLower } from "./lexical-classes";
 import { contextualDoseLexicalEnd } from "./rules/core-rules";
-import { maximumDosePerPeriodAt, maximumCountLeadAt } from "./rule-context";
+import { maximumDosePerPeriodAt, maximumCountLeadAt, plainClinicalNumberAt } from "./rule-context";
 import { maximumOccurrenceAt, isIndependentMaximum } from "./rules/timing-rules";
 import { lexicalSign, type HpsgGuardExpression, type HpsgSynsem, type HpsgPhraseRule } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
@@ -642,20 +643,22 @@ function guardExpressionHasDayDomain(value: HpsgGuardExpression): boolean {
     value.parts.every(guardExpressionHasDayDomain);
 }
 
-function guardHasMeasurement(value: MedicationCondition): boolean {
+export function guardHasMeasurement(value: MedicationCondition): boolean {
   return value.kind === "measurement" ||
     (value.kind === "all" || value.kind === "any") && value.conditions.some(guardHasMeasurement) ||
     value.kind === "not" && guardHasMeasurement(value.condition);
 }
 
 /** Only the final predicate daughter can license a following bare limit. */
-function guardFinalPredicateLicensesLimit(value: HpsgGuardExpression): boolean {
+function guardFinalPredicateLicensesLimit(value: HpsgGuardExpression, options?: ParseOptions): boolean {
   if (value.kind === "coordination") {
     const last = value.parts[value.parts.length - 1];
-    return last !== undefined && guardFinalPredicateLicensesLimit(last);
+    return last !== undefined && guardFinalPredicateLicensesLimit(last, options);
   }
-  if (value.kind === "negation") return guardFinalPredicateLicensesLimit(value.operand);
+  if (value.kind === "negation") return guardFinalPredicateLicensesLimit(value.operand, options);
   return value.kind === "predicate" && (value.value.kind === "measurement" ||
+    value.value.kind === "state" && Boolean(resolveSymptomDefinition(
+      value.value.name, options?.prnReasonMap, options?.symptomMap)) ||
     value.dayInvariant === true || value.value.kind === "text" &&
       medicationConditionAtomLexeme(value.value.text).licensesBareIf === true);
 }
@@ -869,12 +872,11 @@ export function parseMedicationGuard(
     end = Math.min(end, lead.end + (comma >= 0 ? comma : tail.length));
     // Registered administration heads and their directive prefixes delimit the
     // consequent. Locale lexing supplies their canonical tokens and source spans.
-    const administrationAt = (index: number, requiresDose: boolean) => {
+    const administrationAt = (index: number) => {
       if (index < 0 || index >= tokens.length) return undefined;
       const match = actionMatchAt(tokens, index, options), action = match?.definition;
-      if (!match || !action?.primaryAdministrationHead && !(action?.definesDose && action.administrationMethod)) return undefined;
-      return (requiresDose || action.procedural) &&
-        contextualDoseLexicalEnd(tokens, index + match.length, options) === undefined ? undefined : match;
+      return match && (action?.primaryAdministrationHead || action?.definesDose && action.administrationMethod)
+        ? match : undefined;
     };
     let delimitedConsequent = false;
     if (comma >= 0) {
@@ -888,14 +890,18 @@ export function parseMedicationGuard(
       }
       // A complete consequent after the delimiter licenses an antecedent
       // containing its own activity, including a quantified ability predicate.
-      delimitedConsequent = Boolean(administrationAt(next, false));
+      const match = administrationAt(next);
+      delimitedConsequent = Boolean(match && (!match.definition.procedural ||
+        contextualDoseLexicalEnd(tokens, next + match.length, options) !== undefined));
     }
     for (let index = 0; !delimitedConsequent && index < tokens.length; index++) {
       const token = tokens[index];
       if (token.sourceStart < lead.end) continue;
       if (token.sourceStart >= end) break;
-      const match = administrationAt(index, true);
+      const match = administrationAt(index);
       if (!match) continue;
+      const doseEnd = contextualDoseLexicalEnd(tokens, index + match.length, options);
+      if (doseEnd === undefined && !plainClinicalNumberAt({ tokens, options }, index + match.length)) continue;
       let consequentStart = token.sourceStart;
       for (const directive of ACTION_DIRECTIVE_PREFIXES) {
         const start = index - directive.parts.length;
@@ -909,7 +915,8 @@ export function parseMedicationGuard(
         ...(withholdingConsequent ? { withholdingConsequent } : {}) };
       const predicate = guardPredicateConstituent(context, tokens, lead.end, consequentStart);
       const guard = predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate);
-      if (!guard?.synsem.cont.clinicalAdjunct?.condition) continue;
+      const condition = guard?.synsem.cont.clinicalAdjunct?.condition;
+      if (!condition || doseEnd === undefined && !guardHasMeasurement(condition)) continue;
       end = consequentStart;
       scopedGuard = guard;
       break;
@@ -938,11 +945,11 @@ export function parseMedicationGuard(
       // A bare comparative maximum can be the predicate's own complement.
       // An opaque state prefix does not prove an independent treatment limit.
       // An implicit occurrence frequency can qualify the patient's history.
-      // Explicit dose/occurrence periods, separators, maximum heads or a
-      // complete structured predicate retain independent limit ownership.
+      // Separators, maximum heads or a complete structured predicate retain
+      // independent limit ownership; a period can still belong to history.
       const expression = predicate?.synsem.cont.guard?.expression;
       if (!isIndependentMaximum(lexicalContext, index, maximum) &&
-          (!expression || !guardFinalPredicateLicensesLimit(expression))) continue;
+          (!expression || !guardFinalPredicateLicensesLimit(expression, options))) continue;
       end = capStart;
       scopedGuard = guard;
       break;

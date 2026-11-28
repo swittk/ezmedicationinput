@@ -485,7 +485,20 @@ function mergeDose(
     return undefined;
   }
   let clinicalQuantity = mergeStructuredFeature(left.clinicalQuantity, right.clinicalQuantity);
-  if (!clinicalQuantity && left.clinicalQuantity && right.clinicalQuantity) return undefined;
+  if (!clinicalQuantity && left.clinicalQuantity && right.clinicalQuantity) {
+    // A total can be divided before its independent rate daughter arrives.
+    // Its schedule already owns the total's period; combine only the projected
+    // dose and division count with the rate's own numerator and denominator.
+    const rate = left.clinicalQuantity.representation === "rate-quantity"
+      ? left.clinicalQuantity : right.clinicalQuantity;
+    const divided = rate === left.clinicalQuantity ? right.clinicalQuantity : left.clinicalQuantity;
+    if (rate.representation !== "rate-quantity" || divided.representation !== "dose" ||
+        divided.status !== "resolved" || divided.dividedDoseCount === undefined || !divided.projectedDose ||
+        !sameOptionalScalar(rate.dividedDoseCount, divided.dividedDoseCount) ||
+        rate.projectedDose && !equalStructuredValues(rate.projectedDose, divided.projectedDose)) return undefined;
+    clinicalQuantity = { ...rate, projectedDose: divided.projectedDose,
+      dividedDoseCount: divided.dividedDoseCount };
+  }
   let value = mergeOptionalScalar(left.value, right.value);
   let unit = mergeOptionalScalar(left.unit, right.unit);
   let range = mergeOptionalScalar(left.range, right.range);
@@ -900,7 +913,7 @@ export function unifySynsem(
       (!quantity || (quantity.representation === "dose" && quantity.status === "resolved" &&
         !quantity.denominators.some(term => term.dimension === "time"))) &&
       dose.value !== undefined && dose.unit &&
-      schedule?.frequency === 1 && schedule.period !== undefined && schedule.periodUnit) {
+      schedule && (schedule.frequency ?? 1) === 1 && schedule.period !== undefined && schedule.periodUnit) {
     const category = getUnitCategory(dose.unit);
     const dimension: HpsgClinicalQuantityDimension = category === "other"
       ? (dose.unit === "[iU]" ? "biologic-activity" : "administration-unit")
@@ -917,6 +930,14 @@ export function unifySynsem(
       dailyTotal: true, dividedDoseCount: dose.divisionCount, projectedDose
     } };
     schedule = { ...schedule, frequency: dose.divisionCount, timingCode: undefined };
+  }
+  // An independently owned rate may already have divided the separate dose.
+  // Its count applies to the authored total's schedule, never the rate period.
+  if (dose?.clinicalQuantity?.representation === "rate-quantity" &&
+      dose.clinicalQuantity.dividedDoseCount !== undefined &&
+      (dose.clinicalQuantity.projectedDose || dose.range) && schedule &&
+      (schedule.frequency ?? 1) === 1 && schedule.period !== undefined && schedule.periodUnit) {
+    schedule = { ...schedule, frequency: dose.clinicalQuantity.dividedDoseCount, timingCode: undefined };
   }
   // A divided total supplies its authored period. An independent rate
   // denominator belongs to the infusion and cannot create a recurrence.

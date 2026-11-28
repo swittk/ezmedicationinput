@@ -1,6 +1,7 @@
 import { MedicationCondition } from "./types";
 import type { HpsgGuardExpression, HpsgGuardFeature } from "./hpsg/signature";
 import lexicalSource from "./hpsg/lexical-classes.json";
+import { isSentenceBoundaryChar } from "./lexer/surface";
 
 // One public entry point, implemented by the HPSG constituent grammar. This
 // module supplies lexical atoms and pure evaluation, never Boolean attachment.
@@ -177,11 +178,7 @@ export function medicationGuardClauseBoundary(text: string): number {
   for (let index = 0; index < text.length; index++) {
     const ch = text[index];
     if (ch === "," || ch === ";" || ch === "!" || ch === "?") return index;
-    if (ch === ".") {
-      const previousDigit = index > 0 && /\d/u.test(text[index - 1]);
-      const nextDigit = index + 1 < text.length && /\d/u.test(text[index + 1]);
-      if (!previousDigit || !nextDigit) return index;
-    }
+    if (ch === "." && isSentenceBoundaryChar(text, index)) return index;
   }
   return text.length;
 }

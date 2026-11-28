@@ -4500,3 +4500,139 @@ describe("both dose-opportunity withholding targets", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 });
+
+
+describe("current guard and postfix action ownership", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+
+  it("keeps a complete measurement guard on a unitless numeric administration", () => {
+    const source = "If SBP > 160 take 1 PO", parsed = parsePublicSig(source);
+    const saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts).toHaveLength(1);
+      expect(members[0].amounts![0].quantity).toEqual({ value: 1 });
+      expect(members[0].predicate).toEqual({ kind: "measurement", name: "sbp", operation: "gt", value: 160, text: "SBP > 160" });
+      expect(members[0].route?.coding?.[0].code).toBe(RouteCode["Oral route"]);
+      expect(members[0].asNeeded).not.toBe(true);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Take 1 orally only if SBP > 160.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("รับประทานครั้งละ 1 เฉพาะเมื่อ SBP > 160.");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhir[0].text).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([false, true])("keeps a retrospective per-day threshold inside its predicate (separate maximum=%s)", capped => {
+    const history = "you took no more than 2 tablets per day last week";
+    const source = `Take 1 tablet daily only if ${history}${capped ? ", maximum 4 tablets per day" : ""}`;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject({ kind: "state", name: history, expected: true, text: history });
+      expect(members[0].schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      if (capped) {
+        expect(members[0].limits).toHaveLength(1);
+        expect(members[0].limits![0]).toMatchObject({ scope: "period",
+          amount: { value: 4, unit: "tab" }, period: { value: 1, unit: "d" } });
+      } else expect(members[0].limits).toBeUndefined();
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(history);
+        expect(text.split(history)).toHaveLength(2);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhir[0].text).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each(["symptomMap", "prnReasonMap"] as const)("uses the existing %s provider to complete a selected state before its limit", map => {
+    const source = "Take 1 tablet daily only if breakthrough no more than 4 tablets per day";
+    const parsed = parsePublicSig(source, { [map]: {
+      "breakthrough symptom": { text: "Breakthrough symptom", aliases: ["breakthrough"] }
+    } });
+    const saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.predicate).toMatchObject({ kind: "state", name: "breakthrough", expected: true });
+      expect(member.asNeeded).not.toBe(true);
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(member.limits).toHaveLength(1);
+      expect(member.limits![0]).toMatchObject({ scope: "period", amount: { value: 4, unit: "tab" },
+        period: { value: 1, unit: "d" } });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("only if breakthrough");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([", and ", "; "])("keeps each postfix condition with its own action across %j", join => {
+    const source = "Take 1 tablet daily. Do not drive if dizzy" + join + "call the clinic if symptoms persist.";
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0], graph = member.syntax?.instructionGraph;
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(member.predicate).toBeUndefined();
+      expect(graph?.actions).toHaveLength(2);
+      expect(graph?.actions[0]).toMatchObject({ predicate: { lemma: "drive" }, polarity: AdvicePolarity.Negate });
+      expect(graph?.actions[1].predicate.lemma).toBe("call");
+      expect(graph?.actions[1].polarity).not.toBe(AdvicePolarity.Negate);
+      expect(graph?.relations?.filter(relation => relation.kind === AdviceRelation.If)).toEqual([
+        expect.objectContaining({ toActionIndex: 0, text: "if dizzy" }),
+        expect.objectContaining({ toActionIndex: 1, text: "if symptoms persist" })
+      ]);
+      for (const relation of graph!.relations!.filter(relation => relation.kind === AdviceRelation.If))
+        expect(source.slice(relation.span!.start, relation.span!.end)).toBe(relation.text);
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en.toLowerCase()).toContain("do not drive if dizzy");
+      expect(en.toLowerCase()).toContain("call the clinic if symptoms persist");
+      expect(en.toLowerCase().match(/drive/gu)).toHaveLength(1);
+      expect(en.toLowerCase().match(/call/gu)).toHaveLength(1);
+      expect(en.toLowerCase()).not.toContain("do not call");
+      expect(th).toContain("เวียนศีรษะ");
+      expect(th).toContain("if symptoms persist");
+      expect(th).not.toContain("ห้ามติดต่อ");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.meta.canonical.clauses[0].rawText).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each(["INR=.9", "INR==.9", "INR=0.9."])("retains the complete equality measurement %s", comparison => {
+    const source = "Take 1 tablet only if " + comparison, parsed = parsePublicSig(source);
+    const saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject({ kind: "measurement", name: "inr", operation: "eq", value: 0.9 });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Take 1 tablet orally only if inr = 0.9.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("รับประทานครั้งละ 1 เม็ด เฉพาะเมื่อ inr = 0.9.");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhir[0].text).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+});

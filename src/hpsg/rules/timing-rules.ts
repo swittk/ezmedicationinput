@@ -829,16 +829,14 @@ export function maximumOccurrenceAt(
     ...(period ? { period } : {}) };
 }
 
-/** A comparative maximum can remain inside an opaque predicate.
- * Explicit dose/occurrence periods, separators or maximum heads establish an
- * independent limit; implicit occurrence frequencies can qualify the predicate. */
+/** A comparative maximum can remain inside an opaque predicate, including
+ * its period. Separators or explicit maximum heads establish an independent
+ * limit; the enclosing condition owner can also license a completed predicate. */
 export function isIndependentMaximum(
   context: Parameters<typeof maximumCountLeadAt>[0], start: number,
   maximum: NonNullable<ReturnType<typeof maximumOccurrenceAt> | ReturnType<typeof maximumDosePerPeriodAt>>
 ): boolean {
   return maximum.headStart !== start ||
-    Boolean(maximum.period && maximum.period.unitDenominator !== false &&
-      !("implicitOccurrence" in maximum && maximum.implicitOccurrence)) ||
     MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[maximum.headStart]));
 }
 

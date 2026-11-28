@@ -5763,7 +5763,7 @@ describe("unweighted divided period totals", () => {
   });
 
   it("keeps an explicit infusion duration on its independently selected rate", () => {
-    const source = "Infuse 30 mg per 48 hours over 48 hours";
+    const source = "Infuse 30 mg per 48 hours over 24 hours";
     const parsed = parsePublicSig(source), parsedBefore = JSON.stringify(parsed);
     for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
       const before = JSON.stringify(input), administration = importCanonicalCourse(input).stages[0].administrations[0];
@@ -5772,15 +5772,96 @@ describe("unweighted divided period totals", () => {
       expect(administration.amounts![0].rateRatio).toMatchObject({ numerator: { value: 30, unit: "mg" },
         denominator: { value: 48, unit: "h" } });
       expect(administration.schedule?.recurrence).toMatchObject({ count: 1,
-        occurrenceDuration: 48, occurrenceDurationUnit: "h" });
+        occurrenceDuration: 24, occurrenceDurationUnit: "h" });
       expect(administration.schedule?.recurrence?.frequency).toBeUndefined();
       expect(administration.schedule?.recurrence?.period).toBeUndefined();
       expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual(["2026-01-01T00:00:00+00:00"]);
       expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 48, durationUnit: FhirPeriodUnit.Hour }))
-        .toMatchObject({ totalUnits: 30, unit: "mg" });
+        .toMatchObject({ totalUnits: 15, unit: "mg" });
       expect(JSON.stringify(input)).toBe(before);
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+});
+
+
+describe("authored divided totals beside independent rates", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  it.each([
+    "Infuse a total of 100 mL every 12 hours in 2 divided doses at 30 mL/hr",
+    "Infuse a total of 100 mL at 30 mL/hr every 12 hours in 2 divided doses",
+    "Infuse at 30 mL/hr a total of 100 mL every 12 hours in 2 divided doses",
+    "At 30 mL/hr, infuse a total of 100 mL every 12 hours in 2 divided doses",
+    "Infuse 100 mL in 2 divided doses every 12 hours at 30 mL/hr"
+  ])("projects the total's period while retaining its separate rate: %s", source => {
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts).toHaveLength(1);
+      expect(members[0].amounts![0]).toMatchObject({ quantity: { value: 50, unit: "mL" },
+        rate: { value: 30, unit: "mL/h" } });
+      expect(members[0].schedule?.recurrence).toMatchObject({ frequency: 2, period: 12, periodUnit: "h" });
+      expect(nextDueDoses(input, { ...query, limit: 4 })).toEqual([
+        "2026-01-01T00:00:00+00:00", "2026-01-01T06:00:00+00:00",
+        "2026-01-01T12:00:00+00:00", "2026-01-01T18:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 200, unit: "mL" });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("50 mL twice every 12 hours");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("50 มิลลิลิตร 2 ครั้ง ทุก 12 ชั่วโมง");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhir[0].text).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it("divides an implicitly once-per-period total without inventing a rate", () => {
+    const source = "Infuse a total of 100 mL every 12 hours in 2 divided doses", parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0].quantity).toMatchObject({ value: 50, unit: "mL" });
+      expect(member.amounts![0].rate).toBeUndefined();
+      expect(member.amounts![0].rateRatio).toBeUndefined();
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 2, period: 12, periodUnit: "h" });
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 200, unit: "mL" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("retains a registered infusion runtime introduced by in", () => {
+    const source = "Infuse at 100 mL/hr in 1 hour", parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts![0].quantity).toBeUndefined();
+      expect(member.amounts![0].rate).toMatchObject({ value: 100, unit: "mL/h" });
+      expect(member.schedule?.recurrence).toMatchObject({ count: 1, occurrenceDuration: 1, occurrenceDurationUnit: "h" });
+      expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual(["2026-01-01T00:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 100, unit: "mL" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("retains in as a start delay for a non-infusion dose", () => {
+    const source = "Take 1 tablet in 1 hour", parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+      expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual(["2026-01-01T01:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });
