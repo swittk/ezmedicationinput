@@ -2682,11 +2682,13 @@ function encodeFields(
         children.push({ url: key, valueQuantity:
           (snapshot ? cloneStructuredValue(quantity) : quantity) as FhirQuantity | undefined });
       } else if (field.value) {
-        let child: FhirExtension = { url: key,
-          ...(item !== undefined ? { [field.value]: item } : {}),
-          ...(companion !== undefined ? { [primitiveField!]: companion } : {}) };
-        if (companion !== undefined && !preserveQuantityWire)
-          child = quantityAnnotationExtensions([child], "r5")[0] as FhirExtension;
+        let child: FhirExtension = item === undefined ? { url: key }
+          : { url: key, [field.value]: item };
+        if (companion !== undefined) {
+          child = { ...child, [primitiveField!]: companion };
+          if (!preserveQuantityWire)
+            child = quantityAnnotationExtensions([child], "r5")[0] as FhirExtension;
+        }
         children.push(snapshot ? cloneStructuredValue(child) : child);
       }
     }
