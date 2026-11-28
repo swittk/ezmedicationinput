@@ -3,7 +3,7 @@ import { resolveActionRelationSurface } from "../../relation-terminology";
 import { routeLexicalRule } from "./core-rules";
 import { LexKind } from "../../lexer/token-types";
 import { getRouteMeaning, hasPrnMeaning, hasTimingAbbreviationMeaning } from "../../lexer/meaning";
-import { FhirPeriodUnit, RouteCode } from "../../types";
+import { FhirPeriodUnit, RouteCode, type CanonicalDoseRange } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
   HpsgClauseContext, lexicalRule, maximumDosePerPeriodAt, normalizeTokenLower,
@@ -483,12 +483,16 @@ function weightQuantity(
   start: number,
   value: number,
   expression: UnitExpression,
-  phraseStart = start
+  phraseStart = start,
+  range?: CanonicalDoseRange
 ) {
   const parts = expression.compact.split("/");
   if (parts.length < 2 || parts[1] !== "kg") return undefined;
-  const numerator = massTerm(value, parts[0]);
-  if (!numerator) return undefined;
+  const scalar = massTerm(value, parts[0]);
+  if (!scalar) return undefined;
+  const numerator = range
+    ? { range: { ...range }, unit: scalar.unit, dimension: scalar.dimension }
+    : scalar;
   const marker = separateRateMarker(context, phraseStart);
   const indices = [
     ...(marker !== undefined ? [marker] : []),
@@ -516,6 +520,27 @@ function weightQuantity(
       requiresPatientWeight: true,
       reviewReason: "unsupported-weight-based-rate"
     });
+  }
+
+  if (range) {
+    if (!denominator || perDose) {
+      return clinicalSign(context,
+        perDose ? "hpsg.lex.clinicalQuantity.weightPerDose" : "hpsg.lex.clinicalQuantity.weightDose",
+        indices, {
+          representation: "dose", status: "resolved", numerator, denominators: [bodyMass],
+          requiresPatientWeight: true
+        }, { range: { ...range }, unit: `${scalar.unit}/kg` }, undefined, WEIGHT_WARNING);
+    }
+    // Keep a period total pending until its ordinary division daughter composes.
+    // No later token is inspected or claimed by this quantity constituent.
+    const total = !clinicalRateHeadAt(context, phraseStart, expression.end, false, denominator.value).rateSpecific;
+    return clinicalSign(context, "hpsg.lex.clinicalQuantity.weightRangeTotal", indices, {
+      representation: total ? "dose" : "rate-quantity",
+      status: total ? "incomplete" : "resolved",
+      numerator, denominators: [bodyMass, denominator],
+      ...(total ? { dailyTotal: true, reviewReason: "incomplete-weight-based-dose" as const } : {}),
+      requiresPatientWeight: true
+    }, total ? { unit: `${scalar.unit}/kg` } : undefined);
   }
 
   const rateTime = periodUnit !== FhirPeriodUnit.Day || periodValue !== 1 ? periodUnit : undefined;
@@ -828,8 +853,8 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     return additive ? [additive] : [];
   }
   const weight = qualifyClinicalSign(context, phraseStart, quantityEnd,
-    weightQuantity(context, quantityEnd, value, expression, phraseStart), comparator);
-  if (!rangedNumber && weight) {
+    weightQuantity(context, quantityEnd, value, expression, phraseStart, rangedNumber?.range), comparator);
+  if (weight) {
     // Weight rates own the same external AT/@ marker as fixed rates.
     // Publish ownership before the site fallback examines that marker.
     const owned = context.clinicalCache.quantityTokenIndices ??= new Set<number>();
@@ -846,8 +871,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     const signs = [fixed];
     (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
     return signs;
-  } else if (!rangedNumber || clinicalTimeDenominator(expression.compact.split("/")[1]) ||
-      weight?.synsem.head.dose?.clinicalQuantity?.representation === "rate-quantity") {
+  } else if (!rangedNumber || clinicalTimeDenominator(expression.compact.split("/")[1])) {
     // An unsupported rate range still owns both numeric endpoints.
     // Unit morphology already established a per-time quantity. Without a
     // licensed rate head it remains source text; its numeric daughter must

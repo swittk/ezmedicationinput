@@ -242,7 +242,9 @@ function appendScheduleEvidence(
 function cloneClinicalQuantity(value: HpsgClinicalQuantityFeature): HpsgClinicalQuantityFeature {
   return {
     ...value,
-    numerator: { ...value.numerator },
+    numerator: "range" in value.numerator
+      ? { ...value.numerator, range: { ...value.numerator.range } }
+      : { ...value.numerator },
     denominators: value.denominators.map((term) => ({ ...term })),
     projectedDose: value.projectedDose ? { ...value.projectedDose } : undefined,
     ...(value.carrierMaterial ? { carrierMaterial: {
@@ -582,9 +584,9 @@ export function projectHpsgSignToState(
         const comparator = clinical.projectedDose.comparator ?? dose.comparator;
         if (comparator !== undefined && state.primaryClause.dose)
           state.primaryClause.dose.comparator = comparator;
-      } else if (clinical.status === "resolved" && dose.range &&
-          (clinical.representation === "rate-quantity" || clinical.representation === "dose-with-rate-ratio")) {
-        // An independently authored range remains the dose beside its rate.
+      } else if (clinical.status === "resolved" && dose.range) {
+        // The selected range is the dose, including a divided weighted total
+        // or an independently authored range beside its rate.
         state.doseRange = dose.range;
         if (dose.unit !== undefined) state.unit = dose.unit;
       } else {

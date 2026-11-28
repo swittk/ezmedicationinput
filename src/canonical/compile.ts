@@ -48,18 +48,27 @@ export function clinicalQuantityTimeDenominator(
 export function rateFromClinicalQuantity(
   quantity: NonNullable<CanonicalSigClause["clinicalQuantity"]>
 ) {
+  const numerator = quantity.numerator;
+  if ("range" in numerator) {
+    const unit = [numerator.unit, ...quantity.denominators.map(term =>
+      term.value === 1 ? term.unit : `${term.value}${term.unit}`)].join("/");
+    return { rateRange: {
+      low: numerator.range.low === undefined ? undefined : { value: numerator.range.low, unit },
+      high: numerator.range.high === undefined ? undefined : { value: numerator.range.high, unit }
+    } };
+  }
   const period = clinicalQuantityTimeDenominator(quantity);
   if (period && period.value !== 1) return {
     rateRatio: {
-      numerator: { value: quantity.numerator.value, unit: quantity.numerator.unit,
-        ...(quantity.numerator.comparator ? { comparator: quantity.numerator.comparator } : {}) },
+      numerator: { value: numerator.value, unit: numerator.unit,
+        ...(numerator.comparator ? { comparator: numerator.comparator } : {}) },
       denominator: { value: period.value, unit: period.unit }
     }
   };
   return { rate: {
-    value: quantity.numerator.value / quantity.denominators.reduce((scale, part) => scale * part.value, 1),
-    unit: [quantity.numerator.unit, ...quantity.denominators.map(part => part.unit)].join("/"),
-    ...(quantity.numerator.comparator ? { comparator: quantity.numerator.comparator } : {})
+    value: numerator.value / quantity.denominators.reduce((scale, part) => scale * part.value, 1),
+    unit: [numerator.unit, ...quantity.denominators.map(part => part.unit)].join("/"),
+    ...(numerator.comparator ? { comparator: numerator.comparator } : {})
   } };
 }
 
@@ -75,7 +84,8 @@ function amounts(clause: CanonicalSigClause): CanonicalAmount[] | undefined {
   const q = clause.clinicalQuantity;
   if (!q) return result ? [result] : undefined;
   if (q.status !== "resolved") {
-    if (q.dailyTotal && q.denominators.some((d) => d.dimension === "time"))
+    if (q.dailyTotal && q.denominators.some((d) => d.dimension === "time")) {
+      if ("range" in q.numerator) return [rateFromClinicalQuantity(q)];
       return [
         {
           rate: quantity(
@@ -85,6 +95,7 @@ function amounts(clause: CanonicalSigClause): CanonicalAmount[] | undefined {
           ),
         },
       ];
+    }
     return result ? [result] : undefined;
   }
   if (q.representation === "dose") return result ? [result] : undefined;

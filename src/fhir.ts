@@ -2815,6 +2815,13 @@ function projectHpsgClinicalQuantityToFhir(
     // Preserve a recognized daily total even when no per-administration split
     // was stated. It is a rate, not an invented dose, and remains editable.
     if (quantity.dailyTotal && quantity.denominators.some(term => term.dimension === "time")) {
+      if ("range" in quantity.numerator) {
+        const range = rateFromClinicalQuantity(quantity).rateRange!;
+        dosage.doseAndRate = [{ rateRange: buildFhirDoseRange({
+          low: range.low?.value, high: range.high?.value
+        }, range.low?.unit ?? range.high?.unit) }];
+        return;
+      }
       const unit = [quantity.numerator.unit, ...quantity.denominators.map(term => term.unit)].join("/");
       dosage.doseAndRate = [{
         rateQuantity: buildFhirDoseQuantity(quantity.numerator.value, unit, quantity.numerator.comparator)
@@ -2852,6 +2859,10 @@ function projectHpsgClinicalQuantityToFhir(
           rate.rateRatio.numerator.comparator),
         denominator: buildFhirDoseQuantity(rate.rateRatio.denominator.value, rate.rateRatio.denominator.unit)
       };
+    } else if (rate.rateRange) {
+      amount.rateRange = buildFhirDoseRange({
+        low: rate.rateRange.low?.value, high: rate.rateRange.high?.value
+      }, rate.rateRange.low?.unit ?? rate.rateRange.high?.unit);
     } else {
       amount.rateQuantity = buildFhirDoseQuantity(rate.rate.value, rate.rate.unit, rate.rate.comparator);
     }

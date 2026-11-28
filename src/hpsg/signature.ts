@@ -284,7 +284,9 @@ export interface HpsgDimensionalQuantityTerm extends HpsgCodedQuantityTerm {
 export interface HpsgClinicalQuantityFeature {
   representation: "dose" | "rate-quantity" | "dose-with-rate-ratio";
   status: "resolved" | "incomplete" | "unsupported";
-  numerator: HpsgDimensionalQuantityTerm;
+  numerator: HpsgDimensionalQuantityTerm | (Omit<HpsgDimensionalQuantityTerm, "value"> & {
+    range: CanonicalDoseRange;
+  });
   denominators: HpsgDimensionalQuantityTerm[];
   /** Per-administration value after an explicit daily total is divided. */
   projectedDose?: HpsgCodedQuantityTerm;

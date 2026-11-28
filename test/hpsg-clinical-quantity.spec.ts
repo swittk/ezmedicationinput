@@ -4222,7 +4222,6 @@ describe("round72 reviewed quantity and onset ownership", () => {
 
   it.each([
     ["50 to 100", "mL/hr"], ["50–100", "mL/hr"], ["50-100", "mL/hr"],
-    ["0.05 to 0.1", "mcg/kg/min"],
   ])("does not detach an exact endpoint from an unsupported rate range: %s %s", (range, unit) => {
     const source = "Infuse at " + range + " " + unit;
     const parsed = parsePublicSig(source);
@@ -4237,6 +4236,40 @@ describe("round72 reviewed quantity and onset ownership", () => {
     }
     const exact = parsePublicSig("Infuse at 100 mL/hr");
     expect(exact.fhir[0].doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100, code: "mL/h" });
+  });
+
+  it("retains a complete weighted rate range without inventing a scalar administration", () => {
+    const source = "Infuse at 0.05 to 0.1 mcg/kg/min", parsed = parsePublicSig(source);
+    const saved = JSON.stringify(parsed), clause = parsed.meta.canonical.clauses[0];
+    expect(clause.raw.text).toBe(source);
+    expect(clause.dose).toBeUndefined();
+    expect(clause.clinicalQuantity).toMatchObject({ representation: "rate-quantity", status: "resolved",
+      numerator: { range: { low: 0.05, high: 0.1 }, unit: "ug", dimension: "mass" },
+      denominators: [{ value: 1, unit: "kg", dimension: "patient-mass" },
+        { value: 1, unit: "min", dimension: "time" }], requiresPatientWeight: true });
+    expect(clause.clinicalQuantity?.projectedDose).toBeUndefined();
+    for (const dosage of views(parsed)) {
+      const before = JSON.stringify(dosage), course = importCanonicalCourse(dosage);
+      const member = course.stages[0].administrations[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts[0].rateRange).toMatchObject({
+        low: { value: 0.05, unit: "ug/kg/min" }, high: { value: 0.1, unit: "ug/kg/min" }
+      });
+      expect(member.amounts[0].quantity).toBeUndefined();
+      expect(member.amounts[0].range).toBeUndefined();
+      expect(member.amounts[0].rate).toBeUndefined();
+      expect(member.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(member.schedule?.recurrence?.period).toBeUndefined();
+      expect(member.schedule?.recurrence?.clocks).toBeUndefined();
+      expect(member.schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+      expect(course.instruction).toBe(source);
+      expect(formatSig(dosage, "long", { locale: "en", realizationMode: "roundtrip" }))
+        .toContain("0.05 to 0.1 mcg/kg/min");
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
   });
 
   it("locates every clock on the next civil day after the predecessor occurrence", () => {
@@ -6025,4 +6058,202 @@ describe("review125 weekly and monthly dose totals", () => {
     expect(parsed.fhirNext.renderedInstruction).toBe(fixture.source);
     expect(JSON.stringify(parsed)).toBe(saved);
   });
+});
+
+
+describe("weighted ranges with explicit period division", () => {
+  const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  it.each([
+    "30–60 mg/kg/day in 3 divided doses",
+    "30–60 mg/kg daily in 3 divided doses",
+    "30–60 mg/kg/day PO in 3 divided doses",
+    "30–60 mg/kg/day for 5 days in 3 divided doses",
+    "30–60 mg/kg/day with food in 3 divided doses",
+  ])("retains both relative endpoints and the authored cadence: %s", source => {
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ range: { low: 10, high: 20 }, unit: "mg/kg" });
+    // The real numerator range and its denominators remain independent facts.
+    const quantity = parsed.meta.canonical.clauses[0].clinicalQuantity!;
+    expect(quantity).toMatchObject({ representation: "dose", status: "resolved",
+      numerator: { range: { low: 30, high: 60 }, unit: "mg", dimension: "mass" },
+      denominators: [{ value: 1, unit: "kg", dimension: "patient-mass" },
+        { value: 1, unit: FhirPeriodUnit.Day, dimension: "time" }],
+      dividedDoseCount: 3, requiresPatientWeight: true });
+    expect("value" in quantity.numerator).toBe(false);
+    expect(quantity.projectedDose).toBeUndefined();
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.instruction).toBe(source);
+      expect(course.stages).toHaveLength(1);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      const member = course.stages[0].administrations[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0].range).toMatchObject({
+        low: { value: 10, unit: "mg/kg" }, high: { value: 20, unit: "mg/kg" }
+      });
+      expect(member.amounts![0].quantity).toBeUndefined();
+      expect(member.amounts![0].rate).toBeUndefined();
+      expect(member.amounts![0].rateRatio).toBeUndefined();
+      if (source === "30–60 mg/kg/day PO in 3 divided doses") {
+        expect(member.route?.coding?.some(coding => coding.code === RouteCode["Oral route"])).toBe(true);
+      }
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Day });
+      expect(member.schedule?.recurrence?.count).toBeUndefined();
+      if (source === "30–60 mg/kg/day for 5 days in 3 divided doses") {
+        const length = member.schedule?.recurrence?.courseLength;
+        expect(length?.value).toBe(5);
+        expect(length?.code ?? length?.unit).toBe(FhirPeriodUnit.Day);
+      } else expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
+      if (source === "30–60 mg/kg/day with food in 3 divided doses")
+        expect(member.schedule?.recurrence?.anchors).toEqual([EventTiming.Meal]);
+      expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T14:00:00+00:00", "2026-01-01T20:00:00+00:00"
+      ]);
+      const relative = calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day });
+      expect(relative).toMatchObject({ totalUnits: 60, unit: "mg/kg", quantityKind: "maximum" });
+      expect(relative.explanation).toContain("patientWeightKg");
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1,
+        durationUnit: FhirPeriodUnit.Day, patientWeightKg: 70 }))
+        .toMatchObject({ totalUnits: 4200, unit: "mg", quantityKind: "maximum" });
+      // Patient-specific execution must not replace the stored relative endpoints.
+      expect(member.amounts![0].range).toMatchObject({
+        low: { value: 10, unit: "mg/kg" }, high: { value: 20, unit: "mg/kg" }
+      });
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain("10");
+        expect(text).toContain("20");
+        expect(text).not.toContain("30 to 60");
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].rawText).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([
+    { source: "30–60 mg/kg/day", unit: "mg/kg/d", period: 1, periodUnit: FhirPeriodUnit.Day },
+    { source: "30–60 mg/kg/12h", unit: "mg/kg/12h", period: 12, periodUnit: FhirPeriodUnit.Hour }
+  ])("preserves the undivided authored range and denominator: $source", ({ source, unit, period, periodUnit }) => {
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({ status: "incomplete",
+      numerator: { range: { low: 30, high: 60 }, unit: "mg" },
+      denominators: [{ value: 1, unit: "kg", dimension: "patient-mass" },
+        { value: period, unit: periodUnit, dimension: "time" }] });
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      for (const stage of course.stages) for (const member of stage.administrations) {
+        expect(member.amounts).toHaveLength(1);
+        expect(member.amounts![0]).toMatchObject({ rateRange: {
+          low: { value: 30, unit }, high: { value: 60, unit }
+        } });
+        expect(member.amounts![0].range).toBeUndefined();
+        expect(member.amounts![0].quantity).toBeUndefined();
+        expect(member.schedule?.recurrence?.frequency).toBeUndefined();
+        expect(member.schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+      }
+      expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([]);
+      expect(() => calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toThrow(/administered dose is not a single known positive quantity/u);
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+
+  it.each([
+    { source: "30–60 mg/kg/12h in 3 divided doses", period: 12, unit: FhirPeriodUnit.Hour,
+      duration: 12, durationUnit: FhirPeriodUnit.Hour },
+    { source: "30–60 mg/kg/week in 3 divided doses", period: 1, unit: FhirPeriodUnit.Week,
+      duration: 7, durationUnit: FhirPeriodUnit.Day }
+  ])("projects the selected period once for $source", fixture => {
+    const parsed = parsePublicSig(fixture.source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      numerator: { range: { low: 30, high: 60 }, unit: "mg" },
+      denominators: [{ value: 1, unit: "kg", dimension: "patient-mass" },
+        { value: fixture.period, unit: fixture.unit, dimension: "time" }], dividedDoseCount: 3
+    });
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const member = course.stages[0].administrations[0];
+      expect(member.amounts![0].range).toMatchObject({
+        low: { value: 10, unit: "mg/kg" }, high: { value: 20, unit: "mg/kg" }
+      });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 3,
+        period: fixture.period, periodUnit: fixture.unit });
+      expect(calculateTotalUnits({ dosage: input, ...query,
+        durationValue: fixture.duration, durationUnit: fixture.durationUnit }))
+        .toMatchObject({ totalUnits: 60, unit: "mg/kg", quantityKind: "maximum" });
+      expect(calculateTotalUnits({ dosage: input, ...query, patientWeightKg: 70,
+        durationValue: fixture.duration, durationUnit: fixture.durationUnit }))
+        .toMatchObject({ totalUnits: 4200, unit: "mg", quantityKind: "maximum" });
+      expect(course.instruction).toBe(fixture.source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it("does not repartition a separately licensed weighted infusion rate", () => {
+    const source = "Infuse 30–60 mcg/kg/min in 3 divided doses";
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", numerator: { range: { low: 30, high: 60 }, unit: "ug" }
+    });
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const member = course.stages[0].administrations[0];
+      expect(member.amounts![0].rateRange).toMatchObject({
+        low: { value: 30, unit: "ug/kg/min" }, high: { value: 60, unit: "ug/kg/min" }
+      });
+      expect(member.amounts![0].range).toBeUndefined();
+      expect(member.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(member.schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+
+  it.each([
+    "Give 30–60 mg/kg/day in 3 divided doses at 10 mL/h",
+    "Give 30–60 mg/kg/day at 10 mL/h in 3 divided doses"
+  ])("retains the independent rate without repartitioning the active range: %s", source => {
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages).toHaveLength(1);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      const member = course.stages[0].administrations[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0]).toMatchObject({
+        range: { low: { value: 10, unit: "mg/kg" }, high: { value: 20, unit: "mg/kg" } },
+        rate: { value: 10, unit: "mL/h" }
+      });
+      expect(member.amounts![0].quantity).toBeUndefined();
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Day });
+      expect(member.schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 60, unit: "mg/kg", quantityKind: "maximum" });
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1,
+        durationUnit: FhirPeriodUnit.Day, patientWeightKg: 70 }))
+        .toMatchObject({ totalUnits: 4200, unit: "mg", quantityKind: "maximum" });
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
 });

@@ -494,25 +494,38 @@ function mergeDose(
   ) {
     return undefined;
   }
-  let clinicalQuantity = mergeStructuredFeature(left.clinicalQuantity, right.clinicalQuantity);
-  if (!clinicalQuantity && left.clinicalQuantity && right.clinicalQuantity) {
-    // A total can be divided before its independent rate daughter arrives.
-    // Its schedule already owns the total's period; combine only the projected
-    // dose and division count with the rate's own numerator and denominator.
-    const rate = left.clinicalQuantity.representation === "rate-quantity"
-      ? left.clinicalQuantity : right.clinicalQuantity;
-    const divided = rate === left.clinicalQuantity ? right.clinicalQuantity : left.clinicalQuantity;
-    if (rate.representation !== "rate-quantity" || divided.representation !== "dose" ||
-        divided.status !== "resolved" || divided.dividedDoseCount === undefined || !divided.projectedDose ||
-        !sameOptionalScalar(rate.dividedDoseCount, divided.dividedDoseCount) ||
-        rate.projectedDose && !equalStructuredValues(rate.projectedDose, divided.projectedDose)) return undefined;
-    clinicalQuantity = { ...rate, projectedDose: divided.projectedDose,
-      dividedDoseCount: divided.dividedDoseCount };
-  }
   let value = mergeOptionalScalar(left.value, right.value);
   let unit = mergeOptionalScalar(left.unit, right.unit);
   let range = mergeOptionalScalar(left.range, right.range);
-  const divisionCount = mergeOptionalScalar(left.divisionCount, right.divisionCount);
+  let divisionCount = mergeOptionalScalar(left.divisionCount, right.divisionCount);
+  let clinicalQuantity = mergeStructuredFeature(left.clinicalQuantity, right.clinicalQuantity);
+  if (!clinicalQuantity && left.clinicalQuantity && right.clinicalQuantity) {
+    // A period total and its independent rate keep separate denominators.
+    // The selected division may already be resolved or arrive with the rate.
+    const rateDose = left.clinicalQuantity.representation === "rate-quantity" ? left : right;
+    const dividedDose = rateDose === left ? right : left;
+    const rate = rateDose.clinicalQuantity!, divided = dividedDose.clinicalQuantity!;
+    if (rate.representation !== "rate-quantity" || divided.representation !== "dose") return undefined;
+    if ("range" in divided.numerator) {
+      const count = divided.dividedDoseCount ?? divisionCount;
+      if (!divided.dailyTotal || divided.status === "unsupported" || count === undefined || !dividedDose.unit ||
+          !sameOptionalScalar(divided.dividedDoseCount, divisionCount) ||
+          !sameOptionalScalar(rate.dividedDoseCount, count) || rate.projectedDose || rateDose.range) return undefined;
+      if (divided.status === "resolved") {
+        if (!dividedDose.range) return undefined;
+        range = dividedDose.range;
+      } else range = divideDoseRange(divided.numerator.range, count);
+      unit = dividedDose.unit;
+      clinicalQuantity = { ...rate, dividedDoseCount: count };
+      divisionCount = undefined;
+    } else {
+      if (divided.status !== "resolved" || divided.dividedDoseCount === undefined || !divided.projectedDose ||
+          !sameOptionalScalar(rate.dividedDoseCount, divided.dividedDoseCount) ||
+          rate.projectedDose && !equalStructuredValues(rate.projectedDose, divided.projectedDose)) return undefined;
+      clinicalQuantity = { ...rate, projectedDose: divided.projectedDose,
+        dividedDoseCount: divided.dividedDoseCount };
+    }
+  }
   if (clinicalQuantity && divisionCount !== undefined && clinicalQuantity.dividedDoseCount !== divisionCount &&
       clinicalQuantity.status !== "unsupported" &&
       clinicalQuantity.denominators.some(term => term.dimension === "time")) {
@@ -521,7 +534,8 @@ function mergeDose(
     // an explicit infusion/AT rate; a separate amount or duration keeps its
     // independent rate unchanged, whichever daughter arrives first.
     const dividedPeriodTotal = clinicalQuantity.representation === "rate-quantity" &&
-      (clinicalQuantity.requiresPatientWeight || clinicalQuantity.dailyTotal) &&
+      (clinicalQuantity.dailyTotal || clinicalQuantity.requiresPatientWeight &&
+        !("range" in clinicalQuantity.numerator)) &&
       !clinicalQuantity.projectedDose && value === undefined && range === undefined &&
       !clinicalQuantity.administrationDuration;
     const independentRate = clinicalQuantity.representation === "rate-quantity" && !dividedPeriodTotal;
@@ -541,7 +555,12 @@ function mergeDose(
         for (const term of clinicalQuantity.denominators)
           if (term.dimension !== "time") doseUnit += "/" + term.unit;
       }
-      value = activeDose.value / divisionCount;
+      const projectedDose = "range" in activeDose ? undefined : {
+        value: activeDose.value / divisionCount, unit: doseUnit,
+        ...(activeDose.comparator ? { comparator: activeDose.comparator } : {})
+      };
+      if ("range" in activeDose) range = divideDoseRange(activeDose.range, divisionCount);
+      value = projectedDose?.value;
       unit = doseUnit;
       clinicalQuantity = {
         ...clinicalQuantity, status: "resolved", reviewReason: undefined,
@@ -552,11 +571,9 @@ function mergeDose(
         ...(clinicalQuantity.rateNumerator ? { rateNumerator: {
           ...clinicalQuantity.rateNumerator, value: clinicalQuantity.rateNumerator.value / divisionCount
         } } : {}),
-        dividedDoseCount: divisionCount, projectedDose: {
-          value, unit, ...(activeDose.comparator
-            ? { comparator: activeDose.comparator } : {})
-        }
+        dividedDoseCount: divisionCount, projectedDose
       };
+      if (!projectedDose) divisionCount = undefined;
     } else if (rangedActiveDose && range && unit) {
       // Divide the authored active range. A carrier preparation also divides
       // its separate volume; an independent flow rate keeps its numerator.
@@ -941,7 +958,13 @@ export function unifySynsem(
     } else if (dose.range) {
       // The projected range and recurrence own the completed division.
       // Consume its complement before a later independent rate can attach.
-      dose = { ...dose, range: divideDoseRange(dose.range, divisionCount), divisionCount: undefined };
+      dose = { ...dose, range: divideDoseRange(dose.range, divisionCount), divisionCount: undefined,
+        ...(quantity ? { clinicalQuantity: {
+          ...quantity, denominators: [...quantity.denominators,
+            { value: schedule.period, unit: schedule.periodUnit, dimension: "time" as const }],
+          dailyTotal: true, dividedDoseCount: divisionCount
+        } } : {})
+      };
     }
     schedule = { ...schedule, frequency: divisionCount, timingCode: undefined };
   }
@@ -955,12 +978,15 @@ export function unifySynsem(
   }
   // A divided total supplies its authored period. An independent rate
   // denominator belongs to the infusion and cannot create a recurrence.
-  if (dose?.clinicalQuantity?.representation === "dose" &&
-      dose.clinicalQuantity.dividedDoseCount !== undefined) {
-    const period = dose.clinicalQuantity.denominators.find(term => term.dimension === "time");
+  const dividedQuantity = dose?.clinicalQuantity;
+  const periodTotal = dividedQuantity?.representation === "dose" ? dividedQuantity
+    : left.head.dose?.clinicalQuantity?.representation === "dose" ? left.head.dose.clinicalQuantity
+    : right.head.dose?.clinicalQuantity?.representation === "dose" ? right.head.dose.clinicalQuantity : undefined;
+  if (dividedQuantity?.dividedDoseCount !== undefined && periodTotal) {
+    const period = periodTotal.denominators.find(term => term.dimension === "time");
     if (period) {
       const dividedSchedule = {
-        frequency: dose.clinicalQuantity.dividedDoseCount,
+        frequency: dividedQuantity.dividedDoseCount,
         period: period.value,
         periodUnit: period.unit as HpsgScheduleFeature["periodUnit"]
       };
