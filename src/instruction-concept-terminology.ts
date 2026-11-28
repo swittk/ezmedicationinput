@@ -1,4 +1,6 @@
 import source from "./instruction-concept-terminology.json";
+import { cloneLocaleAliases, flattenLocaleAliases } from "./localization";
+import { cloneStructuredValue } from "./stable-structure";
 import {
   AdviceArgumentRole,
   FhirCoding,
@@ -59,66 +61,51 @@ for (const definition of DEFAULT_CONCEPTS) {
   }
 }
 
-function cloneLocaleAliases(
-  aliases: Record<string, string[]> | undefined
-): Record<string, string[]> | undefined {
-  if (!aliases) return undefined;
-  const cloned: Record<string, string[]> = {};
-  for (const locale of Object.keys(aliases)) {
-    const values = aliases[locale];
-    if (values?.length) cloned[locale] = [...values];
-  }
-  return Object.keys(cloned).length ? cloned : undefined;
-}
-
-function flattenLocaleAliases(aliases: Record<string, string[]> | undefined): string[] {
-  const values: string[] = [];
-  for (const locale of Object.keys(aliases ?? {})) values.push(...(aliases?.[locale] ?? []));
-  return values;
-}
-
 export function normalizeConceptSurface(value: string): string {
   return value.trim().toLowerCase().replace(/[{}]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
-  return coding
-    ? {
-      system: coding.system,
-      version: coding.version,
-      code: coding.code,
-      display: coding.display,
-      extension: coding.extension?.map((extension) => ({ ...extension })),
-      _display: coding._display ? { ...coding._display } : undefined,
-      i18n: coding.i18n ? { ...coding.i18n } : undefined
-    }
-    : undefined;
+  if (!coding) return undefined;
+  const copy = Object.assign({}, coding);
+  copy.extension = cloneStructuredValue(coding.extension);
+  copy._code = cloneStructuredValue(coding._code);
+  copy._userSelected = cloneStructuredValue(coding._userSelected);
+  copy._display = cloneStructuredValue(coding._display);
+  copy.i18n = coding.i18n ? { ...coding.i18n } : undefined;
+  return copy;
 }
 
-function cloneComponents(
+// The bundled catalog has a closed Coding schema. Copy its known fields
+// directly; caller-supplied codings retain all metadata through cloneCoding.
+function cloneCatalogCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
+  return coding ? {
+    system: coding.system,
+    version: coding.version,
+    code: coding.code,
+    display: coding.display,
+    extension: coding.extension?.map(extension => ({ ...extension })),
+    _display: coding._display ? { ...coding._display } : undefined,
+    i18n: coding.i18n ? { ...coding.i18n } : undefined
+  } : undefined;
+}
+
+function cloneCatalogComponents(
+  components: MedicationInstructionConceptDefinition["components"]
+): MedicationInstructionConceptDefinition["components"] {
+  return components?.map(component => ({
+    role: component.role, text: component.text,
+    ...(component.coding ? { coding: cloneCatalogCoding(component.coding) } : {})
+  }));
+}
+
+export function cloneMedicationInstructionConceptComponents(
   components: MedicationInstructionConceptDefinition["components"]
 ): MedicationInstructionConceptDefinition["components"] {
   return components?.map(component => ({
     role: component.role, text: component.text,
     ...(component.coding ? { coding: cloneCoding(component.coding) } : {})
   }));
-}
-
-function cloneDefinition(
-  definition: MedicationInstructionConceptDefinition
-): MedicationInstructionConceptDefinition {
-  return {
-    code: definition.code,
-    role: definition.role,
-    impliedArgument: definition.impliedArgument ? { ...definition.impliedArgument } : undefined,
-    display: definition.display,
-    i18n: definition.i18n ? { ...definition.i18n } : undefined,
-    aliases: definition.aliases ? [...definition.aliases] : undefined,
-    localeAliases: cloneLocaleAliases(definition.localeAliases),
-    coding: cloneCoding(definition.coding),
-    components: cloneComponents(definition.components),
-    externalCodings: definition.externalCodings?.map((coding) => cloneCoding(coding)!)
-  };
 }
 
 function normalizeDefinition(sourceDefinition: ConceptSource): MedicationInstructionConceptDefinition {
@@ -130,9 +117,9 @@ function normalizeDefinition(sourceDefinition: ConceptSource): MedicationInstruc
     i18n: sourceDefinition.i18n ? { ...sourceDefinition.i18n } : undefined,
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
     localeAliases: cloneLocaleAliases(sourceDefinition.localeAliases),
-    coding: cloneCoding(sourceDefinition.coding),
-    components: cloneComponents(sourceDefinition.components),
-    externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!)
+    coding: cloneCatalogCoding(sourceDefinition.coding),
+    components: cloneCatalogComponents(sourceDefinition.components),
+    externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCatalogCoding(coding)!)
   };
 }
 
@@ -150,7 +137,7 @@ function normalizeCustomDefinition(
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
     localeAliases: cloneLocaleAliases(input.localeAliases),
     coding: cloneCoding(input.coding),
-    components: cloneComponents(input.components),
+    components: cloneMedicationInstructionConceptComponents(input.components),
     externalCodings: input.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
 }
@@ -175,6 +162,9 @@ function customDefinitionForSurface(
   return undefined;
 }
 
+/** Dictionary definitions are immutable by caller contract. Repeated
+ * lexical resolution must not recursively clone the same vocabulary tree.
+ * Explicit frame construction still copies only the fields it later edits. */
 export function resolveMedicationInstructionConcept(
   surface: string,
   options?: ParseOptions
@@ -182,7 +172,7 @@ export function resolveMedicationInstructionConcept(
   const custom = customDefinitionForSurface(surface, options);
   if (custom) return custom;
   const definition = DEFAULT_BY_ALIAS.get(normalizeConceptSurface(surface));
-  return definition ? cloneDefinition(definition) : undefined;
+  return definition;
 }
 
 export function getMedicationInstructionConcept(
@@ -191,14 +181,32 @@ export function getMedicationInstructionConcept(
   const definition = !system || system === MEDICATION_INSTRUCTION_CONCEPT_SYSTEM
     ? DEFAULT_BY_CODE.get(code)
     : DEFAULT_BY_CODING.get(system + "|" + code);
-  return definition ? cloneDefinition(definition) : undefined;
+  return definition;
 }
 
 export function listMedicationInstructionConcepts(): MedicationInstructionConceptDefinition[] {
-  return DEFAULT_CONCEPTS.map(cloneDefinition);
+  return DEFAULT_CONCEPTS;
 }
 
+/** The public CodeSystem is freshly returned, but its published concepts
+ * require only one source-definition walk and one designation walk each.
+ * This avoids filter->map and map->filter intermediary arrays per call. */
 export function buildMedicationInstructionConceptCodeSystem(): MedicationInstructionConceptCodeSystem {
+  const concepts: MedicationInstructionConceptCodeSystem["concept"] = [];
+  for (const definition of DEFAULT_CONCEPTS) {
+    // An explicit local whole-phrase code remains part of this CodeSystem
+    // even when its standard-coded constituents are also available.
+    if (definition.coding?.system !== MEDICATION_INSTRUCTION_CONCEPT_SYSTEM &&
+        (definition.coding || definition.externalCodings?.length || definition.components?.length)) continue;
+    const designations: NonNullable<MedicationInstructionConceptCodeSystem["concept"]>[number]["designation"] = [];
+    const translations = definition.i18n;
+    if (translations) for (const language in translations) {
+      if (!Object.prototype.hasOwnProperty.call(translations, language)) continue;
+      const value = translations[language];
+      if (value) designations.push({ language, value });
+    }
+    concepts.push({ code: definition.code, display: definition.display, designation: designations });
+  }
   return {
     resourceType: "CodeSystem",
     url: MEDICATION_INSTRUCTION_CONCEPT_SYSTEM,
@@ -208,19 +216,7 @@ export function buildMedicationInstructionConceptCodeSystem(): MedicationInstruc
     experimental: false,
     caseSensitive: true,
     content: "complete",
-    concept: DEFAULT_CONCEPTS.filter((definition) =>
-      // An explicit local whole-phrase code remains part of this CodeSystem
-      // even when its standard-coded constituents are also available.
-      definition.coding?.system === MEDICATION_INSTRUCTION_CONCEPT_SYSTEM ||
-      (!definition.coding && !definition.externalCodings?.length && !definition.components?.length)
-    ).map((definition) => ({
-      code: definition.code,
-      display: definition.display,
-      designation: Object.keys(definition.i18n ?? {}).map((language) => ({
-        language,
-        value: definition.i18n?.[language] ?? ""
-      })).filter((designation) => designation.value.length > 0)
-    }))
+    concept: concepts
   };
 }
 

@@ -1,0 +1,3190 @@
+import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../instruction-graph-fhir";
+import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL, buildBodySiteSpatialRelationExtension,
+  parseBodySiteSpatialRelationExtension } from "../body-site-spatial";
+import { projectR6ModifierWrapper, reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, sourceOwnership, isSourceAgreementMarker } from "../dosage-course";
+import { courseFromR5 } from "./r5-course";
+import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../dosage-course";
+import { projectNativeR5Course } from "./r5-course";
+
+/**
+ * Interchange boundary for EZMED's canonical course.
+ *
+ * R6 input is read directly: never flatten to R5, attach persistence markers,
+ * decode those markers, and reconstruct clinical meaning merely to execute.
+ * R5 edit reconciliation remains the R5 adapter's responsibility. Both output
+ * versions are projections of the same canonical clinical course. Unknown
+ * source metadata is retained separately and never consulted by execution.
+ */
+import type {
+  FhirDosage,
+  FhirDayOfWeek,
+  EzDosage,
+  FhirR6Dosage,
+  FhirR6DosageInstruction,
+  FhirR6DosageInstructionInput,
+  FhirR6DoseLimit,
+  FhirR6DosageSafety,
+  FhirR6DosageStep,
+  CanonicalSigClause,
+  FhirR6RelativeTime,
+  FhirTiming,
+  FhirR6Timing,
+  FhirQuantity,
+  FhirR6Quantity,
+  FhirRange,
+  FhirR6Range,
+  FhirRatio,
+  ParseBatchResult,
+  FhirCodeableConcept,
+  FhirExtension,
+  FhirR6Extension,
+  FormatOptions,
+} from "../types";
+import { administrationHasAmountFacts, isPreviousPhaseAnchor } from "../canonical/course";
+import { convertQuantityValue, getQuantityComparisonUnit, getUnitComparisonCategory, quantityUnitIdentityCode, sameCodedQuantityUnit } from "../utils/units";
+import type {
+  CanonicalMeasure,
+  CanonicalAmount,
+  CanonicalRange,
+  CanonicalRatio,
+  CanonicalAdministration,
+  CanonicalSafety,
+  CanonicalDoseLimit,
+  CanonicalCourse,
+  CanonicalStage,
+  CanonicalTiming,
+  CanonicalBoundary,
+  CanonicalScheduleInput,
+} from "../canonical/course";
+import {
+  DOSAGE_DETAILS_R5_URL,
+  DOSAGE_RETAINED_R5_SEQUENCE_URL,
+  R5_RATE_MODIFIERS_R6_URL,
+  DOSAGE_CONDITION_R5_URL,
+  exactConditionBridgePredicate,
+  isRenderedInstructionMarker,
+  hasUnrecognizedEditMetadata,
+  retainField,
+  readRetainedField,
+  withTimingCountMinimum, withTimingDurationMinimum, withTimingPeriodMinimum,
+  encodeR6SourceMetadata,
+  decodeR6SourceMetadata,
+  dosageMatchesSavedProjection,
+  getFreshDoseSource,
+  getDosageSourceTextFingerprint,
+  retainedSourceProjectionFingerprint, dosageHasAgreedSourceText, dosageClinicalProjectionFingerprint,
+  dosageTextFingerprint,
+  DOSAGE_RECONCILIATION_SOURCE_URL,
+  DOSAGE_RENDERED_INSTRUCTION_R5_URL,
+  getDosageCondition,
+  getDosageCalendarDayCondition,
+  getDosageExcludedDates,
+  getDosageExcludedWeekdays,
+  getDosageAlternativeChoice,
+  DOSAGE_ALTERNATIVE_CHOICE_URL,
+  DOSAGE_EXCLUDED_DATES_R5_URL,
+  DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
+  getCourseContextIssue,
+  PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
+  conditionToR6,
+  setDosageExcludedDates,
+  setDosageExcludedWeekdays,
+  setDosageCondition,
+  setDosageAlternativeChoice,
+} from "../dosage-course";
+import {
+  serializeCanonicalContext,
+  independentGraphWarningAdvice,
+  serializeCanonicalSchedule,
+  canUseCoreTimingOffset,
+  getTimingClocks,
+  getTimingEvents, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL,
+  projectTimingClocks,
+  deserializeCanonicalContext,
+  cycleDayConstraintExtension,
+  infusionCarrierMaterialExtension,
+  INFUSION_CARRIER_MATERIAL_EXTENSION_URL,
+  clinicalCarrierQuantityFromFhir,
+  getAdministrationOffsetMinutes,
+  getAnchoredCourseDuration,
+  projectCourseDurationRange,
+  getTimingClockWindow,
+  getTimingMonthDays,
+  getTimingWeekdayOrdinal,
+  getTimingEventWindow,
+  getTimingOccurrenceCap,
+  getTimingSharedCount,
+  getCycleDayConstraint,
+  getExactTimingOffsetMinutes,
+  parseActivityTimingExtensions,
+  TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL,
+  TIMING_FREQUENCY_MIN_EXTENSION_URL,
+  TIMING_ADMINISTRATION_DURATION_EXTENSION_URL,
+  parseTimingAdministrationDuration,
+  TIMING_OFFSET_EXACT_EXTENSION_URL,
+  TIMING_OFFSET_MIN_EXTENSION_URL,
+  TIMING_OFFSET_MAX_EXTENSION_URL,
+  TIMING_DAY_OF_MONTH_EXTENSION_URL,
+  TIMING_WEEKDAY_ORDINAL_EXTENSION_URL,
+  TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
+  TIMING_CLOCK_WINDOW_EXTENSION_URL,
+  TIMING_EVENT_WINDOW_EXTENSION_URL,
+  TIMING_OCCURRENCE_CAP_EXTENSION_URL,
+  TIMING_SHARED_COUNT_EXTENSION_URL,
+  ADMINISTRATION_OFFSET_EXTENSION_URL,
+  ANCHORED_COURSE_DURATION_EXTENSION_URL,
+  CYCLE_DAY_ELIGIBILITY_EXTENSION_URL,
+} from "../fhir";
+import {
+  getQuantityComparator,
+  simpleQuantityForR5, simpleQuantityForR6,
+  quantityForR5 as generalQuantityForR5,
+  quantityFromR5,
+  quantityFromWire,
+  quantityForR6,
+  quantityAnnotationExtensions,
+} from "../fhir-quantity-operator";
+import { equalStructuredValues } from "../stable-structure";
+import { clauseForAdministration } from "../canonical/compile";
+import { getStandardDoseUnitCoding } from "../maps";
+import { getMedicationInstructionAction } from "../instruction-action-terminology";
+import { AdviceArgumentRole, AdvicePolarity, type AdviceFrame } from "../types";
+import type { FhirProjectionOptions } from "../fhir";
+import {
+  getBodySiteAdministrationTargetCount,
+  buildBodySiteAdministrationTargetCountExtension,
+  BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL,
+} from "../body-site-target";
+import type { FhirR6Ratio } from "../types";
+import { hashStructuredValue } from "../stable-structure";
+import { compactProjectionFingerprint } from "../dosage-course";
+
+/** A maximum without both endpoint objects is retained source, not an invented R6 limit. */
+export const R5_SOURCE_ONLY_MAXIMUM_URL =
+  "urn:ezmedicationinput:StructureDefinition:r5-source-only-maximum";
+/** Source-only maxima are never executable limits. Their typed source can
+ * return to an R5 Ratio only when both endpoints (or neither) satisfy rat-1. */
+function sourceMaximumToR5(maximum: FhirRatio): boolean {
+  return maximum.numerator !== undefined && maximum.denominator !== undefined ||
+    maximum.numerator === undefined && maximum.denominator === undefined && !!maximum.extension?.length;
+}
+interface SourceMaximum { maximum: FhirRatio; position?: number }
+function projectSourceMaxima(output: Record<string, unknown>, target: "r5" | "r6"): SourceMaximum[] | undefined {
+  const original = output.extension as FhirExtension[] | undefined;
+  let extensions: FhirExtension[] | undefined, maxima: SourceMaximum[] | undefined;
+  for (let index = 0; index < (original?.length ?? 0); index++) {
+    const marker = original![index];
+    if (marker.url !== R5_SOURCE_ONLY_MAXIMUM_URL || !marker.valueRatio &&
+        !marker.extension?.some(child => child.url === "kind" && child.valueCode === "object")) {
+      if (extensions) extensions.push(marker);
+      continue;
+    }
+    const maximum = marker.valueRatio ?? readRetainedField(marker) as FhirRatio;
+    if (target === "r5" && sourceMaximumToR5(maximum)) {
+      const position = marker.extension?.find(child => child.url === "r5Position")?.valueInteger;
+      (maxima ??= []).push({ maximum, position });
+      extensions ??= original!.slice(0, index);
+      const expected: FhirExtension = marker.valueRatio ? { url: R5_SOURCE_ONLY_MAXIMUM_URL, valueRatio: maximum }
+        : retainField(R5_SOURCE_ONLY_MAXIMUM_URL, maximum);
+      if (position !== undefined) expected.extension!.push({ url: "r5Position", valueInteger: position });
+      if (!equalStructuredValues(marker, expected))
+        extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [marker] });
+    } else if (marker.valueRatio) {
+      // Accept older source markers, but never re-emit a one-ended valueRatio.
+      extensions ??= original!.slice(0, index);
+      const { valueRatio: _ratio, ...metadata } = marker;
+      extensions.push({ ...metadata, ...retainField(R5_SOURCE_ONLY_MAXIMUM_URL, maximum) });
+    } else if (extensions) extensions.push(marker);
+  }
+  if (extensions) assign(output, "extension", extensions.length ? extensions : undefined);
+  return maxima;
+}
+
+const TREATMENT_START_SYSTEM = "http://hl7.org/fhir/evidence-variable-event";
+const record = (value: object): Record<string, unknown> => value as Record<string, unknown>;
+
+/** Ordinary numeric quantities are reused; only an EMA-qualified quantity
+ * needs an execution copy with the decoded operator as a direct property. */
+/** Decode a source R5 quantity into its clinical operator, removing only
+ * the exact generated EMA carrier. Author-enriched/unknown extensions remain
+ * source data. Do not keep two active encodings of the same qualifier. */
+function measureFromR5(q: FhirQuantity | FhirR6Quantity | undefined): CanonicalMeasure | undefined {
+  return quantityFromR5(q);
+}
+export function measureFromWire(q: FhirQuantity | FhirR6Quantity | undefined): CanonicalMeasure | undefined {
+  return quantityFromWire(q);
+}
+function rangeFromWire(r: FhirRange | FhirR6Range | undefined, r5 = false): CanonicalRange | undefined {
+  if (!r) return undefined;
+  const low = r5 ? measureFromR5(r.low) : measureFromWire(r.low);
+  const high = r5 ? measureFromR5(r.high) : measureFromWire(r.high);
+  const extension = r.extension?.length ? quantityAnnotationExtensions(r.extension, "r6") : r.extension;
+  return low === r.low && high === r.high && extension === r.extension
+    ? r
+    : { ...r, ...(r.low ? { low } : {}), ...(r.high ? { high } : {}),
+        ...(extension !== r.extension ? { extension } : {}) };
+}
+export function rangeFromFhir(r: FhirRange | FhirR6Range | undefined): CanonicalRange | undefined {
+  return rangeFromWire(r);
+}
+function ratio(
+  r: { numerator?: FhirQuantity | FhirR6Quantity; denominator?: FhirQuantity | FhirR6Quantity;
+    extension?: FhirR6Extension[] } | undefined,
+  r5 = false
+): CanonicalRatio | undefined {
+  if (!r) return undefined;
+  const numerator = r5 ? measureFromR5(r.numerator as FhirQuantity) : measureFromWire(r.numerator);
+  const denominator = r5 ? measureFromR5(r.denominator as FhirQuantity) : measureFromWire(r.denominator);
+  const extension = r.extension?.length ? quantityAnnotationExtensions(r.extension, "r6") : r.extension;
+  return numerator === r.numerator && denominator === r.denominator && extension === r.extension
+    ? r
+    : { ...r, ...(r.numerator ? { numerator } : {}), ...(r.denominator ? { denominator } : {}),
+        ...(extension !== r.extension ? { extension } : {}) };
+}
+function offsetValue(repeat: { extension?: FhirR6Extension[] } | undefined, url: string): number | undefined {
+  const value = repeat?.extension?.find((e) => e.url === url);
+  return value?.valueInteger ?? value?.valueDecimal;
+}
+/** Decode timing annotations in one classification walk. Each specialized
+ * codec sees only its own marker(s), not the full extension list again. */
+function timingAnnotations(
+  r: Pick<NonNullable<FhirR6Timing["repeat"]>, "extension" | "offset" | "timeOfDay" | "duration" | "durationMax" | "durationUnit"> | undefined
+): Pick<
+  NonNullable<CanonicalTiming["recurrence"]>,
+  | "clocks"
+  | "offset"
+  | "offsetMin"
+  | "offsetMax"
+  | "monthDays"
+  | "weekdayOrdinal"
+  | "activityTiming"
+  | "occurrenceCap"
+  | "sharedCount"
+  | "clockWindow"
+  | "eventWindow"
+  | "frequency"
+  | "occurrenceDuration"
+  | "occurrenceDurationMax"
+  | "occurrenceDurationUnit"
+  | "occurrenceDurationComparator"
+  | "occurrenceDurationRange"
+> {
+  const out: Pick<
+    NonNullable<CanonicalTiming["recurrence"]>,
+    | "clocks"
+    | "offset"
+    | "offsetMin"
+    | "offsetMax"
+    | "monthDays"
+    | "weekdayOrdinal"
+    | "activityTiming"
+    | "occurrenceCap"
+    | "sharedCount"
+    | "clockWindow"
+    | "eventWindow"
+    | "frequency"
+    | "occurrenceDuration"
+    | "occurrenceDurationMax"
+    | "occurrenceDurationUnit"
+    | "occurrenceDurationComparator"
+    | "occurrenceDurationRange"
+  > = { offset: r?.offset };
+  let administrationDurationSeen = false;
+  let exact: FhirR6Extension | undefined,
+    month: FhirR6Extension[] | undefined,
+    activities: FhirR6Extension[] | undefined;
+  let weekday: FhirR6Extension | undefined,
+    cap: FhirR6Extension | undefined,
+    shared: FhirR6Extension | undefined,
+    clock: FhirR6Extension | undefined,
+    event: FhirR6Extension | undefined;
+  for (const e of r?.extension ?? [])
+    switch (e.url) {
+      case TIMING_ADDITIONAL_CLOCK_EXTENSION_URL:
+        if (r?.timeOfDay === undefined) {
+          if (e.valueTime !== undefined) (out.clocks ??= []).push(e.valueTime);
+          else if (e._valueTime) out.clocks ??= [];
+        }
+        break;
+      case TIMING_ADMINISTRATION_DURATION_EXTENSION_URL:
+        if (!administrationDurationSeen) {
+          administrationDurationSeen = true;
+          const duration = parseTimingAdministrationDuration(e, r);
+          if (duration) {
+            out.occurrenceDuration = duration.value;
+            if (duration.range) out.occurrenceDurationRange = duration.range;
+            out.occurrenceDurationUnit = duration.unit;
+            out.occurrenceDurationComparator = duration.comparator;
+          }
+        }
+        break;
+      case TIMING_FREQUENCY_MIN_EXTENSION_URL:
+        if (out.frequency === undefined) out.frequency = e.valueInteger;
+        break;
+      case TIMING_OFFSET_EXACT_EXTENSION_URL:
+        if (!exact) exact = e;
+        break;
+      case TIMING_OFFSET_MIN_EXTENSION_URL:
+        if (out.offsetMin === undefined) out.offsetMin = e.valueInteger ?? e.valueDecimal;
+        break;
+      case TIMING_OFFSET_MAX_EXTENSION_URL:
+        if (out.offsetMax === undefined) out.offsetMax = e.valueInteger ?? e.valueDecimal;
+        break;
+      case TIMING_DAY_OF_MONTH_EXTENSION_URL:
+        (month ??= []).push(e);
+        break;
+      case TIMING_WEEKDAY_ORDINAL_EXTENSION_URL:
+        if (!weekday) weekday = e;
+        break;
+      case TIMING_ACTIVITY_WINDOW_EXTENSION_URL:
+        (activities ??= []).push(e);
+        break;
+      case TIMING_OCCURRENCE_CAP_EXTENSION_URL:
+        if (!cap) cap = e;
+        break;
+      case TIMING_SHARED_COUNT_EXTENSION_URL:
+        if (!shared) shared = e;
+        break;
+      case TIMING_CLOCK_WINDOW_EXTENSION_URL:
+        if (!clock) clock = e;
+        break;
+      case TIMING_EVENT_WINDOW_EXTENSION_URL:
+        if (!event) event = e;
+        break;
+    }
+  if (exact) out.offset = getExactTimingOffsetMinutes({ offset: r?.offset, extension: [exact] });
+  if (month) out.monthDays = getTimingMonthDays({ extension: month });
+  if (weekday) out.weekdayOrdinal = getTimingWeekdayOrdinal({ extension: [weekday] });
+  if (activities) out.activityTiming = parseActivityTimingExtensions({ extension: activities });
+  if (cap) out.occurrenceCap = getTimingOccurrenceCap({ extension: [cap] });
+  if (shared) out.sharedCount = getTimingSharedCount({ extension: [shared] });
+  if (clock) out.clockWindow = getTimingClockWindow({ extension: [clock] });
+  if (event) out.eventWindow = getTimingEventWindow({ extension: [event] });
+  return out;
+}
+/** Metadata-only primitive positions stay on the wire, not in recurrence facts. */
+function timingPrimitiveValues<T>(source: Array<T | null> | undefined): T[] | undefined {
+  if (!source) return undefined;
+  let values: T[] | undefined;
+  for (let index = 0; index < source.length; index++) {
+    const value = source[index];
+    if (value === null) values ??= source.slice(0, index) as T[];
+    else if (values) values.push(value);
+  }
+  return values ?? source as T[];
+}
+function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): CanonicalTiming | undefined {
+  if (!t) return undefined;
+  const out: CanonicalTiming = { code: t.code, explicitEvents: getTimingEvents(t), provenance: record(t) };
+  const r = t.repeat;
+  if (r) {
+    const annotations = r.extension?.length ? timingAnnotations(r) : undefined;
+    const native = r as NonNullable<FhirR6Timing["repeat"]>;
+    out.recurrence = {
+      count: r.count,
+      countMax: r.countMax,
+      frequency: r.frequency ?? annotations?.frequency,
+      frequencyMax: r.frequencyMax,
+      period: r.period,
+      periodMax: r.periodMax,
+      periodUnit: r.periodUnit,
+      occurrenceDuration: annotations?.occurrenceDurationRange ? undefined : r.duration ?? annotations?.occurrenceDuration,
+      occurrenceDurationMax: annotations?.occurrenceDurationRange ? undefined : r.durationMax,
+      occurrenceDurationRange: annotations?.occurrenceDurationRange,
+      occurrenceDurationUnit: annotations?.occurrenceDurationRange ? undefined :
+        r.duration === undefined && annotations?.occurrenceDuration !== undefined
+          ? annotations.occurrenceDurationUnit : r.durationUnit,
+      occurrenceDurationComparator: r.duration === undefined ? annotations?.occurrenceDurationComparator : undefined,
+      courseLength: r5 ? measureFromR5(r.boundsDuration as FhirQuantity) : measureFromWire(r.boundsDuration),
+      courseLengthRange: rangeFromFhir(r.boundsRange),
+      calendarWindow: r.boundsPeriod,
+      clocks: r.timeOfDay !== undefined ? getTimingClocks(r) : annotations?.clocks,
+      anchors: timingPrimitiveValues(r.when),
+      dayOfWeek: timingPrimitiveValues(r.dayOfWeek) as FhirDayOfWeek[] | undefined,
+      offset: annotations?.offset ?? r.offset,
+      offsetMin: annotations?.offsetMin,
+      offsetMax: annotations?.offsetMax,
+      monthDays: annotations?.monthDays,
+      weekdayOrdinal: annotations?.weekdayOrdinal,
+      activityTiming: annotations?.activityTiming,
+      occurrenceCap: annotations?.occurrenceCap,
+      clockWindow: annotations?.clockWindow,
+      eventWindow: annotations?.eventWindow,
+      startOffset: measureFromWire(native.startOffset),
+      endOffset: measureFromWire(native.endOffset),
+      provenance: record(r),
+    };
+    if (annotations?.sharedCount) out.recurrence.sharedCount = annotations.sharedCount;
+  }
+  return out;
+}
+/** Stable external event identity; the native boundary shape remains internal.
+ * This event is already the next local day after the prior phase completes,
+ * so the adapter must not synthesize an additional one-day displacement. */
+const COURSE_PHASE_EVENT_SYSTEM = "urn:ezmedicationinput:CodeSystem:course-phase-event";
+const PREVIOUS_PHASE_NEXT_DAY_CODE = "previous-phase-next-day";
+
+export function boundaryFromR6(b: FhirR6RelativeTime | undefined): CanonicalBoundary | undefined {
+  if (!b) return undefined;
+  let recognized: "treatment-start" | "treatment-day-start" | "previous-phase-next-day" | "previous-phase-end" | undefined;
+  if (!b.contextReference && !b.contextDefinition && !b.contextPath) {
+    for (const coding of b.contextCode?.coding ?? []) {
+      const event = coding.system === TREATMENT_START_SYSTEM && coding.code === "treatment-start"
+        ? "treatment-start" : coding.system === COURSE_PHASE_EVENT_SYSTEM && coding.code === PREVIOUS_PHASE_NEXT_DAY_CODE
+        ? "previous-phase-next-day" : coding.system === COURSE_PHASE_EVENT_SYSTEM && coding.code === "previous-phase-end"
+        ? "previous-phase-end" : coding.system === COURSE_PHASE_EVENT_SYSTEM && coding.code === "treatment-day-start"
+        ? "treatment-day-start" : undefined;
+      if (!event) continue;
+      // Conflicting understood anchors are retained as a coded event. Unknown
+      // foreign equivalents do not supply a different executable meaning.
+      if (recognized && recognized !== event) { recognized = undefined; break; }
+      recognized = event;
+    }
+  }
+  const anchor = recognized
+    ? recognized
+    : b.contextReference
+    ? "resource-reference"
+    : b.contextDefinition
+    ? "definition"
+    : b.contextPath
+    ? "path"
+    : b.contextCode
+    ? "coded-event"
+    : "unresolved";
+  return {
+    anchor,
+    ...(b.contextReference ? { contextReference: b.contextReference } : {}),
+    ...(b.contextDefinition ? { contextDefinition: b.contextDefinition } : {}),
+    ...(b.contextPath ? { contextPath: b.contextPath } : {}),
+    ...(b.contextCode && !recognized ? { contextCode: b.contextCode } : {}),
+    description: b.text,
+    displacement: measureFromWire(b.offsetDuration),
+    displacementRange: rangeFromFhir(b.offsetRange),
+    provenance: record(b),
+  };
+}
+/** Member quantity limits have their own typed owner. Any other safety
+ * content retains the existing unevaluated-policy qualification. */
+function onlyOwnedMemberQuantityLimits(safety: FhirR6DosageSafety): boolean {
+  if (!safety.doseLimit?.length) return false;
+  for (const field of Object.keys(safety))
+    if (field !== "doseLimit" && field !== "id") return false;
+  for (const limit of safety.doseLimit) {
+    if (limit.valueQuantity?.value === undefined ||
+        (limit.scope !== "period" && limit.scope !== "administration" && limit.scope !== "lifetime"))
+      return false;
+    for (const field of Object.keys(limit))
+      if (field !== "scope" && field !== "valueQuantity" && field !== "period" &&
+          field !== "text" && field !== "id") return false;
+  }
+  return true;
+}
+
+/** Every understood safety rule is typed. Unknown element metadata stays
+ * only on the retained external source object, never in an executable bag. */
+export function doseLimitFromWire(limit: FhirR6DoseLimit): CanonicalDoseLimit {
+  return {
+    scope: limit.scope,
+    amount: measureFromWire(limit.valueQuantity),
+    count: limit.valueInteger,
+    expression: limit.valueExpression,
+    period: measureFromWire(limit.period),
+    text: limit.text,
+    provenance: limit,
+  };
+}
+
+export function safetyFromWire(
+  safety: FhirR6DosageSafety | undefined,
+  includeLimits = false
+): CanonicalSafety | undefined {
+  if (!safety) return undefined;
+  if (!includeLimits && onlyOwnedMemberQuantityLimits(safety)) return { maximaDeclared: true };
+  return {
+    ...(safety.ifExceeded !== undefined ? { ifExceeded: safety.ifExceeded } : {}),
+    ...(includeLimits && safety.doseLimit
+      ? {
+          limits: safety.doseLimit.map(doseLimitFromWire),
+        }
+      : {}),
+    ...(safety.ifExceeded ||
+    safety.doseLimit?.some((limit) => limit.valueInteger !== undefined || limit.valueExpression !== undefined)
+      ? { requiresReview: true }
+      : {}),
+  };
+}
+
+/** Wire safety output owns coding/retained external metadata; clinical facts
+ * own the live ifExceeded and limits. No generic internal safety fields leak. */
+export function safetyToWire(
+  policy: CanonicalSafety | undefined,
+  source: FhirR6DosageSafety | undefined,
+  limits?: CanonicalDoseLimit[],
+  inferCoding = false
+): FhirR6DosageSafety | undefined {
+  if (!policy && limits === undefined) return undefined;
+  const output: FhirR6DosageSafety = { ...source };
+  if (policy?.ifExceeded === undefined) delete output.ifExceeded;
+  else output.ifExceeded = policy.ifExceeded;
+  const known = limits ?? policy?.limits;
+  if (known?.length) {
+    output.doseLimit = known.map((limit) => {
+      const saved = limit.provenance as FhirR6DoseLimit | undefined;
+      // R6 value[x] is an exclusive choice: never resurrect a stale source
+      // valueQuantity when an integer/expression was explicitly edited.
+      const {
+        valueQuantity: _oldQuantity,
+        valueInteger: _oldCount,
+        _valueInteger: countMetadata,
+        valueExpression: _oldExpression,
+        period: _oldPeriod,
+        text: _oldText,
+        numerator: _ratioNumerator,
+        denominator: _ratioDenominator,
+        ...metadata
+      } = (saved ?? {}) as FhirR6DoseLimit & { numerator?: unknown; denominator?: unknown };
+      const period =
+        limit.period && inferCoding
+          ? {
+              ...limit.period,
+              ...(!limit.period.system && !limit.period.code && isCalendarUnit(limit.period.unit)
+                ? { system: "http://unitsofmeasure.org", code: limit.period.unit }
+                : {}),
+            }
+          : limit.period;
+      const common = {
+        ...metadata,
+        scope: limit.scope,
+        ...(period ? { period: quantityForR6(period) } : {}),
+        ...(limit.text !== undefined ? { text: limit.text } : {}),
+      };
+      const amount = limit.amount;
+      if (amount)
+        return {
+          ...common,
+          valueQuantity: quantityForR6({
+            ...amount,
+            ...(inferCoding ? getStandardDoseUnitCoding(amount.unit) : undefined),
+            ...(amount.system ? { system: amount.system } : {}),
+            ...(amount.code ? { code: amount.code } : {}),
+          })!,
+        } satisfies FhirR6DoseLimit;
+      if (limit.count !== undefined)
+        return { ...common, valueInteger: limit.count,
+          ...(countMetadata ? { _valueInteger: countMetadata } : {}) } satisfies FhirR6DoseLimit;
+      if (limit.expression) return { ...common, valueExpression: limit.expression } satisfies FhirR6DoseLimit;
+      // FHIR permits an extension-only primitive. It is source evidence,
+      // not a numeric ceiling, and must not prevent importing the dosage.
+      if (countMetadata && saved?.valueInteger === undefined)
+        return { ...common, _valueInteger: countMetadata } satisfies FhirR6DoseLimit;
+      throw new TypeError("An authored safety limit must contain a numeric, count, or expression value");
+    });
+  } else delete output.doseLimit;
+  if (!output.doseLimit && !output.ifExceeded &&
+      !Object.keys(output).some(key => {
+        const value = (output as Record<string, unknown>)[key];
+        return key !== "id" && value !== undefined && (!Array.isArray(value) || value.length > 0);
+      })) return undefined;
+  return output;
+}
+export function amountFromWire(
+  a: NonNullable<FhirR6Dosage["doseAndRate"]>[number],
+  r5 = false
+): CanonicalAmount {
+  return {
+    quantity: r5 ? measureFromR5(a.doseQuantity as FhirQuantity) : measureFromWire(a.doseQuantity),
+    range: rangeFromWire(a.doseRange, r5),
+    expression: a.doseExpression,
+    rate: r5 ? measureFromR5(a.rateQuantity as FhirQuantity) : measureFromWire(a.rateQuantity),
+    rateRange: rangeFromWire(a.rateRange, r5),
+    rateRatio: ratio(a.rateRatio, r5),
+    rateExpression: a.rateExpression,
+    role: a.type,
+    provenance: record(a),
+  };
+}
+/** Older saved R5 parser rows predate explicit dose-owner spans. A single
+ * restored declared amount must reproduce their existing projection exactly
+ * before display can treat its absence as a clear. No source graph is edited. */
+function savedR5DoseOwner(
+  raw: FhirDosage, graph: NonNullable<CanonicalSigClause["instructionGraph"]>
+): AdviceFrame | undefined {
+  if (raw.doseAndRate?.length || graph.primaryAdministrationSpan || getFreshDoseSource(raw) ||
+      getDosageSourceTextAgreement(raw, false) === false) return undefined;
+  let owner: AdviceFrame | undefined;
+  for (const action of graph.actions) {
+    if (action.polarity === AdvicePolarity.Negate ||
+        !getMedicationInstructionAction(action.predicate.lemma)?.definesDose ||
+        !action.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity)) continue;
+    if (owner) return undefined;
+    owner = action;
+  }
+  if (!owner) return undefined;
+  const amount = owner.args.find(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity)!.quantity!;
+  const coded = (value: number) => simpleQuantityForR5({
+    value, unit: amount.unit, ...getStandardDoseUnitCoding(amount.unit), comparator: amount.comparator
+  })!;
+  const dose = amount.range ? { doseRange: {
+    ...(amount.range.low !== undefined ? { low: coded(amount.range.low) } : {}),
+    ...(amount.range.high !== undefined ? { high: coded(amount.range.high) } : {})
+  } } : amount.value !== undefined ? { doseQuantity: coded(amount.value) } : undefined;
+  if (!dose) return undefined;
+  const restored = { ...raw, doseAndRate: [dose] };
+  const matches = dosageMatchesSavedProjection(restored);
+  return matches === true ? owner : undefined;
+}
+function baseAdministration(
+  raw: FhirDosage | FhirR6Dosage | EzDosage,
+  format: "r5" | "r6",
+  sourceContext = false
+): CanonicalAdministration {
+  const input = raw as EzDosage;
+  const target = format === "r6" ? (raw as FhirR6Dosage).site?.concept : input.site;
+  let phaseOrigin: CanonicalMeasure | undefined,
+    phaseStart: CanonicalBoundary | undefined,
+    phaseEnd: CanonicalBoundary | undefined,
+    phaseOriginIssue = false,
+    seenOrigin = false;
+  let sourceMember: number | undefined, phasePredecessors: number[] | undefined;
+  let missingContexts: string[] | undefined,
+    contextIssue: CanonicalAdministration["contextIssue"];
+  let anchored: FhirR6Extension | undefined,
+    choiceMarker: FhirR6Extension | undefined,
+    predicateMarker: FhirR6Extension | undefined,
+    datesMarker: FhirR6Extension | undefined,
+    cycleMarker: FhirR6Extension | undefined,
+    delayMarker: FhirR6Extension | undefined;
+  // Classify modifiers once. Specialized codecs see only their own retained
+  // field rather than repeatedly traversing the whole imported marker list.
+  for (const e of raw.modifierExtension ?? [])
+    switch (e.url) {
+      case DOSAGE_DETAILS_R5_URL:
+        // R6 carries unresolved row context as an active modifier. Normalize
+        // it here so both exporters read the same typed administration facts.
+        // R5 membership/resolution remains owned by the R5 course importer.
+        if (format === "r6") for (const child of e.extension ?? []) {
+          const context = child.valueString;
+          if (child.url !== "missingContext" || context === undefined) continue;
+          if (!missingContexts) missingContexts = [context];
+          else if (missingContexts.indexOf(context) < 0) missingContexts.push(context);
+          if (context === "conflicting-phase") contextIssue = "conflicting-course-phase";
+          else contextIssue ??= "missing-course-context";
+        }
+        break;
+      case PARALLEL_COMPONENT_PHASE_ORIGIN_URL:
+        if (seenOrigin) phaseOriginIssue = true;
+        seenOrigin = true;
+        // Identity is sparse: only members of a real dependency carry it.
+        // Original source member IDs must survive wire reorder and deletion.
+        for (const child of e.extension ?? []) {
+          if (child.url === "sourceMember" && child.valueInteger !== undefined)
+            sourceMember = child.valueInteger;
+        }
+        if (sourceMember !== undefined) {
+          phasePredecessors = [];
+          for (const child of e.extension ?? [])
+            if (child.url === "predecessor" && child.valueInteger !== undefined)
+              phasePredecessors.push(child.valueInteger);
+        }
+        if (e.valueQuantity) phaseOrigin = measureFromWire(e.valueQuantity);
+        else {
+          const fields = decodeR6SourceMetadata(e, "step");
+          phaseStart = boundaryFromR6(fields?.start as FhirR6RelativeTime | undefined);
+          phaseEnd = boundaryFromR6(fields?.end as FhirR6RelativeTime | undefined);
+          if (!phaseStart && !phaseEnd && sourceMember === undefined) phaseOriginIssue = true;
+        }
+        break;
+      case ANCHORED_COURSE_DURATION_EXTENSION_URL:
+        if (!anchored) anchored = e;
+        break;
+      case DOSAGE_ALTERNATIVE_CHOICE_URL:
+        if (!choiceMarker) choiceMarker = e;
+        break;
+      case DOSAGE_CONDITION_R5_URL:
+        if (!predicateMarker) predicateMarker = e;
+        break;
+      case DOSAGE_EXCLUDED_DATES_R5_URL:
+        if (!datesMarker) datesMarker = e;
+        break;
+      case CYCLE_DAY_ELIGIBILITY_EXTENSION_URL:
+        if (!cycleMarker) cycleMarker = e;
+        break;
+      case ADMINISTRATION_OFFSET_EXTENSION_URL:
+        if (!delayMarker) delayMarker = e;
+        break;
+    }
+  const conditionInput = predicateMarker
+    ? { modifierExtension: [predicateMarker], condition: input.condition }
+    : input.condition?.length
+    ? { condition: input.condition }
+    : undefined;
+  const choice = choiceMarker ? getDosageAlternativeChoice({ modifierExtension: [choiceMarker] }) : undefined;
+  let weekdaysMarker: FhirR6Extension | undefined;
+  let sourceFields: ReturnType<typeof sourceOwnership>;
+  let hasCarrierMaterial = false, hasInstructionGraph = false;
+  for (const e of raw.extension ?? []) {
+    if (e.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL && !weekdaysMarker) weekdaysMarker = e;
+    else if (e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL && sourceFields === undefined)
+      sourceFields = sourceOwnership(e);
+    else if (e.url === INFUSION_CARRIER_MATERIAL_EXTENSION_URL) hasCarrierMaterial = true;
+    else if (e.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL) hasInstructionGraph = true;
+  }
+  const amounts: CanonicalAmount[] | undefined = raw.doseAndRate ? [] : undefined;
+  for (const value of raw.doseAndRate ?? [])
+    amounts!.push(amountFromWire(value as NonNullable<FhirR6Dosage["doseAndRate"]>[number], format === "r5"));
+  let sourceTextVerified = format === "r6" ? false : getDosageSourceTextAgreement(raw);
+  const carrier = raw.doseAndRate?.[0]?.rateRatio && (sourceContext || format === "r5" && hasCarrierMaterial)
+    ? clinicalCarrierQuantityFromFhir(raw as FhirDosage) : undefined;
+  if (format === "r5" && (sourceContext || hasInstructionGraph || sourceFields?.clocks || carrier?.carrierMaterial) &&
+      sourceTextVerified !== false && raw.extension?.length) {
+    const matches = dosageMatchesSavedProjection(input);
+    if (matches === false) {
+      const originalText = getDosageSourceTextFingerprint(raw);
+      // A cached clinical mismatch invalidates old graph wording, while an
+      // explicitly replaced external text still owns its current display.
+      if (raw.text === undefined || originalText === undefined || originalText === dosageTextFingerprint(input))
+        sourceTextVerified = false;
+    } else if (matches === undefined && sourceTextVerified === undefined &&
+        (hasInstructionGraph || carrier?.carrierMaterial) && !getFreshDoseSource(input)) {
+      // A saved graph or carrier without positive source agreement cannot
+      // certify its old wording. Keep it as provenance while live facts render.
+      sourceTextVerified = false;
+    }
+  }
+  const duration = anchored ? getAnchoredCourseDuration(raw) : undefined;
+  const memberLength = anchored?.extension?.some(child => child.url === "courseLength");
+  let schedule = timing(raw.timing, format === "r5");
+  if (memberLength && duration) {
+    schedule ??= {};
+    const recurrence = schedule.recurrence ??= {};
+    recurrence.courseLength = measureFromWire(duration.valueQuantity);
+    recurrence.courseLengthRange = rangeFromFhir(duration.valueRange);
+  }
+  const denominator = raw.doseAndRate?.[0]?.rateRatio?.denominator;
+  if (denominator && schedule?.recurrence?.occurrenceDuration === undefined &&
+      raw.timing?.repeat?.duration === undefined && raw.timing?.repeat?.durationMax === undefined &&
+      getQuantityComparator(denominator) &&
+      !raw.timing?.repeat?.extension?.some(e => e.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)) {
+    // Only an explicitly recognized carrier/self-carrier infusion supplies an
+    // administration duration. An arbitrary rate denominator is not a dose time.
+    const administrationDuration = (carrier ?? clinicalCarrierQuantityFromFhir(raw as FhirDosage))?.administrationDuration;
+    if (administrationDuration?.comparator) {
+      schedule ??= {};
+      const recurrence = schedule.recurrence ??= {};
+      recurrence.occurrenceDuration = administrationDuration.value;
+      recurrence.occurrenceDurationUnit = administrationDuration.unit;
+      recurrence.occurrenceDurationComparator = administrationDuration.comparator;
+    }
+  }
+  if (duration?.valueRange && raw.timing?.repeat?.boundsRange && schedule?.recurrence)
+    schedule.recurrence.courseLengthRange = rangeFromFhir(duration.valueRange);
+  const asNeeded = raw.asNeeded ?? (format === "r5"
+    ? (raw as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean : undefined);
+  const output: CanonicalAdministration = {
+    kind: "administration",
+    schedule,
+    amounts,
+    stageOrdinal: format === "r5" ? input.sequence : undefined,
+    asNeeded: asNeeded ?? (raw.asNeededFor?.length ? true : undefined),
+    target,
+    targetCount: getBodySiteAdministrationTargetCount(target),
+    siteReference: format === "r6" ? (raw as FhirR6Dosage).site?.reference : input.siteReference,
+    route: raw.route,
+    method: raw.method,
+    text: raw.text,
+    patientInstruction: raw.patientInstruction,
+    additionalInstructions: raw.additionalInstruction,
+    predicate: conditionInput ? getDosageCondition(conditionInput) : undefined,
+    calendarPredicate: predicateMarker ? getDosageCalendarDayCondition(conditionInput!) : undefined,
+    excludedDates:
+      input.excludedDates ??
+      (datesMarker ? getDosageExcludedDates({ modifierExtension: [datesMarker] }) : undefined),
+    excludedWeekdays: weekdaysMarker ? getDosageExcludedWeekdays({ extension: [weekdaysMarker] }) : undefined,
+    safety: safetyFromWire(input.safety),
+    choice,
+    choiceIssue: !choice && Boolean(choiceMarker),
+    phaseOrigin,
+    phaseStart,
+    phaseEnd,
+    phaseOriginIssue,
+    delayMinutes: delayMarker
+      ? getAdministrationOffsetMinutes({ modifierExtension: [delayMarker] })
+      : undefined,
+    anchoredLength: duration && !memberLength && !raw.timing?.repeat?.boundsRange
+      ? { quantity: measureFromWire(duration.valueQuantity), range: rangeFromFhir(duration.valueRange) }
+      : undefined,
+    cycleDays: cycleMarker ? getCycleDayConstraint({ modifierExtension: [cycleMarker] }) : undefined,
+    provenance: { format, data: record(raw) },
+  };
+  // Keep sparse dependency identities off the ordinary import allocation
+  // path; an object spread here emits ES6 descriptor-copy helpers per dose.
+  if (sourceFields?.clocks !== undefined) output.provenance!.sourceHasStructuredClocks = sourceFields.clocks;
+  if (sourceFields?.events !== undefined) output.provenance!.sourceHasStructuredEvents = sourceFields.events;
+  if (sourceFields?.site !== undefined) output.provenance!.sourceHasStructuredSite = sourceFields.site;
+  const siteSpatialRelation = (format === "r6"
+    ? parseBodySiteSpatialRelationExtension((raw as FhirR6Dosage).site) : undefined) ??
+    parseBodySiteSpatialRelationExtension(target);
+  if (siteSpatialRelation) output.siteSpatialRelation = siteSpatialRelation;
+  if (dosageHasAgreedSourceText(raw)) output.provenance!.sourceTextAgreed = true;
+  if (phasePredecessors !== undefined) {
+    output.sourceMember = sourceMember;
+    output.phasePredecessors = phasePredecessors;
+  }
+  if (missingContexts) {
+    output.missingContexts = missingContexts;
+    output.contextIssue = contextIssue;
+  }
+  if (sourceTextVerified !== undefined) output.provenance!.sourceTextVerified = sourceTextVerified;
+  if (format === "r5") {
+    let limits: CanonicalDoseLimit[] | undefined, sourceMaxima: FhirExtension[] | undefined;
+    for (let index = 0; index < (input.maxDosePerPeriod?.length ?? 0); index++) {
+      const maximum = input.maxDosePerPeriod![index];
+      if (maximum.numerator === undefined || maximum.denominator === undefined) {
+        const marker = retainField(R5_SOURCE_ONLY_MAXIMUM_URL, maximum);
+        marker.extension!.push({ url: "r5Position", valueInteger: index });
+        (sourceMaxima ??= []).push(marker);
+        continue;
+      }
+      (limits ??= []).push({
+        scope: "period",
+        amount: measureFromR5(maximum.numerator),
+        period: measureFromR5(maximum.denominator),
+        provenance: maximum,
+      });
+    }
+    if (sourceMaxima) output.provenance!.data = {
+      ...raw, extension: [...(raw.extension ?? []), ...sourceMaxima],
+    };
+    if (input.maxDosePerAdministration)
+      (limits ??= []).push({
+        scope: "administration",
+        amount: measureFromR5(input.maxDosePerAdministration),
+      });
+    if (input.maxDosePerLifetime)
+      (limits ??= []).push({ scope: "lifetime", amount: measureFromR5(input.maxDosePerLifetime) });
+    if (limits) output.limits = limits;
+  }
+  if (sourceContext) {
+    output.syntax = deserializeCanonicalContext({
+      text: raw.text,
+      extension: raw.extension,
+      route: raw.route,
+      site: target,
+      method: raw.method,
+      asNeeded,
+      asNeededFor: raw.asNeededFor,
+      additionalInstruction: raw.additionalInstruction,
+      patientInstruction: raw.patientInstruction,
+    });
+    // The existing typed carrier feature supplies only its current material
+    // label to presentation; native amounts still own every dose/rate value.
+    if (carrier?.carrierMaterial) output.syntax.clinicalQuantity = carrier;
+  }
+  const graph = output.syntax?.instructionGraph;
+  if (format === "r5" && sourceTextVerified === false && !amounts?.length && graph && !graph.primaryAdministrationSpan) {
+    const owner = savedR5DoseOwner(input, graph);
+    if (owner) output.syntax!.instructionGraph = {
+      ...graph, primaryAdministrationSpan: { start: owner.span.start, end: owner.span.end }
+    };
+  }
+  return output;
+}
+
+/** Import one native R6 administration WITHOUT any R5 projection. */
+export function administrationFromR6(raw: FhirR6Dosage, sourceContext = false): CanonicalAdministration {
+  const result = baseAdministration(raw, "r6", sourceContext);
+  if (raw.safety) {
+    result.limits = raw.safety.doseLimit?.map(doseLimitFromWire);
+  }
+  return result;
+}
+/** Remove only generated source mirrors already owned by a lifted partial
+ * limit. Authored markers and unmatched Ratios keep their exact multiplicity. */
+export function removeLiftedPartialMaximumMirrors(
+  fresh: CanonicalAdministration, row: FhirDosage, safety: FhirR6DosageSafety | undefined
+): void {
+  // The generic R5 reader retains incomplete Ratios as source-only markers.
+  // A reconciled native partial limit already owns that same live Ratio;
+  // remove only its newly generated mirror, never an authored marker or an
+  // unmatched maximum. Match one occurrence at a time to retain multiplicity.
+  let partialMaxima: FhirRatio[] | undefined;
+  for (const limit of safety?.doseLimit ?? [])
+    if (limit.scope === "period" && limit.valueQuantity && limit.period &&
+        (limit.valueQuantity.value === undefined || limit.period.value === undefined))
+      (partialMaxima ??= []).push(periodMaximumToR5(limit.valueQuantity, limit.period, limit));
+  if (partialMaxima?.length && fresh.provenance) {
+    const data = fresh.provenance.data as EzDosage;
+    const extensions = data.extension?.filter(marker => {
+      if (marker.url !== R5_SOURCE_ONLY_MAXIMUM_URL || (row.extension?.indexOf(marker) ?? -1) >= 0) return true;
+      const maximum = readRetainedField(marker);
+      const owner = partialMaxima!.findIndex(value => equalStructuredValues(value, maximum));
+      if (owner < 0) return true;
+      partialMaxima!.splice(owner, 1);
+      return false;
+    });
+    if (extensions && extensions.length !== data.extension?.length) {
+      const current = { ...data };
+      if (extensions.length) current.extension = extensions;
+      else delete current.extension;
+      fresh.provenance.data = current;
+    }
+  }
+}
+export function administrationFromR5(
+  raw: FhirDosage | EzDosage,
+  sourceContext = false
+): CanonicalAdministration {
+  const result = baseAdministration(raw, "r5", sourceContext);
+  // Most rows have only R5 maxima and need no mirror reconciliation.
+  // Lifted safety has a persisted baseline so either current view can own an edit.
+  if ((raw as EzDosage).safety) {
+    const safety = reconcileLiftedR5Safety(raw as EzDosage);
+    result.safety = safetyFromWire(safety);
+    result.limits = safety?.doseLimit?.map(doseLimitFromWire);
+    removeLiftedPartialMaximumMirrors(result, raw, safety);
+  }
+  return result;
+}
+export function courseFromR6(raw: FhirR6DosageInstructionInput, sourceContext = false): CanonicalCourse {
+  const stages: CanonicalStage[] = [];
+  const retainedSafety = retainedSingleStepSafety(raw);
+  const steps = editableCourseSteps(raw);
+  let sourceStepIndex = 0;
+  for (const step of steps) {
+    let safetyOwner = false;
+    if (retainedSafety) {
+      // Draft restoration can insert inactive stages or remove a synthesized
+      // start using a shallow step copy. Match its active source in this same
+      // traversal so the retained policy follows exactly one original owner.
+      const source = raw.step?.[sourceStepIndex];
+      if (step === source || step.component === source?.component) {
+        safetyOwner = source === retainedSafety.owner;
+        sourceStepIndex++;
+      }
+    }
+    const stepSafety = step.safety ?? (safetyOwner ? retainedSafety!.step : undefined);
+    const administrations: CanonicalAdministration[] = [];
+    for (const component of step.component)
+      administrations.push(administrationFromR6(component, sourceContext));
+    stages.push(stageFromFields(safetyOwner && !step.safety ? { ...step, safety: stepSafety } : step,
+      administrations));
+  }
+  const cycleCount = getCourseCycleCount(raw);
+  const course: CanonicalCourse = {
+    kind: "course",
+    stages,
+    instruction: raw.renderedInstruction,
+    cycleInterval: measureFromWire(raw.repeatCycle),
+    cycleCount: cycleCount ?? undefined,
+    safety: safetyFromWire(retainedSafety ? retainedSafety.course : raw.safety, true),
+    contextIssue: raw.step ? getCourseContextIssue(raw as FhirR6DosageInstruction) : undefined,
+    provenance: { format: "r6", data: record(retainedSafety
+      ? { ...raw, safety: retainedSafety.course } : raw) },
+  };
+  if (cycleCount === null) course.cycleCountUnresolved = true;
+  if (stages.length) course.provenance!.sourceTextVerified = false;
+  if (raw.renderedInstruction !== undefined &&
+      dosageHasAgreedSourceText({ text: raw.renderedInstruction, extension: raw.extension }))
+    course.provenance!.sourceTextAgreed = true;
+  // No defensive copy. Re-reading an externally changed FHIR input should
+  // still observe its current fields, while ordinary callers leave it alone.
+  return course;
+}
+/** Reconciliation is solely an R5 import concern, never part of native
+ * course execution. A simple scalar needs no course reconstruction. */
+export function isR6DosageInstruction(input: object): input is FhirR6DosageInstructionInput {
+  if ("step" in input || "renderedInstruction" in input || "_renderedInstruction" in input || "repeatCycle" in input) return true;
+  // Header-only R6 instructions may carry just safety or known R6 source.
+  // An extended R5 dosage still owns its explicit dosage fields.
+  if ("text" in input || "sequence" in input || "_sequence" in input || "doseAndRate" in input || "timing" in input ||
+      "route" in input || "site" in input || "siteReference" in input || "method" in input || "condition" in input ||
+      "asNeeded" in input || "asNeededBoolean" in input || "asNeededFor" in input || "additionalInstruction" in input ||
+      "patientInstruction" in input || "maxDosePerPeriod" in input ||
+      "maxDosePerAdministration" in input || "maxDosePerLifetime" in input || "excludedDates" in input) return false;
+  if ("safety" in input || getCourseCycleCount(input as FhirR6DosageInstruction) !== undefined) return true;
+  for (const marker of (input as FhirR6DosageInstruction).extension ?? []) {
+    if (marker.url === R6_DRAFT_STEPS_SOURCE_URL || marker.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL) return true;
+    if (marker.url === DOSAGE_RECONCILIATION_SOURCE_URL && marker.extension?.some(child =>
+        child.url === R6_DRAFT_STEPS_SOURCE_URL || child.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL)) return true;
+  }
+  return false;
+}
+export function inputToCanonical(
+  input:
+    | FhirDosage
+    | readonly FhirDosage[]
+    | FhirR6DosageInstructionInput
+    | ParseBatchResult
+    | CanonicalScheduleInput
+): CanonicalScheduleInput {
+  if (input && !Array.isArray(input)) {
+    if ("kind" in input && (input.kind === "course" || input.kind === "administration"))
+      return input as CanonicalCourse | CanonicalAdministration;
+    if ("items" in input) return input.meta.canonical.course ?? courseFromR6(input.fhirNext);
+    if (isR6DosageInstruction(input)) return courseFromR6(input);
+  }
+  if (Array.isArray(input)) {
+    if (input.length && "kind" in input[0]) return input as CanonicalAdministration[];
+    const rows = input as readonly FhirDosage[];
+    if (
+      rows.some((row) =>
+        row.modifierExtension?.some(
+          (e) => e.url === DOSAGE_DETAILS_R5_URL || e.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL
+        )
+      )
+    )
+      return courseFromR5(rows);
+    return rows.map((row) => {
+      const a = administrationFromR5(row);
+      // Whole-course accounting conservatively reports persisted dosage
+      // maxima as constraints; a standalone scalar retains its historical
+      // exact single-row accounting contract.
+      if (!a.safety && a.limits?.length) a.safety = { maximaDeclared: true };
+      return a;
+    });
+  }
+  const raw = input as FhirDosage;
+  if (raw.modifierExtension?.some((e) => e.url === DOSAGE_DETAILS_R5_URL)) return courseFromR5([raw]);
+  return administrationFromR5(raw);
+}
+
+/** Projection helpers always overwrite modeled clinical fields, including
+ * deliberate clearing, while preserving unrelated external source fields. */
+function assign(target: Record<string, unknown>, name: string, value: unknown): void {
+  if (value === undefined) delete target[name];
+  else target[name] = value;
+}
+export function boundaryToWire(b: CanonicalBoundary | undefined): FhirR6RelativeTime | undefined {
+  if (!b) return undefined;
+  const output = { ...b.provenance };
+  const original = b.provenance ? boundaryFromR6(b.provenance as FhirR6RelativeTime)?.anchor : undefined;
+  if (b.anchor !== original) {
+    delete output.contextReference;
+    delete output.contextDefinition;
+    delete output.contextPath;
+    delete output.contextCode;
+    if (b.anchor === "treatment-start")
+      output.contextCode = {
+        coding: [{ system: TREATMENT_START_SYSTEM, code: "treatment-start", display: "Start of Treatment" }],
+      };
+    else if (isPreviousPhaseAnchor(b.anchor) || b.anchor === "treatment-day-start")
+      output.contextCode = {
+        coding: [{ system: COURSE_PHASE_EVENT_SYSTEM, code: b.anchor }],
+      };
+  }
+  // Understood external anchor types stay typed, including in native edits.
+  // These are preserved but not considered executable without an event/source resolver.
+  if (b.anchor !== "treatment-start" && b.anchor !== "treatment-day-start" && !isPreviousPhaseAnchor(b.anchor)) {
+    assign(output, "contextReference", b.anchor === "resource-reference" ? b.contextReference : undefined);
+    assign(output, "contextDefinition", b.anchor === "definition" ? b.contextDefinition : undefined);
+    assign(output, "contextPath",
+      b.anchor === "path" || b.anchor === "resource-reference" || b.anchor === "definition"
+        ? b.contextPath : undefined);
+    assign(output, "contextCode", b.contextCode);
+  }
+  assign(output, "text", b.description);
+  assign(output, "offsetDuration", quantityForR6(b.displacement));
+  assign(output, "offsetRange", b.displacementRange ? serializeRange(b.displacementRange, "r6") : undefined);
+  return output as FhirR6RelativeTime;
+}
+/** Reuse an unchanged Timing fragment by value/reference comparison on the
+ * current input. This is not a persistent memo cache: a later edited input is
+ * normalized again and any changed live clinical field gets a fresh fragment. */
+function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): FhirR6Timing | undefined {
+  if (!t) return undefined;
+  const original = t.provenance as FhirR6Timing | undefined;
+  const r = t.recurrence,
+    prior = original?.repeat;
+  let repeat: FhirR6Timing["repeat"];
+  if (r) {
+    const duration = target === "r5" ? generalQuantityForR5(r.courseLength) : quantityForR6(r.courseLength);
+    const lengthRange = r.courseLengthRange ? serializeRange(r.courseLengthRange, target) : undefined;
+    const start = target === "r6" ? simpleQuantityForR6(r.startOffset) : undefined;
+    const end = target === "r6" ? simpleQuantityForR6(r.endOffset) : undefined;
+    // Clinical zero frequency and signed/fractional offsets are carried by
+    // their typed extensions. Reuse and reconstruction must compare the same
+    // positiveInt/unsignedInt-compatible wire values.
+    const frequency = r.frequency === 0 ? undefined : r.frequency;
+    // A qualified duration stays in its typed timing marker or carrier rate
+    // denominator; Timing.duration must not assert false exactness.
+    const markerDuration = r.occurrenceDurationComparator || r.occurrenceDurationRange;
+    // Numeric presence from an unresolved marker must not create a unitless
+    // core duration. Keep its authored marker and any independent core fields.
+    const unresolvedMarkerDuration = r.occurrenceDuration !== undefined &&
+      r.occurrenceDurationUnit === undefined && prior?.duration === undefined;
+    const occurrenceDuration = markerDuration ? undefined :
+      unresolvedMarkerDuration ? prior?.duration : r.occurrenceDuration;
+    const occurrenceDurationMax = markerDuration ? undefined :
+      unresolvedMarkerDuration ? prior?.durationMax : r.occurrenceDurationMax;
+    const occurrenceDurationUnit = markerDuration ? undefined :
+      unresolvedMarkerDuration ? prior?.durationUnit : r.occurrenceDurationUnit;
+    // Imported native facts retain the original primitive slots and annotations.
+    const dayOfWeek = prior?.dayOfWeek ?? r.dayOfWeek;
+    const when = prior?.when ?? r.anchors;
+    // Both wire writers use the same eligibility rule. A code-derived anchor
+    // does not invent repeat.when or displace its supplied exact-offset carrier.
+    const offset = canUseCoreTimingOffset(when, r.offset) ? r.offset : undefined;
+    if (
+      prior &&
+      prior.count === r.count &&
+      prior.countMax === r.countMax &&
+      prior.frequency === frequency &&
+      prior.frequencyMax === r.frequencyMax &&
+      prior.period === r.period &&
+      prior.periodMax === r.periodMax &&
+      prior.periodUnit === r.periodUnit &&
+      prior.dayOfWeek === dayOfWeek &&
+      prior.offset === offset &&
+      prior.duration === occurrenceDuration &&
+      prior.durationMax === occurrenceDurationMax &&
+      prior.durationUnit === occurrenceDurationUnit &&
+      prior.boundsDuration === duration &&
+      prior.boundsRange === lengthRange &&
+      prior.boundsPeriod === r.calendarWindow &&
+      prior.when === when &&
+      prior.timeOfDay === r.clocks &&
+      prior.startOffset === start &&
+      prior.endOffset === end
+    )
+      repeat = prior;
+    else {
+      const value: Record<string, unknown> = Object.assign({}, r.provenance);
+      assign(value, "count", r.count);
+      assign(value, "countMax", r.countMax);
+      assign(value, "frequency", frequency);
+      assign(value, "frequencyMax", r.frequencyMax);
+      assign(value, "period", r.period);
+      assign(value, "periodMax", r.periodMax);
+      assign(value, "periodUnit", r.periodUnit);
+      assign(value, "dayOfWeek", dayOfWeek);
+      assign(value, "offset", offset);
+      assign(value, "duration", occurrenceDuration);
+      assign(value, "durationMax", occurrenceDurationMax);
+      assign(value, "durationUnit", occurrenceDurationUnit);
+      assign(value, "boundsDuration", duration);
+      assign(value, "boundsRange", lengthRange);
+      assign(value, "boundsPeriod", r.calendarWindow);
+      assign(value, "when", when);
+      assign(value, "timeOfDay", r.clocks);
+      assign(value, "startOffset", start);
+      assign(value, "endOffset", end);
+      repeat = value;
+    }
+  }
+  if (repeat?.countMax !== undefined) repeat = withTimingCountMinimum(repeat);
+  if (repeat?.durationMax !== undefined) repeat = withTimingDurationMinimum(repeat);
+  if (repeat?.periodMax !== undefined) repeat = withTimingPeriodMinimum(repeat);
+  // Import has already separated executable values from metadata-only wire
+  // positions. The immutable native timing keeps its imported event projection.
+  const events = original?.event ?? t.explicitEvents;
+  if (
+    original &&
+    original.event === events &&
+    original.code === t.code &&
+    original.repeat === repeat
+  )
+    return original;
+  const output: Record<string, unknown> = Object.assign({}, t.provenance);
+  assign(output, "event", events);
+  // Primitive annotations retain their external FHIR positions. Native facts
+  // are internal immutable values, not an editing API that infers event identity.
+  assign(output, "code", t.code);
+  assign(output, "repeat", repeat);
+  return output;
+}
+/** Only changed known semantics replace their owned wire annotations.
+ * Unknown siblings and unedited richer source markers are preserved exactly.
+ * The execution core never sees these annotations. */
+function replaceOwnedAnnotations(
+  before: readonly FhirR6Extension[] | undefined,
+  generated: readonly FhirR6Extension[] | undefined,
+  changed: ReadonlySet<string>
+): FhirR6Extension[] | undefined {
+  if (!changed.size) return before as FhirR6Extension[] | undefined;
+  const next: FhirR6Extension[] = [];
+  for (const item of before ?? []) if (!changed.has(item.url)) next.push(item);
+  for (const item of generated ?? []) if (changed.has(item.url)) next.push(item);
+  return next.length ? next : undefined;
+}
+function updateNativeTimingAnnotations(
+  a: CanonicalAdministration,
+  output: Record<string, unknown>,
+  target: FhirR6Timing | undefined
+): FhirR6Timing | undefined {
+  if (a.provenance?.format === "syntax") return target;
+  // Native compositions own their typed annotations without an imported source.
+  const nativeOwnsAnnotations = !a.provenance || a.provenance.format === "r6";
+  const raw = (a.provenance?.data ?? {}) as FhirR6Dosage;
+  const live = a.schedule?.recurrence;
+  const original = raw.timing?.repeat;
+  // The R5 boundary normally owns its annotations. Surviving duration
+  // markers and superseded exact offsets still need shared reconciliation.
+  if (!nativeOwnsAnnotations && !original?.extension?.length) return target;
+  if (
+    !original?.extension?.length &&
+    !raw.modifierExtension?.length &&
+    !live?.monthDays &&
+    !live?.weekdayOrdinal &&
+    !live?.activityTiming &&
+    !live?.occurrenceCap &&
+    !live?.sharedCount &&
+    !live?.clockWindow &&
+    !live?.eventWindow &&
+    !live?.occurrenceDurationRange &&
+    !live?.occurrenceDurationComparator &&
+    live?.offset === original?.offset &&
+    live?.offsetMin === undefined &&
+    live?.offsetMax === undefined &&
+    live?.frequency !== 0 &&
+    a.delayMinutes === undefined &&
+    !a.anchoredLength
+  )
+    return target;
+  const durationMarker = original?.extension?.find(item => item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
+  const duration = parseTimingAdministrationDuration(durationMarker);
+  const durationChanged = duration ? duration.value !== live?.occurrenceDuration ||
+    duration.unit !== live?.occurrenceDurationUnit || duration.comparator !== live?.occurrenceDurationComparator ||
+    !same(duration.range, live?.occurrenceDurationRange)
+    : Boolean(live?.occurrenceDurationRange || live?.occurrenceDurationComparator);
+  const exactOffset = original?.offset !== undefined
+    ? original.extension?.find(item => item.url === TIMING_OFFSET_EXACT_EXTENSION_URL) : undefined;
+  const supersededOffset = exactOffset &&
+    getExactTimingOffsetMinutes({ extension: [exactOffset] }) !== original?.offset;
+  const frequencyMinimum = original?.extension?.find(item => item.url === TIMING_FREQUENCY_MIN_EXTENSION_URL);
+  const supersededMinimum = frequencyMinimum?.valueInteger === 0 && live?.frequency !== 0;
+  if (!nativeOwnsAnnotations && !durationChanged && !supersededOffset && !supersededMinimum) return target;
+  const oldMarkers = original ? { extension: original.extension, offset: original.offset } : undefined;
+  const changes = new Set<string>();
+  if (supersededOffset) {
+    changes.add(TIMING_OFFSET_EXACT_EXTENSION_URL);
+    output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+      { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [exactOffset] }];
+  }
+  if (supersededMinimum) {
+    changes.add(TIMING_FREQUENCY_MIN_EXTENSION_URL);
+    output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+      { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [frequencyMinimum!] }];
+  }
+  const changed = (url: string, before: unknown, after: unknown) => {
+    if (!same(before, after)) changes.add(url);
+  };
+  if (durationChanged) {
+    changes.add(TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
+    if (durationMarker) output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+      { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [durationMarker] }];
+  }
+  const administrationChanges = new Set<string>();
+  if (nativeOwnsAnnotations) {
+    changed(TIMING_DAY_OF_MONTH_EXTENSION_URL, getTimingMonthDays(oldMarkers), live?.monthDays);
+    changed(TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, getTimingWeekdayOrdinal(oldMarkers), live?.weekdayOrdinal);
+    changed(TIMING_CLOCK_WINDOW_EXTENSION_URL, getTimingClockWindow(oldMarkers), live?.clockWindow);
+    changed(TIMING_EVENT_WINDOW_EXTENSION_URL, getTimingEventWindow(oldMarkers), live?.eventWindow);
+    changed(
+      TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
+      parseActivityTimingExtensions(oldMarkers),
+      live?.activityTiming
+    );
+    changed(TIMING_OCCURRENCE_CAP_EXTENSION_URL, getTimingOccurrenceCap(oldMarkers), live?.occurrenceCap);
+    changed(TIMING_SHARED_COUNT_EXTENSION_URL, getTimingSharedCount(oldMarkers), live?.sharedCount);
+    changed(TIMING_OFFSET_EXACT_EXTENSION_URL, getExactTimingOffsetMinutes(oldMarkers), live?.offset);
+    changed(
+      TIMING_OFFSET_MIN_EXTENSION_URL,
+      offsetValue(oldMarkers, TIMING_OFFSET_MIN_EXTENSION_URL),
+      live?.offsetMin
+    );
+    changed(
+      TIMING_OFFSET_MAX_EXTENSION_URL,
+      offsetValue(oldMarkers, TIMING_OFFSET_MAX_EXTENSION_URL),
+      live?.offsetMax
+    );
+    changed(
+      TIMING_FREQUENCY_MIN_EXTENSION_URL,
+      frequencyMinimum?.valueInteger === 0,
+      live?.frequency === 0
+    );
+    if (!same(getAdministrationOffsetMinutes(raw as FhirDosage), a.delayMinutes))
+      administrationChanges.add(ADMINISTRATION_OFFSET_EXTENSION_URL);
+    const oldLength = getAnchoredCourseDuration(raw);
+    if (
+      // Active bounds own duration projection reconciliation below. In particular,
+      // do not discard an old projected-range wrapper before retaining its ID and
+      // annotations alongside the recovered authored endpoints.
+      !target?.repeat?.boundsRange && !target?.repeat?.boundsDuration &&
+      !same(
+        oldLength
+          ? { quantity: measureFromWire(oldLength.valueQuantity), range: rangeFromFhir(oldLength.valueRange) }
+          : undefined,
+        a.anchoredLength
+      )
+    )
+      administrationChanges.add(ANCHORED_COURSE_DURATION_EXTENSION_URL);
+  }
+  if (!changes.size && !administrationChanges.size) return target;
+  const currentClause = clauseForAdministration(a);
+  // The shared serializer keeps a recognized carrier duration on its existing
+  // Ratio denominator while retaining a distinct authored timing duration.
+  const clinicalQuantity = currentClause.clinicalQuantity ?? (raw.doseAndRate?.[0]?.rateRatio
+    ? clinicalCarrierQuantityFromFhir(raw as FhirDosage) : undefined);
+  const generated = serializeCanonicalSchedule(currentClause.schedule, undefined, clinicalQuantity, currentClause.prn?.enabled);
+  if (durationMarker && changes.has(TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)) {
+    const marker = generated.timing?.repeat?.extension?.find(item =>
+      item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
+    if (marker) {
+      // The current endpoint changes its value, not the identity or unrelated
+      // annotations of the timing marker that contains it.
+      const { valueQuantity: _quantity, valueRange: _range, ...metadata } = durationMarker;
+      Object.assign(marker, metadata);
+    }
+  }
+  if (target?.repeat && changes.size) {
+    target = Object.assign({}, target, { repeat: Object.assign({}, target.repeat) });
+    const repeat = target.repeat!;
+    assign(
+      repeat as Record<string, unknown>,
+      "extension",
+      replaceOwnedAnnotations(original?.extension ?? repeat.extension, generated.timing?.repeat?.extension, changes)
+    );
+    if (changes.has(TIMING_OFFSET_EXACT_EXTENSION_URL))
+      assign(repeat as Record<string, unknown>, "offset", generated.timing?.repeat?.offset);
+    if (changes.has(TIMING_FREQUENCY_MIN_EXTENSION_URL))
+      assign(repeat as Record<string, unknown>, "frequency", generated.timing?.repeat?.frequency);
+  }
+  assign(
+    output,
+    "modifierExtension",
+    replaceOwnedAnnotations(
+      output.modifierExtension as FhirExtension[] | undefined,
+      generated.modifierExtension,
+      administrationChanges
+    )
+  );
+  return target;
+}
+/** Use the supplied dose unit, including one carried by either range endpoint. */
+export function r5MaximumDoseBasis(amounts: FhirDosage["doseAndRate"]): FhirQuantity | undefined {
+  for (const amount of amounts ?? []) {
+    if (amount.doseQuantity) return amount.doseQuantity;
+    const range = amount.doseRange;
+    if (range?.low?.unit || range?.low?.code) return range.low;
+    if (range?.high) return range.high;
+    if (range?.low) return range.low;
+  }
+  return undefined;
+}
+
+interface SelectedR5Maximum {
+  quantity: CanonicalMeasure;
+  /** A same-code label can establish a comparison scale without rewriting the winning quantity. */
+  comparisonBasis?: CanonicalMeasure;
+  definite: boolean;
+  strict: boolean;
+  index?: number;
+}
+export interface R5MaximumSelection extends SelectedR5Maximum {
+  groups?: Map<string, SelectedR5Maximum>;
+}
+function sameMaximumIdentity(left: CanonicalMeasure, right: CanonicalMeasure): boolean {
+  return sameCodedQuantityUnit(left, right) ||
+    left.unit === right.unit && left.system === right.system && left.code === right.code &&
+    (left.unit !== undefined || !left.system && !left.code);
+}
+function unitKeyPart(value: string | undefined): string {
+  return value === undefined ? "-" : value.length + ":" + value;
+}
+function maximumUnitKey(quantity: CanonicalMeasure): string | undefined {
+  return quantity.system && quantity.code
+    ? "c" + unitKeyPart(quantity.system) + unitKeyPart(quantityUnitIdentityCode(quantity))
+    : quantity.unit !== undefined || !quantity.system && !quantity.code
+      ? "u" + unitKeyPart(quantity.system) + unitKeyPart(quantity.code) + unitKeyPart(quantity.unit)
+      : undefined;
+}
+function maximumComparisonUnitKey(quantity: CanonicalMeasure): string | undefined {
+  const unit = getQuantityComparisonUnit(quantity);
+  if (!unit) return undefined;
+  const category = getUnitComparisonCategory(unit);
+  return category === "other" ? "l" + unitKeyPart(unit) : "d" + category;
+}
+function preferMaximum(
+  value: number, strict: boolean, index: number | undefined,
+  previousValue: number, previousStrict: boolean, previousIndex: number | undefined,
+  quantity?: CanonicalMeasure, previousQuantity?: CanonicalMeasure
+): boolean {
+  if (value !== previousValue) {
+    // Multiplication/division at a dimensional boundary can perturb an equal
+    // bound. Same-scale and coded identities still compare their exact values.
+    const near = Math.abs(value - previousValue) <=
+      2 * Number.EPSILON * Math.max(Math.abs(value), Math.abs(previousValue));
+    const scale = near && quantity && previousQuantity
+      ? convertQuantityValue(1, quantity, previousQuantity) : null;
+    if (scale === null || scale === 1) return value < previousValue;
+  }
+  if (strict !== previousStrict) return strict;
+  return index === undefined || previousIndex === undefined || index >= previousIndex;
+}
+function selectComparableMaximum(previous: SelectedR5Maximum, candidate: SelectedR5Maximum): SelectedR5Maximum {
+  const sameIdentity = sameMaximumIdentity(previous.quantity, candidate.quantity);
+  const candidateBasis = candidate.comparisonBasis ?? candidate.quantity;
+  let previousBasis = previous.comparisonBasis ?? previous.quantity;
+  if (sameIdentity && !getQuantityComparisonUnit(previousBasis) && getQuantityComparisonUnit(candidateBasis)) {
+    previous.comparisonBasis = previousBasis = candidateBasis;
+  }
+  const value = convertQuantityValue(candidate.quantity.value!, candidateBasis, previousBasis);
+  if (value === null) return candidate;
+  if (!preferMaximum(value, candidate.strict, candidate.index, previous.quantity.value!,
+      previous.strict, previous.index, candidateBasis, previousBasis)) return previous;
+  if (!sameIdentity) return candidate;
+  // Identity and compatible-unit indexes can refer to the same group. Update
+  // that group in place so a lower code-only bound keeps its established scale.
+  previous.quantity = candidate.quantity;
+  previous.strict = candidate.strict;
+  previous.index = candidate.index;
+  previous.comparisonBasis = getQuantityComparisonUnit(candidateBasis) ? candidateBasis : previousBasis;
+  return previous;
+}
+
+/** Select a comparable numeric upper bound for R5's singular maximum field.
+ * Equal bounds retain the last annotated source; a strict bound wins an equal
+ * inclusive one. Approximate siblings stay retained without replacing an
+ * available definite upper bound. Prefer the dose-compatible group when known.
+ * Only interleaved units allocate group state. */
+export function selectR5Maximum(
+  current: R5MaximumSelection | undefined, quantity: CanonicalMeasure, index?: number, dose?: CanonicalMeasure
+): R5MaximumSelection {
+  const operator = getQuantityComparator(quantity);
+  const definite = quantity.value !== undefined && (!operator || operator === "<" || operator === "<=");
+  const strict = operator === "<";
+  if (!current || definite && !current.definite) return { quantity, definite, strict, index };
+  if (!definite) {
+    if (!current.definite) { current.quantity = quantity; current.strict = strict; current.index = index; }
+    return current;
+  }
+  const candidate: SelectedR5Maximum = { quantity, definite, strict, index };
+  if (!current.groups) {
+    if (sameMaximumIdentity(current.quantity, quantity)) return selectComparableMaximum(current, candidate);
+    current.groups = new Map();
+    const previous: SelectedR5Maximum = {
+      quantity: current.quantity, comparisonBasis: current.comparisonBasis,
+      definite: current.definite, strict: current.strict, index: current.index
+    };
+    const previousKey = maximumUnitKey(previous.quantity);
+    if (previousKey !== undefined) current.groups.set(previousKey, previous);
+    const previousUnit = maximumComparisonUnitKey(previous.comparisonBasis ?? previous.quantity);
+    if (previousUnit !== undefined) current.groups.set(previousUnit, previous);
+  }
+  let selected = candidate;
+  const key = maximumUnitKey(quantity);
+  if (key !== undefined) {
+    const previous = current.groups.get(key);
+    if (previous) selected = selectComparableMaximum(previous, selected);
+    current.groups.set(key, selected);
+  }
+  // Resolve identity first: a labeled same-code sibling establishes the
+  // scale for the group's minimum, even if that minimum has no display unit.
+  const unit = maximumComparisonUnitKey(selected.comparisonBasis ?? selected.quantity);
+  if (unit !== undefined) {
+    const previous = current.groups.get(unit);
+    if (previous && previous !== selected) selected = selectComparableMaximum(previous, selected);
+    current.groups.set(unit, selected);
+  }
+  if (dose) {
+    const identity = maximumUnitKey(dose);
+    const coded = identity === undefined ? undefined : current.groups.get(identity);
+    const dimension = maximumComparisonUnitKey(dose) ??
+      (coded ? maximumComparisonUnitKey(coded.comparisonBasis ?? coded.quantity) : undefined);
+    const compatible = (dimension === undefined ? undefined : current.groups.get(dimension)) ?? coded;
+    if (compatible) selected = compatible;
+  }
+  current.quantity = selected.quantity; current.definite = selected.definite;
+  current.strict = selected.strict; current.index = selected.index;
+  current.comparisonBasis = selected.comparisonBasis;
+  return current;
+}
+
+/** Shared wire serializer for current maxima and retained R5 edit baselines. */
+export function periodMaximumToR5(amount: CanonicalMeasure, period: CanonicalMeasure, source?: object): FhirRatio {
+  const { scope: _scope, _scope: _scopeMetadata, valueQuantity: _amount, valueInteger: _count, _valueInteger: _countMetadata,
+    valueExpression: _expression, period: _period, text: _text, _text: _textMetadata,
+    numerator: _numerator, denominator: _denominator, ...metadata
+  } = (source ?? {}) as Record<string, unknown>;
+  return { ...metadata, numerator: generalQuantityForR5(amount), denominator: simpleQuantityForR5(period) };
+}
+
+/** Write the requested external shape directly from clinical facts. The
+ * common vocabulary/source work is shared; no output version is the input to
+ * another version's serializer. Target-specific choices are made as written. */
+function administrationToWire(
+  a: CanonicalAdministration,
+  target: "r5" | "r6",
+  options?: FhirProjectionOptions,
+  currentSyntax?: CanonicalSigClause
+): FhirDosage | FhirR6Dosage {
+  // The fresh parser construction passes its current, already-scoped clause
+  // explicitly for coding/source annotations. Edited/imported public courses
+  // reconstruct that view from their authoritative native facts instead.
+  // Numeric doses, recurrence and limits below ALWAYS use native fields.
+  // A shared delay may have moved from this member to the owning stage.
+  // The source annotation view is no longer current in that case: deriving
+  // it from live native facts prevents applying the same delay twice.
+  const currentView =
+    currentSyntax?.schedule?.administrationOffsetMinutes === a.delayMinutes ? currentSyntax : undefined;
+  const clause =
+    currentView ??
+    (a.syntax && (!a.provenance || a.provenance.format === "syntax")
+      ? clauseForAdministration(a)
+      : undefined);
+  const context = clause ? serializeCanonicalContext(clause, options) : undefined;
+  const scheduleMetadata = clause ? serializeCanonicalSchedule(clause.schedule, options, clause.clinicalQuantity, clause.prn?.enabled) : undefined;
+  const output: Record<string, unknown> = clause
+    ? Object.assign({}, context)
+    : Object.assign({}, a.provenance?.data, a.provenance?.retained);
+  const source =
+    a.provenance?.format === "r6"
+      ? (a.provenance.data as FhirR6Dosage)
+      : a.provenance?.retained ?? (a.provenance?.data as EzDosage | undefined);
+  // R6 has no sequence primitive. Preserve its R5 annotation on the existing
+  // typed source carrier, alongside values normalized by one-based grouping.
+  // A fresh live row owns a replacement or removed companion.
+  if (a.provenance?.format === "r5") {
+    const { sequence, _sequence: primitive } = a.provenance.data as FhirDosage;
+    const normalized = sequence !== undefined && (!Number.isInteger(sequence) || sequence < 1);
+    const retain = normalized || primitive !== undefined;
+    const extensions = output.extension as FhirExtension[] | undefined;
+    const retained = extensions?.find(item => item.url === DOSAGE_RETAINED_R5_SEQUENCE_URL);
+    if (retain ? retained?.valueDecimal !== sequence ||
+        !equalStructuredValues(retained?._valueDecimal, primitive) : retained !== undefined) {
+      const next = extensions?.filter(item => item !== retained) ?? [];
+      if (retained) next.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [retained] });
+      if (retain) {
+        const { valueDecimal: _oldValue, _valueDecimal: _oldPrimitive, ...metadata } = retained ?? {};
+        next.push({ ...metadata, url: DOSAGE_RETAINED_R5_SEQUENCE_URL,
+          ...(sequence !== undefined ? { valueDecimal: sequence } : {}),
+          ...(primitive !== undefined ? { _valueDecimal: primitive } : {}) });
+      }
+      assign(output, "extension", next.length ? next : undefined);
+    }
+    if (target === "r6") delete output._sequence;
+  }
+  delete output.sequence;
+  let wireTiming = timingToWire(a.schedule, target);
+  if (clause && wireTiming) {
+    const annotations = scheduleMetadata?.timing;
+    const r = wireTiming.repeat;
+    if (r) {
+      const source = a.schedule?.recurrence;
+      const annotationsRepeat = annotations?.repeat;
+      wireTiming.repeat = {
+        ...r,
+        ...(annotationsRepeat?.extension ? { extension: annotationsRepeat.extension } : {}),
+        ...(source?.courseLength
+          ? {
+              boundsDuration:
+                target === "r5"
+                  ? generalQuantityForR5(serializeDuration(source.courseLength))
+                  : serializeDuration(source.courseLength),
+            }
+          : {}),
+        ...(source?.courseLengthRange ? { boundsRange: serializeRange(source.courseLengthRange, target, true) } : {}),
+      };
+    }
+    if (annotations?._event) wireTiming._event = annotations._event;
+    if (annotations?.code) wireTiming.code = annotations.code;
+    // Shared marker serialization includes explicit signed offsets and
+    // absolute+duration constraints, never clinical interpretation.
+    if (scheduleMetadata?.modifierExtension) output.modifierExtension = scheduleMetadata.modifierExtension;
+  }
+  if (clause && wireTiming?.repeat && scheduleMetadata?.timing?.repeat) {
+    // Wire positive/unsigned integer slots do not express clinical zero or
+    // signed fractional offsets; their common serializer owns those encodings.
+    assign(
+      wireTiming.repeat as Record<string, unknown>,
+      "frequency",
+      scheduleMetadata.timing.repeat.frequency
+    );
+    assign(wireTiming.repeat as Record<string, unknown>, "offset", scheduleMetadata.timing.repeat.offset);
+  }
+  if (!clause || a.provenance) wireTiming = updateNativeTimingAnnotations(a, output, wireTiming);
+  if (wireTiming?.repeat && (a.schedule?.recurrence?.clocks !== undefined ||
+      wireTiming.repeat._timeOfDay?.some(Boolean))) {
+    const sourceRepeat = (a.provenance?.data as FhirDosage | FhirR6Dosage | undefined)?.timing?.repeat;
+    const repeat = projectTimingClocks(wireTiming.repeat, sourceRepeat, target);
+    if (repeat !== wireTiming.repeat) wireTiming = { ...wireTiming, repeat };
+  }
+  const calendarBounds = wireTiming?.repeat?.boundsPeriod;
+  const anchoredQuantity = calendarBounds
+    ? wireTiming?.repeat?.boundsDuration ?? a.anchoredLength?.quantity : a.anchoredLength?.quantity;
+  const anchoredRange = calendarBounds
+    ? wireTiming?.repeat?.boundsRange ?? a.anchoredLength?.range : a.anchoredLength?.range;
+  const currentRange = wireTiming?.repeat?.boundsRange ??
+    (anchoredRange ? serializeRange(anchoredRange, target, Boolean(clause)) : undefined);
+  const modifiers = output.modifierExtension as FhirR6Extension[] | undefined;
+  const oldDuration = modifiers?.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
+  const oldMemberLength = oldDuration?.extension?.find(child => child.url === "courseLength");
+  const memberLength = calendarBounds && !a.anchoredLength &&
+    (a.schedule?.recurrence?.courseLength || a.schedule?.recurrence?.courseLengthRange);
+  const projection = currentRange ? projectCourseDurationRange(currentRange) : undefined;
+  if (projection?.source || oldDuration && (wireTiming?.repeat?.boundsRange || wireTiming?.repeat?.boundsDuration) ||
+      oldDuration?.extension?.some(child => child.url === "projectedRange") ||
+      (anchoredRange || anchoredQuantity) && !oldDuration) {
+    const replacement: FhirR6Extension | undefined = projection?.source
+      ? { ...projection.source, extension: wireTiming?.repeat?.boundsRange && !calendarBounds ? projection.source.extension :
+          projection.source.extension!.filter(child => child.url !== "projectedRange") }
+      : anchoredRange && projection
+        ? { url: ANCHORED_COURSE_DURATION_EXTENSION_URL, valueRange: projection.range }
+        : anchoredQuantity
+          ? { url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
+              valueQuantity: generalQuantityForR5(clause ? serializeDuration(anchoredQuantity) : anchoredQuantity) }
+          : undefined;
+    const next = modifiers?.filter(item => item !== oldDuration) ?? [];
+    if (replacement) {
+      const { valueRange: _oldRange, valueQuantity: _oldQuantity, extension: priorChildren, ...metadata } = oldMemberLength ?? oldDuration ?? {};
+      const unknown = priorChildren?.filter(child => child.url !== "low" && child.url !== "high" &&
+        child.url !== "projectedRange" && child.url !== "rangeMetadata");
+      let children = replacement.extension;
+      if (children && priorChildren) {
+        const retained: FhirR6Extension[] = [];
+        for (const child of children) {
+          const prior = child.url === "low" || child.url === "high"
+            ? priorChildren.find(item => item.url === child.url) : undefined;
+          retained.push(prior ? { ...prior, ...child } : child);
+        }
+        children = retained;
+      }
+      const length = { ...metadata, ...replacement,
+        ...(children ? { extension: unknown?.length ? [...children, ...unknown] : children } : {}) };
+      if (memberLength) {
+        const siblings = oldMemberLength ? oldDuration!.extension!.filter(child => child !== oldMemberLength) : [];
+        next.push({ ...(oldMemberLength ? oldDuration : {}), url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
+          extension: [{ ...length, url: "courseLength" }, ...siblings] });
+      } else next.push(length);
+    } else if (oldDuration) output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+      { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [oldDuration] }];
+    assign(output, "modifierExtension", next.length ? next : undefined);
+  }
+  if (calendarBounds && wireTiming?.repeat &&
+      (wireTiming.repeat.boundsDuration || wireTiming.repeat.boundsRange)) {
+    // Period owns the single bounds[x] slot; its independent length is carried
+    // by the existing anchored-duration modifier above.
+    const { boundsDuration: _duration, boundsRange: _range, ...repeat } = wireTiming.repeat;
+    wireTiming = { ...wireTiming, repeat };
+  } else if (projection && wireTiming?.repeat?.boundsRange && projection.range !== currentRange)
+    wireTiming = { ...wireTiming, repeat: { ...wireTiming.repeat, boundsRange: projection.range } };
+  // A qualified carrier duration can leave no core Timing fields after its
+  // existing annotation projection. Keep supplied Timing metadata intact.
+  if (wireTiming?.repeat && !a.schedule?.recurrence?.provenance &&
+      Object.keys(wireTiming.repeat).length === 0) {
+    const { repeat: _emptyRepeat, ...remaining } = wireTiming;
+    wireTiming = a.schedule?.provenance || Object.keys(remaining).length ? remaining : undefined;
+  }
+  assign(output, "timing", wireTiming);
+  assign(output, "text", a.text);
+  assign(output, "patientInstruction", a.patientInstruction);
+  if (!clause) {
+    assign(output, "route", a.route);
+    assign(output, "method", a.method);
+  }
+  // Native instruction edits control the list even when the original grammar
+  // remains available as evidence. Reuse only generated element annotations,
+  // never source-only instructions that a clinician removed or replaced.
+  let additionalInstructions = a.additionalInstructions;
+  if (clause && context?.additionalInstruction && additionalInstructions) {
+    let generatedIndex = 0;
+    additionalInstructions = additionalInstructions.map((instruction) => {
+      const metadata = instruction.text?.trim() ? context.additionalInstruction?.[generatedIndex++] : undefined;
+      const projected: Record<string, unknown> = { ...metadata, ...instruction };
+      const extensions = (instruction as FhirCodeableConcept).extension;
+      if (extensions) {
+        const frames = metadata?.extension?.find(field => field.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL);
+        if (frames && !extensions.some(field => field.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL))
+          projected.extension = [...extensions, frames];
+      }
+      assign(projected, "text", instruction.text);
+      assign(projected, "coding", instruction.coding);
+      return projected;
+    });
+  }
+  const warnings = independentGraphWarningAdvice((clause ?? a.syntax)?.instructionGraph,
+    (clause ?? a.syntax)?.additionalInstructions);
+  if (warnings) additionalInstructions = [...(additionalInstructions ?? []), ...warnings];
+  assign(output, "additionalInstruction", additionalInstructions);
+  // A supplied indication already expresses PRN meaning. Keep an absent
+  // external boolean absent while execution consumes the typed native fact.
+  assign(output, "asNeeded", a.asNeeded === true && source?.asNeeded === undefined &&
+    source?.asNeededFor?.length ? undefined : a.asNeeded);
+  assign(
+    output,
+    "doseAndRate",
+    a.amounts?.map((value) => {
+      const original = value.provenance as NonNullable<FhirR6Dosage["doseAndRate"]>[number] | undefined;
+      const projectedDoseRange = value.range && serializeRange(value.range, target, false, Boolean(clause));
+      const projectedRateRange = value.rateRange && serializeRange(value.rateRange, target);
+      const ratioExtensions = (value.rateRatio as { extension?: FhirR6Extension[] } | undefined)?.extension;
+      const projectedRatioExtensions = target === "r5" && ratioExtensions?.length
+        ? quantityAnnotationExtensions(ratioExtensions, "r5") : ratioExtensions;
+      const externalR5 = target === "r6" && a.provenance?.format === "r5";
+      const doseConflict = externalR5 && (value.quantity !== undefined
+        ? value.range !== undefined || value.expression !== undefined
+        : value.range !== undefined && value.expression !== undefined);
+      const rateConflict = externalR5 && (value.rate !== undefined
+        ? value.rateRange !== undefined || value.rateRatio !== undefined || value.rateExpression !== undefined
+        : value.rateRange !== undefined
+          ? value.rateRatio !== undefined || value.rateExpression !== undefined
+          : value.rateRatio !== undefined && value.rateExpression !== undefined);
+      if (
+        !doseConflict && !rateConflict && !clause &&
+        original &&
+        original.doseQuantity === value.quantity &&
+        original.doseRange === projectedDoseRange &&
+        original.rateQuantity === value.rate &&
+        (target !== "r5" || simpleQuantityForR5(value.quantity) === value.quantity &&
+          simpleQuantityForR5(value.rate) === value.rate &&
+          generalQuantityForR5(value.rateRatio?.numerator) === value.rateRatio?.numerator &&
+          simpleQuantityForR5(value.rateRatio?.denominator) === value.rateRatio?.denominator &&
+          projectedRatioExtensions === ratioExtensions) &&
+        original.rateRange === projectedRateRange &&
+        original.rateRatio === value.rateRatio &&
+        original.type === value.role &&
+        original.doseExpression === value.expression &&
+        original.rateExpression === value.rateExpression &&
+        (target === "r6"
+          ? !Object.prototype.hasOwnProperty.call(original, "modifierExtension") &&
+            !(value.rateRatio?.numerator?.comparator && original.rateRatio?.numerator?.extension?.length)
+          : !value.expression &&
+            !value.rateExpression &&
+            !value.quantity?.comparator &&
+            !value.rate?.comparator &&
+            !value.range?.low?.comparator &&
+            !value.range?.high?.comparator &&
+            !value.rateRange?.low?.comparator &&
+            !value.rateRange?.high?.comparator &&
+            !value.rateRatio?.denominator?.comparator &&
+            value.rateRatio?.numerator?.comparator !== "~" &&
+            !(value.rateRatio?.numerator?.comparator && original.rateRatio?.numerator?.extension?.length) &&
+            !Object.prototype.hasOwnProperty.call(original, "modifierExtension"))
+      )
+        return original;
+      const rate = Object.assign({}, value.provenance);
+      // Both strict doseAndRate slots are Element. Keep editable modifier
+      // children in their existing extension wrapper in either wire version.
+      projectR6ModifierWrapper(rate, R5_RATE_MODIFIERS_R6_URL);
+      const code = (q: CanonicalMeasure | undefined) =>
+        q && clause
+          ? {
+              ...q,
+              ...getStandardDoseUnitCoding(q.unit),
+              ...(q.system ? { system: q.system } : {}),
+              ...(q.code ? { code: q.code } : {}),
+            }
+          : q;
+      assign(
+        rate,
+        "doseQuantity",
+        (target === "r5" ? simpleQuantityForR5 : simpleQuantityForR6)(code(value.quantity))
+      );
+      assign(
+        rate,
+        "doseRange",
+        projectedDoseRange
+      );
+      assign(rate, "doseExpression", target === "r6" ? value.expression : undefined);
+      assign(
+        rate,
+        "rateQuantity",
+        (target === "r5" ? simpleQuantityForR5 : simpleQuantityForR6)(code(value.rate))
+      );
+      assign(
+        rate,
+        "rateRange",
+        projectedRateRange
+      );
+      assign(
+        rate,
+        "rateRatio",
+        value.rateRatio && {
+          ...value.rateRatio,
+          ...(projectedRatioExtensions !== ratioExtensions ? { extension: projectedRatioExtensions } : {}),
+          ...(value.rateRatio.numerator
+            ? {
+                numerator:
+                  target === "r5"
+                    ? generalQuantityForR5(code(value.rateRatio.numerator))
+                    : quantityForR6(code(value.rateRatio.numerator)),
+              }
+            : {}),
+          ...(value.rateRatio.denominator
+            ? {
+                denominator:
+                  (target === "r5" ? simpleQuantityForR5 : simpleQuantityForR6)(code(value.rateRatio.denominator)),
+              }
+            : {}),
+        }
+      );
+      assign(rate, "rateExpression", target === "r6" ? value.rateExpression : undefined);
+      assign(rate, "type", value.role);
+      if (doseConflict || rateConflict) retainConflictingAmountChoices(rate, doseConflict, rateConflict);
+      if (target === "r5" && (value.expression || value.rateExpression) &&
+          Object.keys(rate).every(key => key === "id" || rate[key] === undefined ||
+            (Array.isArray(rate[key]) && !(rate[key] as unknown[]).length)))
+        rate.extension = [{ url: R5_EXPRESSION_SLOT_SOURCE_URL, extension: [
+          ...(value.expression ? [{ url: "doseExpression", valueExpression: value.expression }] : []),
+          ...(value.rateExpression ? [{ url: "rateExpression", valueExpression: value.rateExpression }] : [])
+        ] }];
+      return rate;
+    })
+  );
+  const oldSite = a.provenance?.format === "r6"
+    ? output.site as FhirR6Dosage["site"] : a.provenance?.retained?.site;
+  const elementSpatial = oldSite?.extension?.find(e => e.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL);
+  let concept: FhirCodeableConcept | undefined = clause ? context?.site : a.target;
+  if (!clause && a.targetCount !== getBodySiteAdministrationTargetCount(concept)) {
+    const marker = buildBodySiteAdministrationTargetCountExtension(a.targetCount);
+    const extensions = (concept?.extension ?? []).filter(
+      (e) => e.url !== BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL
+    );
+    if (marker) extensions.push(marker);
+    if (concept || marker) concept = { ...concept, ...(extensions.length ? { extension: extensions } : {}) };
+    if (concept && !extensions.length) delete concept.extension;
+  }
+  if (a.siteSpatialRelation) {
+    const conceptSpatial = concept?.extension?.find(e => e.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL);
+    if (target === "r5" && !conceptSpatial) {
+      const spatial = elementSpatial
+        ? quantityAnnotationExtensions([elementSpatial], "r5")[0] as FhirExtension
+        : buildBodySiteSpatialRelationExtension(a.siteSpatialRelation);
+      if (spatial) concept = { ...concept, extension: [...(concept?.extension ?? []), spatial] };
+    } else if (target === "r6" && elementSpatial && conceptSpatial && a.provenance?.format === "r5" &&
+        !oldSite?.concept?.extension?.some(e => e.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL) &&
+        equalStructuredValues(conceptSpatial, quantityAnnotationExtensions([elementSpatial], "r5")[0])) {
+      // Remove only the R5 projection's copy of the wrapper relation. An
+      // independently authored concept relation keeps its own location.
+      const extension = concept!.extension!.filter(e => e !== conceptSpatial);
+      concept = { ...concept };
+      if (extension.length) concept.extension = extension;
+      else delete concept.extension;
+      if (!Object.keys(concept).length) concept = undefined;
+    }
+  }
+  if (target === "r5") {
+    assign(output, "site", concept);
+    delete output.siteReference;
+  } else if (
+    concept ||
+    a.siteReference || a.siteSpatialRelation ||
+    (oldSite && Object.keys(oldSite).some((key) => key !== "concept" && key !== "reference"))
+  ) {
+    const site: Record<string, unknown> = { ...oldSite };
+    assign(site, "concept", concept);
+    assign(site, "reference", a.siteReference);
+    if (a.siteSpatialRelation && !elementSpatial &&
+        !concept?.extension?.some(e => e.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL)) {
+      const spatial = buildBodySiteSpatialRelationExtension(a.siteSpatialRelation);
+      if (spatial) site.extension = [...(oldSite?.extension ?? []), spatial];
+    }
+    output.site = site;
+  } else delete output.site;
+  // A retained R6 delta is sparse; unrelated live lifted R5 fields remain
+  // authoritative. In particular, a safety-only delta must not hide the
+  // original authored condition coding/text on the R5 row.
+  const sourceRow = a.provenance?.format === "r5" ? a.provenance.data as EzDosage : undefined;
+  const conditionSource = sourceRow?.condition !== undefined ? sourceRow : source;
+  const sourceCondition = conditionSource ? getDosageCondition(conditionSource as EzDosage) : undefined;
+  if (conditionSource?.condition?.length === 0 && output.modifierExtension) {
+    const kept: FhirExtension[] = [], retired: FhirExtension[] = [];
+    for (const marker of output.modifierExtension as FhirExtension[])
+      (marker.url === DOSAGE_CONDITION_R5_URL ? retired : kept).push(marker);
+    if (retired.length) {
+      assign(output, "modifierExtension", kept.length ? kept : undefined);
+      output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+        { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: retired }];
+    }
+  }
+  if (target === "r5") {
+    delete output.condition;
+    if (a.predicate || sourceCondition || conditionSource?.condition !== undefined ||
+        sourceRow?.modifierExtension?.some(item => item.url === DOSAGE_CONDITION_R5_URL))
+      setDosageCondition(output as FhirDosage, a.predicate, a.calendarPredicate);
+  } else {
+    // An R5 source may carry only a modifier predicate. Equal clinical
+    // predicates do not imply that a native condition array already exists.
+    // Preserve real native source arrays, otherwise write the known predicate.
+    assign(
+      output,
+      "condition",
+      conditionSource?.condition?.length && same(sourceCondition, a.predicate)
+        ? conditionSource.condition.map(condition => {
+            const valueQuantity = quantityForR6(condition.valueQuantity);
+            return valueQuantity === condition.valueQuantity ? condition : { ...condition, valueQuantity };
+          })
+        : a.predicate
+        ? [conditionToR6(a.predicate)]
+        : undefined
+    );
+  }
+  // A producer may leave unequal member delays after lifting the common
+  // stage start. Emit that current native fact even without a syntax view.
+  const previousDelay = getAdministrationOffsetMinutes(output as FhirDosage);
+  if (previousDelay !== a.delayMinutes) {
+    const previous = (output.modifierExtension as FhirExtension[] | undefined) ?? [];
+    const marker = previous.find(item => item.url === ADMINISTRATION_OFFSET_EXTENSION_URL);
+    const modifiers = previous.filter(item => item !== marker);
+    if (a.delayMinutes !== undefined) modifiers.push({
+      ...marker, url: ADMINISTRATION_OFFSET_EXTENSION_URL,
+      valueQuantity: { ...marker?.valueQuantity, value: a.delayMinutes,
+        unit: "minutes", system: "http://unitsofmeasure.org", code: "min" },
+    });
+    else if (marker) output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+      { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [marker] }];
+    assign(output, "modifierExtension", modifiers.length ? modifiers : undefined);
+  }
+  if (a.calendarPredicate) setDosageCondition(output as FhirDosage, a.predicate, a.calendarPredicate);
+  if (
+    a.excludedDates?.length ||
+    (output.modifierExtension && !same(getDosageExcludedDates({
+      modifierExtension: output.modifierExtension as FhirExtension[],
+    }), a.excludedDates ?? []))
+  )
+    setDosageExcludedDates(output as FhirDosage, a.excludedDates ?? []);
+  if (
+    a.excludedWeekdays?.length ||
+    (source && !same(getDosageExcludedWeekdays(source as FhirDosage), a.excludedWeekdays ?? []))
+  )
+    setDosageExcludedWeekdays(output as FhirDosage, a.excludedWeekdays ?? []);
+  if (a.choice || (source && !a.choiceIssue && getDosageAlternativeChoice(source)))
+    setDosageAlternativeChoice(
+      output as FhirDosage,
+      a.choice ? { ...a.choice, selectionBehavior: "exactly-one" } : undefined
+    );
+  if (clause?.clinicalQuantity?.carrierMaterial?.text) {
+    output.extension = [
+      ...((output.extension as FhirDosage["extension"]) ?? []),
+      infusionCarrierMaterialExtension(clause.clinicalQuantity.carrierMaterial),
+    ];
+  }
+  if (a.cycleDays || (source && getCycleDayConstraint(source as FhirDosage))) {
+    const previous = output.modifierExtension as FhirDosage["modifierExtension"];
+    let found = false;
+    const modifiers: FhirExtension[] = [];
+    for (const marker of previous ?? []) {
+      if (marker.url !== CYCLE_DAY_ELIGIBILITY_EXTENSION_URL) modifiers.push(marker);
+      else if (!found) {
+        found = true;
+        if (a.cycleDays) modifiers.push(cycleDayConstraintExtension(a.cycleDays, marker));
+      }
+    }
+    if (!found && a.cycleDays) modifiers.push(cycleDayConstraintExtension(a.cycleDays));
+    output.modifierExtension = modifiers.length ? modifiers : undefined;
+  }
+  const phaseParticipant = a.phasePredecessors !== undefined && a.sourceMember !== undefined;
+  if (
+    a.phaseOrigin || a.phaseStart || a.phaseEnd || phaseParticipant ||
+    (source &&
+      !a.phaseOriginIssue &&
+      source.modifierExtension?.some((e) => e.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL))
+  ) {
+    const existing = (output.modifierExtension as FhirDosage["modifierExtension"]) ?? [];
+    const withPhaseIdentity = (marker: FhirExtension): FhirExtension => {
+      if (!phaseParticipant) return marker;
+      const children = marker.extension ?? [];
+      const identity = children.find(child => child.url === "sourceMember");
+      const predecessors = children.filter(child => child.url === "predecessor");
+      if (identity?.valueInteger === a.sourceMember && predecessors.length === a.phasePredecessors!.length &&
+          predecessors.every((child, index) => child.valueInteger === a.phasePredecessors![index])) return marker;
+      const retained = children.filter(child => child.url !== "sourceMember" && child.url !== "predecessor");
+      retained.push({ ...identity, url: "sourceMember", valueInteger: a.sourceMember });
+      for (let index = 0; index < a.phasePredecessors!.length; index++)
+        retained.push({ ...predecessors[index], url: "predecessor", valueInteger: a.phasePredecessors![index] });
+      return { ...marker, extension: retained };
+    };
+    const phaseOrigin = simpleQuantityForR5(a.phaseOrigin);
+    // A member interval uses the existing relative step fields. Convert its
+    // scalar origin to the equivalent start when an end or a newly generated
+    // dependency identity needs children. Preserve imported legacy scalar markers.
+    const phaseStart = a.phaseStart ? boundaryToWire(a.phaseStart)
+      : (a.phaseEnd || phaseParticipant && !source) && a.phaseOrigin
+        ? boundaryToWire({ anchor: "treatment-start", displacement: a.phaseOrigin }) : undefined;
+    const phaseEnd = a.phaseEnd ? boundaryToWire(a.phaseEnd) : undefined;
+    let generatedInterval: FhirExtension | undefined;
+    let found = false;
+    let changed: FhirExtension[] | undefined;
+    for (let index = 0; index < existing.length; index++) {
+      const marker = existing[index];
+      if (marker.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL) {
+        if (changed) changed.push(marker);
+        continue;
+      }
+      found = true;
+      let replacement: FhirExtension | undefined;
+      if (phaseStart || phaseEnd) {
+        const previous = marker.valueQuantity ? undefined : decodeR6SourceMetadata(marker, "step");
+        if (equalStructuredValues(previous?.start, phaseStart) && equalStructuredValues(previous?.end, phaseEnd))
+          replacement = marker;
+        else {
+          generatedInterval ??= encodeR6SourceMetadata(PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
+            { ...(phaseStart ? { start: phaseStart } : {}), ...(phaseEnd ? { end: phaseEnd } : {}) }, "step");
+          const { valueQuantity: _oldOrigin, extension: children, ...metadata } = marker;
+          let previousStart: FhirExtension | undefined, previousEnd: FhirExtension | undefined;
+          const retained: FhirExtension[] = [];
+          for (const child of children ?? []) {
+            if (child.url === "start") previousStart ??= child;
+            else if (child.url === "end") previousEnd ??= child;
+            else retained.push(child);
+          }
+          const current: FhirExtension[] = [];
+          for (const child of generatedInterval.extension ?? [])
+            current.push({ ...(child.url === "start" ? previousStart : previousEnd), ...child });
+          replacement = { ...metadata, extension: [...current, ...retained] };
+        }
+      } else if (phaseOrigin) {
+        if (marker.valueQuantity === phaseOrigin) replacement = marker;
+        else {
+          const { extension: children, ...metadata } = marker;
+          replacement = { ...metadata, valueQuantity: phaseOrigin };
+          if (children?.length) output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+            { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [marker] }];
+        }
+      } else if (phaseParticipant) {
+        const { valueQuantity: _oldOrigin, ...metadata } = marker;
+        replacement = { ...metadata, extension: marker.extension?.filter(child => child.url !== "start" && child.url !== "end") };
+      }
+      if (replacement) replacement = withPhaseIdentity(replacement);
+      if (replacement !== marker && !changed) changed = existing.slice(0, index);
+      if (changed && replacement) changed.push(replacement);
+    }
+    if (!found && (phaseOrigin || phaseStart || phaseEnd || phaseParticipant))
+      (changed ??= existing.slice()).push(withPhaseIdentity(phaseStart || phaseEnd
+        ? generatedInterval ?? encodeR6SourceMetadata(PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
+          { ...(phaseStart ? { start: phaseStart } : {}), ...(phaseEnd ? { end: phaseEnd } : {}) }, "step")
+        : phaseOrigin ? { url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: phaseOrigin }
+        : { url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL }));
+    if (changed) assign(output, "modifierExtension", changed.length ? changed : undefined);
+  }
+  // Whole-course display baselines belong to the FINAL output, never to
+  // a projected component copied from an earlier edited source. Remove only
+  // recognized old baselines; native course provenance retains their history.
+  const priorExtensions = output.extension as FhirExtension[] | undefined;
+  let projectedGraph = false;
+  if (priorExtensions) {
+    let kept: FhirExtension[] | undefined;
+    for (let i = 0; i < priorExtensions.length; i++) {
+      const e = priorExtensions[i];
+      if (e.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL) projectedGraph = true;
+      if (isRenderedInstructionMarker(e) || isSourceAgreementMarker(e)) {
+        if (!kept) kept = priorExtensions.slice(0, i);
+        if (hasUnrecognizedEditMetadata(e))
+          kept.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [e] });
+      } else if (kept) kept.push(e);
+    }
+    if (kept) assign(output, "extension", kept.length ? kept : undefined);
+  }
+  let agreedSourceFields: FhirExtension[] | undefined;
+  if (target === "r6") {
+    // A just-compiled clause owns its emitted wording. Carry the same source
+    // agreement used by R5 without requiring a graph or a clinical replay hash.
+    const agreedText = a.text !== undefined &&
+      (currentSyntax !== undefined || a.provenance?.sourceTextAgreed === true);
+    const agreedGraphText = a.provenance?.sourceTextAgreed === true && projectedGraph &&
+      !administrationHasAmountFacts(a);
+    const clocks = a.provenance?.sourceHasStructuredClocks ??
+      (clause?.instructionGraph ? Boolean(a.schedule?.recurrence?.clocks?.length) : undefined);
+    const events = a.provenance?.sourceHasStructuredEvents ??
+      (clause?.instructionGraph ? Boolean(a.schedule?.recurrence?.anchors?.length) : undefined);
+    const site = a.provenance?.sourceHasStructuredSite ??
+      (clause?.instructionGraph ? Boolean(a.target || a.siteReference) : undefined);
+    if (clocks !== undefined || events !== undefined || site !== undefined || agreedText) {
+      // R6 current-source replay remains unverified. Preserve an established
+      // component-text baseline independently of the primary-field evidence
+      // that distinguishes deletions from independent graph facts.
+      const fields: FhirExtension[] = [{ url: "sourceAgreement", valueBoolean: agreedGraphText }];
+      if (agreedText) {
+        fields.push({ url: "sourceTextAgreed", valueBoolean: true });
+        if (agreedGraphText) agreedSourceFields = fields;
+        fields.push({ url: "textFingerprint", valueString:
+          (a.provenance && getDosageSourceTextFingerprint(a.provenance.data)) ?? dosageTextFingerprint({ text: a.text }) });
+      }
+      if (clocks !== undefined) fields.push({ url: "sourceHasStructuredClocks", valueBoolean: clocks });
+      if (events !== undefined) fields.push({ url: "sourceHasStructuredEvents", valueBoolean: events });
+      if (site !== undefined) fields.push({ url: "sourceHasStructuredSite", valueBoolean: site });
+      output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+        { url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: fields }];
+    }
+  }
+  const sourceMaxima = projectSourceMaxima(output, target);
+  // No understood safety concept is serialized through a generic bag.
+  // Unknown external annotations survive via the original wire provenance.
+  if (target === "r6") {
+    // Saved row-profile markers do not belong inside an emitted native R6
+    // component. The importer already restored them into native facts.
+    const oldModifiers = output.modifierExtension as FhirExtension[] | undefined;
+    let contextMarker: FhirExtension | undefined, contextSources: FhirExtension[] | undefined;
+    if (oldModifiers) {
+      const kept: FhirExtension[] = [];
+      for (const extension of oldModifiers) {
+        if (extension.url === DOSAGE_DETAILS_R5_URL) {
+          // R6's missing-context modifier can carry authored Element/child
+          // annotations. R5 row codec markers retain their separate owner.
+          if (a.provenance?.format === "r6" || a.provenance?.retained?.modifierExtension !== undefined) {
+            if (!contextMarker) contextMarker = extension;
+            else (contextSources ??= []).push(extension);
+          }
+          continue;
+        }
+        if (extension.url === DOSAGE_CONDITION_R5_URL) {
+          const generatedPredicate = exactConditionBridgePredicate(extension);
+          if (generatedPredicate && same(generatedPredicate, a.predicate)) continue;
+          const nativeCondition = Boolean((output.condition as FhirR6Dosage["condition"])?.length);
+          const ownsCondition = nativeCondition || conditionSource?.condition !== undefined;
+          let predicate = false, calendar = false;
+          for (const child of extension.extension ?? []) {
+            if (child.url === "predicate") predicate = true;
+            else if (child.url === "calendarDayPredicate") calendar = true;
+          }
+          // Once condition[] owns the predicate, an annotated R5 copy is
+          // source, not a second active owner that can revive a later deletion.
+          if (ownsCondition && predicate || !a.predicate && calendar && !predicate) {
+            output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+              { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [extension] }];
+            if (nativeCondition) {
+              const children = extension.extension?.filter(child => child.url !== "predicate");
+              if (children?.length) kept.push({ ...extension, extension: children });
+            }
+            continue;
+          }
+        }
+        kept.push(extension);
+      }
+      assign(output, "modifierExtension", kept.length ? kept : undefined);
+    }
+
+    if (a.missingContexts?.length) {
+      const reasons = new Map<string, boolean>();
+      for (const reason of a.missingContexts) reasons.set(reason, false);
+      const children: FhirExtension[] = [];
+      for (const child of contextMarker?.extension ?? []) {
+        if (child.url !== "missingContext") children.push(child);
+        else if (child.valueString !== undefined && reasons.has(child.valueString)) {
+          children.push(child);
+          reasons.set(child.valueString, true);
+        }
+      }
+      for (const [valueString, retained] of reasons)
+        if (!retained) children.push({ url: "missingContext", valueString });
+      output.modifierExtension = [
+        ...((output.modifierExtension as FhirExtension[]) ?? []),
+        { ...contextMarker, url: DOSAGE_DETAILS_R5_URL, extension: children },
+      ];
+    } else if (contextMarker) (contextSources ??= []).push(contextMarker);
+    if (contextSources)
+      output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+        { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: contextSources }];
+    // The supported R5 alias has already supplied current asNeeded above.
+    // It is not an active current-R6 field.
+    delete output.asNeededBoolean;
+    delete output.siteReference;
+    delete output.excludedDates;
+    delete output.maxDosePerPeriod;
+    delete output.maxDosePerAdministration;
+    delete output.maxDosePerLifetime;
+    // An explicit native removal must not resurrect an imported clinical
+    // doseLimit. But an ordinary dosage with no authored safety must not
+    // grow a synthetic empty R6 safety policy merely because limits=undefined.
+    // A sparse retained field (for example a reference-only site) does not
+    // own a policy subsequently authored on the live editable R5 dosage.
+    const safetySource = source?.safety ??
+      (a.provenance?.format === "r5" ? (a.provenance.data as EzDosage).safety : undefined);
+    const limits = a.limits ?? (safetySource?.doseLimit !== undefined ? [] : undefined);
+    assign(output, "safety", safetyToWire(a.safety, safetySource, limits, Boolean(clause)));
+  } else {
+    delete output.excludedDates;
+    delete output.safety;
+    delete output.maxDosePerPeriod;
+    delete output.maxDosePerAdministration;
+    delete output.maxDosePerLifetime;
+    let periodLimits: FhirRatio[] | undefined;
+    let administrationMaximum: R5MaximumSelection | undefined, lifetimeMaximum: R5MaximumSelection | undefined;
+    const limits = a.limits ?? [];
+    const dose = limits.length > 1 ? r5MaximumDoseBasis(output.doseAndRate as FhirDosage["doseAndRate"]) : undefined;
+    for (let index = 0; index < limits.length; index++) {
+      const limit = limits[index];
+      if (!limit.amount) continue;
+      const amount = {
+        ...limit.amount,
+        ...(clause ? getStandardDoseUnitCoding(limit.amount.unit) : undefined),
+        ...(limit.amount.system ? { system: limit.amount.system } : {}),
+        ...(limit.amount.code ? { code: limit.amount.code } : {}),
+      };
+      if (limit.scope === "period" && limit.period) {
+        const period = {
+          ...limit.period,
+          ...(clause && !limit.period.system && !limit.period.code && isCalendarUnit(limit.period.unit)
+            ? { system: "http://unitsofmeasure.org", code: limit.period.unit }
+            : {}),
+        };
+        (periodLimits ??= []).push(periodMaximumToR5(amount, period, limit.provenance));
+      } else if (limit.scope === "administration")
+        administrationMaximum = selectR5Maximum(administrationMaximum, amount, index, dose);
+      else if (limit.scope === "lifetime")
+        lifetimeMaximum = selectR5Maximum(lifetimeMaximum, amount, index, dose);
+    }
+    if (administrationMaximum) output.maxDosePerAdministration = simpleQuantityForR5(administrationMaximum.quantity);
+    if (lifetimeMaximum) output.maxDosePerLifetime = simpleQuantityForR5(lifetimeMaximum.quantity);
+    if (sourceMaxima) {
+      // Only source-only entries need a merge. Ordinary complete maxima keep
+      // their direct append path; annotation-only Ratios retain authored order.
+      const complete = periodLimits ?? [];
+      periodLimits = [];
+      let index = 0;
+      for (const source of sourceMaxima) {
+        while (index < complete.length && periodLimits.length < (source.position ?? 0))
+          periodLimits.push(complete[index++]);
+        periodLimits.push(source.maximum);
+      }
+      while (index < complete.length) periodLimits.push(complete[index++]);
+    }
+    if (periodLimits) output.maxDosePerPeriod = periodLimits;
+  }
+  if (agreedSourceFields)
+    agreedSourceFields.push({ url: "projectionFingerprint", valueString:
+      retainedSourceProjectionFingerprint(a.provenance!.data) ?? dosageClinicalProjectionFingerprint(output as FhirR6Dosage) });
+  return output as FhirDosage | FhirR6Dosage;
+}
+/** Direct native-to-R6 component writer. */
+/** Emit native R6 directly from modeled clinical facts. Shared serializers
+ * encode vocabulary and grammar-source annotations only, never an R5 course. */
+export function administrationToR6(
+  a: CanonicalAdministration,
+  options?: FhirProjectionOptions,
+  currentSyntax?: CanonicalSigClause
+): FhirR6Dosage {
+  return administrationToWire(a, "r6", options, currentSyntax) as FhirR6Dosage;
+}
+/** Direct native-to-R5 component writer. No R6 component is constructed. */
+export function administrationToR5(
+  a: CanonicalAdministration,
+  sequence: number | undefined,
+  options?: FhirProjectionOptions,
+  currentSyntax?: CanonicalSigClause
+): FhirDosage {
+  const row = administrationToWire(a, "r5", options, currentSyntax) as FhirDosage;
+  if (sequence !== undefined) row.sequence = sequence;
+  return row;
+}
+const same = equalStructuredValues;
+function isCalendarUnit(unit: string | undefined): unit is "s" | "min" | "h" | "d" | "wk" | "mo" | "a" {
+  return (
+    unit === "s" ||
+    unit === "min" ||
+    unit === "h" ||
+    unit === "d" ||
+    unit === "wk" ||
+    unit === "mo" ||
+    unit === "a"
+  );
+}
+/** Standard wire display labels, not natural-language SIG realization.
+ * The clinical unit code remains authoritative in both output versions. */
+const WIRE_DURATION_LABELS: Readonly<Record<string, readonly [string, string]>> = {
+  s: ["second", "seconds"],
+  min: ["minute", "minutes"],
+  h: ["hour", "hours"],
+  d: ["day", "days"],
+  wk: ["week", "weeks"],
+  mo: ["month", "months"],
+  a: ["year", "years"],
+};
+function serializeDuration(q: CanonicalMeasure): FhirR6Quantity {
+  const unit = q.code ?? q.unit ?? "";
+  return {
+    ...q,
+    unit: WIRE_DURATION_LABELS[unit]?.[q.value === 1 ? 0 : 1] ?? q.unit,
+    system: q.system ?? "http://unitsofmeasure.org",
+    code: unit,
+  };
+}
+function serializeRange(value: CanonicalRange, target: "r5" | "r6", duration = false, doseCoding = false): FhirRange {
+  const q = (item: CanonicalMeasure) =>
+    (target === "r5" ? simpleQuantityForR5 : simpleQuantityForR6)(
+      duration
+        ? serializeDuration(item)
+        : doseCoding
+        ? { ...item, ...getStandardDoseUnitCoding(item.unit) }
+        : item
+    )!;
+  const low = value.low ? q(value.low) : undefined;
+  const high = value.high ? q(value.high) : undefined;
+  if (duration && low && high && low.code === high.code && low.system === high.system)
+    low.unit = high.unit;
+  const rangeExtensions = (value as FhirR6Range).extension;
+  const extension = target === "r5" && rangeExtensions?.length
+    ? quantityAnnotationExtensions(rangeExtensions, "r5") : rangeExtensions;
+  if (low === value.low && high === value.high && extension === rangeExtensions) return value as FhirRange;
+  return {
+    ...value,
+    ...(low ? { low } : {}),
+    ...(high ? { high } : {}),
+    ...(extension !== rangeExtensions ? { extension } : {}),
+  } as FhirRange;
+}
+/** Header/step metadata is shared fragment serialization, NOT a course in
+ * another external format. The R5 writer encodes it directly in R5 extensions. */
+export function courseMetadataToWire(
+  course: CanonicalCourse
+): Omit<FhirR6DosageInstruction, "step" | "renderedInstruction"> {
+  const out: Record<string, unknown> & { modifierExtension?: FhirExtension[] } =
+    Object.assign({}, course.provenance?.data);
+  delete out.step;
+  delete out.renderedInstruction;
+  assign(out, "repeatCycle", quantityForR6(course.cycleInterval));
+  const displaced = setCourseCycleCount(out, course.cycleCount);
+  if (course.cycleCountUnresolved && course.cycleCount === undefined && getCourseCycleCount(out) === undefined)
+    out.modifierExtension = [...(out.modifierExtension ?? []), {
+      url: COURSE_CYCLE_COUNT_EXTENSION_URL,
+      _valueInteger: { extension: [{
+        url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+      }] },
+    }];
+  if (displaced) out.extension = [...((out.extension as FhirExtension[] | undefined) ?? []),
+    { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: displaced }];
+  const raw = course.provenance?.data as Partial<FhirR6DosageInstruction> | undefined;
+  assign(out, "safety", safetyToWire(course.safety, raw?.safety));
+  return out;
+}
+/** Native typed facts come from metadata fragments, not from a whole other
+ * external course. Foreign annotations are kept on the source envelope. */
+export function stageFromFields(
+  fields: Omit<FhirR6DosageStep, "component">,
+  members: CanonicalAdministration[]
+): CanonicalStage {
+  const stage: CanonicalStage = {
+    administrations: members,
+    start: boundaryFromR6(fields.start),
+    end: boundaryFromR6(fields.end),
+    count: fields.count,
+    safety: safetyFromWire(fields.safety, true),
+    provenance: record(fields),
+  };
+  if (fields.count === undefined && fields._count !== undefined) stage.countUnresolved = true;
+  return stage;
+}
+export function stageMetadataToWire(stage: CanonicalStage): Omit<FhirR6DosageStep, "component"> {
+  const out: Record<string, unknown> = Object.assign({}, stage.provenance);
+  delete out.component;
+  assign(out, "start", boundaryToWire(stage.start));
+  assign(out, "end", boundaryToWire(stage.end));
+  assign(out, "count", stage.count);
+  if (stage.countUnresolved && stage.count === undefined && out._count === undefined)
+    out._count = { extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+    }] };
+  assign(
+    out,
+    "safety",
+    safetyToWire(stage.safety, (stage.provenance as FhirR6DosageStep | undefined)?.safety)
+  );
+  return out;
+}
+function projectCourseToR6(
+  course: CanonicalCourse,
+  options: FhirProjectionOptions | undefined,
+  freshlyCompiled: boolean
+): FhirR6DosageInstruction {
+  const steps: FhirR6DosageStep[] = [];
+  let drafts: Array<{ index: number; step: Omit<FhirR6DosageStep, "component"> }> | undefined;
+  let precedingDraftEnd: CanonicalBoundary | undefined;
+  let synthesizedStarts: number[] | undefined;
+  for (let index = 0; index < course.stages.length; index++) {
+    const stage = course.stages[index];
+    if (!stage.administrations.length) {
+      (drafts ??= []).push({ index, step: stageMetadataToWire(stage) });
+      precedingDraftEnd = stage.end ?? precedingDraftEnd;
+      continue;
+    }
+    const component: FhirR6Dosage[] = [];
+    for (const a of stage.administrations)
+      component.push(administrationToR6(a, options, freshlyCompiled ? a.syntax : undefined));
+    const metadata = stageMetadataToWire(stage);
+    // An empty edited stage is retained as source, not an invalid active
+    // component. Its authored end still anchors an implicit successor.
+    if (!stage.start && precedingDraftEnd) {
+      metadata.start = boundaryToWire(precedingDraftEnd);
+      (synthesizedStarts ??= []).push(steps.length);
+    }
+    precedingDraftEnd = undefined;
+    steps.push(Object.assign(metadata, { component }));
+  }
+  const result: FhirR6DosageInstruction = courseMetadataToWire(course);
+  if (steps.length) result.step = steps;
+  liftSingleStepSafety(result);
+  if (drafts || result.extension?.length) retainDraftSteps(result, drafts, synthesizedStarts);
+  if (course.instruction !== undefined) result.renderedInstruction = course.instruction;
+  if (course.instruction !== undefined &&
+      (freshlyCompiled || course.provenance?.sourceTextAgreed === true) &&
+      !dosageHasAgreedSourceText({ text: course.instruction, extension: result.extension })) {
+    // Header coverage is independent of component coverage. A fresh external
+    // header never acquires agreement merely because its members have amounts.
+    result.extension = [...(result.extension ?? []), {
+      url: DOSAGE_RENDERED_INSTRUCTION_R5_URL,
+      extension: [
+        { url: "sourceAgreement", valueBoolean: false },
+        { url: "sourceTextAgreed", valueBoolean: true },
+        { url: "textFingerprint", valueString: dosageTextFingerprint({ text: course.instruction }) }
+      ]
+    }];
+  }
+  return result;
+}
+/** Ordinary native export must derive source-annotation views from current
+ * native fields because callers may have edited them. */
+export function courseToR6(
+  course: CanonicalCourse,
+  options?: FhirProjectionOptions
+): FhirR6DosageInstruction {
+  return projectCourseToR6(course, options, false);
+}
+/** Parser construction-only export: the caller has JUST compiled these exact
+ * clauses and has not exposed them for edits. Reusing their annotation views
+ * avoids rebuilding every canonical clause merely to write its first output.
+ * This is not a persistent cache and is never used for public edited exports. */
+export function projectFreshlyCompiledCourseToR6(
+  course: CanonicalCourse,
+  options?: FhirProjectionOptions
+): FhirR6DosageInstruction {
+  return projectCourseToR6(course, options, true);
+}
+export function courseToR5(course: CanonicalCourse): FhirDosage[] {
+  return projectNativeR5Course(course).dosages;
+}
+
+/** Source-only R6 instructions have no structured administration to preview.
+ * A nonempty header on a structured import is original text, not evidence
+ * that its dose/timing still agrees with the independently editable fields. */
+export function unchangedR6SourceDisplay(
+  raw: FhirR6DosageInstructionInput,
+  options?: FormatOptions
+): string | undefined {
+  return raw.renderedInstruction && !raw.step?.length && !raw.repeatCycle &&
+    !raw.safety?.doseLimit?.length && !raw.safety?.ifExceeded &&
+    getCourseCycleCount(raw) === undefined &&
+    !raw.extension?.some(item => item.url === R6_DRAFT_STEPS_SOURCE_URL) &&
+    options?.realizationMode !== "normalized"
+    ? raw.renderedInstruction : undefined;
+}
+
+/** Explicit editable import for applications that already hold R5 rows.
+ * Import normalization and persistence reconciliation happen once here, not
+ * inside any native edit, formatter, or execution operation. Metadata-only
+ * R6 headers share R5's Element shape; use fromFhir for that known-R6 input. */
+export function importCanonicalCourse(
+  input: FhirDosage | readonly FhirDosage[] | FhirR6DosageInstructionInput | ParseBatchResult | CanonicalCourse
+): CanonicalCourse {
+  if (!Array.isArray(input)) {
+    if ("kind" in input && input.kind === "course") return input;
+    if ("items" in input && input.meta.canonical.course) return input.meta.canonical.course;
+    if (isR6DosageInstruction(input)) return courseFromR6(input, true);
+    if ("items" in input) return courseFromR6(input.fhirNext, true);
+  }
+  const rows = Array.isArray(input) ? (input as readonly FhirDosage[]) : [input as FhirDosage];
+  return courseFromR5(rows, undefined, undefined, undefined, true);
+}
+
+/**
+ * R6-only serialization of editable information that has no active core slot.
+ * These annotations contain current FHIR fragments, never a persisted native
+ * model. Draft steps remain source data; a one-step safety projection records
+ * its original scope so an unchanged export can be reopened for editing.
+ */
+
+
+
+
+
+
+
+export const R6_DRAFT_STEPS_SOURCE_URL = "urn:ezmedicationinput:r6-draft-steps-source";
+export const R6_SINGLE_STEP_SAFETY_SOURCE_URL = "urn:ezmedicationinput:r6-single-step-safety-source";
+export const R6_SCOPED_SAFETY_MODIFIER_URL = "urn:ezmedicationinput:r6-scoped-safety-policy";
+
+function replaceSource(owner: { extension?: FhirR6Extension[] }, url: string, value: object | undefined): void {
+  const extensions = owner.extension?.filter(item => item.url !== url) ?? [];
+  const prior = owner.extension?.filter(item => item.url === url) ?? [];
+  if (value !== undefined) {
+    const kind = url === R6_DRAFT_STEPS_SOURCE_URL ? "drafts" : "safety";
+    let retained: Record<string, unknown> | undefined;
+    if (prior[0]) {
+      try { retained = decodeR6SourceMetadata(prior[0], kind); }
+      catch { /* Unreadable external source is retained below, never executed. */ }
+    }
+    // Current known fields overwrite the snapshot; decoded unfamiliar children
+    // and the marker's own Element metadata remain recoverable source data.
+    const next = { ...retained, ...value };
+    // An unchanged snapshot still owns its exact typed child wrappers, including
+    // authored Element IDs. Rebuilding it would erase that external metadata.
+    const unchanged = retained !== undefined && equalStructuredValues(retained, next);
+    const retired = prior.slice(unchanged ? 1 : 0);
+    if (retired.length) extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: retired });
+    extensions.push(unchanged ? prior[0] : encodeR6SourceMetadata(url, next, kind));
+  }
+  if (extensions.length) owner.extension = extensions;
+  else delete owner.extension;
+}
+
+/** Retired external source remains inert and recoverable. It must no longer
+ * supply hidden timing/safety after a live wire edit, but must not disappear. */
+function retireSource(owner: { extension?: FhirR6Extension[] }, url: string): void {
+  const markers = owner.extension?.filter(item => item.url === url);
+  if (!markers?.length) return;
+  const kept = owner.extension!.filter(item => item.url !== url);
+  kept.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: markers });
+  owner.extension = kept;
+}
+
+export function retainDraftSteps(
+  output: FhirR6DosageInstruction,
+  drafts: Array<{ index: number; step: Omit<FhirR6DosageStep, "component"> }> | undefined,
+  synthesizedStarts?: number[]
+): void {
+  if (drafts?.length)
+    replaceSource(output, R6_DRAFT_STEPS_SOURCE_URL, { drafts, synthesizedStarts, projected: output.step ?? [] });
+  else if (output.extension?.some(item => item.url === R6_DRAFT_STEPS_SOURCE_URL))
+    retireSource(output, R6_DRAFT_STEPS_SOURCE_URL);
+}
+
+/** A pause belongs to the ordered phase boundaries, not its successor's dose.
+ * Changed anonymous boundary owners need a unique identity; position alone
+ * cannot prove which stage survived a deletion, replacement or reordering. */
+/** Compare the completion-bearing Timing fields only at the changed draft
+ * owner boundary. Element IDs and positional primitive annotations do not
+ * change completion. Keep the original Timing/repeat untouched and compare
+ * every remaining recurrence field, including known and unfamiliar extensions. */
+function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undefined {
+  if (!timing) return undefined;
+  const { id: _id, _timeOfDay: _clocks, boundsRange, ...repeat } = timing.repeat ?? {};
+  const clocks = getTimingClocks(timing.repeat);
+  if (clocks?.length) repeat.timeOfDay = clocks;
+  else delete repeat.timeOfDay;
+  // Only standard primitive companions are annotations. Keep unfamiliar
+  // recurrence fields and extensions in the completion comparison.
+  for (const field of ["_count", "_countMax", "_frequency", "_frequencyMax",
+    "_period", "_periodMax", "_periodUnit", "_duration", "_durationMax",
+    "_durationUnit", "_dayOfWeek", "_when", "_offset"])
+    delete (repeat as Record<string, unknown>)[field];
+  if (repeat.boundsDuration) {
+    const { id: _durationId, _value, _unit, _code, _system, _comparator, ...duration } = repeat.boundsDuration;
+    repeat.boundsDuration = duration;
+  }
+  if (repeat.boundsPeriod) {
+    const { id: _periodId, _start, _end, ...period } = repeat.boundsPeriod;
+    repeat.boundsPeriod = period;
+  }
+  return { event: getTimingEvents(timing), code: timing.code, repeat: timing.repeat
+    ? boundsRange ? { ...repeat, boundsRange: draftCompletionRange(boundsRange) } : repeat
+    : undefined };
+}
+/** Compare existing clinical quantity choices without treating Element IDs or
+ * primitive annotations as a new completion. Original quantities stay untouched. */
+function draftCompletionQuantity(quantity: FhirR6Quantity | undefined): object | undefined {
+  return quantity ? { value: quantity.value, unit: quantity.unit, code: quantity.code,
+    system: quantity.system, comparator: getQuantityComparator(quantity) } : undefined;
+}
+function draftCompletionRange(range: FhirRange | FhirR6Range | undefined): object | undefined {
+  return range ? { low: draftCompletionQuantity(range.low), high: draftCompletionQuantity(range.high) } : undefined;
+}
+function draftCompletionBoundary(boundary: FhirR6RelativeTime | undefined): object | undefined {
+  if (!boundary) return undefined;
+  const { id: _id, offsetDuration, offsetRange, ...fields } = boundary;
+  return { ...fields, offsetDuration: draftCompletionQuantity(offsetDuration),
+    offsetRange: draftCompletionRange(offsetRange) };
+}
+/** A member's current origin and boundaries own completion independently of timing. */
+function draftMemberPhase(value: FhirR6Dosage): object | undefined {
+  const marker = value.modifierExtension?.find(item => item.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL);
+  if (!marker) return undefined;
+  const origin = draftCompletionQuantity(marker.valueQuantity);
+  const fields = origin ? undefined : decodeR6SourceMetadata(marker, "step");
+  const start = draftCompletionBoundary(fields?.start as FhirR6RelativeTime | undefined);
+  const end = draftCompletionBoundary(fields?.end as FhirR6RelativeTime | undefined);
+  let sourceMember: number | undefined;
+  const predecessors: number[] = [];
+  for (const child of marker.extension ?? []) {
+    if (child.url === "sourceMember" && child.valueInteger !== undefined) sourceMember = child.valueInteger;
+    if (child.url === "predecessor" && child.valueInteger !== undefined) predecessors.push(child.valueInteger);
+  }
+  // Dependency order and child annotations do not change completion.
+  if (predecessors.length > 1) predecessors.sort((a, b) => a - b);
+  // Typed dependency identity can close a predecessor's cadence even when
+  // the member's own start/end remain unchanged.
+  return origin || start || end || sourceMember !== undefined
+    ? { origin, start, end, sourceMember, predecessors: sourceMember !== undefined ? predecessors : undefined }
+    : undefined;
+}
+function draftAnchoredLength(dosage: FhirR6Dosage): object | undefined {
+  const length = getAnchoredCourseDuration(dosage);
+  return length ? { quantity: draftCompletionQuantity(length.valueQuantity),
+    range: draftCompletionRange(length.valueRange) } : undefined;
+}
+function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageStep[],
+  drafts: readonly { index: number }[]): boolean | Set<number> {
+  if (!Array.isArray(saved)) return false;
+  const lastDraftPredecessor = drafts.length ? drafts[drafts.length - 1].index - drafts.length : -1;
+  const lastDraftOwner = lastDraftPredecessor + 1;
+  // Unchanged projections need no identity index or boundary hashes. Remember
+  // the compared prefix so reconciliation never deep-walks those stages twice.
+  let firstChanged = 0;
+  while (firstChanged < saved.length && equalStructuredValues(saved[firstChanged], active[firstChanged]))
+    firstChanged++;
+  if (firstChanged === saved.length && active.length === saved.length) return true;
+  const identities = new Map<string, number>();
+  const ownerIdentities: Array<string | undefined> = [];
+  const validOwners = new Set<number>();
+  const changedCompletions = new Set<number>();
+  const changed: number[] = [];
+  const firstIsTreatmentOrigin = drafts[0]?.index !== 0;
+  const identityOf = (step: FhirR6DosageStep, index: number) => step.id !== undefined ? "id:" + step.id :
+    step.start || step.end ? "boundary:" + compactProjectionFingerprint({
+      start: step.start, end: step.end, count: step.count,
+    }) : index === 0 && firstIsTreatmentOrigin ? "treatment-origin" : undefined;
+  for (let index = 0; index < saved.length; index++) {
+    const prior = saved[index], current = active[index];
+    const identity = identityOf(prior, index);
+    ownerIdentities[index] = identity;
+    const needsMembers = index <= lastDraftPredecessor || prior.id === undefined;
+    if (identity !== undefined) identities.set(identity, (identities.get(identity) ?? 0) + 1);
+    if (index > lastDraftOwner) continue;
+    // Implicit and previous-phase-next-day starts inherit predecessor
+    // completion. Reuse the boundary decoder only on this changed-owner path;
+    // independent authored starts and single-occurrence fixed ends stop the
+    // chain. A repeated phase's final completion still depends on its start.
+    if (index > 0 && changedCompletions.has(index - 1) && current &&
+        (!current.end || (current.count ?? 1) > 1) &&
+        (!current.start || boundaryFromR6(current.start)?.anchor === "previous-phase-next-day"))
+      changedCompletions.add(index);
+    if (index < firstChanged || index > firstChanged && equalStructuredValues(prior, current)) {
+      validOwners.add(index);
+      continue;
+    }
+    const endMatches = current !== undefined &&
+      equalStructuredValues(draftCompletionBoundary(prior.end), draftCompletionBoundary(current.end));
+    if (!current || prior.count !== current.count ||
+        !endMatches ||
+        (!prior.end || (prior.count ?? 1) > 1) && !equalStructuredValues(draftCompletionBoundary(prior.start), draftCompletionBoundary(current.start)))
+      changedCompletions.add(index);
+    // A phase can finish through its member timing (count, duration or bounds)
+    // without an explicit step.end. Dose edits leave that declared completion.
+    // A uniquely identified successor owns its boundary independently of
+    // newly added concurrent doses. Earlier/anonymous owners still need members.
+    let membersMatch = true;
+    // Current completion still governs downstream implicit phases when this
+    // draft owner's ID was replaced. Ownership only decides draft reuse.
+    if (current && needsMembers && prior.component.length === current.component.length)
+    for (let member = 0; member < prior.component.length; member++) {
+      if (prior.component[member].id !== current.component[member].id) {
+        membersMatch = false;
+        if (!prior.end) changedCompletions.add(index);
+        break;
+      }
+      // A middle phase can receive one pause and precede another. Its changed
+      // completion retires only the outgoing pause, not its unchanged start.
+      if (!prior.end && index <= lastDraftPredecessor) {
+        const before = prior.component[member], after = current.component[member];
+        // Getters return fresh arrays; weekday order cannot change completion.
+        if (Boolean(before.asNeeded || before.asNeededFor?.length) !== Boolean(after.asNeeded || after.asNeededFor?.length) ||
+            !equalStructuredValues(draftCompletionTiming(before.timing), draftCompletionTiming(after.timing)) ||
+            !equalStructuredValues(getDosageCondition(before), getDosageCondition(after)) ||
+            !equalStructuredValues(draftAnchoredLength(before), draftAnchoredLength(after)) ||
+            !equalStructuredValues(draftMemberPhase(before), draftMemberPhase(after)) ||
+            !equalStructuredValues(getDosageAlternativeChoice(before), getDosageAlternativeChoice(after)) ||
+            (getAdministrationOffsetMinutes({ modifierExtension: before.modifierExtension }) ?? 0) !==
+              (getAdministrationOffsetMinutes({ modifierExtension: after.modifierExtension }) ?? 0) ||
+            !equalStructuredValues(getDosageExcludedDates({ modifierExtension: before.modifierExtension }),
+              getDosageExcludedDates({ modifierExtension: after.modifierExtension })) ||
+            !equalStructuredValues(getDosageExcludedWeekdays({ extension: before.extension }).sort(),
+              getDosageExcludedWeekdays({ extension: after.extension }).sort()))
+          changedCompletions.add(index);
+      }
+    }
+    if (!current || identity === undefined || prior.id !== current.id || prior.count !== current.count ||
+        !equalStructuredValues(draftCompletionBoundary(prior.start), draftCompletionBoundary(current.start)) ||
+        !endMatches ||
+        needsMembers && prior.component.length !== current.component.length) {
+      if (!prior.end && needsMembers && prior.component.length !== current?.component.length)
+        changedCompletions.add(index);
+      continue;
+    }
+    if (!membersMatch) continue;
+    validOwners.add(index);
+    changed.push(index);
+  }
+  for (const index of changed) if (identities.get(ownerIdentities[index]!) !== 1) validOwners.delete(index);
+  // Appending a later phase leaves earlier draft indices intact. A duplicated
+  // owner in that tail invalidates only pauses belonging to that owner.
+  const duplicatedInTail = new Set<string>();
+  for (let index = saved.length; index < active.length; index++) {
+    const identity = identityOf(active[index], index);
+    if (identity !== undefined && identities.has(identity)) duplicatedInTail.add(identity);
+  }
+  if (duplicatedInTail.size)
+    for (const index of validOwners)
+      if (duplicatedInTail.has(ownerIdentities[index]!)) validOwners.delete(index);
+  // A changed later boundary cannot erase an earlier independently owned pause.
+  // Each saved draft uses its original active predecessor and receiver indices.
+  const retained = new Set<number>();
+  for (let index = 0; index < drafts.length; index++) {
+    const predecessor = drafts[index].index - index - 1, receiver = predecessor + 1;
+    if ((predecessor < 0 || validOwners.has(predecessor) && !changedCompletions.has(predecessor)) &&
+        (receiver >= saved.length && receiver >= active.length || validOwners.has(receiver))) retained.add(index);
+  }
+  return retained.size === drafts.length ? true : retained;
+}
+
+/** Restore inactive editable stages while their active phase owners and
+ * boundaries still agree. Current doses and other live fields stay current. */
+export function editableCourseSteps(input: FhirR6DosageInstructionInput): FhirR6DosageStep[] {
+  const active = input.step ?? [];
+  const marker = input.extension?.find(item => item.url === R6_DRAFT_STEPS_SOURCE_URL);
+  if (!marker) return active;
+  try {
+    const saved = decodeR6SourceMetadata(marker, "drafts") as {
+      drafts: Array<{ index: number; step: Omit<FhirR6DosageStep, "component"> }>;
+      projected: FhirR6DosageStep[];
+      synthesizedStarts?: number[];
+    } | undefined;
+    if (!saved || !Array.isArray(saved.drafts)) return active;
+    const ownership = matchingDraftOwnership(active, saved.projected, saved.drafts);
+    if (ownership === false || ownership !== true && !ownership.size) return active;
+    const restored: FhirR6DosageStep[] = [];
+    const inferred = new Set(saved.synthesizedStarts ?? []);
+    if (ownership !== true)
+      for (let index = 0; index < saved.drafts.length; index++)
+        if (!ownership.has(index)) inferred.delete(saved.drafts[index].index - index);
+    let draft = 0, member = 0;
+    for (let index = 0; index < active.length + saved.drafts.length; index++) {
+      const next = saved.drafts[draft];
+      if (next?.index === index) {
+        if (ownership === true || ownership.has(draft)) restored.push({ ...next.step, component: [] });
+        draft++;
+      } else if (member < active.length) {
+        if (inferred.has(member)) {
+          const step = { ...active[member] };
+          // The clinical start was synthesized from the restored pause. Keep
+          // a fresh annotation on that boundary as source when removing it.
+          if (!equalStructuredValues(step.start, saved.projected[member]?.start))
+            step.extension = [...(step.extension ?? []), { url: DOSAGE_RECONCILIATION_SOURCE_URL,
+              extension: [encodeR6SourceMetadata("step", { start: step.start }, "step")] }];
+          delete step.start;
+          restored.push(step);
+        } else restored.push(active[member]);
+        member++;
+      }
+    }
+    return restored;
+  } catch { return active; }
+}
+
+/** Indices from the current external draft source, for R5 membership edits. */
+export function retainedDraftStepIndices(input: { extension?: FhirR6Extension[] }): readonly number[] | undefined {
+  const marker = input.extension?.find(item => item.url === R6_DRAFT_STEPS_SOURCE_URL);
+  if (!marker) return undefined;
+  let saved: Record<string, unknown> | undefined;
+  try { saved = decodeR6SourceMetadata(marker, "drafts"); }
+  catch { return undefined; }
+  return Array.isArray(saved?.drafts)
+    ? (saved.drafts as Array<{ index: number }>).map(draft => draft.index) : undefined;
+}
+
+interface LiftedSafety {
+  course?: FhirR6DosageSafety;
+  step: FhirR6DosageSafety;
+  projected: FhirR6DosageSafety;
+  ownerId?: string;
+  ownerComponentIds?: string[];
+  ownerFingerprint?: string;
+  /** Resolved current wire owner; never part of the serialized source record. */
+  owner?: FhirR6DosageStep;
+}
+
+function stepOwnerFingerprint(step: FhirR6DosageStep): string {
+  if (!step.safety) return compactProjectionFingerprint(step);
+  const { safety: _policy, ...projected } = step;
+  return compactProjectionFingerprint(projected);
+}
+
+/** Only a matching live policy can reuse its saved scope. A later wire edit
+ * replaces that authority rather than reviving an old safety instruction. */
+export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): LiftedSafety | undefined {
+  const marker = input.extension?.find(item => item.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL);
+  if (!marker) return undefined;
+  try {
+    const saved = decodeR6SourceMetadata(marker, "safety") as unknown as LiftedSafety | undefined;
+    const current = input.safety;
+    if (!saved?.step || !current) return undefined;
+    const sameAction = current.ifExceeded === saved.projected.ifExceeded;
+    const sameModifiers = equalStructuredValues(current.modifierExtension, saved.projected.modifierExtension);
+    const unchanged = equalStructuredValues(current.doseLimit, saved.projected.doseLimit);
+    // Header Element metadata follows the policy that supplied the projection.
+    // Changes to a different limit do not widen the surviving phase limits.
+    let course = saved.course, step = saved.step;
+    if (!unchanged || !sameAction || !sameModifiers) {
+      const reconciled = reconcileSafetyScopes(current, saved, true);
+      // An edited header limit remains the current header's authority. Only
+      // unchanged surviving phase limits can reuse the previous phase scope.
+      const independentStepAction = !saved.step.doseLimit?.length && reconciled.step?.ifExceeded !== undefined;
+      step = reconciled.step ?? {};
+      const { doseLimit: _limits, ifExceeded: _action, modifierExtension: _modifiers, ...metadata } = current;
+      if (!saved.course) step = { ...step, ...metadata };
+      const limits = current.doseLimit?.filter((_, index) => !reconciled.stepLimits.has(index));
+      const action = sameAction ? reconciled.course?.ifExceeded : current.ifExceeded;
+      let modifiers = reconciled.course?.modifierExtension;
+      if (!sameModifiers) {
+        const original = saved.projected.modifierExtension;
+        if (!original?.length) modifiers = current.modifierExtension;
+        else {
+          // Only changed external modifier lists need matching. An unchanged
+          // phase qualifier keeps its phase owner; new header qualifiers stay
+          // on the header, and removed qualifiers are never revived.
+          const groups = new Map<number, Array<{ value: FhirR6Extension; count: number }>>();
+          for (const value of original) {
+            const hash = hashStructuredValue(value);
+            let bucket = groups.get(hash);
+            if (!bucket) groups.set(hash, bucket = []);
+            const group = bucket.find(item => equalStructuredValues(item.value, value));
+            if (group) group.count++;
+            else bucket.push({ value, count: 1 });
+          }
+          const retained: FhirR6Extension[] = [], added: FhirR6Extension[] = [];
+          for (const value of current.modifierExtension ?? []) {
+            const group = groups.get(hashStructuredValue(value))?.find(item =>
+              item.count > 0 && equalStructuredValues(item.value, value));
+            if (group) { group.count--; retained.push(value); }
+            else added.push(value);
+          }
+          if (saved.course) {
+            // A merged course/step modifier is one scoped projection. Its
+            // unchanged wrapper proves both original owners independently.
+            const keepsScope = retained.length === original.length;
+            modifiers = keepsScope ? [...(reconciled.course?.modifierExtension ?? []), ...added] : added;
+            if (!keepsScope && step.modifierExtension) {
+              step = { ...step }; delete step.modifierExtension;
+            }
+          } else {
+            step = { ...step };
+            if (retained.length) step.modifierExtension = retained;
+            else delete step.modifierExtension;
+            modifiers = added;
+          }
+        }
+      }
+      // A surviving phase qualifier is a policy even without a numeric
+      // limit. Decide scope only after current modifiers have been reconciled.
+      const independentStepModifiers = !saved.step.doseLimit?.length && Boolean(step.modifierExtension?.length);
+      const retiredStepPolicy = !reconciled.stepLimits.size && !independentStepAction && !independentStepModifiers;
+      if (retiredStepPolicy && (!sameAction || current.ifExceeded === action ||
+          (current.doseLimit?.length ?? 0) !== (reconciled.course?.doseLimit?.length ?? 0))) return undefined;
+      // Reconciliation claims each live limit once. When only the course's
+      // limits remain, its action owns the unchanged joined header. A changed
+      // or newly supplied header limit still retains direct header authority,
+      // including its existing scoped modifier annotations.
+      course = {
+        ...(saved.course ? metadata : {}),
+        ...(limits?.length ? { doseLimit: limits } : {}),
+        ...(action !== undefined ? { ifExceeded: action } : {}),
+        ...(modifiers?.length ? { modifierExtension: modifiers } : {}),
+      };
+      if (!Object.keys(course).length) course = undefined;
+      if (retiredStepPolicy) return { ...saved, course, step: {}, owner: undefined };
+    } else {
+      const { doseLimit: _limits, ifExceeded: _action, _ifExceeded: _actionMetadata,
+        modifierExtension: _modifiers, ...metadata } = current;
+      // The unchanged projection supplies annotations; the owning policy
+      // supplies its scoped clinical fields, including a wrapper-only phase total.
+      const policy = course ?? step;
+      const restored = { ...policy, ...metadata,
+        ...(policy.doseLimit !== undefined ? { doseLimit: policy.doseLimit } : {}),
+        ...(policy.ifExceeded !== undefined ? { ifExceeded: policy.ifExceeded } : {}),
+        ...(policy.modifierExtension !== undefined ? { modifierExtension: policy.modifierExtension } : {}) };
+      if (course) course = restored;
+      else step = restored;
+    }
+    const retained = { ...saved, course, step };
+    let owner: FhirR6DosageStep | undefined;
+    const componentIds = saved.ownerComponentIds?.length ? new Set(saved.ownerComponentIds) : undefined;
+    if (saved.ownerId === undefined && !componentIds && saved.ownerFingerprint === undefined) {
+      // Unidentified source records retain their existing single-step meaning.
+      if (input.step?.length === 1) owner = input.step[0];
+    } else for (const candidate of input.step ?? []) {
+      const matches = saved.ownerId !== undefined ? candidate.id === saved.ownerId
+        : componentIds ? candidate.id === undefined && candidate.component.some(member => member.id !== undefined && componentIds.has(member.id))
+        : stepOwnerFingerprint(candidate) === saved.ownerFingerprint;
+      if (!matches) continue;
+      if (owner) return retained;
+      owner = candidate;
+    }
+    // The unchanged header is still only a projection when its step vanishes.
+    // Keep the authored course policy, and retain the retired step policy in
+    // its source record; it must never be promoted into course authority.
+    return { ...retained, owner };
+  } catch { return undefined; }
+}
+
+/** Phase totals remain in their scoped wrapper; other limits have a core mirror. */
+function hasCoreStepLimit(limit: FhirR6DoseLimit): boolean {
+  return limit.scope !== "dosage";
+}
+
+/** Shared per-limit ownership for a lifted policy and its scoped modifiers. */
+function reconcileSafetyScopes(
+  safety: FhirR6DosageSafety,
+  saved: { course?: FhirR6DosageSafety; step?: FhirR6DosageSafety },
+  unchangedStepOnly = false
+): { course?: FhirR6DosageSafety; step?: FhirR6DosageSafety; stepLimits: Set<number> } {
+  const current = safety.doseLimit ?? [];
+  const courseAction = saved.course?.ifExceeded, stepAction = saved.step?.ifExceeded;
+  const combinedAction = stepAction && stepAction !== courseAction
+    ? courseAction ? courseAction + "\n" + stepAction : stepAction : courseAction;
+  const sameShape = (left: FhirR6DoseLimit, right: FhirR6DoseLimit): boolean => {
+    const a = left.valueQuantity, b = right.valueQuantity, ap = left.period, bp = right.period;
+    return left.scope === right.scope && (a !== undefined) === (b !== undefined) &&
+      (left.valueInteger !== undefined) === (right.valueInteger !== undefined) &&
+      (left.valueExpression !== undefined) === (right.valueExpression !== undefined) &&
+      a?.system === b?.system && a?.code === b?.code &&
+      (a?.system && a.code ? true : a?.unit === b?.unit) &&
+      ap?.value === bp?.value && ap?.system === bp?.system && ap?.code === bp?.code &&
+      (ap?.system && ap.code ? true : ap?.unit === bp?.unit) &&
+      getQuantityComparator(ap) === getQuantityComparator(bp);
+  };
+  const sameClinicalValue = (left: FhirR6DoseLimit, right: FhirR6DoseLimit): boolean =>
+    left.valueQuantity?.value === right.valueQuantity?.value &&
+    getQuantityComparator(left.valueQuantity) === getQuantityComparator(right.valueQuantity) &&
+    left.valueInteger === right.valueInteger &&
+    equalStructuredValues(left.valueExpression, right.valueExpression);
+  // Equal immutable objects may occupy separate authored array occurrences.
+  const claimed = new Set<number>();
+  const stepLimits = new Set<number>();
+  const matches = new Map<FhirR6DoseLimit, number>();
+  const shapeMatch = (limit: FhirR6DoseLimit, unchangedValue = false): number | undefined => {
+    // Only unmatched anonymous edits need this short clinical comparison.
+    // No object serialization or opaque metadata participates in identity.
+    let replacement: number | undefined;
+    for (let index = 0; index < current.length; index++) {
+      const item = current[index];
+      if (!claimed.has(index) && sameShape(limit, item) &&
+          (!unchangedValue || sameClinicalValue(limit, item)) &&
+          (!item.id || !sourceIds.has(item.id) && sameClinicalValue(item, limit))) {
+        if (replacement !== undefined) return undefined;
+        replacement = index;
+      }
+    }
+    if (replacement === undefined) return undefined;
+    let sourceCount = 0;
+    for (const item of sourceGroups.keys())
+      if (sameShape(limit, item) && (!unchangedValue || sameClinicalValue(limit, item)) &&
+          ++sourceCount > 1) return undefined;
+    return sourceCount === 1 ? replacement : undefined;
+  };
+  // Exact-equal anonymous limits still have distinct scope ownership.
+  // Count each equality bucket once on both sides before assigning it;
+  // one surviving copy cannot inherit two independent policy qualifiers.
+  type ExactLimits = { sample: FhirR6DoseLimit; sourceCount: number;
+    live: number[]; cursor: number };
+  const exactBuckets = new Map<number, ExactLimits[]>();
+  const sourceGroups = new Map<FhirR6DoseLimit, ExactLimits>();
+  const exactGroup = (limit: FhirR6DoseLimit): ExactLimits => {
+    const key = hashStructuredValue(limit);
+    let bucket = exactBuckets.get(key);
+    if (!bucket) exactBuckets.set(key, bucket = []);
+    for (const group of bucket) if (equalStructuredValues(group.sample, limit)) return group;
+    const group = { sample: limit, sourceCount: 0, live: [], cursor: 0 };
+    bucket.push(group);
+    return group;
+  };
+  const liveIds = new Map<string, number | undefined>();
+  const sourceIds = new Map<string, number>();
+  for (let index = 0; index < current.length; index++) {
+    const limit = current[index];
+    exactGroup(limit).live.push(index);
+    if (limit.id) liveIds.set(limit.id, liveIds.has(limit.id) ? undefined : index);
+  }
+  for (let index = 0; index < 2; index++) {
+    const policy = index === 0 ? saved.course : saved.step;
+    for (const limit of policy?.doseLimit ?? []) {
+      if (index === 1 && !hasCoreStepLimit(limit)) continue;
+      const group = exactGroup(limit);
+      group.sourceCount++;
+      sourceGroups.set(limit, group);
+      if (limit.id) sourceIds.set(limit.id, (sourceIds.get(limit.id) ?? 0) + 1);
+    }
+  }
+  // Reserve exact survivors and unique declared identities across BOTH
+  // policies before any anonymous edit can claim a live clinical shape.
+  for (const [limit, group] of sourceGroups) {
+    const exact = group.sourceCount === group.live.length ? group.live[group.cursor++] : undefined;
+    const replacement = exact ?? (group.live.length === 0 && limit.id && sourceIds.get(limit.id) === 1
+      ? liveIds.get(limit.id) : undefined);
+    if (replacement !== undefined && !claimed.has(replacement)) {
+      matches.set(limit, replacement);
+      claimed.add(replacement);
+    }
+  }
+  const reconcile = (policy: FhirR6DosageSafety | undefined, phase = false) => {
+    if (!policy) return policy;
+    let changed = false;
+    const limits: FhirR6DoseLimit[] = [];
+    for (const limit of policy.doseLimit ?? []) {
+      if (phase && !hasCoreStepLimit(limit)) {
+        limits.push(limit);
+        continue;
+      }
+      const group = sourceGroups.get(limit)!;
+      const assigned = matches.get(limit);
+      if (assigned !== undefined && (!phase || !unchangedStepOnly || group.sourceCount === group.live.length ||
+          limit.id !== undefined && sameShape(limit, current[assigned]) && sameClinicalValue(limit, current[assigned]))) {
+        limits.push(current[assigned]);
+        if (phase) stepLimits.add(assigned);
+        if (group.sourceCount !== group.live.length) changed = true;
+        continue;
+      }
+      changed = true;
+      // A changed multiplicity is not an amount edit. Neither an ID
+      // fallback nor shape matching can prove which identical copy won.
+      if (group.live.length || limit.id) continue;
+      // A unique anonymous annotation edit keeps its clinical value and phase
+      // owner. A changed amount still belongs to the edited header authority.
+      const replacement = shapeMatch(limit, phase && unchangedStepOnly);
+      if (replacement !== undefined) {
+        limits.push(current[replacement]);
+        if (phase) stepLimits.add(replacement);
+        matches.set(limit, replacement);
+        claimed.add(replacement);
+      }
+    }
+    const action = policy.ifExceeded;
+    const keepAction = action === undefined || safety.ifExceeded === action ||
+      safety.ifExceeded === combinedAction;
+    if (!changed && keepAction) return policy;
+    const next = { ...policy };
+    if (limits.length) next.doseLimit = limits;
+    else delete next.doseLimit;
+    if (!keepAction) delete next.ifExceeded;
+    return next;
+  };
+  const course = reconcile(saved.course), step = reconcile(saved.step, true);
+  return { course, step, stepLimits };
+}
+
+/** A live edit to lifted safety also owns the active scoped modifier. Keep
+ * qualifiers attached to surviving limits, never to a superseded snapshot. */
+function reconcileScopedSafety(safety: FhirR6DosageSafety | undefined): void {
+  if (!safety?.modifierExtension?.length) return;
+  let modifiers: FhirR6Extension[] | undefined;
+  let retired: FhirR6Extension[] | undefined;
+  for (let index = 0; index < safety.modifierExtension.length; index++) {
+    const marker = safety.modifierExtension[index];
+    let replacement = marker;
+    if (marker.url === R6_SCOPED_SAFETY_MODIFIER_URL) {
+      const saved = decodeR6SourceMetadata(marker, "safety") as {
+        course?: FhirR6DosageSafety; step?: FhirR6DosageSafety;
+      } | undefined;
+      if (saved) {
+        const { course, step } = reconcileSafetyScopes(safety, saved);
+        if (course !== saved.course || step !== saved.step) {
+          const generated = encodeR6SourceMetadata(R6_SCOPED_SAFETY_MODIFIER_URL,
+            { ...saved, course, step }, "safety");
+          replacement = { ...marker, extension: marker.extension?.map(child => {
+            if ((child.url !== "course" && child.url !== "step") ||
+                (child.url === "course" && course === saved.course) ||
+                (child.url === "step" && step === saved.step)) return child;
+            const updated = generated.extension?.find(value => value.url === child.url);
+            return updated ? { ...child, ...updated } : child;
+          }) };
+          (retired ??= []).push(marker);
+        }
+      }
+    }
+    if (replacement !== marker && !modifiers) modifiers = safety.modifierExtension.slice(0, index);
+    modifiers?.push(replacement);
+  }
+  if (modifiers) safety.modifierExtension = modifiers;
+  if (retired?.length) safety.extension = [...(safety.extension ?? []),
+    { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: retired }];
+}
+
+export function liftSingleStepSafety(output: FhirR6DosageInstruction): void {
+  const step = output.step?.length === 1 ? output.step[0] : undefined;
+  const policy = step?.safety;
+  if (!policy) {
+    reconcileScopedSafety(output.safety);
+    if (output.extension?.some(item => item.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL))
+      retireSource(output, R6_SINGLE_STEP_SAFETY_SOURCE_URL);
+    return;
+  }
+  const course = output.safety;
+  // A dosage-scoped limit is relative to its containing policy. Lifting a
+  // phase total into core course safety would change its meaning.
+  const scopedTotal = policy.doseLimit?.some(limit => !hasCoreStepLimit(limit));
+  const liftedLimits = scopedTotal
+    ? policy.doseLimit!.filter(hasCoreStepLimit) : policy.doseLimit;
+  let projected = policy;
+  if (course || scopedTotal) {
+    projected = { ...(course ?? policy) };
+    if (course?.doseLimit || liftedLimits?.length)
+      projected.doseLimit = [...(course?.doseLimit ?? []), ...(liftedLimits ?? [])];
+    else delete projected.doseLimit;
+    if (policy.ifExceeded && policy.ifExceeded !== course?.ifExceeded) {
+      projected.ifExceeded = course?.ifExceeded ? course.ifExceeded + "\n" + policy.ifExceeded : policy.ifExceeded;
+      // A primitive translation describes its complete text. Distinct action
+      // translations remain on their original, separately scoped policies.
+      if (course?.ifExceeded) delete projected._ifExceeded;
+      else if (policy._ifExceeded) projected._ifExceeded = policy._ifExceeded;
+      else delete projected._ifExceeded;
+    }
+    if (scopedTotal || course?.modifierExtension?.length || policy.modifierExtension?.length ||
+        course?.ifExceeded !== policy.ifExceeded) {
+      // R6 cannot carry sole-step safety. A must-understand wrapper keeps
+      // phase totals, actions and modifiers tied to their owning policy.
+      projected.modifierExtension = [encodeR6SourceMetadata(R6_SCOPED_SAFETY_MODIFIER_URL,
+        { course, step: policy }, "safety")];
+    }
+  }
+  // The policy belongs to the phase, including when an identified component
+  // later moves elsewhere. Preserve an authored phase ID; otherwise give this
+  // wire phase its own stable identity before lifting its policy.
+  if (step!.id === undefined) step!.id = "phase-" + stepOwnerFingerprint(step!);
+  replaceSource(output, R6_SINGLE_STEP_SAFETY_SOURCE_URL, { course, step: policy, projected,
+    ownerId: step!.id });
+  output.safety = projected;
+  delete step!.safety;
+}
+
+
+/** Conflicting externally edited choices have no single active clinical meaning.
+ * Keep every submitted value in typed source data, leaving the independent
+ * dose/rate dimension available without inventing a winner for the conflict. */
+export function retainConflictingAmountChoices(
+  amount: Record<string, unknown>, doseConflict: boolean, rateConflict: boolean
+): void {
+  const retain = (kind: "dose" | "rate", fields: readonly (readonly [string, string])[]) => {
+    const source: FhirExtension[] = [];
+    for (const [field, valueKey] of fields) {
+      if (amount[field] === undefined) continue;
+      let value = amount[field];
+      if (field === "rateRatio") {
+        const ratio = value as FhirR6Ratio;
+        value = { ...ratio,
+          ...(ratio.numerator ? { numerator: generalQuantityForR5(ratio.numerator) } : {}),
+          ...(ratio.denominator ? { denominator: simpleQuantityForR5(ratio.denominator) } : {}),
+        };
+      }
+      source.push({ url: field, [valueKey]: value } as FhirExtension);
+      delete amount[field];
+    }
+    amount.extension = [
+      ...((amount.extension as FhirExtension[] | undefined) ?? []),
+      { url: `urn:ezmedicationinput:r6-unresolved-${kind}-source`, extension: source },
+    ];
+  };
+  if (doseConflict) retain("dose", [
+    ["doseQuantity", "valueQuantity"], ["doseRange", "valueRange"], ["doseExpression", "valueExpression"],
+  ]);
+  if (rateConflict) retain("rate", [
+    ["rateQuantity", "valueQuantity"], ["rateRange", "valueRange"],
+    ["rateRatio", "valueRatio"], ["rateExpression", "valueExpression"],
+  ]);
+}

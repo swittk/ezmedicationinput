@@ -2,6 +2,40 @@
   "system": "urn:ezmedicationinput:CodeSystem:medication-instruction-action",
   "actions": [
     {
+      "code": "drive",
+      "semanticClass": "activity",
+      "display": "Drive",
+      "i18n": { "th": "ขับรถ" },
+      "aliases": [
+        "drive",
+        "driving"
+      ],
+      "adviceClauseHead": true,
+      "argumentParser": "default",
+      "realizer": "default"
+    },
+    {
+      "code": "cause",
+      "semanticClass": "effect",
+      "display": "Cause",
+      "aliases": [
+        "cause",
+        "causes"
+      ],
+      "i18n": {
+        "th": "ทำให้เกิด"
+      },
+      "adviceClauseHead": true,
+      "defaultForce": "warning",
+      "argumentParser": "default",
+      "realizer": "default",
+      "realizerConfig": {
+        "locales": {
+          "en": { "finiteUnmodalLabel": "Causes" }
+        }
+      }
+    },
+    {
       "code": "protect-from-light",
       "semanticClass": "storage",
       "display": "Protect from light",
@@ -525,6 +559,9 @@
     {
       "code": "dilute",
       "semanticClass": "prepare",
+      "acceptsAmount": true,
+      "argumentParser": "amount-material-destination",
+      "realizer": "amount-material-destination",
       "display": "Dilute",
       "i18n": {
         "th": "เจือจาง"
@@ -781,6 +818,8 @@
     {
       "code": "chew",
       "semanticClass": "manipulate",
+      "acceptsAmount": true,
+      "definesDose": true,
       "display": "Chew",
       "i18n": {
         "th": "เคี้ยว"
@@ -814,6 +853,9 @@
     {
       "code": "swallow",
       "semanticClass": "ingest",
+      "methodBoundMannerConcepts": ["whole"],
+      "acceptsAmount": true,
+      "definesDose": true,
       "display": "Swallow",
       "i18n": {
         "th": "กลืน"
@@ -1815,7 +1857,12 @@
       ],
       "procedural": true,
       "argumentParser": "bare-duration",
-      "realizer": "duration"
+      "realizer": "duration",
+      "realizerConfig": {
+        "locales": {
+          "th": { "suppressSiteConcepts": ["eye"] }
+        }
+      }
     },
     {
       "code": "press",

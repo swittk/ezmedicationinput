@@ -1,5 +1,8 @@
-import { DOSE_TARGET_EVENT_MEMBERS } from "../hpsg/lexical-classes";
-import { terminalAdministrationDelay } from "./grammar";
+import { isPreviousPhaseAnchor } from "../canonical/course";
+import { DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_DAYPART_CLOCK_RANGES, isNextDayScheduleRule } from "../hpsg/lexical-classes";
+import { hasImplicitSingleCount, singleClockWithoutRecurrence, terminalAdministrationDelay } from "./grammar";
+import { applyAdministrationDurationSemantics } from "../hpsg/defaults";
+import { hasRecurringSchedule as hasIndependentRecurrence } from "../hpsg/projection";
 import { EventTiming as SequenceEventTiming, FhirPeriodUnit } from '../types';
 import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
 import type { BoundaryPlan, BoundaryRelation } from '../hpsg/signature';
@@ -9,7 +12,8 @@ import type {
   CanonicalEvidence,
   CanonicalSigClause,
   CanonicalSourceSpan,
-  FhirQuantity
+  FhirQuantity,
+  ParseOptions
 } from '../types';
 
 export interface RegimenPhase {
@@ -88,12 +92,29 @@ export function buildRegimenGraph(
   };
 }
 
-function nextDate(value: string): string | undefined {
+function advanceDate(value: string, days = 1): string | undefined {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
   const date = new Date(`${value}T00:00:00Z`);
   if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return undefined;
-  date.setUTCDate(date.getUTCDate() + 1);
+  date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+/** Calendar selection makes a dated opening an eligibility floor, not a
+ * completed administration from which a NEXT phase can be dated. */
+function hasCalendarSelection(schedule: CanonicalSigClause["schedule"]): boolean {
+  return Boolean(schedule?.dayOfWeek?.length || schedule?.dayOfMonth?.length || schedule?.weekdayOrdinal !== undefined);
+}
+
+/** Whether the authored endpoints identify one exact course duration. */
+export function hasExactScheduleDuration(
+  schedule: CanonicalSigClause["schedule"]
+): schedule is NonNullable<CanonicalSigClause["schedule"]> & { duration: number } {
+  return Boolean(schedule && schedule.duration !== undefined &&
+    !schedule.durationComparator && !schedule.durationMaxComparator &&
+    (!schedule.durationIsRange || schedule.durationMax !== undefined) &&
+    (schedule.durationMax === undefined || schedule.durationMax === schedule.duration &&
+      (!schedule.durationMaxUnit || schedule.durationMaxUnit === schedule.durationUnit)));
 }
 
 /**
@@ -104,8 +125,7 @@ function nextDate(value: string): string | undefined {
 export function anchoredScheduleDurationEnd(
   schedule: CanonicalSigClause['schedule']
 ): string | undefined {
-  if (!schedule?.boundsStart || schedule.duration === undefined ||
-      schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) return undefined;
+  if (!hasExactScheduleDuration(schedule) || !schedule.boundsStart) return undefined;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(schedule.boundsStart) || schedule.duration <= 0) {
     return undefined;
   }
@@ -129,24 +149,35 @@ export function anchoredScheduleDurationEnd(
   return date.toISOString().slice(0, 10);
 }
 
-function materializeAnchoredScheduleWindow(schedule: CanonicalSigClause['schedule']): void {
+function materializeAnchoredScheduleWindow(schedule: CanonicalSigClause['schedule']): string | undefined {
   if (!schedule || schedule.boundsEnd) return;
   const durationEnd = anchoredScheduleDurationEnd(schedule);
   if (durationEnd) schedule.boundsEnd = durationEnd;
+  return durationEnd;
 }
+/** An exact fixed-day phase can establish a later relative origin. */
+function exactPhaseDurationDays(schedule: CanonicalSigClause["schedule"]): number | undefined {
+  if (!hasExactScheduleDuration(schedule)) return undefined;
+  const days = schedule.durationUnit === "d" ? schedule.duration :
+    schedule.durationUnit === "wk" ? schedule.duration * 7 : undefined;
+  // Only whole local days compose with a civil-day pause. Fractional days
+  // retain their elapsed endpoint through the existing predecessor-end owner.
+  return days !== undefined && Number.isInteger(days) ? days : undefined;
+}
+
 /** Half-open phase endpoint derived from explicit dates, end bounds, or anchored duration. */
 function phaseEndExclusive(schedule: CanonicalSigClause['schedule']): string | undefined {
   if (!schedule) return undefined;
-  let endpoint = schedule.boundsEnd ? nextDate(schedule.boundsEnd) : undefined;
+  let endpoint = schedule.boundsEnd ? advanceDate(schedule.boundsEnd) : undefined;
   const inclusiveDurationEnd = anchoredScheduleDurationEnd(schedule);
-  const durationEnd = inclusiveDurationEnd ? nextDate(inclusiveDurationEnd) : undefined;
+  const durationEnd = inclusiveDurationEnd ? advanceDate(inclusiveDurationEnd) : undefined;
   if (durationEnd && (!endpoint || durationEnd < endpoint)) endpoint = durationEnd;
   // Explicit finite phase bounds take precedence over the date of its last dose.
   if (endpoint) return endpoint;
   if (schedule.calendarEvents?.length) {
     let latest = '';
     for (const event of schedule.calendarEvents) if (event.isoDate > latest) latest = event.isoDate;
-    return nextDate(latest);
+    return advanceDate(latest);
   }
   return undefined;
 }
@@ -258,6 +289,14 @@ function terminalTreatmentPauseDays(clause: CanonicalSigClause): number | undefi
   return pause.durationDays;
 }
 
+/** A divided daily total retains its denominator as derivation; the resolved
+ * per-administration dose does not become an infusion-method antecedent. */
+function isAdministrationRate(quantity: CanonicalSigClause["clinicalQuantity"]): boolean {
+  return !!quantity && (quantity.representation !== "dose" ||
+    quantity.status !== "resolved" && !!quantity.dailyTotal &&
+      quantity.denominators.some(term => term.dimension === "time"));
+}
+
 /**
  * License sequential schedule inheritance on the typed regimen graph before
  * canonical clauses are lowered to FHIR. A complete predecessor phase owns
@@ -268,10 +307,32 @@ export function scopeSequentialPhaseSemantics(
   states: readonly ParserState[],
   segments: readonly HpsgSigSegment[],
   graph: RegimenGraph,
-  source: string
+  source: string,
+  options?: ParseOptions
 ): InheritanceEvidence[] {
   const applications: InheritanceEvidence[] = [];
-  for (const state of states) materializeAnchoredScheduleWindow(state.primaryClause.schedule);
+  let derivedEnds: Map<NonNullable<CanonicalSigClause["schedule"]>, string> | undefined;
+  for (const state of states) {
+    const clause = state.primaryClause, schedule = clause.schedule;
+    const derivedEnd = materializeAnchoredScheduleWindow(schedule);
+    if (derivedEnd && schedule) (derivedEnds ??= new Map()).set(schedule, derivedEnd);
+    // A typed relative delay locates one future administration unless the
+    // clause supplies recurring or as-needed use. Establish it before native
+    // and R5 projection; an empty repeat cannot decide this at execution time.
+    if (schedule?.administrationOffsetMinutes !== undefined && !clause.prn?.enabled &&
+        schedule.count === undefined && schedule.countMax === undefined && !schedule.sharedCount &&
+        !hasRecurringSchedule(schedule) && schedule.frequencyMax === undefined &&
+        schedule.periodMax === undefined && schedule.periodUnit === undefined &&
+        !schedule.dayOfMonth?.length && schedule.weekdayOrdinal === undefined &&
+        !schedule.activityTiming?.length && !schedule.clockWindow && !schedule.eventWindow &&
+        !schedule.calendarEvents?.length && !schedule.cycleDayConstraint && !schedule.occurrenceCap &&
+        schedule.duration === undefined && schedule.durationMax === undefined && schedule.durationUnit === undefined) {
+      schedule.count = 1;
+      clause.evidence.push({ rule: "hpsg.regimen.delayed-administration-point", spans: [],
+        scheduleFields: ["count"],
+        note: "The relative interval locates one administration unless a recurrence is independently stated." });
+    }
+  }
   for (const dependency of graph.administrationDependencies ?? []) {
     const donor = states[dependency.from]?.primaryClause;
     const recipient = states[dependency.to]?.primaryClause;
@@ -290,23 +351,213 @@ export function scopeSequentialPhaseSemantics(
       note: "The target inherits this administration's arguments and base schedule with the explicit intervening wait."
     });
   }
-  const relativePhaseStarts = new Map<number, number>();
+  const relativePhaseStarts = new Map<number, number | null>();
   for (const edge of graph.sequences) {
     const prior = graph.phases[edge.from].members;
     const next = graph.phases[edge.to].members;
-    const priorStart = relativePhaseStarts.get(edge.from) ?? 0;
+    const schedules = prior.map(index => states[index]?.primaryClause.schedule);
+    if (edge.relation.semanticLicense === 'dose-continuation' && prior.length === 1 && next.length === 1) {
+      const precedingClock = singleClockWithoutRecurrence(schedules[0]);
+      const followingSchedule = states[next[0]]?.primaryClause.schedule;
+      const followingEarlierClock = precedingClock &&
+        followingSchedule?.timeOfDay?.some(clock => precedingClock > clock);
+      const followingEvent = !followingSchedule?.timeOfDay?.length &&
+        followingSchedule?.when?.some(event => event !== SequenceEventTiming.Immediate);
+      if (precedingClock && states[prior[0]].primaryClause.prn?.enabled !== true &&
+          (followingEvent || followingEarlierClock || hasIndependentRecurrence(followingSchedule, false))) {
+        // The selected sequential construction kept this bare point before
+        // an independent recurrence, earlier clock, or event.
+        // Complete its initial point; native phase completion owns the next
+        // eligible clock or caller-resolved event without adding an event clock.
+        schedules[0]!.count = 1;
+        states[prior[0]].primaryClause.evidence.push({
+          rule: "hpsg.regimen.single-clock-before-clock-transition", spans: [], scheduleFields: ["count"],
+          note: "The sequential clock or event continuation follows this initial administration."
+        });
+      }
+    }
+    const endpoints = schedules.map(phaseEndExclusive);
+    // All coordinated daughters must be finite. An unbounded sibling prevents
+    // the sequence construction from inventing a phase boundary.
+    const start = endpoints.length && endpoints.every((value): value is string => !!value)
+      ? endpoints.reduce((latest, value) => value > latest ? value : latest, '')
+      : undefined;
+    const recordedStart = relativePhaseStarts.get(edge.from);
+    const inheritedStart = recordedStart !== undefined ? recordedStart : 0;
+    const firstSchedule = schedules[0];
+    // A NEXT displacement belongs to the preceding phase, not the order.
+    // Keep that dependency until execution resolves its actual origin.
+    let priorStart: number | null = isPreviousPhaseAnchor(firstSchedule?.phaseStartReference)
+      ? null : firstSchedule?.treatmentStartOffsetDays ?? inheritedStart;
+    // An omitted member onset inherits the phase origin, not a sibling's
+    // independently authored onset. Distinct origins keep their dependency
+    // for the native phase resolver, which already owns member completion.
+    let phasePauseDays = 0;
+    let terminalPauses = 0;
+    for (let index = 0; index < schedules.length; index++) {
+      const schedule = schedules[index];
+      if (index > 0 && ((schedule?.treatmentStartOffsetDays ?? inheritedStart) !== priorStart ||
+          schedule?.phaseStartReference !== firstSchedule?.phaseStartReference ||
+          schedule?.boundsStart !== firstSchedule?.boundsStart)) priorStart = null;
+      const clause = states[prior[index]]?.primaryClause;
+      if (clause?.clinicalAdjuncts?.treatmentPause) {
+        const days = terminalTreatmentPauseDays(clause);
+        if (days !== undefined) {
+          phasePauseDays = days;
+          terminalPauses++;
+        }
+      }
+    }
+    // Only one typed terminal action can supply a shared pause. Conflicting
+    // pauses remain counseling instead of becoming an executable guess.
+    if (terminalPauses !== 1) phasePauseDays = 0;
+    let nextDayRelation = false;
+    let contextualNextDay = false;
+    let localNextDay = false;
+    let datedNextDay: string | undefined;
+    let contextualPredecessor: boolean | undefined;
+    let singleClockPredecessor: number | undefined;
+    let relativeNextDay: number | null | undefined;
+    for (const member of next) {
+      const clause = states[member]?.primaryClause;
+      const schedule = clause?.schedule;
+      if (!clause || !schedule?.evidence?.some(item => isNextDayScheduleRule(item.rule))) continue;
+      if (contextualPredecessor === undefined) {
+        const preceding = prior.length === 1 ? schedules[0] : undefined;
+        // A sequential next-morning construction closes one explicitly
+        // clocked administration. Its actual occurrence, which can move to
+        // tomorrow after a late order, owns the following local day.
+        const onceDaily = preceding?.frequency === 1 && preceding.period === 1 &&
+          preceding.periodUnit === FhirPeriodUnit.Day;
+        if (preceding?.timeOfDay?.length === 1 && states[prior[0]].primaryClause.prn?.enabled !== true &&
+            preceding.count === undefined &&
+            preceding.countMax === undefined && !preceding.sharedCount && preceding.duration === undefined &&
+            preceding.durationMax === undefined && preceding.durationUnit === undefined &&
+            (onceDaily || preceding.frequency === undefined && preceding.period === undefined) &&
+            preceding.frequencyMax === undefined && preceding.periodMax === undefined &&
+            !hasCalendarSelection(preceding) && !preceding.repeatCycle &&
+            !preceding.boundsStart && !preceding.boundsEnd && !preceding.calendarEvents?.length) {
+          // A named daypart can qualify this same clock. A separate event
+          // position, including a meal, cannot be closed by a one-dose cap.
+          const hour = preceding.when?.length ? Number(preceding.timeOfDay[0].slice(0, 2)) : 0;
+          if (!preceding.when?.length || preceding.when.every(event => {
+            const range = DOSE_TARGET_DAYPART_CLOCK_RANGES.get(event);
+            return range && hour >= range.startHour && hour < range.endHour;
+          })) singleClockPredecessor = prior[0];
+        }
+        // Every finite duration can end within a local day. The execution
+        // owner knows its actual endpoint, order clock and timezone; grammar
+        // must preserve NEXT instead of reducing it to an elapsed offset.
+        // A displaced dated endpoint still belongs to execution, which knows
+        // the actual occupied day rather than just the nominal calendar end.
+        const displaced = schedules.some(value => Boolean(value?.administrationOffsetMinutes));
+        contextualPredecessor = (!start || displaced) && (singleClockPredecessor !== undefined || priorStart === null ||
+          schedules.some(value => value?.count !== undefined || value?.countMax !== undefined || value?.sharedCount ||
+            isPreviousPhaseAnchor(value?.phaseStartReference) ||
+            value?.duration !== undefined || value?.durationUnit !== undefined ||
+            // An unfiltered open phase keeps its shared civil origin. A day
+            // selection leaves that date as a floor, not a known completion.
+            (!firstSchedule?.boundsStart || hasCalendarSelection(value)) && hasIndependentRecurrence(value, false)));
+      }
+      const authoredOffset = schedule.evidence.some(item => !isNextDayScheduleRule(item.rule) &&
+        (item.scheduleFields?.indexOf('treatmentStartOffsetDays') ?? -1) >= 0 &&
+        item.spans.some(span => span.start >= 0 && span.end <= clause.rawText.length));
+      // A standalone NEXT starts at the next civil day. In a sequence this
+      // provisional anchor is replaced by the predecessor's own boundary.
+      if (!authoredOffset && schedule.phaseStartReference === "treatment-day-start")
+        delete schedule.phaseStartReference;
+      // An independent source onset remains its own owner. Remove only the
+      // provisional relative-day offset when an authored calendar start owns it.
+      if (authoredOffset || contextualPredecessor && (schedule.boundsStart || schedule.calendarEvents?.length)) {
+        if (!authoredOffset) delete schedule.treatmentStartOffsetDays;
+        continue;
+      }
+      nextDayRelation = true;
+      if (singleClockPredecessor !== undefined) {
+        const predecessor = states[singleClockPredecessor].primaryClause;
+        predecessor.schedule!.count = 1;
+        predecessor.evidence.push({ rule: "hpsg.regimen.single-clock-before-next-day", spans: [],
+          scheduleFields: ["count"],
+          note: "The next-morning continuation follows this one explicitly clocked administration." });
+        singleClockPredecessor = undefined;
+      }
+      if (contextualPredecessor) {
+        contextualNextDay = true;
+        if (phasePauseDays) schedule.treatmentStartOffsetDays = phasePauseDays;
+        else delete schedule.treatmentStartOffsetDays;
+        schedule.phaseStartReference = 'previous-phase-next-day';
+      } else if (start) {
+        // A dated predecessor supplies an actual next calendar day. It must
+        // not also claim the unrelated second day of treatment.
+        datedNextDay = phasePauseDays ? advanceDate(start, phasePauseDays) : start;
+        schedule.boundsStart ??= datedNextDay;
+        delete schedule.treatmentStartOffsetDays;
+      } else if (firstSchedule?.boundsStart && priorStart !== null) {
+        // An open dated phase supplies a civil origin, not a completion.
+        // NEXT follows that shared date; keep the predecessor's authored end
+        // absent, rather than replacing its calendar origin with treatment day 2.
+        datedNextDay = advanceDate(firstSchedule.boundsStart, 1 + phasePauseDays);
+        schedule.boundsStart ??= datedNextDay;
+        delete schedule.treatmentStartOffsetDays;
+      } else {
+        if (relativeNextDay === undefined) {
+          // Finite and dependent predecessors were handled above. An
+          // otherwise unbounded NEXT uses the established local-day origin.
+          relativeNextDay = priorStart === null ? null : priorStart + 1;
+          localNextDay = relativeNextDay !== null;
+        }
+        if (relativeNextDay === null) delete schedule.treatmentStartOffsetDays;
+        else {
+          schedule.treatmentStartOffsetDays = relativeNextDay;
+          if (localNextDay) schedule.phaseStartReference = "treatment-day-start";
+        }
+      }
+      clause.evidence.push({ rule: 'hpsg.regimen.next-day-onset', spans: [],
+        scheduleFields: schedule.phaseStartReference && schedule.treatmentStartOffsetDays !== undefined
+          ? ["phaseStartReference", "treatmentStartOffsetDays"]
+          : schedule.phaseStartReference ? ['phaseStartReference'] :
+            datedNextDay ? ['boundsStart'] : relativeNextDay === null ? [] : ['treatmentStartOffsetDays'],
+        note: 'The next-day daughter follows the complete preceding phase, retaining its authored endpoint or origin.' });
+    }
+    if (contextualNextDay || localNextDay || datedNextDay) {
+      // Coordination already established one successor phase. Its onset scopes
+      // over daughters that omit an onset, while independently authored dates
+      // and treatment offsets remain local to their own administrations.
+      for (const member of next) {
+        const clause = states[member]?.primaryClause;
+        if (!clause) continue;
+        const schedule = clause.schedule;
+        if (schedule?.phaseStartReference || schedule?.treatmentStartOffsetDays !== undefined ||
+            schedule?.boundsStart || schedule?.calendarEvents?.length) continue;
+        clause.schedule ??= {};
+        if (datedNextDay) clause.schedule.boundsStart = datedNextDay;
+        else {
+          clause.schedule.phaseStartReference = contextualNextDay ? 'previous-phase-next-day' : "treatment-day-start";
+          if (contextualNextDay && phasePauseDays)
+            clause.schedule.treatmentStartOffsetDays = phasePauseDays;
+          else if (localNextDay && relativeNextDay !== null && relativeNextDay !== undefined)
+            clause.schedule.treatmentStartOffsetDays = relativeNextDay;
+        }
+        clause.evidence.push({ rule: 'hpsg.regimen.shared-next-day-onset', spans: [],
+          scheduleFields: datedNextDay ? ['boundsStart'] : clause.schedule.treatmentStartOffsetDays !== undefined
+            ? ["phaseStartReference", "treatmentStartOffsetDays"] : ['phaseStartReference'],
+          note: 'The coordinated successor shares the phase onset while retaining its local dose and clock.' });
+      }
+    }
     const explicitStarts = next.map(index => states[index]?.primaryClause.schedule?.treatmentStartOffsetDays)
       .filter((value): value is number => value !== undefined);
     const typedChange = next.some(index => Boolean(states[index]?.primaryClause.regimenAdjustment));
-    const explicitStart = typedChange && explicitStarts.length &&
+    const explicitStart = !contextualNextDay && (typedChange || nextDayRelation) && explicitStarts.length &&
       explicitStarts.every(value => value === explicitStarts[0]) ? explicitStarts[0] : undefined;
-    if (explicitStart !== undefined && explicitStart > priorStart) {
+    if (explicitStart !== undefined && priorStart !== null && explicitStart > priorStart) {
       // An explicit source-relative ADD/REPLACE onset closes the preceding
-      // phase. Never derive this from unrelated lowered parallel members.
+      // phase. Civil NEXT already supplies the successor boundary to execution;
+      // an elapsed length here would incorrectly keep the predecessor past midnight.
+      // Never derive an elapsed length from unrelated lowered parallel members.
       for (const member of prior) {
         const clause = states[member]?.primaryClause;
         const schedule = clause?.schedule;
-        if (!clause || !schedule || schedule.duration !== undefined ||
+        if (!clause || !schedule || localNextDay || schedule.duration !== undefined ||
             schedule.boundsStart || schedule.boundsEnd || schedule.calendarEvents?.length) continue;
         schedule.duration = explicitStart - priorStart;
         schedule.durationUnit = FhirPeriodUnit.Day;
@@ -318,54 +569,101 @@ export function scopeSequentialPhaseSemantics(
       // The same source onset also belongs to the succeeding step's start.
       // Do not erase it after bounding the predecessor: R6/R5 lowering must
       // still emit the exact treatment-relative date on the next phase.
-    } else {
-      const lengths = prior.map(index => {
-        const schedule = states[index]?.primaryClause.schedule;
-        return schedule?.duration !== undefined &&
-          (schedule.durationUnit === 'd' || schedule.durationUnit === 'wk')
-          ? schedule.duration * (schedule.durationUnit === 'wk' ? 7 : 1) : undefined;
-      });
-      if (lengths.length && lengths.every((value): value is number => value !== undefined)) {
-        const pauses = prior.map(index =>
-          states[index]?.primaryClause && terminalTreatmentPauseDays(states[index].primaryClause))
-          .filter((days): days is number => days !== undefined);
-        // The pause is a typed, single terminal action attached to a complete
-        // finite predecessor. Multiple or conflicting pauses remain editable
-        // counseling rather than executable guesses.
-        const pauseDays = pauses.length === 1 ? pauses[0] : 0;
-        const phaseStart = priorStart + Math.max(...lengths) + pauseDays;
+    } else if (start && phasePauseDays) {
+      // A dated completion owns its terminal pause independently of the order.
+      // Preserve a successor's explicit onset instead of replacing that owner.
+      relativePhaseStarts.set(edge.to, null);
+      for (const member of next) {
+        const clause = states[member]?.primaryClause;
+        const schedule = clause?.schedule;
+        if (!clause || schedule?.treatmentStartOffsetDays !== undefined ||
+            schedule?.phaseStartReference || schedule?.boundsStart ||
+            schedule?.calendarEvents?.length) continue;
+        (clause.schedule ??= {}).boundsStart = advanceDate(start, phasePauseDays);
+        clause.evidence.push({
+          rule: "hpsg.regimen.terminal-treatment-pause",
+          spans: [], scheduleFields: ["boundsStart"],
+          note: "The next administration starts after the dated completion and its finite no-medication interval."
+        });
+      }
+    } else if (!contextualNextDay) {
+      const lengths = schedules.map(exactPhaseDurationDays);
+      if (priorStart !== null && lengths.length &&
+          lengths.every((value): value is number => value !== undefined)) {
+        const phaseStart = priorStart + Math.max(...lengths) + phasePauseDays;
         relativePhaseStarts.set(edge.to, phaseStart);
-        if (pauseDays && lengths.every(length => length === lengths[0])) {
+        if (phasePauseDays && lengths.every(length => length === lengths[0])) {
           for (const member of next) {
             const clause = states[member]?.primaryClause;
             const schedule = clause?.schedule;
             if (!clause || !schedule || schedule.treatmentStartOffsetDays !== undefined ||
-                schedule.boundsStart || schedule.boundsEnd) continue;
+                schedule.phaseStartReference || schedule.boundsStart || schedule.boundsEnd) continue;
             schedule.treatmentStartOffsetDays = phaseStart;
+            if (firstSchedule?.phaseStartReference === "treatment-day-start")
+              schedule.phaseStartReference = firstSchedule.phaseStartReference;
             clause.evidence.push({
               rule: "hpsg.regimen.terminal-treatment-pause",
-              spans: [], scheduleFields: ["treatmentStartOffsetDays"],
+              spans: [], scheduleFields: schedule.phaseStartReference
+                ? ["treatmentStartOffsetDays", "phaseStartReference"] : ["treatmentStartOffsetDays"],
               note: "The next administration starts after an explicit finite no-medication interval."
             });
           }
         }
+      } else {
+        relativePhaseStarts.set(edge.to, null);
+        // An exact elapsed/calendar-unit phase cannot be collapsed into civil
+        // days. Its existing execution completion owns the following pause.
+        if (phasePauseDays && schedules.length && schedules.every(hasExactScheduleDuration)) {
+          for (const member of next) {
+            const clause = states[member]?.primaryClause;
+            const schedule = clause?.schedule;
+            if (!clause || !schedule || schedule.treatmentStartOffsetDays !== undefined ||
+                schedule.phaseStartReference || schedule.boundsStart || schedule.boundsEnd ||
+                schedule.calendarEvents?.length) continue;
+            schedule.phaseStartReference = "previous-phase-end";
+            schedule.treatmentStartOffsetDays = phasePauseDays;
+            clause.evidence.push({
+              rule: "hpsg.regimen.terminal-treatment-pause",
+              spans: [], scheduleFields: ["phaseStartReference", "treatmentStartOffsetDays"],
+              note: "The typed pause starts at the preceding phase's actual exclusive end."
+            });
+          }
+        }
       }
-    }
-    const schedules = prior.map(index => states[index]?.primaryClause.schedule);
-    const endpoints = schedules.map(phaseEndExclusive);
-    // All coordinated daughters must be finite. An unbounded sibling prevents
-    // the sequence construction from inventing a phase boundary.
-    const start = endpoints.length && endpoints.every((value): value is string => !!value)
-      ? endpoints.reduce((latest, value) => value > latest ? value : latest, '')
-      : undefined;
+    } else relativePhaseStarts.set(edge.to, null);
     const shared = schedules[0];
+    // A recurring event and its offset form one donated anchor in both
+    // explicit timing references and ordinary sequential ellipsis.
+    const recurringAnchors = shared?.when?.filter(event => event !== SequenceEventTiming.Immediate);
+    const eventTiming = recurringAnchors?.length ? { when: recurringAnchors,
+      offset: shared?.offset, offsetMin: shared?.offsetMin, offsetMax: shared?.offsetMax } : undefined;
     const sharedAnchors = schedules.every(schedule =>
       sameSet(schedule?.when, shared?.when) &&
-      sameSet(schedule?.timeOfDay, shared?.timeOfDay)
+      sameSet(schedule?.timeOfDay, shared?.timeOfDay) &&
+      equalStructuredValues(schedule?.clockWindow, shared?.clockWindow) &&
+      equalStructuredValues(schedule?.eventWindow, shared?.eventWindow) &&
+      equalStructuredValues(schedule?.activityTiming, shared?.activityTiming) &&
+      schedule?.offset === shared?.offset &&
+      schedule?.offsetMin === shared?.offsetMin &&
+      schedule?.offsetMax === shared?.offsetMax
     );
+    // The complete recurrence needs one unambiguous antecedent, independently
+    // of whether the predecessor members happen to share their clock anchors.
+    const cadence = {
+      frequency: shared?.frequency, frequencyMax: shared?.frequencyMax,
+      period: shared?.period, periodMax: shared?.periodMax, periodUnit: shared?.periodUnit,
+      timingCode: shared?.timingCode, dayOfWeek: shared?.dayOfWeek,
+      dayOfMonth: shared?.dayOfMonth, weekdayOrdinal: shared?.weekdayOrdinal
+    };
+    const cadenceKeys = Object.keys(cadence) as (keyof typeof cadence)[];
+    const sharedCadence = schedules.every(schedule => cadenceKeys.every(key =>
+      key === "dayOfWeek" && schedule?.dayOfWeek !== undefined && cadence.dayOfWeek !== undefined
+        ? sameSet(schedule.dayOfWeek, cadence.dayOfWeek)
+        : equalStructuredValues(schedule?.[key], cadence[key])));
     // The target-transition construction may carry an omitted administration
     // method only when the entire predecessor phase agrees on the typed head.
     const sourceMethods = prior.map(index => states[index]?.primaryClause.method);
+    const priorHasRate = prior.every(index => isAdministrationRate(states[index]?.primaryClause.clinicalQuantity));
     const sharedMethod = (edge.relation.semanticLicense === 'target-transition' ||
       edge.relation.semanticLicense === 'dose-continuation') &&
       sourceMethods[0] &&
@@ -406,20 +704,65 @@ export function scopeSequentialPhaseSemantics(
           fields.push('site');
         }
       }
-      if (sharedMethod && !clause.method) {
+      const recipientHasRate = isAdministrationRate(clause.clinicalQuantity);
+      const recipientRoute = clause.route;
+      const routeCompatible = !recipientRoute || prior.every(index => {
+        const priorRoute = states[index]?.primaryClause.route;
+        // A continued administration rate can refine an omitted route. Other
+        // explicit routes need a shared antecedent; evidence rebasing does not
+        // change that route's clinical identity.
+        return priorRoute ? (priorRoute.code && recipientRoute.code
+          ? priorRoute.code === recipientRoute.code
+          : priorRoute.text === recipientRoute.text) : priorHasRate && recipientHasRate;
+      });
+      if (sharedMethod && !clause.method && routeCompatible && (!recipientHasRate || priorHasRate)) {
         clause.method = cloneInheritedValue(sharedMethod, donorStart, recipientStart);
+        applyAdministrationDurationSemantics(states[index], options, true);
+        // Only an end materialized from this provisional course duration can
+        // disappear when the inherited head claims administration run time.
+        // Independently authored or subsequently changed bounds stay intact.
+        const derivedEnd = schedule && derivedEnds?.get(schedule);
+        if (derivedEnd && schedule?.boundsEnd === derivedEnd && schedule.duration === undefined)
+          delete schedule.boundsEnd;
         fields.push('method');
       }
-      if (schedule?.timingReference === "previous" && sharedAnchors && shared) {
-        // The anaphor contributes recurrence, not the preceding phase's
-        // duration or dates. Explicit local cadence/anchors remain local.
+      // A local cadence owns compatibility of the complete recurring anchor set.
+      // Both the timing anaphor and ordinary ellipsis use the same decision
+      // before copying clocks or events and their offsets.
+      const donorAnchorCount = (shared?.timeOfDay?.length ?? 0) + (recurringAnchors?.length ?? 0);
+      const calendarPeriod = schedule?.period ?? 1;
+      const singleCalendarAnchor = donorAnchorCount === 1 &&
+        Number.isInteger(calendarPeriod) && calendarPeriod > 0 &&
+        (schedule?.periodUnit === "d" || schedule?.periodUnit === "wk" ||
+         schedule?.periodUnit === "mo" || schedule?.periodUnit === "a");
+      const successorFrequency = schedule?.frequency ??
+        (schedule?.period !== undefined || schedule?.periodUnit !== undefined ? 1 : undefined);
+      const matchesSuccessorCadence = successorFrequency === undefined || (
+        successorFrequency === donorAnchorCount &&
+        (singleCalendarAnchor || (schedule?.period === undefined || schedule.period === 1) &&
+          (schedule?.periodUnit === undefined || schedule.periodUnit === 'd')) &&
+        (schedule?.frequencyMax === undefined || schedule.frequencyMax === donorAnchorCount)
+      );
+      const onsetOnlyContinuation = edge.relation.semanticLicense === "dose-continuation" &&
+        (schedule?.treatmentStartOffsetDays !== undefined || Boolean(schedule?.phaseStartReference)) &&
+        !clause.prn?.enabled && prior.length === 1 && schedule && !hasRecurringSchedule(schedule) &&
+        (shared?.count !== 1 || cadenceKeys.some(key => cadence[key] !== undefined)) &&
+        (hasRecurringSchedule(shared) || Boolean(shared?.activityTiming?.length));
+      if (schedule && (schedule.timingReference === "previous" || onsetOnlyContinuation) && sharedAnchors && sharedCadence && shared) {
+        // A timing anaphor or licensed onset-only dose continuation inherits
+        // recurrence, not the preceding phase's duration, count or dates.
+        // The onset-only construction has one complete cadence antecedent.
+        // Explicit local cadence/anchors remain local.
+        const hasLocalAnchor = Boolean(schedule.clockWindow || schedule.eventWindow || schedule.activityTiming?.length ||
+          schedule.when?.length || schedule.timeOfDay?.length);
+        const hasLocalCadence = cadenceKeys.some(key => schedule[key] !== undefined);
         const recurrence = {
-          frequency: shared.frequency, frequencyMax: shared.frequencyMax,
-          period: shared.period, periodMax: shared.periodMax, periodUnit: shared.periodUnit,
-          timingCode: shared.timingCode, dayOfWeek: shared.dayOfWeek,
-          when: shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
-          timeOfDay: shared.timeOfDay, eventWindow: shared.eventWindow,
-          offset: shared.offset, offsetMin: shared.offsetMin, offsetMax: shared.offsetMax
+          ...(hasLocalCadence ? undefined : cadence),
+          ...(hasLocalAnchor || !matchesSuccessorCadence ? undefined : eventTiming),
+          timeOfDay: hasLocalAnchor || !matchesSuccessorCadence ? undefined : shared.timeOfDay,
+          clockWindow: hasLocalAnchor ? undefined : shared.clockWindow,
+          eventWindow: hasLocalAnchor ? undefined : shared.eventWindow,
+          activityTiming: hasLocalAnchor ? undefined : shared.activityTiming
         };
         // ParserState setters may create own keys with an undefined value;
         // only an actually defined local value can override inherited recurrence.
@@ -429,15 +772,22 @@ export function scopeSequentialPhaseSemantics(
             (schedule as Record<string, unknown>)[key] = cloneStructuredValue(inherited);
           }
         }
-        delete schedule.timingReference;
-        // Only remove the exact typed reference advice after it is resolved.
-        // Without a predecessor the source preference stays readable/editable.
-        if (clause.additionalInstructions?.length) {
-          clause.additionalInstructions = clause.additionalInstructions.filter(instruction =>
-            !instruction.evidence?.some(item =>
-              (item.scheduleFields?.indexOf('timingReference') ?? -1) >= 0));
-        }
-        fields.push('timingReference');
+        // A selected recurrence supersedes the unowned single-dose default.
+        // A count with its own source daughter remains an independent bound.
+        if (hasImplicitSingleCount(clause)) delete schedule.count;
+        if (schedule.timingReference === "previous" &&
+            (schedule.when?.length || schedule.timeOfDay?.length || schedule.clockWindow || schedule.eventWindow)) {
+          delete schedule.timingReference;
+          // Only remove the exact typed reference advice after it is resolved.
+          // Without a predecessor the source preference stays readable/editable.
+          if (clause.additionalInstructions?.length) {
+            clause.additionalInstructions = clause.additionalInstructions.filter(instruction =>
+              !instruction.evidence?.some(item =>
+                (item.scheduleFields?.indexOf('timingReference') ?? -1) >= 0));
+            if (!clause.additionalInstructions.length) delete clause.additionalInstructions;
+          }
+          fields.push('timingReference');
+        } else fields.push('recurrence');
       }
       if (!schedule || schedule.calendarEvents?.length || !hasRecurringSchedule(schedule)) {
         if (fields.length) {
@@ -454,32 +804,23 @@ export function scopeSequentialPhaseSemantics(
         }
         continue;
       }
-      if (!schedule.boundsStart && start) {
+      if (!schedule.boundsStart && !schedule.phaseStartReference &&
+          schedule.treatmentStartOffsetDays === undefined && start) {
         schedule.boundsStart = start;
         fields.push('boundsStart');
         materializeAnchoredScheduleWindow(schedule);
       }
-      // An explicit local meal/event or clock anchor owns the whole anchor
-      // group, so inherited anchors can never create a mixed local/donor pair.
-      if (!schedule.when?.length && !schedule.timeOfDay?.length && sharedAnchors) {
-        // A point event belongs to its administration. A successor may
-        // inherit recurring meal/day anchors, never the predecessor's "now".
-        const recurringAnchors = shared?.when?.filter(event => event !== SequenceEventTiming.Immediate);
-        if (recurringAnchors?.length) {
-          schedule.when = recurringAnchors;
-          fields.push('when');
+      // An explicit local meal/event, activity or clock anchor owns the whole
+      // anchor group, so inherited anchors cannot create a mixed local/donor pair.
+      if (!schedule.when?.length && !schedule.timeOfDay?.length && !schedule.clockWindow &&
+          !schedule.eventWindow && !schedule.activityTiming?.length && sharedAnchors) {
+        if (eventTiming && matchesSuccessorCadence) for (const key of Object.keys(eventTiming) as (keyof typeof eventTiming)[]) {
+          const inherited = eventTiming[key];
+          if (schedule[key] === undefined && inherited !== undefined) {
+            (schedule as Record<string, unknown>)[key] = cloneStructuredValue(inherited);
+            fields.push(key);
+          }
         }
-        // A newly explicit cadence cannot inherit an incompatible number
-        // of exact clock anchors from the preceding phase. In particular,
-        // QID -> TID does not license guessing which three of four times to
-        // keep. The original source still accompanies the editable schedule.
-        const donorClockCount = shared?.timeOfDay?.length ?? 0;
-        const matchesSuccessorCadence = schedule.frequency === undefined || (
-          schedule.frequency === donorClockCount &&
-          (schedule.period === undefined || schedule.period === 1) &&
-          (schedule.periodUnit === undefined || schedule.periodUnit === 'd') &&
-          (schedule.frequencyMax === undefined || schedule.frequencyMax === donorClockCount)
-        );
         if (shared?.timeOfDay?.length && matchesSuccessorCadence) {
           schedule.timeOfDay = [...shared.timeOfDay];
           fields.push('timeOfDay');
@@ -637,7 +978,12 @@ export function expandRegimenAdjustmentPhases(
               if (!remaining.length && !schedule.when?.length) continue;
               schedule.timeOfDay = remaining;
               if (schedule.frequency === oldClocks.length && schedule.period === 1 &&
-                  schedule.periodUnit === 'd') schedule.frequency = remaining.length;
+                  schedule.periodUnit === 'd') {
+                schedule.frequency = remaining.length;
+                // The surviving partition has its own cadence; the donor's
+                // coded frequency no longer describes this administration.
+                delete schedule.timingCode;
+              }
             }
           }
           if (schedule && replacedEvent && target.regimenAdjustment === "replace-target") {
@@ -647,25 +993,37 @@ export function expandRegimenAdjustmentPhases(
               if (!remaining.length && !schedule.timeOfDay?.length) continue;
               schedule.when = remaining;
               if (schedule.frequency === oldEvents.length && schedule.period === 1 &&
-                  schedule.periodUnit === 'd') schedule.frequency = remaining.length;
+                  schedule.periodUnit === 'd') {
+                schedule.frequency = remaining.length;
+                // The surviving partition has its own cadence; the donor's
+                // coded frequency no longer describes this administration.
+                delete schedule.timingCode;
+              }
             }
           }
           if (schedule) {
-            // The new phase keeps prior recurrence but has its own course window.
-            delete schedule.duration; delete schedule.durationMax; delete schedule.durationUnit;
+            // The new phase keeps prior recurrence but owns its complete
+            // course window, including open ranges and endpoint qualifiers.
+            Object.assign(schedule, {
+              duration: target.schedule?.duration,
+              durationMax: target.schedule?.durationMax,
+              durationUnit: target.schedule?.durationUnit,
+              durationMaxUnit: target.schedule?.durationMaxUnit,
+              durationComparator: target.schedule?.durationComparator,
+              durationMaxComparator: target.schedule?.durationMaxComparator,
+              durationIsRange: target.schedule?.durationIsRange,
+            });
             delete schedule.boundsStart; delete schedule.boundsEnd; delete schedule.calendarEvents;
             // Cloned continuation daughters take the explicit onset of THIS
             // phase, not the donor's old onset. Step.start is executable
             // only when all new phase members agree on that source feature.
             delete schedule.treatmentStartOffsetDays;
+            delete schedule.phaseStartReference;
             if (target.schedule?.treatmentStartOffsetDays !== undefined) {
               schedule.treatmentStartOffsetDays = target.schedule.treatmentStartOffsetDays;
             }
-            if (target.schedule?.duration !== undefined) {
-              schedule.duration = target.schedule.duration;
-              schedule.durationUnit = target.schedule.durationUnit;
-              schedule.durationMax = target.schedule.durationMax;
-            }
+            if (target.schedule?.phaseStartReference)
+              schedule.phaseStartReference = target.schedule.phaseStartReference;
             if (target.schedule?.boundsStart) schedule.boundsStart = target.schedule.boundsStart;
             if (target.schedule?.boundsEnd) schedule.boundsEnd = target.schedule.boundsEnd;
           }

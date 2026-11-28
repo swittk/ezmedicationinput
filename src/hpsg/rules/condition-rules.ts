@@ -1,24 +1,27 @@
 import { medicationGuardLeadLexeme, CIRCUMSTANTIAL_CONDITION_HEADS } from "../../medication-condition";
-import { registeredActivityDayAt } from "./instruction-rules";
+import { registeredActivityDayAt, isProceduralInstructionFrame } from "./instruction-rules";
+import { frameActionDefinition } from "../../instruction-graph";
 import { AdviceArgumentRole, AdviceFrame, AdvicePolarity, AdviceRelation, EventTiming, FhirDayOfWeek, MedicationCondition, ParseOptions } from "../../types";
 import {
   findMedicationDateListSpans,
   MedicationDateListMatch,
   parseMedicationDateListAt
 } from "../../date-interpretation";
-import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
-import { parseMedicationGuard, scopeMedicationGuardSign } from "../constructions";
+import { guardHasMeasurement, parseMedicationGuard, scopeMedicationGuardSign, type ParsedMedicationGuard } from "../constructions";
 import {
   relationHasGrammarFeature,
   resolveActionRelationSurface
 } from "../../relation-terminology";
-import { getProceduralFrames, actionEventRelationAt, conditionalAdviceOwnerAt, isConditionalAdviceFrame, instructionActionsAreSequenced as explicitlySequences, proceduralInstructionProgram as prefixProgram } from "../procedural-context";
-import { hasSymptomOnsetPrnAt, startsMaximumCountLead } from "./prn-rules";
-import { SUPPLEMENTAL_DOSE_MODIFIERS, CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
+import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt, conditionalAdviceOwnerAt, isConditionalAdviceFrame, instructionActionsAreSequenced as explicitlySequences, proceduralInstructionProgram as prefixProgram } from "../procedural-context";
+import { hasSymptomOnsetPrnAt, prnAt } from "./prn-rules";
+import { LIST_SEPARATORS, coordinationConnectorKind, CALENDAR_WEEKDAY_LEXEMES, CALENDAR_WEEKDAY_GROUPS, CALENDAR_DAY_LIST_CONNECTORS, CALENDAR_EXCLUSION_CUE, CALENDAR_EXCLUSION_DAY_HEADS, NEGATIVE_ACTION_DIRECTIVE_LEADS, SUPPLEMENTAL_DOSE_MODIFIERS, CALENDAR_COMPLEMENT_DAY_MODIFIERS, CALENDAR_COMPLEMENT_DETERMINERS, CALENDAR_UNIVERSAL_DAY_QUANTIFIERS, DOSE_TARGET_QUANTIFIERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES, DOSE_TARGET_DAYPART_CLOCK_RANGES, DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_SLOT_HEADS } from "../lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../../maps";
-import { countAndDurationRule, countFrequencyRule, timeOfDayRule, timingLexicalRule, dayRangeLexicalRule } from "./timing-rules";
+import { MAX_EVENT_TIMING_EXPRESSION_PARTS, resolveEventTimingExpression } from "../../event-timing-expression";
+import { countAndDurationRule, countFrequencyRule, timingLexicalRule, dayRangeLexicalRule, maximumOccurrenceAt, isIndependentMaximum } from "./timing-rules";
 import { LexKind } from "../../lexer/token-types";
+import { hasPrnMeaning } from "../../lexer/meaning";
 import { normalizeUnit } from "../../unit-lexicon";
 import { mapIntervalUnit } from "../timing-lexicon";
 import {
@@ -27,13 +30,18 @@ import {
   tokensAvailable,
   rangeFromTokens,
   medicationGuardForContext,
+  maximumDosePerPeriodAt,
+  maximumCountLeadAt,
   normalizeTokenLower,
-  startsMedicationGuard
+  parseClockToken,
+  startsMedicationGuard,
+  isMedicationGuardMarker
 } from "../rule-context";
 import {
   HpsgClinicalAdjunctFeature,
   HpsgConditionFeature,
   HpsgLexicalRule,
+  HpsgSign,
   lexicalSign
 } from "../signature";
 
@@ -43,18 +51,6 @@ const DAYS = [
   FhirDayOfWeek.Sunday
 ] as const;
 
-const WEEKDAYS: Array<{ day: FhirDayOfWeek; en: RegExp; th: RegExp }> = [
-  { day: FhirDayOfWeek.Monday, en: /\bmon(?:day)?s?\b/giu, th: /(?:วัน)?จันทร์/gu },
-  { day: FhirDayOfWeek.Tuesday, en: /\btue(?:sday)?s?\b/giu, th: /(?:วัน)?อังคาร/gu },
-  { day: FhirDayOfWeek.Wednesday, en: /\bwed(?:nesday)?s?\b/giu, th: /(?:วัน)?พุธ/gu },
-  { day: FhirDayOfWeek.Thursday, en: /\bthu(?:rsday)?s?\b/giu, th: /(?:วัน)?พฤหัส(?:บดี)?/gu },
-  { day: FhirDayOfWeek.Friday, en: /\bfri(?:day)?s?\b/giu, th: /(?:วัน)?ศุกร์/gu },
-  { day: FhirDayOfWeek.Saturday, en: /\bsat(?:urday)?s?\b/giu, th: /(?:วัน)?เสาร์/gu },
-  { day: FhirDayOfWeek.Sunday, en: /\bsun(?:day)?s?\b/giu, th: /(?:วัน)?อาทิตย์/gu }
-];
-
-// ยกเว้นกรณี is a Boolean guard (unless), not a calendar exclusion.
-const EXCLUSION_CUE = /\b(?:except|excluding)\b|ยกเว้น(?!\s*กรณี)|เว้น(?=วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/iu;
 
 export interface CalendarExclusion {
   start: number;
@@ -64,7 +60,7 @@ export interface CalendarExclusion {
 }
 
 export function containsCalendarExclusionCue(source: string): boolean {
-  return EXCLUSION_CUE.test(source);
+  return CALENDAR_EXCLUSION_CUE.test(source);
 }
 
 /** A universal weekday quantifier denotes the existing complete weekday
@@ -75,7 +71,7 @@ function universalDayScope(source: string): boolean {
   const words = source.trim().toLowerCase().split(/\s+/u);
   return words.length === 2 &&
     CALENDAR_UNIVERSAL_DAY_QUANTIFIERS.has(words[0]) &&
-    (words[1] === "day" || words[1] === "days");
+    CALENDAR_EXCLUSION_DAY_HEADS.has(words[1]);
 }
 
 function uniqueDays(source: string): FhirDayOfWeek[] {
@@ -83,17 +79,15 @@ function uniqueDays(source: string): FhirDayOfWeek[] {
   if (universalDayScope(source)) {
     for (const day of DAYS) values.add(day);
   }
-  for (const definition of WEEKDAYS) {
-    definition.en.lastIndex = 0;
-    definition.th.lastIndex = 0;
-    if (definition.en.test(source) || definition.th.test(source)) values.add(definition.day);
+  for (const definition of CALENDAR_WEEKDAY_LEXEMES) {
+    if (definition.patterns.some(pattern => {
+      pattern.lastIndex = 0;
+      return pattern.test(source);
+    })) values.add(definition.day);
   }
-  if (/\bweekends?\b/iu.test(source)) {
-    values.add(FhirDayOfWeek.Saturday);
-    values.add(FhirDayOfWeek.Sunday);
-  }
-  if (/\bweekdays?\b/iu.test(source)) {
-    for (const day of DAYS.slice(0, 5)) values.add(day);
+  for (const group of CALENDAR_WEEKDAY_GROUPS) {
+    group.pattern.lastIndex = 0;
+    if (group.pattern.test(source)) for (const day of group.days) values.add(day);
   }
   return DAYS.filter((day) => values.has(day));
 }
@@ -102,12 +96,17 @@ function isOnlyWeekdays(source: string): boolean {
   const phrase = source.trim().replace(/[.!?]+$/u, "").trim();
   if (universalDayScope(phrase)) return true;
   let remainder = phrase;
-  for (const definition of WEEKDAYS) {
-    definition.en.lastIndex = 0;
-    definition.th.lastIndex = 0;
-    remainder = remainder.replace(definition.en, " ").replace(definition.th, " ");
+  for (const group of CALENDAR_WEEKDAY_GROUPS) {
+    group.pattern.lastIndex = 0;
+    remainder = remainder.replace(group.pattern, " ");
   }
-  remainder = remainder.replace(/\b(?:weekends?|weekdays?|and|or|on|the|every|each)\b|(?:และ|หรือ|วัน|ทุก)|[\s,\/&+]+/giu, "");
+  for (const definition of CALENDAR_WEEKDAY_LEXEMES) {
+    for (const pattern of definition.patterns) {
+      pattern.lastIndex = 0;
+      remainder = remainder.replace(pattern, " ");
+    }
+  }
+  remainder = remainder.replace(CALENDAR_DAY_LIST_CONNECTORS, "");
   return remainder.length === 0;
 }
 
@@ -121,7 +120,7 @@ export function matchCalendarExclusion(
 ): CalendarExclusion | undefined {
   // Match from the lexical sign's own source offset. Another earlier
   // exclusion is a separate constituent, never this sign's payload.
-  const cue = EXCLUSION_CUE.exec(source.slice(from));
+  const cue = CALENDAR_EXCLUSION_CUE.exec(source.slice(from));
   if (!cue) return undefined;
   const cueStart = cue.index + from;
   const clauseEnd = source.indexOf(";", cueStart) >= 0
@@ -253,7 +252,9 @@ function clinicalAdjunctSign(
   context: HpsgClauseContext,
   tokens: ReturnType<typeof overlappingAvailableTokens>,
   feature: HpsgClinicalAdjunctFeature,
-  consumedTokens = tokens
+  consumedTokens = tokens,
+  scopedCondition?: HpsgConditionFeature,
+  instructions?: HpsgSign["synsem"]["valence"]["instructions"]
 ) {
   return lexicalSign({
     type: "clinical-adjunct-sign",
@@ -262,8 +263,9 @@ function clinicalAdjunctSign(
     consumedTokenIndices: consumedTokens.map((token) => token.index),
     synsem: {
       head: {},
-      valence: {},
-      cont: { clauseKind: "administration", clinicalAdjunct: feature }
+      valence: instructions ? { instructions } : {},
+      cont: { clauseKind: "administration", clinicalAdjunct: feature,
+        ...(scopedCondition ? { scopedAdministrations: [{ condition: scopedCondition, head: {} }] } : {}) }
     },
     score: 56 + consumedTokens.length
   });
@@ -271,14 +273,12 @@ function clinicalAdjunctSign(
 
 /** Exact nominal source ownership. A medication noun in some other argument
  * (e.g. an AFTER-taking activity) does not make the held object a drug dose. */
-function tokenInActionArgument(
-  context: HpsgClauseContext, start: number, end: number,
-  frame: AdviceFrame, argument: AdviceFrame["args"][number]
-): boolean {
-  const argumentStart = argument.span?.start ?? context.state.input.indexOf(argument.text, frame.span.start);
-  const argumentEnd = argument.span?.end ?? argumentStart + argument.text.length;
-  return argumentStart >= frame.span.start && argumentEnd <= frame.span.end &&
-    start >= argumentStart && end <= argumentEnd;
+function actionArgumentSpan(
+  context: HpsgClauseContext, frame: AdviceFrame, argument: AdviceFrame["args"][number]
+): { start: number; end: number } | undefined {
+  const start = argument.span?.start ?? context.state.input.indexOf(argument.text, frame.span.start);
+  const end = argument.span?.end ?? start + argument.text.length;
+  return start >= frame.span.start && end <= frame.span.end ? { start, end } : undefined;
 }
 
 /**
@@ -292,9 +292,10 @@ function withholdsMedicationAdministration(
   context: HpsgClauseContext,
   frame: AdviceFrame
 ): boolean {
-  const action = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const action = frameActionDefinition(frame, context.options);
   const prohibitedAdministration = frame.polarity === AdvicePolarity.Negate &&
-    (action?.primaryAdministrationHead || action?.definesDose && action.administrationMethod);
+    (action?.semanticClass === "administration" || action?.semanticClass === "ingest") &&
+    (action.primaryAdministrationHead || action.definesDose && action.administrationMethod);
   const effect = prohibitedAdministration ? "withhold" : action?.argumentParserConfig?.medicationConditionEffect;
   if (frame.polarity === AdvicePolarity.Negate && !prohibitedAdministration || !effect) return false;
   // A bare "hold/omit/skip" is an elliptical medication-dose object under
@@ -306,17 +307,25 @@ function withholdsMedicationAdministration(
       argument.role === AdviceArgumentRole.Time || argument.role === AdviceArgumentRole.Duration)) {
     return effect === "withhold";
   }
+  // An explicit supplemental target belongs to a different dose. Its modifier
+  // may be retained on the nominal while the typed Amount has a narrower span.
+  for (const argument of frame.args) {
+    if (argument.role !== AdviceArgumentRole.Object && argument.role !== AdviceArgumentRole.Theme &&
+        argument.role !== AdviceArgumentRole.Amount) continue;
+    const span = actionArgumentSpan(context, frame, argument);
+    if (span && context.tokens.some(token => token.sourceStart >= span.start && token.sourceEnd <= span.end &&
+      SUPPLEMENTAL_DOSE_MODIFIERS.has(normalizeTokenLower(token)))) return false;
+  }
   return frame.args.some((argument) => {
+    if (prohibitedAdministration && argument.role === AdviceArgumentRole.Amount && argument.quantity) return true;
     // Registered avoidance uses a Theme argument, whereas HOLD uses Object.
     // A medication/product noun is a legitimate explicit medication target;
     // unrelated food, breath, container and activity objects remain distinct.
     if (argument.role !== AdviceArgumentRole.Object && argument.role !== AdviceArgumentRole.Theme) return false;
-    const nominalTokens = context.tokens.filter(token =>
-      tokenInActionArgument(context, token.sourceStart, token.sourceEnd, frame, argument));
+    const span = actionArgumentSpan(context, frame, argument);
+    const nominalTokens = span ? context.tokens.filter(token =>
+      token.sourceStart >= span.start && token.sourceEnd <= span.end) : [];
     const words = nominalTokens.map(normalizeTokenLower);
-    // An explicitly supplemental dose is a distinct referent, not the
-    // standing administration whose clinical guard is being constructed.
-    if (words.some(word => SUPPLEMENTAL_DOSE_MODIFIERS.has(word))) return false;
     if (argument.conceptId === "medication-dose" || argument.conceptId === "product") return true;
     // A registered withholding predicate can select a temporal noun with an
     // elliptical DOSE head (hold 20:00 / omit PM). Physical objects remain
@@ -328,7 +337,7 @@ function withholdsMedicationAdministration(
         ["only", "the"].indexOf(normalizeTokenLower(token)) >= 0 ||
         DOSE_TARGET_QUANTIFIERS.has(normalizeTokenLower(token)))) return true;
     if (words.some(word => resolveMedicationInstructionConcept(word, context.options)?.code === "medication-dose" ||
-        prohibitedAdministration && normalizeUnit(word, context.options))) return true;
+        effect === "withhold" && normalizeUnit(word, context.options))) return true;
 
     // A selected dose slot is a nominal head plus its event modifier, not a
     // food object. The typed conditionTarget below must subsequently bind to
@@ -341,31 +350,6 @@ function withholdsMedicationAdministration(
         DOSE_TARGET_EVENT_MEMBERS.has(EVENT_TIMING_TOKENS[word]) || DOSE_TARGET_QUANTIFIERS.has(word) ||
         resolveMedicationInstructionConcept(word, context.options)?.code === "product");
   });
-}
-
-/** Return an inverse condition only when the selected conditional construction
- * relates a typed withholding action to a medication-dose argument. */
-function localWithholdingGuard(
-  context: HpsgClauseContext,
-  sourceStart: number,
-  frame: AdviceFrame,
-  sourceEnd?: number
-) {
-  if (!withholdsMedicationAdministration(context, frame)) return undefined;
-  const cached = medicationGuardForContext(context);
-  const applicable = cached?.start === sourceStart ? cached : undefined;
-  // An explicit ELSE branch does not invert the earlier permission guard.
-  if (applicable?.alternative && applicable.alternative.end <= frame.span.start) return undefined;
-  // A typed withholding predicate licenses a non-numeric conditional daughter
-  // (IF dizzy, HOLD) without reclassifying ordinary TAKE-if-symptom PRN syntax.
-  // All predicate/Boolean meaning still comes from the same HPSG constructor.
-  const guard = applicable && (sourceEnd === undefined || sourceEnd >= applicable.end)
-    ? applicable
-    : parseMedicationGuard(context.state.input.slice(sourceStart, sourceEnd), undefined, true);
-  if (!guard) return undefined;
-  return guard.condition.kind === "not"
-    ? guard.condition.condition
-    : { kind: "not" as const, condition: guard.condition };
 }
 
 /** Resolve either the broad daypart head or one of its meal-relative members
@@ -387,26 +371,53 @@ function withholdingDoseTarget(
   context: HpsgClauseContext, frame: AdviceFrame
 ): NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]> {
   const target: NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]> = {};
+  const nominalSpans: AdviceFrame["span"][] = [];
   for (const argument of frame.args) {
-    if (argument.role !== AdviceArgumentRole.Object) continue;
-    // Exact source anchoring only: the grammatical tokens are reused, not
-    // reparsed from a rendered phrase or interpreted by a second parser.
-    for (const token of context.tokens) {
-      if (!tokenInActionArgument(context, token.sourceStart, token.sourceEnd, frame, argument)) continue;
-      const word = normalizeTokenLower(token);
-      if (token.kind === LexKind.TimeLike) {
-        const typedClock = timeOfDayRule().match(context, token.index).find(sign =>
-          sign.synsem.head.schedule?.timeOfDay?.length === 1)?.synsem.head.schedule?.timeOfDay;
-        if (typedClock) target.timeOfDay = [...new Set([...(target.timeOfDay ?? []), ...typedClock])];
+    if (argument.quantity && (argument.role === AdviceArgumentRole.Amount ||
+        (argument.role === AdviceArgumentRole.Object || argument.role === AdviceArgumentRole.Theme) &&
+          (argument.conceptId === "medication-dose" || argument.conceptId === "product"))) {
+      target.dose = argument.quantity;
+      if (argument.role === AdviceArgumentRole.Amount) continue;
+    }
+    if (argument.role === AdviceArgumentRole.Site) {
+      target.site = { text: argument.normalized ?? argument.text,
+        coding: argument.coding?.code ? { ...argument.coding, code: argument.coding.code } : undefined,
+        administrationTargetCount: argument.administrationTargetCount };
+      continue;
+    }
+    if (argument.role !== AdviceArgumentRole.Object && argument.role !== AdviceArgumentRole.Time) continue;
+    // Resolve source ownership once, then reuse the grammatical tokens.
+    const span = actionArgumentSpan(context, frame, argument);
+    if (span) nominalSpans.push(span);
+  }
+  // Wider, earlier nominals own their complete event phrase before overlapping
+  // Time arguments can contribute a less-specific token from the same source.
+  nominalSpans.sort((a, b) => a.start - b.start || b.end - a.end);
+  const eventTokens = new Set<number>();
+  const words = context.tokens.map(normalizeTokenLower);
+  for (const span of nominalSpans) {
+    for (let index = 0; index < context.tokens.length; index++) {
+      const token = context.tokens[index];
+      if (token.sourceStart < span.start || token.sourceEnd > span.end || eventTokens.has(index)) continue;
+      const word = words[index];
+      const next = context.tokens[index + 1];
+      const clock = parseClockToken(token, next && next.sourceEnd <= span.end ? next : undefined);
+      if (clock) {
+        target.timeOfDay = [...new Set([...(target.timeOfDay ?? []), clock.value])];
+        for (let offset = 0; offset < clock.tokens.length; offset++) eventTokens.add(index + offset);
+        continue;
       }
       const meridiemRange = DOSE_TARGET_MERIDIEM_CLOCK_RANGES.get(word);
       if (meridiemRange) target.clockRange = { ...meridiemRange };
       const quantifier = DOSE_TARGET_QUANTIFIERS.get(word);
       if (quantifier) target.quantifier = quantifier;
-      const event = EVENT_TIMING_TOKENS[word];
+      let eventEnd = Math.min(context.tokens.length, index + MAX_EVENT_TIMING_EXPRESSION_PARTS);
+      while (eventEnd > index && context.tokens[eventEnd - 1].sourceEnd > span.end) eventEnd--;
+      const event = resolveEventTimingExpression(words, index, eventEnd);
       if (!event) continue;
-      const members = doseTargetEventFamily(event);
-      const clockRange = DOSE_TARGET_DAYPART_CLOCK_RANGES.get(event);
+      for (let offset = 0; offset < event.length; offset++) eventTokens.add(index + offset);
+      const members = doseTargetEventFamily(event.timing);
+      const clockRange = DOSE_TARGET_DAYPART_CLOCK_RANGES.get(event.timing);
       if (clockRange) target.clockRange = { ...clockRange };
       target.when = [...new Set([...(target.when ?? []), ...members])];
     }
@@ -419,31 +430,81 @@ function withholdingDoseTarget(
  * until the related regimen daughters have been composed. */
 function withholdingAdjunct(
   context: HpsgClauseContext,
-  range: { start: number; end: number },
-  frames: readonly AdviceFrame[]
+  scope: HpsgConditionFeature,
+  markerEnd: number,
+  selectedGuard?: ParsedMedicationGuard
 ): HpsgClinicalAdjunctFeature | undefined {
-  for (const frame of frames) {
-    const condition = localWithholdingGuard(context, range.start, frame, range.end);
-    if (!condition) continue;
-    const sourceGuard = medicationGuardForContext(context);
-    const dayInvariant = sourceGuard?.start === range.start &&
-      sourceGuard.sign.synsem.cont.clinicalAdjunct?.calendarDayCondition;
-    return {
-      condition,
-      ...(dayInvariant ? { calendarDayCondition: condition } : {}),
-      conditionTarget: withholdingDoseTarget(context, frame),
-      localRanges: [range],
-      evidence: [{
-        rule: "hpsg.cx.medication-withholding-conditional",
-        kind: "condition",
-        ranges: [range]
-      }]
-    };
+  const range = { start: scope.sourceStart, end: scope.sourceEnd };
+  let applicable: ParsedMedicationGuard | undefined;
+  let guardSelected = false;
+  const targets: NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]>[] = [];
+  const targetRanges: Array<AdviceFrame["span"]> = [];
+  for (const frame of scope.frames) {
+    if (!withholdsMedicationAdministration(context, frame)) continue;
+    if (!guardSelected) {
+      const cached = selectedGuard ?? medicationGuardForContext(context);
+      applicable = cached?.start === range.start ? cached : undefined;
+      guardSelected = true;
+    }
+    // An explicit ELSE branch does not invert the earlier permission guard.
+    if (applicable?.alternative && applicable.alternative.end <= frame.span.start) continue;
+    targets.push(withholdingDoseTarget(context, frame));
+    targetRanges.push(frame.span);
   }
-  return undefined;
+  if (!targets.length) return undefined;
+  // All selected targets share this already closed conditional daughter.
+  const guard = applicable && range.end >= applicable.end ? applicable
+    : parseMedicationGuard(context.state.input, context.tokens, true, context.options,
+      { relation: scope.relation, start: range.start, markerEnd, end: range.end });
+  if (!guard) return undefined;
+  if (targetRanges.length > 1) scope.targetRanges = targetRanges;
+  const condition = guard.condition.kind === "not" ? guard.condition.condition
+    : { kind: "not" as const, condition: guard.condition };
+  const dayInvariant = guard.sign.synsem.cont.clinicalAdjunct?.calendarDayCondition;
+  return {
+    condition,
+    ...(dayInvariant ? { calendarDayCondition: condition } : {}),
+    conditionTarget: targets.length === 1 ? targets[0] : { members: targets },
+    localRanges: [range],
+    evidence: [{
+      rule: "hpsg.cx.medication-withholding-conditional",
+      kind: "condition",
+      ranges: [range]
+    }]
+  };
 }
 
-/** Medication guards are lexical adjuncts, separate from procedural IF scope. */
+/** Preserve the selected guard derivation and its independently typed scope. */
+function medicationGuardSign(
+  context: HpsgClauseContext,
+  guard: ParsedMedicationGuard,
+  withheld?: HpsgClinicalAdjunctFeature,
+  scopedCondition?: HpsgConditionFeature
+): HpsgSign | undefined {
+  const tokens = overlappingAvailableTokens(context, guard.start, guard.end);
+  if (!tokens.length) return undefined;
+  const localRanges = [{ start: guard.start, end: guard.end }];
+  if (guard.otherwise) localRanges.push({ ...guard.otherwise });
+  const consumedTokens = overlappingAvailableTokens(
+    context,
+    Math.min(...localRanges.map((range) => range.start)),
+    Math.max(...localRanges.map((range) => range.end))
+  ).filter((token) => localRanges.some((range) =>
+    token.sourceStart < range.end && range.start < token.sourceEnd
+  ));
+  const scope = clinicalAdjunctSign("hpsg.lex.clinical.condition", context, tokens, {
+    condition: withheld?.condition ?? guard.condition,
+    ...(withheld ? { conditionTarget: withheld.conditionTarget } : {}),
+    localRanges,
+    evidence: [{
+      rule: "hpsg.lex.clinical.condition",
+      kind: "condition",
+      ranges: localRanges.map((range) => ({ ...range }))
+    }]
+  }, consumedTokens, scopedCondition);
+  return scopeMedicationGuardSign(guard, scope);
+}
+
 export function medicationGuardLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.clinical.condition", (context, start) => {
     const lead = context.tokens[start];
@@ -453,34 +514,16 @@ export function medicationGuardLexicalRule(): HpsgLexicalRule<HpsgClauseContext>
     }
     const guard = medicationGuardForContext(context);
     if (!guard) return [];
-    const tokens = overlappingAvailableTokens(context, guard.start, guard.end);
-    if (!tokens.length) return [];
-    const localRanges = [{ start: guard.start, end: guard.end }];
-    if (guard.otherwise) localRanges.push({ ...guard.otherwise });
-    const consumedTokens = overlappingAvailableTokens(
-      context,
-      Math.min(...localRanges.map((range) => range.start)),
-      Math.max(...localRanges.map((range) => range.end))
-    ).filter((token) => localRanges.some((range) =>
-      token.sourceStart < range.end && range.start < token.sourceEnd
-    ));
-    // The procedural conditional construction owns which action this IF
-    // modifies, for both prefix and postfix order. Its matcher calls the
-    // pure frame helper, never this discovery function, so no recursion.
-    const scoped = getConditionFeatures(context).find(feature => feature.sourceStart === guard.start);
-    const withheld = scoped && withholdingAdjunct(context,
-      { start: scoped.sourceStart, end: scoped.sourceEnd }, scoped.frames);
-    const scope = clinicalAdjunctSign("hpsg.lex.clinical.condition", context, tokens, {
-      condition: withheld?.condition ?? guard.condition,
-      ...(withheld ? { conditionTarget: withheld.conditionTarget } : {}),
-      localRanges,
-      evidence: [{
-        rule: "hpsg.lex.clinical.condition",
-        kind: "condition",
-        ranges: localRanges.map((range) => ({ ...range }))
-      }]
-    }, consumedTokens);
-    return [scopeMedicationGuardSign(guard, scope)];
+    // Discovery selects the consequent once. Clinical targets keep their head;
+    // procedural targets still use the ordinary conditional scope construction.
+    const discovery = conditionDiscovery(context);
+    const clinical = discovery.signs.find(sign => sign.synsem.cont.scopedAdministrations?.some(
+      scoped => scoped.condition.sourceStart === guard.start));
+    if (clinical) return [clinical];
+    const scoped = discovery.features.find(feature => feature.sourceStart === guard.start);
+    const withheld = scoped && withholdingAdjunct(context, scoped, guard.markerEnd, guard);
+    const sign = medicationGuardSign(context, guard, withheld, withheld ? scoped : undefined);
+    return sign ? [sign] : [];
   });
 }
 
@@ -543,15 +586,32 @@ function targetedWithholdingCalendarAt(context: HpsgClauseContext, start: number
   const word = normalizeTokenLower(lead);
   const action = resolveMedicationInstructionAction(word, context.options);
   const relation = resolveActionRelationSurface(word);
-  const isExclusion = EXCLUSION_CUE.test(lead.original);
-  const negativeLead = /^(?:do|not|never|ห้าม|อย่า)$/iu.test(word);
+  const isExclusion = CALENDAR_EXCLUSION_CUE.test(lead.original);
+  const negativeLead = NEGATIVE_ACTION_DIRECTIVE_LEADS.has(word);
   if (!isExclusion && !action?.argumentParserConfig?.medicationConditionEffect &&
       !action?.primaryAdministrationHead && relation !== AdviceRelation.On && !negativeLead) return undefined;
-  const weekdayAt = (index: number) => {
+  const weekdayAt = (index: number, limit = context.limit) => {
     const on = context.tokens[index] && resolveActionRelationSurface(normalizeTokenLower(context.tokens[index])) === AdviceRelation.On;
     const head = index + (on ? 1 : 0);
-    return [...dayRangeLexicalRule().match(context, head), ...timingLexicalRule().match(context, head)]
-      .find(sign => sign.synsem.head.schedule?.dayOfWeek?.length);
+    const dayOfWeek: FhirDayOfWeek[] = [];
+    let cursor = head, end = head;
+    while (cursor < limit) {
+      const sign = [...dayRangeLexicalRule().match(context, cursor), ...timingLexicalRule().match(context, cursor)]
+        .find(candidate => candidate.synsem.head.schedule?.dayOfWeek?.length);
+      if (!sign || sign.tokens[sign.tokens.length - 1].index >= limit) break;
+      for (const day of sign.synsem.head.schedule!.dayOfWeek!) {
+        if (dayOfWeek.indexOf(day) < 0) dayOfWeek.push(day);
+      }
+      end = sign.tokens[sign.tokens.length - 1].index + 1;
+      cursor = end;
+      while (cursor < limit && !context.state.consumed.has(context.tokens[cursor].index)) {
+        const connector = normalizeTokenLower(context.tokens[cursor]);
+        if (!LIST_SEPARATORS.has(connector) && coordinationConnectorKind(connector) === "unknown") break;
+        cursor++;
+      }
+      if (cursor === end) break;
+    }
+    return dayOfWeek.length ? { tokens: context.tokens.slice(head, end), dayOfWeek } : undefined;
   };
   for (const frame of getProceduralFrames(context)) {
     if (!withholdsMedicationAdministration(context, frame)) continue;
@@ -576,11 +636,31 @@ function targetedWithholdingCalendarAt(context: HpsgClauseContext, start: number
         });
       }
     }
-    if (!target.when?.length && !target.timeOfDay?.length && !target.clockRange && !target.quantifier) continue;
+    if (!target.dose && !target.site && !target.when?.length && !target.timeOfDay?.length && !target.clockRange && !target.quantifier) continue;
     let rangeStart = frame.span.start, rangeEnd = frame.span.end;
-    let excluded = frame.args.filter(argument => argument.role === AdviceArgumentRole.Time ||
-        frame.relation === AdviceRelation.On && argument.role === AdviceArgumentRole.Object)
-      .reduce<FhirDayOfWeek[]>((days, argument) => [...new Set([...days, ...uniqueDays(argument.text)])], []);
+    let calendarSpan: { start: number; end: number } | undefined;
+    let calendarArgument: AdviceFrame["args"][number] | undefined;
+    let excluded: FhirDayOfWeek[] = [];
+    for (const argument of frame.args) {
+      if (argument.role !== AdviceArgumentRole.Time &&
+          !(frame.relation === AdviceRelation.On && argument.role === AdviceArgumentRole.Object)) continue;
+      const argumentSpan = actionArgumentSpan(context, frame, argument);
+      if (!argumentSpan) continue;
+      const members = context.tokens.filter(token =>
+        token.sourceStart >= argumentSpan.start && token.sourceEnd <= argumentSpan.end);
+      if (!members.length) continue;
+      const days = weekdayAt(members[0].index, members[members.length - 1].index + 1);
+      if (!days || !days.tokens.every(token =>
+        token.sourceStart >= argumentSpan.start && token.sourceEnd <= argumentSpan.end)) continue;
+      for (const day of days.dayOfWeek) {
+        if (excluded.indexOf(day) < 0) excluded.push(day);
+      }
+      const span = rangeFromTokens(days.tokens)!;
+      calendarSpan = calendarSpan
+        ? { start: Math.min(calendarSpan.start, span.start), end: Math.max(calendarSpan.end, span.end) }
+        : span;
+      calendarArgument = argument;
+    }
     if (isExclusion && frame.span.start >= lead.sourceEnd &&
         !context.state.input.slice(lead.sourceEnd, frame.span.start).trim()) rangeStart = lead.sourceStart;
     else if (relation === AdviceRelation.On && frame.span.start > lead.sourceStart) {
@@ -588,7 +668,8 @@ function targetedWithholdingCalendarAt(context: HpsgClauseContext, start: number
       const end = days?.tokens[days.tokens.length - 1]?.sourceEnd;
       if (!days || end === undefined || end > frame.span.start ||
           context.state.input.slice(end, frame.span.start).replace(/[,]/gu, '').trim()) continue;
-      excluded = days.synsem.head.schedule!.dayOfWeek!;
+      excluded = days.dayOfWeek;
+      calendarSpan = rangeFromTokens(days.tokens);
       // This lexical constituent starts at its ON head. The preceding
       // sentence delimiter remains a separate connector daughter, not an
       // overlapping token silently consumed by a later lexical rule.
@@ -599,15 +680,32 @@ function targetedWithholdingCalendarAt(context: HpsgClauseContext, start: number
       if (next < 0 || context.state.input.slice(frame.span.end, context.tokens[next].sourceStart).trim()) continue;
       const days = weekdayAt(next);
       if (!days) continue;
-      excluded = days.synsem.head.schedule!.dayOfWeek!;
+      excluded = days.dayOfWeek;
+      calendarSpan = rangeFromTokens(days.tokens);
       rangeEnd = days.tokens[days.tokens.length - 1].sourceEnd;
     }
     const range = { start: rangeStart, end: rangeEnd };
     const members = overlappingAvailableTokens(context, range.start, range.end);
+    const selectedFrame = calendarSpan ? {
+      ...frame,
+      args: [...frame.args.filter(argument => argument !== calendarArgument), {
+        ...calendarArgument,
+        role: AdviceArgumentRole.Time,
+        relation: AdviceRelation.On,
+        text: context.state.input.slice(calendarSpan.start, calendarSpan.end),
+        span: calendarSpan
+      }],
+      span: range,
+      sourceText: context.state.input.slice(range.start, range.end)
+    } : frame;
     return clinicalAdjunctSign("hpsg.cx.medication-withholding-calendar-target", context, members, {
-      conditionTarget: target, excludedWeekdays: excluded, localRanges: [range],
+      conditionTarget: { ...target, excludedWeekdays: excluded }, localRanges: [range],
       evidence: [{ rule: "hpsg.cx.medication-withholding-calendar-target", kind: "calendar-exclusion", ranges: [range] }]
-    });
+    }, members, undefined, calendarSpan ? [{
+      text: selectedFrame.sourceText!, frames: [selectedFrame],
+      evidence: [{ rule: "hpsg.cx.medication-withholding-calendar-target", lexicalCategory: "instruction",
+        spans: [{ ...range, text: selectedFrame.sourceText! }] }]
+    }] : undefined);
   }
   return undefined;
 }
@@ -616,12 +714,13 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
   return lexicalRule("hpsg.lex.clinical.calendar-exclusion", (context, start) => {
     const lead = context.tokens[start];
     if (!lead || context.state.consumed.has(lead.index) ||
-        !EXCLUSION_CUE.test(lead.sourceText ?? lead.original)) {
+        !CALENDAR_EXCLUSION_CUE.test(lead.sourceText ?? lead.original)) {
       return [];
     }
-    const clauseEnd = context.state.input.indexOf(";", lead.sourceStart) >= 0
-      ? context.state.input.indexOf(";", lead.sourceStart)
-      : context.state.input.length;
+    const clauseBoundary = context.tokens.find(token => token.index < context.limit &&
+      token.sourceStart > lead.sourceStart &&
+      (token.kind === LexKind.Punctuation || token.kind === LexKind.Separator) && hasStrongBoundary(token.original));
+    const clauseEnd = clauseBoundary?.sourceStart ?? context.state.input.length;
     const durationBoundary = trailingCourseDurationBoundary(
       context, lead.sourceStart, clauseEnd
     );
@@ -680,13 +779,64 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
   });
 }
 
+function isSafetyTarget(
+  context: HpsgClauseContext, frame: ReturnType<typeof getProceduralFrames>[number],
+  selected: ReturnType<typeof frameActionDefinition>
+): boolean {
+  if (frame.polarity === AdvicePolarity.Negate) return true;
+  // Selected identity owns code collisions; unresolved lexical frames can
+  // still carry a surface rather than a saved predicate code.
+  const definition = selected ?? resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  return definition?.safetyScopeTarget === true;
+}
+
 function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getProceduralFrames>[number]): boolean {
-  const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const definition = frameActionDefinition(frame, context.options);
   return Boolean(
-    frame.polarity === AdvicePolarity.Negate ||
     definition?.procedural || isConditionalAdviceFrame(context, frame) ||
-    medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options)
+    isSafetyTarget(context, frame, definition)
   );
+}
+
+/** A selected positive dose keeps an already licensed clinical condition.
+ * Unknown predicates and procedural/negative targets retain their scope owner. */
+function targetHasClinicalCondition(
+  context: HpsgClauseContext, start: number, frame: AdviceFrame, guard: ParsedMedicationGuard | undefined
+): boolean {
+  // A workflow head can be excluded from procedural lexical admission while
+  // its complements still belong to a procedure rather than an administration.
+  if (isProceduralInstructionFrame(context, frame) ||
+      sourceRangeAttachmentClass(context, frame.span.start, frame.span.end) !== "administration") return false;
+  const lead = context.tokens[start];
+  if (guard && guard.start <= lead.sourceStart && lead.sourceStart < guard.markerEnd) return true;
+  return prnAt(context, start).some(sign => {
+    const requests = sign.synsem.valence.prn?.lookupRequests;
+    return Boolean(requests?.length && requests.every(request => request.canonical));
+  });
+}
+
+/** The clinical consequent already selected by the conditional owner retains
+ * source scope without becoming a procedure or losing its medication head. */
+function selectedClinicalGuardSign(
+  context: HpsgClauseContext, start: number, relation: AdviceRelation,
+  frame: AdviceFrame, guard: ParsedMedicationGuard | undefined, frames: readonly AdviceFrame[]
+): HpsgSign | undefined {
+  const lead = context.tokens[start];
+  if (!guard || lead.sourceStart < guard.start || lead.sourceStart >= guard.markerEnd) return undefined;
+  // Only an activity wholly owned by this antecedent needs graph exclusion.
+  // The default cached guard already has its ordinary clinical lexical path.
+  // A locally selected guard uses that same construction without extra scope data.
+  if (!frames.some(candidate => candidate.span.start >= guard.start && candidate.span.end <= guard.end)) {
+    return guard === medicationGuardForContext(context) ? undefined : medicationGuardSign(context, guard);
+  }
+  const condition: HpsgConditionFeature = {
+    relation, text: guard.text,
+    fullText: context.state.input.slice(Math.min(guard.start, frame.span.start), Math.max(guard.end, frame.span.end)).trim(),
+    sourceStart: guard.start, sourceEnd: guard.end,
+    targetStart: frame.span.start, targetEnd: frame.span.end,
+    safety: false, frames: [frame]
+  };
+  return medicationGuardSign(context, guard, undefined, condition);
 }
 
 function hasStrongBoundary(text: string): boolean {
@@ -704,32 +854,50 @@ function conditionTokens(
 }
 
 
-/** Numeric comparisons own their operator phrases, including surface forms
- * that also introduce dosage caps in another grammatical position. */
-function isQuantifiedCondition(condition: MedicationCondition): boolean {
-  if (condition.kind === "measurement") return true;
-  if (condition.kind === "not") return isQuantifiedCondition(condition.condition);
-  if (condition.kind === "all" || condition.kind === "any") {
-    return condition.conditions.length > 0 && condition.conditions.every(isQuantifiedCondition);
-  }
-  return false;
-}
-
-function postfixConditionEnd(context: HpsgClauseContext, start: number): number {
+/** The selected guard already owns its complete Boolean predicate and any
+ * independent-limit boundary; the condition consumer retains that extent. */
+function postfixConditionEnd(
+  context: HpsgClauseContext, start: number, guard: ParsedMedicationGuard | undefined
+): number {
   const first = context.tokens[start];
   if (!first) return 0;
-  const guard = medicationGuardForContext(context);
-  const comparisonEnd = guard?.start === first.sourceStart && isQuantifiedCondition(guard.condition)
-    ? guard.end : first.sourceStart;
+  const predicateEnd = guard?.start === first.sourceStart ? guard.end : first.sourceStart;
   let end = context.state.input.length;
+  // A postfix predicate ends before the next coordinated action clause.
+  // The selected action and existing connector tokens own this boundary;
+  // an activity inside an already admitted predicate remains inside it.
+  for (const frame of getProceduralFrames(context)) {
+    if (frame.span.start < first.sourceEnd ||
+        guard && guard.start === first.sourceStart && frame.span.start < guard.end) continue;
+    let boundary = context.tokens.findIndex(token => token.sourceStart >= frame.span.start);
+    const actionStart = boundary;
+    while (boundary > start + 1 && (LIST_SEPARATORS.has(normalizeTokenLower(context.tokens[boundary - 1])) ||
+        coordinationConnectorKind(normalizeTokenLower(context.tokens[boundary - 1])) !== "unknown")) boundary--;
+    if (boundary < actionStart) {
+      end = context.tokens[boundary].sourceStart;
+      break;
+    }
+  }
   for (let index = start + 1; index < context.limit; index += 1) {
     const current = context.tokens[index];
-    if (!current) break;
-    if (/^[.;!?]$/u.test(current.original.trim()) ||
-        current.sourceStart >= comparisonEnd && startsMaximumCountLead(context, index)) {
+    if (!current || current.sourceStart >= end) break;
+    if (/^[.;!?]$/u.test(current.original.trim())) {
       end = current.sourceStart;
       break;
     }
+    if (current.sourceStart < predicateEnd) continue;
+    const maximumHead = maximumCountLeadAt(context, index);
+    if (!maximumHead) continue;
+    const maximum = maximumDosePerPeriodAt(context, index, maximumHead) ??
+      maximumOccurrenceAt(context, index, maximumHead);
+    if (maximum) {
+      // A complete lexical PRN predicate has no comparative complement;
+      // an opaque observation history can still own the following count.
+      if (!isIndependentMaximum(context, index, maximum,
+          index === start + 2 && hasPrnMeaning(context.tokens[start + 1]) ? "prn" : "unresolved")) continue;
+    } else if (maximumHead.headStart !== index) continue;
+    end = current.sourceStart;
+    break;
   }
   return end;
 }
@@ -752,7 +920,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const followsAdministration = getProceduralFrames(context).some(frame => {
         if (frame.polarity === AdvicePolarity.Negate || frame.span.end > lead.sourceStart ||
             context.state.input.slice(frame.span.end, lead.sourceStart).trim()) return false;
-        const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+        const definition = frameActionDefinition(frame, context.options);
         return (definition?.primaryAdministrationHead ||
           definition?.definesDose && definition.administrationMethod) &&
           frame.args.some(argument => argument.role === AdviceArgumentRole.Amount && argument.quantity);
@@ -764,14 +932,37 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       a.span.start - b.span.start || a.span.end - b.span.end
     );
 
-    const nextIndex = frames.findIndex((frame) =>
-      frame.span.start >= lead.sourceEnd && isScopeTarget(context, frame) &&
-      // The conditional cannot select a later action across a completed
-      // directive. A subsequent counseling sentence must not steal the IF
-      // daughter from its immediately preceding medication-withholding head.
-      !context.tokens.some(token => token.sourceStart >= lead.sourceEnd &&
-        token.sourceEnd <= frame.span.start && /^[;.!?]$/u.test(token.original))
-    );
+    let guard = medicationGuardForContext(context);
+    const markerEnd = lexicalConditional?.start === 0
+      ? lead.sourceStart + lexicalConditional.end : lead.sourceEnd;
+    if (!guard || lead.sourceStart < guard.start || lead.sourceStart >= guard.markerEnd) {
+      // The registered conditional lead uses the same predicate/consequent
+      // composition as other clinical guards, with or without an activity.
+      guard = parseMedicationGuard(context.state.input, context.tokens, undefined, context.options,
+        { relation, start: lead.sourceStart, markerEnd });
+    }
+    const selectedOwner = conditionalAdviceOwnerAt(context, start);
+    const postfixOwner = selectedOwner && selectedOwner.span.end <= lead.sourceStart ? selectedOwner : undefined;
+    let nextIndex = -1;
+    for (let index = 0; !postfixOwner && index < frames.length; index++) {
+      const frame = frames[index];
+      if (frame.span.start < lead.sourceEnd) continue;
+      // An activity inside the admitted predicate is not its consequent.
+      if (guard && guard.start <= frame.span.start && frame.span.start < guard.end) continue;
+      // A completed directive ends this conditional's target search.
+      if (context.tokens.some(token => token.sourceStart >= lead.sourceEnd &&
+          token.sourceEnd <= frame.span.start && /^[;.!?]$/u.test(token.original))) break;
+      // Select the positive dose before procedural eligibility can skip it.
+      // Its clinical condition cannot transfer to later counseling.
+      if (targetHasClinicalCondition(context, start, frame, guard)) {
+        const sign = selectedClinicalGuardSign(context, start, relation, frame, guard, frames);
+        return sign ? [sign] : [];
+      }
+      if (isScopeTarget(context, frame)) {
+        nextIndex = index;
+        break;
+      }
+    }
     if (nextIndex >= 0) {
       const program = prefixProgram(context, nextIndex, frames);
       const targetStart = program[0].span.start;
@@ -781,12 +972,13 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const conditionEnd = Math.max(...tokens.map((token) => token.sourceEnd));
       const text = context.state.input.slice(lead.sourceStart, conditionEnd).trim();
       const fullText = context.state.input.slice(lead.sourceStart, targetEnd).trim();
-      const safety = program.some((frame) => isScopeTarget(context, frame) && (
-        frame.polarity === AdvicePolarity.Negate ||
-        medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options)
-      ));
-      const sourceRange = { start: lead.sourceStart, end: conditionEnd };
-      const withheld = withholdingAdjunct(context, sourceRange, program);
+      const safety = program.some((frame) => frame.polarity === AdvicePolarity.Negate ||
+        isSafetyTarget(context, frame, frameActionDefinition(frame, context.options)));
+      const condition: HpsgConditionFeature = {
+        relation, text, fullText, sourceStart: lead.sourceStart, sourceEnd: conditionEnd,
+        targetStart, targetEnd, safety, frames: program
+      };
+      const withheld = withholdingAdjunct(context, condition, markerEnd, guard);
       return [lexicalSign({
         type: "conditional-sign",
         rule: "hpsg.lex.condition",
@@ -796,17 +988,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           valence: {},
           cont: {
             clauseKind: "administration",
-            condition: {
-              relation,
-              text,
-              fullText,
-              sourceStart: lead.sourceStart,
-              sourceEnd: conditionEnd,
-              targetStart,
-              targetEnd,
-              safety,
-              frames: program
-            },
+            condition,
             ...(withheld ? { clinicalAdjunct: withheld } : {})
           }
         },
@@ -814,25 +996,31 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       })];
     }
 
-    const previous = frames
-      .filter((frame) => frame.span.end <= lead.sourceStart && isScopeTarget(context, frame))
+    const previous = postfixOwner ?? frames
+      .filter((frame) => frame.span.end <= lead.sourceStart &&
+        (targetHasClinicalCondition(context, start, frame, guard) || isScopeTarget(context, frame)))
       .sort((a, b) => b.span.end - a.span.end)[0];
     if (!previous) return [];
     const gap = context.state.input.slice(previous.span.end, lead.sourceStart);
-    if (
-      hasStrongBoundary(gap) ||
-      (gap.trim() && !explicitlySequences(context, previous.span.end, lead.sourceStart))
-    ) return [];
-    const conditionEnd = postfixConditionEnd(context, start);
+    if (hasStrongBoundary(gap)) return [];
+    if (targetHasClinicalCondition(context, start, previous, guard)) {
+      const sign = selectedClinicalGuardSign(context, start, relation, previous, guard, frames);
+      return sign ? [sign] : [];
+    }
+    if (gap.trim() && !explicitlySequences(context, previous.span.end, lead.sourceStart)) return [];
+    const conditionEnd = postfixConditionEnd(context, start, guard);
     const tokens = conditionTokens(context, lead.sourceStart, conditionEnd);
     if (!tokens.length) return [];
     const sourceEnd = Math.max(...tokens.map((token) => token.sourceEnd));
     const text = context.state.input.slice(lead.sourceStart, sourceEnd).trim();
     const fullText = context.state.input.slice(previous.span.start, sourceEnd).trim();
     const safety = previous.polarity === AdvicePolarity.Negate ||
-      medicationInstructionActionIsSafetyScopeTarget(previous.predicate.lemma, context.options);
-    const sourceRange = { start: lead.sourceStart, end: sourceEnd };
-    const withheld = withholdingAdjunct(context, sourceRange, [previous]);
+      isSafetyTarget(context, previous, frameActionDefinition(previous, context.options));
+    const condition: HpsgConditionFeature = {
+      relation, text, fullText, sourceStart: lead.sourceStart, sourceEnd,
+      targetStart: previous.span.start, targetEnd: previous.span.end, safety, frames: [previous]
+    };
+    const withheld = withholdingAdjunct(context, condition, markerEnd, guard);
     return [lexicalSign({
       type: "conditional-sign",
       rule: "hpsg.lex.condition",
@@ -842,17 +1030,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         valence: {},
         cont: {
           clauseKind: "administration",
-          condition: {
-            relation,
-            text,
-            fullText,
-            sourceStart: lead.sourceStart,
-            sourceEnd,
-            targetStart: previous.span.start,
-            targetEnd: previous.span.end,
-            safety,
-            frames: [previous]
-          },
+          condition,
           ...(withheld ? { clinicalAdjunct: withheld } : {})
         }
       },
@@ -862,21 +1040,28 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
 }
 
 
-const CONDITION_FEATURE_CACHE = new WeakMap<HpsgClauseContext, HpsgConditionFeature[]>();
+const CONDITION_FEATURE_CACHE = new WeakMap<HpsgClauseContext, {
+  signs: HpsgSign[]; features: HpsgConditionFeature[];
+}>();
 
-export function getConditionFeatures(context: HpsgClauseContext): HpsgConditionFeature[] {
+function conditionDiscovery(context: HpsgClauseContext) {
   const cached = CONDITION_FEATURE_CACHE.get(context);
   if (cached) return cached;
-  const result: HpsgConditionFeature[] = [];
+  const result = { signs: [] as HpsgSign[], features: [] as HpsgConditionFeature[] };
   const rule = conditionLexicalRule();
   for (let index = 0; index < context.limit; index += 1) {
     for (const sign of rule.match(context, index)) {
+      result.signs.push(sign);
       const condition = sign.synsem.cont.condition;
-      if (condition && !result.some((candidate) =>
+      if (condition && !result.features.some((candidate) =>
         candidate.sourceStart === condition.sourceStart && candidate.sourceEnd === condition.sourceEnd
-      )) result.push(condition);
+      )) result.features.push(condition);
     }
   }
   CONDITION_FEATURE_CACHE.set(context, result);
   return result;
+}
+
+export function getConditionFeatures(context: HpsgClauseContext): HpsgConditionFeature[] {
+  return conditionDiscovery(context).features;
 }

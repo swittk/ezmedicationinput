@@ -91,7 +91,9 @@ function matchedDateRelationLead(
 export function registerMedicationDateResolver(resolver: MedicationDateResolver): void {
   const id = resolver.id.trim().toLowerCase();
   if (!id) return;
-  DATE_RESOLVERS.set(id, { ...resolver, id });
+  const normalized: MedicationDateResolver = Object.assign({}, resolver);
+  normalized.id = id;
+  DATE_RESOLVERS.set(id, normalized);
 }
 
 /** Return the currently registered calendar resolver ids. */
@@ -570,14 +572,12 @@ export function findMedicationDateListSpans(
     }
   }
   output.sort((left, right) => left.start - right.start || right.end - left.end);
-  return output.filter((span, index) =>
-    !output.some((other, otherIndex) =>
-      otherIndex !== index &&
-      other.start <= span.start &&
-      other.end >= span.end &&
-      (other.start < span.start || other.end > span.end)
-    )
-  );
+  // Sorted by start then descending end; any containing span precedes its
+  // child. One prefix maximum replaces an O(spans²) containment search.
+  const maximal:MedicationDateListMatch[]=[];
+  let greatestEnd=-1;
+  for(const span of output){if(span.end<=greatestEnd)continue;maximal.push(span);greatestEnd=span.end;}
+  return maximal;
 }
 
 /** Resolve a date list beginning exactly at the supplied source offset. */

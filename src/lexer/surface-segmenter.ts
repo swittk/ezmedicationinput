@@ -10,17 +10,25 @@ export interface MedicationSurfaceSegmenter {
 }
 
 const SEGMENTERS: MedicationSurfaceSegmenter[] = [];
+const SEGMENTER_INDEX=new Map<string,number>();
 
 export function registerMedicationSurfaceSegmenter(segmenter: MedicationSurfaceSegmenter): void {
-  const script = new RegExp(segmenter.script.source, segmenter.script.flags.replace(/[gy]/g, ""));
-  const normalized = { ...segmenter, script };
-  const existing = SEGMENTERS.findIndex((candidate) => candidate.locale === segmenter.locale);
-  if (existing >= 0) SEGMENTERS.splice(existing, 1, normalized);
-  else SEGMENTERS.push(normalized);
+  // Stateless script tests can safely reuse the registered expression.
+  // Only /g or /y must lose their mutation-prone lastIndex behavior.
+  const normalized: MedicationSurfaceSegmenter = Object.assign({}, segmenter);
+  const script = segmenter.script;
+  normalized.script = script.global || script.sticky
+    ? new RegExp(script.source, script.flags.replace(/[gy]/g, "")) : script;
+  const locale = normalized.locale;
+  const existing=SEGMENTER_INDEX.get(locale);
+  if(existing!==undefined)SEGMENTERS[existing]=normalized;
+  else{SEGMENTER_INDEX.set(locale,SEGMENTERS.length);SEGMENTERS.push(normalized);}
 }
 
-export function listMedicationSurfaceSegmenters(): MedicationSurfaceSegmenter[] {
-  return SEGMENTERS.map((segmenter) => ({ ...segmenter }));
+export function listMedicationSurfaceSegmenters(): Readonly<MedicationSurfaceSegmenter>[] {
+  // The list is a registry snapshot; its entries are immutable-by-contract
+  // providers. Recopying every provider object adds no clinical meaning.
+  return SEGMENTERS.slice();
 }
 
 interface IntlWordSegment {
@@ -35,12 +43,20 @@ type IntlWordSegmenterConstructor = new (
   options?: { granularity: "word" }
 ) => IntlWordSegmenter;
 
+/** ICU segmenters are pure per-locale services. Re-registering a known
+ * locale should replace its script association, not rebuild the expensive
+ * ICU service. Constructor identity also handles runtime polyfill replacement. */
+let intlConstructor:IntlWordSegmenterConstructor|undefined;
+const intlSegmenters=new Map<string,IntlWordSegmenter>();
 export function registerIntlMedicationSurfaceSegmenter(locale: string, script: RegExp): void {
   const Segmenter = (Intl as unknown as { Segmenter?: IntlWordSegmenterConstructor }).Segmenter;
   if (!Segmenter) return;
   try {
-    const segmenter = new Segmenter(locale, { granularity: "word" });
-    registerMedicationSurfaceSegmenter({ locale, script, segment: (input) => segmenter.segment(input) });
+    if(intlConstructor!==Segmenter){intlConstructor=Segmenter;intlSegmenters.clear();}
+    let segmenter=intlSegmenters.get(locale);
+    if(!segmenter){segmenter=new Segmenter(locale,{granularity:"word"});intlSegmenters.set(locale,segmenter);}
+    const resolved=segmenter;
+    registerMedicationSurfaceSegmenter({locale,script,segment:(input)=>resolved.segment(input)});
   } catch {
     // Locale segmentation is optional; lexical parsing still has a non-segmented fallback.
   }

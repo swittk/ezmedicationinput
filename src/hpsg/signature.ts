@@ -78,7 +78,7 @@ export interface HpsgEvidence {
   lexicalCategory?: CanonicalLexicalCategory;
   tokenIndices: number[];
   /** Lexical evidence that a schedule field is an inferred, construction-local default. */
-  scheduleDefault?: "daily-frequency";
+  scheduleDefault?: "daily-frequency" | "weekday-recurrence";
   /** Exact typed schedule fields contributed by this lexical evidence. */
   scheduleFields?: CanonicalScheduleSemanticField[];
 }
@@ -187,6 +187,8 @@ export interface HpsgConditionFeature {
   sourceEnd: number;
   targetStart: number;
   targetEnd: number;
+  /** Independently selected targets of one coordinated withholding program. */
+  targetRanges?: TextRange[];
   safety: boolean;
   frames: AdviceFrame[];
 }
@@ -246,6 +248,7 @@ export interface HpsgDoseFeature {
   value?: number;
   range?: CanonicalDoseRange;
   unit?: string;
+  comparator?: FhirQuantity["comparator"] | "~";
   /**
    * Dimensionally typed clinical quantity contributed by the grammar.  This
    * remains distinct from `value`/`unit`: an infusion rate must never be
@@ -268,6 +271,8 @@ export type HpsgClinicalQuantityDimension =
 export interface HpsgCodedQuantityTerm {
   value: number;
   unit: string;
+  /** Qualifier on this amount only; active drug and carrier can differ. */
+  comparator?: FhirQuantity["comparator"] | "~";
   system?: string;
   code?: string;
 }
@@ -279,7 +284,9 @@ export interface HpsgDimensionalQuantityTerm extends HpsgCodedQuantityTerm {
 export interface HpsgClinicalQuantityFeature {
   representation: "dose" | "rate-quantity" | "dose-with-rate-ratio";
   status: "resolved" | "incomplete" | "unsupported";
-  numerator: HpsgDimensionalQuantityTerm;
+  numerator: HpsgDimensionalQuantityTerm | (Omit<HpsgDimensionalQuantityTerm, "value"> & {
+    range: CanonicalDoseRange;
+  });
   denominators: HpsgDimensionalQuantityTerm[];
   /** Per-administration value after an explicit daily total is divided. */
   projectedDose?: HpsgCodedQuantityTerm;
@@ -290,7 +297,8 @@ export interface HpsgClinicalQuantityFeature {
   carrierMaterial?: { text: string; range?: TextRange };
   dailyTotal?: boolean;
   dividedDoseCount?: number;
-  administrationDuration?: { value: number; unit: FhirPeriodUnit };
+  administrationDuration?: { value: number; unit: FhirPeriodUnit;
+    comparator?: FhirQuantity["comparator"] | "~" };
   requiresPatientWeight?: true;
   reviewReason?:
     | "incomplete-weight-based-dose"
@@ -307,6 +315,10 @@ declare module "../types" {
   interface CanonicalSigClause {
     clinicalQuantity?: HpsgClinicalQuantityFeature;
   }
+  interface CanonicalScheduleExpr {
+    /** Grammar-owned continuing onset, distinct from one dated occurrence. */
+    openEndedStart?: true;
+  }
 }
 
 export interface HpsgScheduleFeature {
@@ -320,8 +332,10 @@ export interface HpsgScheduleFeature {
   /** Weekday occurrence in each month; -1 denotes the last occurrence. */
   weekdayOrdinal?: -1 | 1 | 2 | 3 | 4 | 5;
   timingReference?: "previous" | "previous-weekday-complement";
-  /** Source-relative phase onset, in elapsed days from treatment start. */
+  /** Source-relative phase onset; the reference distinguishes civil days. */
   treatmentStartOffsetDays?: number;
+  /** Local civil-day origin or completion of the preceding phase. */
+  phaseStartReference?: "treatment-day-start" | "previous-phase-next-day" | "previous-phase-end";
   attachmentClass?: "administration" | "procedure";
   /** Exact source owned by this schedule construction, retained for generic attachment arbitration. */
   sourceRanges?: TextRange[];
@@ -334,6 +348,8 @@ export interface HpsgScheduleFeature {
   /** Elapsed delay before one administration, not a course duration. */
   administrationOffsetMinutes?: number;
   boundsStart?: string;
+  /** The selected start construction explicitly continues beyond its date. */
+  openEndedStart?: true;
   boundsEnd?: string;
   frequency?: number;
   frequencyMax?: number;
@@ -471,7 +487,7 @@ export function lexicalSign(args: {
   } else if (schedule) {
     const fields: CanonicalScheduleSemanticField[] = [];
     for (const key of Object.keys(schedule)) {
-      if (key === "attachmentClass" || key === "sourceRanges") continue;
+      if (key === "attachmentClass" || key === "sourceRanges" || key === "openEndedStart") continue;
       const field = key as keyof HpsgScheduleFeature;
       // Optional undefined values contribute no feature to the lexical sign.
       if (schedule[field] !== undefined) fields.push(key as CanonicalScheduleSemanticField);
@@ -511,6 +527,8 @@ export interface BoundarySite extends Range {
   lastTokenIndex: number;
   rightIndex: number;
   kind: BoundaryKind;
+  /** Selected lexical relation; surface remains the authored source. */
+  connectorKind?: CoordinationConnectorKind;
   surface: string;
 }
 export interface Evidence {

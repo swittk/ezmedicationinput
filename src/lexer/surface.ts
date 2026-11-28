@@ -60,6 +60,15 @@ function isStandaloneSurfaceChar(char: string): boolean {
   return classifySurfaceKind(char) !== undefined;
 }
 
+/** A leading decimal can follow a token boundary or an existing numeric prefix. */
+function isNumericTokenBoundary(input: string, index: number): boolean {
+  if (index < 0) return true;
+  const char = input[index];
+  return isWhitespaceChar(char) || SEPARATOR_CHARS.has(char) ||
+    char === "/" || char === "@" || char === "~" || char === "≈" ||
+    char === "≥" || char === "≤" || char === "<" || char === ">" || char === "=";
+}
+
 function isAsciiLetter(char: string): boolean {
   return (char >= "A" && char <= "Z") || (char >= "a" && char <= "z");
 }
@@ -73,7 +82,7 @@ function asciiLetterRunLength(input: string, start: number, step: -1 | 1): numbe
   return length;
 }
 
-function isSentenceBoundaryChar(input: string, index: number): boolean {
+export function isSentenceBoundaryChar(input: string, index: number): boolean {
   const char = input[index];
   if (char === "!" || char === "?") {
     const before = index > 0 ? input[index - 1] : "";
@@ -83,9 +92,18 @@ function isSentenceBoundaryChar(input: string, index: number): boolean {
   if (char !== ".") return false;
   const before = index > 0 ? input[index - 1] : "";
   const after = index + 1 < input.length ? input[index + 1] : "";
-  // Keep decimal points inside numeric tokens (e.g. 1.5 mL or clinician shorthand .5 tab).
+  let rangeLeft = index - 2;
+  if (/[-–—]/u.test(before)) {
+    while (rangeLeft >= 0 && isWhitespaceChar(input[rangeLeft])) rangeLeft--;
+  }
+  // Keep decimal points inside numeric tokens (e.g. 1.5 mL, .5 tab,
+  // or a directly prefixed '~.1mcg/kg/min' / '@.5 mL/h'). Breaking the prefix changes
+  // 0.1 into 1, a tenfold dose error. This is a lexical boundary, not a
+  // separate clinical grammar or a whole-input repair pass.
   if (/[0-9๐-๙]/u.test(after) &&
-      (/[0-9๐-๙]/u.test(before) || index === 0 || isWhitespaceChar(before) || before === "(")) {
+      (/[0-9๐-๙]/u.test(before) || isNumericTokenBoundary(input, index - 1) ||
+        (before === "-" || before === "+") && isNumericTokenBoundary(input, index - 2) ||
+        /[-–—]/u.test(before) && rangeLeft >= 0 && /[0-9๐-๙]/u.test(input[rangeLeft]))) {
     return false;
   }
   // Keep clinical dotted abbreviations intact (O.D., I.U., b.i.d.). A period

@@ -1,5 +1,6 @@
-import type { CanonicalEvidence, CanonicalLexicalCategory } from "./types";
+import type { CanonicalAdditionalInstructionExpr, CanonicalEvidence, CanonicalLexicalCategory } from "./types";
 import { parseHpsgClause } from "./hpsg/clause-parser";
+import { getProceduralFrames } from "./hpsg/procedural-context";
 import { findMedicationDateListSpans } from "./date-interpretation";
 import { applyHpsgDefaultConstraints } from "./hpsg/defaults";
 import { buildTranslationPrimitiveElement, mergeI18nRecords } from "./fhir-translations";
@@ -12,7 +13,7 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { ParserState, Token } from "./parser-state";
-import { buildInstructionGraph, realizeInstructionAction } from "./instruction-graph";
+import { buildInstructionGraph, instructionGraphAdviceAssociation, instructionSourceRange, realizeInstructionAction } from "./instruction-graph";
 import { resolveMedicationAdministrationMethod } from "./hpsg/method-lexicon";
 export {
   applyPrnReasonCoding,
@@ -308,90 +309,62 @@ function cleanupClause(state: ParserState): void {
   }
 }
 
-function normalizedSafetyText(value: string): string {
-  return value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
-}
-
 function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClause): void {
   const graph = clause.instructionGraph;
-  const primary = graph?.primaryAdministrationSpan;
-  const directives = graph?.actions.filter((frame) => {
-    if (!frame.sourceText.trim()) return false;
-    if (frame.polarity === AdvicePolarity.Negate) return true;
-    if (!frame.modality || !primary) return false;
-    return frame.span.end <= primary.start || frame.span.start >= primary.end;
-  }) ?? [];
-  if (!directives.length) return;
-  const instructions = clause.additionalInstructions ?? (clause.additionalInstructions = []);
-  for (const warning of directives) {
+  if (!graph) return;
+  const primary = graph.primaryAdministrationSpan;
+  let instructions = clause.additionalInstructions;
+  let associations: ReturnType<typeof instructionGraphAdviceAssociation>[] | undefined;
+  let source: string | undefined;
+  for (let index = 0; index < graph.actions.length; index += 1) {
+    const warning = graph.actions[index];
     const sourceText = warning.sourceText.trim();
-    // The shared polarity of a coordinated verb belongs to the COMPOSED
-    // typed directive. Its raw daughter source ("drink ...") has no "not".
-    const sharedNegation = warning.polaritySource === "shared";
-    const composedWording = sharedNegation;
-    const text = composedWording
+    if (!sourceText || (warning.polarity !== AdvicePolarity.Negate &&
+        (!warning.modality || !primary ||
+          warning.span.end > primary.start && warning.span.start < primary.end))) continue;
+    if (!associations) associations = (instructions ?? []).map(instruction =>
+      instructionGraphAdviceAssociation(graph, instruction));
+    let rowIndex = -1;
+    let uncodedBindings = 0;
+    for (let candidate = 0; candidate < associations.length; candidate += 1) {
+      if (associations[candidate].actionIndices.indexOf(index) < 0) continue;
+      const coded = Boolean(instructions![candidate].coding?.code);
+      if (rowIndex < 0 || !coded && instructions![rowIndex].coding?.code) rowIndex = candidate;
+      if (!coded) uncodedBindings += 1;
+    }
+    let previous: CanonicalAdditionalInstructionExpr | undefined;
+    let range: TextRange | undefined;
+    if (rowIndex >= 0) {
+      previous = instructions![rowIndex];
+      // One daughter cannot replace a split or wider selected instruction.
+      if (previous.coding?.code || uncodedBindings !== 1 || previous.frames?.length !== 1 ||
+          associations[rowIndex].actionIndices.length !== 1) continue;
+      range = instructionSourceRange(graph, previous.text,
+        source ??= graph.sourceText.toLocaleLowerCase("en"));
+      if (range && (range.start < warning.span.start || range.end > warning.span.end)) continue;
+    }
+    const wordingRange = range ?? warning.span;
+    const composedSource = warning.polaritySource === "shared" || warning.args.some(argument =>
+      argument.span && (argument.span.start < wordingRange.start || argument.span.end > wordingRange.end));
+    const completeModalSource = previous?.frames?.[0].modality === warning.modality &&
+      range?.start === warning.span.start && range.end === warning.span.end;
+    const realizeSelected = composedSource || warning.modality !== undefined && !completeModalSource;
+    if (previous && !realizeSelected) {
+      if (previous.frames![0] !== warning) instructions![rowIndex] = { ...previous, frames: [warning] };
+      continue;
+    }
+    // Preserve a complete authored occurrence. Generated or shorter rows need
+    // the selected modality and inherited facts realized in their wording.
+    const text = realizeSelected
       ? realizeInstructionAction(warning, "en")
-      : sourceText
-        ? sourceText.charAt(0).toUpperCase() + sourceText.slice(1)
-        : sourceText;
-    const translated = composedWording ? realizeInstructionAction(warning, "th") : undefined;
-    const normalized = normalizedSafetyText(text);
-    if (!normalized) continue;
-    const representedIndex = instructions.findIndex((instruction) =>
-      instruction.frames?.some((frame) =>
-        frame.predicate.lemma === warning.predicate.lemma &&
-        frame.polarity === warning.polarity &&
-        frame.span.start < warning.span.end &&
-        warning.span.start < frame.span.end
-      )
-    );
-    if (representedIndex >= 0) {
-      // A coded combined safety instruction already semantically owns the
-      // daughter action. Keep that compound meaning instead of generating a
-      // redundant "do not chew" directive beside its coded equivalent.
-      const previous = instructions[representedIndex];
-      if (composedWording && !previous.coding?.code) {
-        instructions[representedIndex] = {
-          ...previous, text,
-          i18n: { ...(previous.i18n ?? {}), ...(translated ? { th: translated } : {}) }
-        };
-      } else if (warning.modality && !previous.coding?.code &&
-          normalizedSafetyText(sourceText).length > normalizedSafetyText(previous.text ?? "").length) {
-        // The typed modal owns the fuller source phrase. Preserve its
-        // relation and condition verbatim rather than realizing the partial
-        // daughter ("take with food" instead of "should take with food").
-        instructions[representedIndex] = {
-          ...previous,
-          text: sourceText.charAt(0).toUpperCase() + sourceText.slice(1)
-        };
-      }
-      continue;
-    }
-    const overlapIndex = instructions.findIndex((instruction) => {
-      const existing = normalizedSafetyText(instruction.text ?? "");
-      return Boolean(existing && (existing === normalized || existing.includes(normalized) || normalized.includes(existing)));
-    });
-    if (overlapIndex >= 0) {
-      const existing = instructions[overlapIndex];
-      const frames = [...(existing.frames ?? [])];
-      if (!frames.some((frame) =>
-        frame.predicate.lemma === warning.predicate.lemma &&
-        frame.polarity === warning.polarity &&
-        frame.span.start < warning.span.end && warning.span.start < frame.span.end
-      )) {
-        frames.push(warning);
-      }
-      const shouldUseWarningText = !existing.coding?.code &&
-        normalizedSafetyText(existing.text ?? "").length < normalized.length;
-      instructions[overlapIndex] = {
-        ...existing,
-        ...(shouldUseWarningText || composedWording ? { text } : {}),
-        ...(composedWording && translated ? { i18n: { ...(existing.i18n ?? {}), th: translated } } : {}),
-        frames
-      };
-      continue;
-    }
-    instructions.push({ text, ...(translated ? { i18n: { th: translated } } : {}), frames: [warning] });
+      : sourceText.charAt(0).toUpperCase() + sourceText.slice(1);
+    if (!text.trim()) continue;
+    const translated = realizeSelected ? realizeInstructionAction(warning, "th") : undefined;
+    const selected: CanonicalAdditionalInstructionExpr = previous
+      ? { ...previous, text, frames: [warning] } : { text, frames: [warning] };
+    if (translated) selected.i18n = { ...previous?.i18n, th: translated };
+    if (previous) instructions![rowIndex] = selected;
+    else (instructions ??= clause.additionalInstructions = []).push(selected);
   }
 }
 
@@ -413,7 +386,8 @@ function finalizeClause(
     state.input,
     clause,
     options,
-    semanticOwnershipRanges
+    semanticOwnershipRanges,
+    getProceduralFrames({ state, options })
   );
   promoteGraphDirectivesToAdditionalInstructions(clause);
 }

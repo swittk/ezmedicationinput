@@ -14,12 +14,14 @@ import { resolveBodySiteLexeme, resolveBodySiteRestrictionPredicate, type Resolv
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import {
+  BODY_SITE_LOCATIVE_LEAD_TOKENS,
+  relationHasGrammarFeature,
   resolveActionRelationSurface,
   resolveActionRelationSurfaceCandidates
 } from "../../relation-terminology";
 import { inferRouteFromContext } from "../../context";
 import { baseLanguageTag } from "../../localization";
-import { inferMedicationLocale } from "../../locale-detection";
+import { withMedicationSourceI18n } from "../../locale-detection";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
   EVERY_INTERVAL_TOKENS,
@@ -33,15 +35,19 @@ import {
   ACTION_COORDINATION_CONNECTORS,
   ACTION_SEQUENCE_MARKERS,
   BODY_SITE_BARE_NOMINAL_PREFIXES,
+  BODY_SITE_PARTITIVE_HEADS,
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_FEATURE_SCORE_BONUS,
   DURATION_LEAD_TOKENS,
+  DOSE_COMPARATOR_PREFIXES,
+  doseComparatorNumberAt,
   EVENT_ARTICLE_TOKENS,
   EXTERNAL_SITE_LOCATIVE_PREFIXES,
   EYE_SITE_ABBREVIATIONS,
   INSTRUCTION_START_WORDS,
   NON_OCULAR_DOSE_UNITS,
   NON_SITE_ANCHORED_PHRASES,
+  parseClockToken,
   OCULAR_ROUTE_CODES,
   PRN_LEADS,
   PRN_STANDALONE_REASON_LEADS,
@@ -56,6 +62,7 @@ import {
 } from "../lexical-classes";
 import {
   HpsgClauseContext,
+  nextDayOnsetAt,
   sourceRangeOverlapsContextDate,
   isAmPmLower,
   isClockLikeLower,
@@ -133,8 +140,7 @@ function coordinatedRightSiteTokens(
     const tokens = tokensAvailable(context, rightStart, span);
     if (!tokens) break;
     const last = tokens[tokens.length - 1];
-    const lower = normalizeTokenLower(last);
-    if (span > 1 && (siteCoordinatorSpan(context, rightStart + span - 1) || siteBoundary(lower, context))) break;
+    if (span > 1 && (siteCoordinatorSpan(context, rightStart + span - 1) || siteBoundary(last, context))) break;
     const resolved = resolveBodySiteLexeme(joinTokenText(tokens), context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     });
@@ -172,13 +178,15 @@ function anchoredModifierLeadsToResolvableSite(
   start: number
 ): boolean {
   const maxEnd = Math.min(context.limit, start + 5);
+  const attributive = BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(normalizeTokenLower(context.tokens[start]));
   for (let index = start + 1; index < maxEnd; index += 1) {
-    const candidate = context.tokens.slice(index, index + 1)[0];
+    const candidate = context.tokens[index];
     if (!candidate || context.state.consumed.has(candidate.index) || isPunctuation(normalizeTokenLower(candidate))) break;
-    const resolved = resolveBodySiteLexeme(candidate.original, context.options?.siteCodeMap, {
+    const phrase = attributive ? candidate.original : joinTokenText(context.tokens.slice(start, index + 1));
+    const resolved = resolveBodySiteLexeme(phrase, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     });
-    if (resolved?.coding || resolved?.definition) return true;
+    if (resolved?.coding || resolved?.definition || resolved?.spatialRelation?.targetCoding) return true;
   }
   return false;
 }
@@ -191,6 +199,11 @@ function relationIntroducesNonSiteComplement(
   if (!token) return false;
   const relations = resolveActionRelationSurfaceCandidates(normalizeTokenLower(token));
   if (!relations.length) return false;
+  // A licensed clock complement owns its relation before site collection.
+  if (relations.some(relation => relationHasGrammarFeature(relation, "timeComplement"))) {
+    const clock = parseClockToken(context.tokens[index + 1], context.tokens[index + 2]);
+    if (clock && tokensAvailable(context, index + 1, clock.tokens.length)) return true;
+  }
   for (let cursor = index + 1; cursor < Math.min(context.limit, index + 4); cursor += 1) {
     const candidate = context.tokens[cursor];
     if (!candidate || context.state.consumed.has(candidate.index) || isPunctuation(normalizeTokenLower(candidate))) {
@@ -216,15 +229,12 @@ function coordinationStartsAction(context: HpsgClauseContext, index: number): bo
   );
 }
 
-function siteBoundary(lower: string, context: HpsgClauseContext, allowRelativeMarker = false): boolean {
+function siteBoundary(token: Token, context: HpsgClauseContext, allowRelativeMarker = false): boolean {
+  const lower = normalizeTokenLower(token);
   if (SITE_MULTIPLICITY_WORDS.has(lower)) {
     return false;
   }
-  const siteLike = Boolean(resolveBodySiteLexeme(lower, context.options?.siteCodeMap, {
-    bodySiteContext: context.options?.context?.bodySiteContext
-  }));
-  const actionLike = resolveMedicationInstructionAction(lower, context.options);
-  return (
+  if (
     isPunctuation(lower) ||
     PRN_LEADS.has(lower) ||
     PRN_STANDALONE_REASON_LEADS.has(lower) ||
@@ -233,24 +243,31 @@ function siteBoundary(lower: string, context: HpsgClauseContext, allowRelativeMa
     (!allowRelativeMarker && SITE_RELATIVE_MARKERS.has(lower)) ||
     SITE_SCOPE_BOUNDARY_WORDS.has(lower) ||
     INSTRUCTION_START_WORDS.has(lower) ||
-    Boolean(
-      actionLike ||
-      (DEFAULT_ROUTE_SYNONYMS[lower] && !siteLike) ||
-      productRouteHint(lower) ||
-      (normalizeUnit(lower, context.options) && !siteLike) ||
-      TIMING_ABBREVIATIONS[lower] ||
-      WORD_FREQUENCIES[lower] ||
-      FREQUENCY_SIMPLE_WORDS[lower] !== undefined ||
-      FREQUENCY_NUMBER_WORDS[lower] !== undefined ||
-      FREQUENCY_TIMES_WORDS.has(lower) ||
-      EVENT_TIMING_TOKENS[lower] ||
-      isClockLikeLower(lower) ||
-      isAmPmLower(lower) ||
-      EVERY_INTERVAL_TOKENS.has(lower) ||
-      mapFrequencyAdverb(lower) ||
-      mapIntervalUnit(lower)
-    )
-  );
+    resolveMedicationInstructionAction(lower, context.options) ||
+    productRouteHint(lower) ||
+    TIMING_ABBREVIATIONS[lower] ||
+    WORD_FREQUENCIES[lower] ||
+    FREQUENCY_SIMPLE_WORDS[lower] !== undefined ||
+    FREQUENCY_NUMBER_WORDS[lower] !== undefined ||
+    FREQUENCY_TIMES_WORDS.has(lower) ||
+    EVENT_TIMING_TOKENS[lower] ||
+    isClockLikeLower(lower) ||
+    isAmPmLower(lower) ||
+    EVERY_INTERVAL_TOKENS.has(lower) ||
+    mapFrequencyAdverb(lower) ||
+    mapIntervalUnit(lower)
+  ) return true;
+  // A registered route or dose unit owns its token unless the same surface is anatomical.
+  // Resolve this ambiguity only for those candidates, using the site owner.
+  if ((!getRouteMeaning(token) && !context.options?.routeMap?.[lower] && !normalizeUnit(lower, context.options)) ||
+      getPrimarySiteMeaningCandidate(token)) return false;
+  const site = resolveBodySiteLexeme(lower, context.options?.siteCodeMap, {
+    bodySiteContext: context.options?.context?.bodySiteContext
+  });
+  if (site?.coding || site?.definition) return false;
+  if (!BODY_SITE_PARTITIVE_HEADS.has(lower) && !BODY_SITE_LOCATIVE_LEAD_TOKENS.has(lower)) return true;
+  // A complete registered site phrase can also own an ambiguous route head.
+  return !anchoredModifierLeadsToResolvableSite(context, token.index);
 }
 
 function trimBraceRange(
@@ -269,16 +286,6 @@ function trimBraceRange(
     end -= 1;
   }
   return { start, end };
-}
-
-function siteI18nWithSourceText(
-  sourceText: string,
-  definitionI18n: Record<string, string> | undefined,
-  context: HpsgClauseContext
-): Record<string, string> | undefined {
-  const sourceLocale = inferMedicationLocale(sourceText, "en");
-  if (sourceLocale === "en") return definitionI18n;
-  return { ...(definitionI18n ?? {}), [sourceLocale]: sourceText };
 }
 
 /**
@@ -429,7 +436,7 @@ function sitePredicateEndsBefore(
     coordinationStartsAction(context, index) ||
     Boolean(coordinatedRightSiteTokens(context, index)) ||
     ACTION_SEQUENCE_MARKERS.has(lower) ||
-    (index > predicateStart && siteBoundary(lower, context))
+    (index > predicateStart && siteBoundary(token, context))
   ) return true;
 
   if (!SITE_ANCHORS.has(lower)) return false;
@@ -501,6 +508,13 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const signs: HpsgSign[] = [];
     const lower = normalizeTokenLower(token);
+    // A licensed "at ~100 mL/hr" rate is not an unknown body site.
+    // Reuse the preceding clinical lexical contribution; no extra scan.
+    if (context.clinicalCache.quantityTokenIndices?.has(token.index)) return signs;
+    // The complete licensed NEXT + day/daypart nominal owns its modifier.
+    // Outside that constituent, ordinary site anchoring remains available.
+    const nextDay = nextDayOnsetAt(context.tokens, start, context.limit);
+    if (nextDay && tokensAvailable(context, start, nextDay.tokenEnd - start)) return signs;
     const relativeMarker = siteRelativeMarkerSign(token, lower);
     // Thai ที่ can introduce either a relative site predicate or a plain
     // administration site. Keep both daughters for the chart to select.
@@ -555,6 +569,16 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     // are also locative heads, not stray leftovers outside site grammar.
     if (!SITE_ANCHORS.has(lower) && !SITE_SELF_DISPLAY_ANCHORS.has(lower)) {
       return signs;
+    }
+    // A recognized quantity owns an overlapping word such as AROUND.
+    // Anatomical complements still use the ordinary locative rule below.
+    if (DOSE_COMPARATOR_PREFIXES.has(lower)) {
+      const amount = doseComparatorNumberAt(context.tokens, start, context.limit, lower);
+      const unitToken = amount && context.tokens[amount.numericIndex + 1];
+      const unit = amount?.rawUnit ?? (unitToken && !context.state.consumed.has(unitToken.index)
+        ? normalizeTokenLower(unitToken) : undefined);
+      if (amount && unit && normalizeUnit(unit, context.options) &&
+          tokensAvailable(context, start, amount.numericIndex + 1 - start)) return signs;
     }
     const firstAfterAnchor = context.tokens[start + 1];
     let ordinalCursor = start + 1;
@@ -648,7 +672,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         BODY_SITE_ATTRIBUTIVE_MODIFIERS.has(candidateLower)
       ) && anchoredModifierLeadsToResolvableSite(context, cursor);
       if (
-        (siteBoundary(candidateLower, context) || relationIntroducesNonSiteComplement(context, cursor)) &&
+        (siteBoundary(candidate, context) || relationIntroducesNonSiteComplement(context, cursor)) &&
         (isPunctuation(candidateLower) || !siteModifierCanBridgeBoundary)
       ) {
         const next = context.tokens[cursor + 1];
@@ -741,7 +765,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
             site: {
               text: displayText,
               i18n: !resolved?.coding && resolved?.definition?.text === "affected area"
-                ? siteI18nWithSourceText(sourceText, resolved?.definition?.i18n, context)
+                ? withMedicationSourceI18n(sourceText, resolved?.definition?.i18n)
                 : resolved?.definition?.i18n,
               source: "text",
               coding: resolved?.coding,
@@ -782,7 +806,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (
       (SITE_ANCHORS.has(firstLower) || SITE_SELF_DISPLAY_ANCHORS.has(firstLower)) ||
       isPunctuation(firstLower) ||
-      siteBoundary(firstLower, context, true)
+      siteBoundary(first, context, true)
     ) {
       return [];
     }
@@ -792,8 +816,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (!tokens) {
         continue;
       }
-      const lowers = tokens.map((token) => normalizeTokenLower(token));
-      if (lowers.some((lower) => !lower || siteBoundary(lower, context, true))) {
+      if (tokens.some(token => !normalizeTokenLower(token) || siteBoundary(token, context, true))) {
         continue;
       }
       const originalText = joinTokenText(tokens);
@@ -829,7 +852,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
               site: {
                 text: displayText,
                 i18n: !resolved.coding && resolved.definition?.text === "affected area"
-                  ? siteI18nWithSourceText(sourceText, resolved.definition?.i18n, context)
+                  ? withMedicationSourceI18n(sourceText, resolved.definition?.i18n)
                   : resolved.siteI18n ?? resolved.definition?.i18n,
                 source: "text",
                 coding: resolved.coding,

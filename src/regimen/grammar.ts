@@ -1,3 +1,6 @@
+import { isNextDayScheduleRule } from "../hpsg/lexical-classes";
+import { hasRecurringSchedule } from "../hpsg/projection";
+import { equalStructuredValues } from "../stable-structure";
 import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, EventTiming, type CanonicalSigClause } from "../types";
 import type {
   BoundaryDecision,
@@ -51,11 +54,13 @@ const conjunctionOrSequence = constraint('connector.conjunction-or-sequence', f 
   f.site.kind === 'sequence' || f.connectorKind !== 'disjunction');
 const usableLeft = constraint('left.head-or-inherited-complete-schedule', f => f.left.hasHead ||
   f.inheritedAdministration && f.left.complete && f.left.hasSchedule);
-const scheduleRight = [
+const scheduledRight = [
   constraint('right.not-procedural', f => !f.rightHasProcedure),
   constraint('right.complete', f => f.right.complete),
-  constraint('right.hasSchedule', f => f.right.hasSchedule),
-  constraint('right.omitsHead', f => !f.right.hasHead)
+  constraint('right.hasSchedule', f => f.right.hasSchedule)
+];
+const scheduleRight = [
+  ...scheduledRight, constraint('right.omitsHead', f => !f.right.hasHead)
 ];
 const targetSetsDiffer = (left: readonly string[], right: readonly string[]) =>
   left.length !== right.length || left.some(value => right.indexOf(value) < 0);
@@ -77,15 +82,101 @@ const hasPhaseBoundary = (clause: CanonicalSigClause) => Boolean(
   )
 );
 
+/** A source-unowned single count is an execution default, not a written
+ * schedule or phase bound. Both boundary planning and cadence inheritance use
+ * this same distinction before a later adjunct completes the administration. */
+export function hasImplicitSingleCount(clause: CanonicalSigClause): boolean {
+  return clause.schedule?.count === 1 && !clause.evidence.some(item =>
+    (item.scheduleFields?.indexOf("count") ?? -1) >= 0 &&
+    item.spans.some(span => span.start >= 0 && span.end <= clause.rawText.length));
+}
+
+/** A postposed onset completes a dose whose only timing is local runtime
+ * or delay. Independent recurrence, anchored positions and authored bounds
+ * remain capable of establishing a separate treatment phase. */
+export function canReceivePostposedOnset(probe: ProbeSummary): boolean {
+  if (!probe.hasDose) return false;
+  if (!probe.hasSchedule) return true;
+  const clause = probe.clause, schedule = clause.schedule;
+  return !hasRecurringSchedule(schedule) && !schedule?.timingCode &&
+    !schedule?.clockWindow && !schedule?.eventWindow && !schedule?.activityTiming?.length &&
+    schedule?.treatmentStartOffsetDays === undefined && schedule?.phaseStartReference === undefined &&
+    schedule?.duration === undefined && schedule?.durationMax === undefined &&
+    schedule?.boundsStart === undefined && schedule?.boundsEnd === undefined &&
+    schedule?.timingReference === undefined && schedule?.countMax === undefined &&
+    (schedule?.count === undefined || hasImplicitSingleCount(clause));
+}
+
+/** A single clock without independent recurrence or phase boundaries can
+ * locate the initial administration in an explicitly ordered clock sequence. */
+export function singleClockWithoutRecurrence(schedule: CanonicalSigClause['schedule']): string | undefined {
+  if (schedule?.timeOfDay?.length !== 1 || schedule.when?.length ||
+      schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
+      schedule.period !== undefined || schedule.periodMax !== undefined || schedule.periodUnit !== undefined ||
+      schedule.timingCode || (schedule.count !== undefined && schedule.count !== 1) || schedule.countMax !== undefined ||
+      schedule.sharedCount ||
+      schedule.duration !== undefined || schedule.durationMax !== undefined || schedule.durationUnit !== undefined ||
+      schedule.boundsStart || schedule.boundsEnd || schedule.calendarEvents?.length ||
+      schedule.dayOfWeek?.length || schedule.dayOfMonth?.length || schedule.weekdayOrdinal !== undefined ||
+      schedule.clockWindow || schedule.eventWindow || schedule.activityTiming?.length ||
+      schedule.repeatCycle || schedule.cycleDayConstraint || schedule.occurrenceCap ||
+      schedule.treatmentStartOffsetDays !== undefined || schedule.phaseStartReference || schedule.timingReference ||
+      schedule.administrationOffsetMinutes !== undefined || schedule.administrationDuration !== undefined ||
+      schedule.administrationDurationRange || schedule.offset !== undefined ||
+      schedule.offsetMin !== undefined || schedule.offsetMax !== undefined) return undefined;
+  return schedule.timeOfDay[0];
+}
+
+/** A complete NEXT point after a single clock locates a later administration.
+ * The ordinary coordinator keeps same-day lists intact unless the right
+ * daughter carries this explicit next-day origin. Existing sequence completion
+ * supplies the predecessor's occupied day; no event clock is inferred here. */
+function typedNextPoint(f: BoundaryFacts): boolean {
+  if (!(f.site.kind === "sequence" || f.site.kind === "coordination" && f.connectorKind === "conjunction") ||
+      !f.left.complete || !f.left.hasDose || f.left.prn || f.right.prn ||
+      singleClockWithoutRecurrence(f.left.clause.schedule) === undefined) return false;
+  const schedule = f.right.clause.schedule;
+  return Boolean(schedule?.phaseStartReference === "treatment-day-start" &&
+    schedule.treatmentStartOffsetDays === 1 &&
+    (schedule.count === 1 || (schedule.timeOfDay?.length ?? 0) > 1 && schedule.count === schedule.timeOfDay!.length) &&
+    schedule.countMax === undefined &&
+    !f.right.hasRecurringCadence && !f.right.hasOffset && !f.right.hasDates &&
+    schedule.frequencyMax === undefined && schedule.periodMax === undefined && schedule.periodUnit === undefined &&
+    schedule.duration === undefined && schedule.durationMax === undefined && schedule.durationUnit === undefined &&
+    !schedule.boundsStart && !schedule.boundsEnd && !schedule.occurrenceCap &&
+    !schedule.clockWindow && !schedule.eventWindow && !schedule.activityTiming?.length &&
+    !schedule.repeatCycle && !schedule.cycleDayConstraint && !schedule.dayOfMonth?.length &&
+    schedule.weekdayOrdinal === undefined &&
+    schedule.evidence?.some(item => isNextDayScheduleRule(item.rule)));
+}
+
+/** An explicit later number may omit the repeated dose unit after THEN.
+ * The typed predecessor supplies the unit; the recipient keeps its own
+ * amount and comparator. A repeated selected head may also omit the unit
+ * when it explicitly refers to the preceding timing; independent heads may not. */
+const hasContinuationDoseUnit = (f: BoundaryFacts): boolean =>
+  f.explicitRightUnit || f.site.kind === 'sequence' &&
+    (!f.right.method || f.right.clause.schedule?.timingReference === 'previous' &&
+      equalStructuredValues(f.left.clause.method, f.right.clause.method)) &&
+    f.right.hasDose && !f.right.clause.dose?.unit &&
+    (Boolean(f.left.clause.dose?.unit) || f.inheritedAdministration && f.left.hasDose && !f.left.method);
+
 const SAME_DAY_DOSE_CONSTRAINTS: readonly Constraint[] = [
     constraint('connector.sequence', f => f.site.kind === 'sequence'),
     constraint('left.complete', f => f.left.complete),
     constraint('right.complete', f => f.right.complete),
     constraint('left.hasDose', f => f.left.hasDose),
     constraint('right.hasDose', f => f.right.hasDose),
-    constraint('right.explicitUnit', f => f.explicitRightUnit),
+    constraint('right.explicit-or-inherited-unit', hasContinuationDoseUnit),
     constraint('left.hasSameDayAnchor', f => hasSameDayAnchor(f.left.clause)),
     constraint('right.hasSameDayAnchor', f => hasSameDayAnchor(f.right.clause)),
+    // Probe clocks are already sorted. A backward pair cannot share one civil
+    // day; a clock and an event anchor have no shared ordering without context.
+    // Both keep the existing sequential reading rather than invent event clocks.
+    constraint('clocks.preserve-sequence-order', f =>
+      !f.left.clocks.length && !f.right.clocks.length ||
+      Boolean(f.left.clocks.length && f.right.clocks.length) &&
+      f.left.clocks[f.left.clocks.length - 1] <= f.right.clocks[0]),
     constraint('left.omitsPhaseBoundary', f => !hasPhaseBoundary(f.left.clause)),
     constraint('right.omitsPhaseBoundary', f => !hasPhaseBoundary(f.right.clause)),
     constraint('right.not-procedural', f => !f.rightHasProcedure),
@@ -357,6 +448,18 @@ export function terminalAdministrationDelay(clause: CanonicalSigClause): number 
 
 /** Rules inspect features only. Surface/locale recognition belongs to lexical and span producers. */
 export const CONSTRUCTIONS: readonly Construction[] = [
+  { id: 'regimen.treatment-relative-phase-onset', priority: 805, relation: 'sequence',
+    semanticLicense: 'dose-continuation', constraints: [
+      coordinationOrSequence, conjunctionOrSequence,
+      constraint('right.explicit-phase-onset-only', f => !hasRecurringSchedule(f.right.clause.schedule) &&
+        !f.right.clause.schedule?.timingCode && !f.right.clause.prn?.enabled &&
+        (f.right.clause.schedule?.treatmentStartOffsetDays !== undefined ||
+         Boolean(f.right.clause.schedule?.phaseStartReference))),
+      constraint('left.complete-administration', f => f.left.complete && f.left.hasDose && f.left.hasSchedule),
+      constraint('right.complete-dose', f => f.right.complete && f.right.hasDose),
+      constraint('right.explicit-or-inherited-unit', hasContinuationDoseUnit),
+      constraint('right.not-procedural', f => !f.rightHasProcedure)
+    ] },
   { id: 'regimen.explicit-phase-adjustment', priority: 810, relation: 'sequence',
     semanticLicense: 'dose-continuation', constraints: [
       constraint('connector.sequence', f => f.site.kind === 'sequence'),
@@ -409,7 +512,7 @@ export const CONSTRUCTIONS: readonly Construction[] = [
   { id: 'regimen.dose-continuation', priority: 700, relation: 'coordination',
     semanticLicense: 'dose-continuation', constraints: [
     coordinationOrSequence, conjunctionOrSequence,
-    constraint('right.explicitUnit', f => f.explicitRightUnit), constraint('left.hasDose', f => f.left.hasDose),
+    constraint('right.explicit-or-inherited-unit', hasContinuationDoseUnit), constraint('left.hasDose', f => f.left.hasDose),
     constraint('right.hasDose', f => f.right.hasDose), constraint('right.not-after-first-administration', f => !f.rightAfterFirstAdministration),
     constraint('right.schedule-method-target-or-adjunct', f => f.right.hasSchedule || f.right.method ||
       f.right.hasTargets || f.right.prn || hasAdministrationAdjunct(f.right.clause))
@@ -438,7 +541,7 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('connector.sequence', f => f.site.kind === 'sequence'),
     constraint('left.complete', f => f.left.complete),
     constraint('right.complete', f => f.right.complete),
-    constraint('left.dimensionalQuantity', f => Boolean(f.left.clause.clinicalQuantity)),
+    constraint('left.explicit-quantity', f => f.left.hasDose || Boolean(f.left.clause.clinicalQuantity)),
     constraint('right.dimensionalQuantity', f => Boolean(f.right.clause.clinicalQuantity)),
     constraint('right.not-procedural', f => !f.rightHasProcedure)
   ] },
@@ -458,7 +561,9 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     preserveRelationAtSequenceSurface: true, semanticLicense: 'dose-continuation', constraints: [...SAME_DAY_DOSE_CONSTRAINTS
   ] },
   { id: 'regimen.sequence', priority: 750, relation: 'sequence', constraints: [
-    constraint('connector.sequence', f => f.site.kind === 'sequence'), ...scheduleRight, usableLeft
+    constraint('connector.sequence-or-typed-next-point', f => f.site.kind === 'sequence' || typedNextPoint(f)),
+    ...scheduledRight,
+    constraint('right.omitsHead-or-typed-next-point', f => !f.right.hasHead || typedNextPoint(f)), usableLeft
   ] },
   { id: 'regimen.target-phase-transition', priority: 770, relation: 'sequence',
     semanticLicense: 'target-transition', constraints: [
@@ -477,6 +582,7 @@ export const CONSTRUCTIONS: readonly Construction[] = [
   { id: 'regimen.target-change', priority: 755, relation: 'coordination',
     semanticLicense: 'target-transition', constraints: [
     coordinationOrSequence, conjunctionOrSequence,
+    constraint('right.not-typed-next-point', f => !typedNextPoint(f)),
     constraint('left.targetCue', f => f.leftTargetCue),
     constraint('right.targetCue', f => f.rightTargetCue),
     constraint('left.hasIndependentCadence', f =>

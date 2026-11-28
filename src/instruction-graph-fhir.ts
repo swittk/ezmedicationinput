@@ -1,3 +1,5 @@
+import { equalStructuredValues } from "./stable-structure";
+import { DOSAGE_RECONCILIATION_SOURCE_URL, getEmaQuantityComparator, QUANTITY_OPERATOR_SOURCE_URL, quantityCodingForWire, quantityFromWire, simpleQuantityForR5 } from "./fhir-quantity-operator";
 import {
   AdviceArgument,
   AdviceArgumentRole,
@@ -11,7 +13,8 @@ import {
   CanonicalInstructionRelation,
   CanonicalSourceSpan,
   FhirCoding,
-  FhirExtension
+  FhirExtension,
+  FhirR6Extension
 } from "./types";
 import {
   getPrimitiveTranslations,
@@ -41,16 +44,15 @@ function getAdviceRelationByCoding(coding: FhirCoding | undefined): AdviceRelati
     ? RELATION_KIND_BY_CODE.get(`${coding.system}|${coding.code}`)
     : undefined;
 }
+function getGraphRelationByCoding(coding: FhirCoding | undefined): AdviceRelation | undefined {
+  return coding?.system === "http://hl7.org/fhir/action-relationship-type" &&
+    (coding.code === "before" || coding.code === "after")
+    ? coding.code as AdviceRelation : getAdviceRelationByCoding(coding);
+}
 
 export const MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph";
 
-function child(extension: FhirExtension, url: string): FhirExtension | undefined {
-  return extension.extension?.find((entry) => entry.url === url);
-}
-function children(extension: FhirExtension, url: string): FhirExtension[] {
-  return extension.extension?.filter((entry) => entry.url === url) ?? [];
-}
 function add(target: FhirExtension[], value: FhirExtension | undefined): void {
   if (value) target.push(value);
 }
@@ -74,15 +76,18 @@ function valueBoolean(url: string, value: boolean | undefined): FhirExtension | 
  * members: strict nested Extension unions validate the in-memory FHIR shape.
  */
 function wireCoding(value: FhirCoding): FhirCoding {
-  const displayPrimitive = mergeTranslationPrimitiveElement(value._display, value.i18n);
-  return {
-    ...(value.system !== undefined ? { system: value.system } : {}),
-    ...(value.version !== undefined ? { version: value.version } : {}),
-    ...(value.code !== undefined ? { code: value.code } : {}),
-    ...(value.display !== undefined ? { display: value.display } : {}),
-    ...(value.extension?.length ? { extension: value.extension } : {}),
-    ...(displayPrimitive ? { _display: displayPrimitive } : {})
-  };
+  let displayPrimitive = value._display;
+  if (value.i18n) displayPrimitive = mergeTranslationPrimitiveElement(displayPrimitive, value.i18n);
+  // Keep supplied Coding fields, including unknown wire annotations, while
+  // translations and known Quantity annotations use their existing codecs.
+  const source = value as FhirCoding & Record<string, unknown>;
+  const result: FhirCoding & Record<string, unknown> = {};
+  for (const key in source) {
+    if (key === "i18n" || key === "_display" || (key === "extension" && !value.extension?.length)) continue;
+    if (source[key] !== undefined) result[key] = source[key];
+  }
+  if (displayPrimitive) result._display = displayPrimitive;
+  return quantityCodingForWire(result, "r5") as FhirCoding;
 }
 
 function readCoding(value: FhirCoding | undefined): FhirCoding | undefined {
@@ -104,31 +109,69 @@ function valueCoding(url: string, value: FhirCoding | undefined): FhirExtension 
  * @param relation Resolved typed relation, not a free-text guess.
  */
 function addRelation(
-  extensions: FhirExtension[], name: string, relation: AdviceRelation | undefined
-): void {
-  if (!relation) return;
-  const coding = getAdviceRelationCoding(relation);
-  if (coding) add(extensions, valueCoding(`${name}Coding`, coding));
-  else add(extensions, valueCode(name, relation));
+  extensions: FhirExtension[], name: string, relation: AdviceRelation | undefined,
+  sourceCoding?: FhirCoding
+): FhirExtension | undefined {
+  const currentCoding = sourceCoding && (relation === undefined ||
+    getAdviceRelationByCoding(sourceCoding) === relation);
+  if (relation || currentCoding) {
+    const coding = currentCoding ? sourceCoding : relation && getAdviceRelationCoding(relation);
+    if (coding) add(extensions, valueCoding(`${name}Coding`, coding));
+    else add(extensions, valueCode(name, relation));
+  }
+  return sourceCoding && !currentCoding ? valueCoding("sourceRelationCoding", sourceCoding) : undefined;
 }
 
-/** Decode the exact standards mapping; preserve existing local-only and
- * previously saved valueCode representations without NLP reparsing.
- * @param extension Encoded action, argument or relation.
- * @param name Relation child name.
- */
-function readRelation(extension: FhirExtension, name: string): AdviceRelation | undefined {
-  return getAdviceRelationByCoding(child(extension, `${name}Coding`)?.valueCoding) ??
-    child(extension, name)?.valueCode as AdviceRelation | undefined;
+/** Merge annotations on component fields while current typed values stay active. */
+function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | undefined): void {
+  if (!sources?.length) return;
+  const activeFields = parts.length;
+  let codingIndex = 0;
+  for (const source of sources ?? []) {
+    // Uninterpreted repeated components retain their own occurrence; they do
+    // not annotate the first independently understood component.
+    if (source.url === "component" || source.url === "predicateComponent") { parts.push(source); continue; }
+    let index = -1;
+    const optionalField = source.url === "normalized" || source.url === "conceptId" || source.url === "quantity";
+    const translation = source.url === "translation" || source.url === "predicateTranslation";
+    const locale = translation ? parseTranslationNode(source).locale : undefined;
+    const repeatedCoding = source.url === "predicateCoding" || source.url === "argumentCoding";
+    for (let i = repeatedCoding ? codingIndex : 0; i < activeFields; i++) {
+      if (parts[i].url !== source.url || source.url === "tokenIndex" &&
+          parts[i].valueInteger !== source.valueInteger ||
+          translation && parseTranslationNode(parts[i]).locale !== locale) continue;
+      index = i;
+      break;
+    }
+    if (source.url === "coding" && source.valueCoding) {
+      const current = index >= 0 ? parts[index].valueCoding : undefined, old = wireCoding(source.valueCoding);
+      // A replacement may retain code identity while changing its display or
+      // primitive metadata. Preserve the full displaced Coding as inactive source.
+      if (!current || !equalStructuredValues(current, old)) {
+        parts.push({ ...source, url: "sourceCoding", valueCoding: old });
+        continue;
+      }
+    }
+    if (index >= 0) {
+      if (repeatedCoding) codingIndex = index + 1;
+      if (translation) addFieldSources(parts[index].extension!, source.extension);
+      parts[index] = { ...source, ...parts[index] };
+    }
+    // An extension-only primitive remains active even without a scalar slot.
+    else if (optionalField && !(source.valueString === undefined && source._valueString))
+      parts.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [source] });
+    else parts.push(source);
+  }
 }
 
 function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   const nested: FhirExtension[] = [];
   add(nested, valueCode("role", argument.role));
-  addRelation(nested, "relation", argument.relation);
-  add(nested, valueString("text", argument.text));
+  const sourceRelation = addRelation(nested, "relation", argument.relation, argument.sourceRelationCoding);
+  add(nested, valueString("text", argument.text || undefined));
   add(nested, valueString("normalized", argument.normalized));
   add(nested, valueString("conceptId", argument.conceptId));
+  add(nested, valueInteger("administrationTargetCount", argument.administrationTargetCount));
   add(nested, valueCoding("coding", argument.coding));
   for (const coding of argument.codings ?? []) {
     nested.push({ url: "argumentCoding", valueCoding: wireCoding(coding) });
@@ -139,7 +182,8 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
       { url: "text", valueString: component.text }
     ];
     add(parts, valueCoding("coding", component.coding));
-    nested.push({ url: "component", extension: parts });
+    addFieldSources(parts, component.sourceExtensions);
+    nested.push({ ...(component.sourceId ? { id: component.sourceId } : {}), url: "component", extension: parts });
   }
   if (argument.span) {
     add(nested, valueInteger("spanStart", argument.span.start));
@@ -147,10 +191,56 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   }
   if (argument.quantity) {
     const quantity: FhirExtension[] = [];
-    add(quantity, valueDecimal("value", argument.quantity.value));
-    add(quantity, valueDecimal("low", argument.quantity.range?.low));
-    add(quantity, valueDecimal("high", argument.quantity.range?.high));
-    add(quantity, valueString("unit", argument.quantity.unit));
+    let displacedFields: FhirExtension[] | undefined;
+    if (argument.quantity.fieldMetadata) {
+      for (const [name, value] of [
+        ["value", argument.quantity.value], ["low", argument.quantity.range?.low],
+        ["high", argument.quantity.range?.high], ["unit", argument.quantity.unit]
+      ] as const) {
+        const metadata = argument.quantity.fieldMetadata[name];
+        if (value === undefined) {
+          if (metadata) {
+            const { _valueDecimal, _valueString, extension, ...annotations } = metadata;
+            const primitive = name === "unit" ? _valueString : _valueDecimal;
+            // A supplied extension-only primitive is an active unknown value,
+            // not a missing field. Preserve its annotation at the same owner.
+            if (primitive) {
+              quantity.push({ ...metadata, url: name });
+              continue;
+            }
+            // A cleared active field cannot be an id-only Extension. Retain
+            // its annotations on a valid, inert source field identifier.
+            (displacedFields ??= []).push({ ...annotations, url: "sourceQuantityField", extension: [
+              { url: "field", valueCode: name, ...(primitive ? { _valueCode: primitive } : {}) },
+              ...(extension ?? [])
+            ] });
+          }
+          continue;
+        }
+        const field: FhirExtension = { ...metadata, url: name };
+        if (name === "unit") field.valueString = value;
+        else field.valueDecimal = value;
+        quantity.push(field);
+      }
+    } else {
+      add(quantity, valueDecimal("value", argument.quantity.value));
+      add(quantity, valueDecimal("low", argument.quantity.range?.low));
+      add(quantity, valueDecimal("high", argument.quantity.range?.high));
+      add(quantity, valueString("unit", argument.quantity.unit));
+    }
+    if (displacedFields) quantity.push(...displacedFields);
+    // Use the published EMA Coding for an operator, not a private graph code.
+    // Exact graph quantities keep their existing wire shape.
+    if (argument.quantity.comparator || argument.quantity.comparatorElement || argument.quantity.comparatorExtensions?.length) {
+      // The public graph quantity owns its current comparator. A cleared
+      // comparator must not reactivate an annotated carrier retained at import.
+      const extensions = argument.quantity.comparator ? argument.quantity.comparatorExtensions :
+        argument.quantity.comparatorExtensions?.map(extension =>
+          getEmaQuantityComparator({ extension: [extension] })
+            ? { url: QUANTITY_OPERATOR_SOURCE_URL, extension: [extension] } : extension);
+      quantity.push(...(simpleQuantityForR5({ comparator: argument.quantity.comparator,
+        _comparator: argument.quantity.comparatorElement, extension: extensions })?.extension ?? []));
+    }
     nested.push({ url: "quantity", extension: quantity });
   }
   for (const locale of Object.keys(argument.i18n ?? {})) {
@@ -164,10 +254,14 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
       ]
     });
   }
-  return { url: "argument", extension: nested };
+  add(nested, sourceRelation);
+  if (argument.sourceExtensions) addFieldSources(nested, argument.sourceExtensions);
+  const result: FhirExtension = { url: "argument", extension: nested };
+  if (argument.sourceId !== undefined) result.id = argument.sourceId;
+  return result;
 }
 
-function buildActionExtension(frame: AdviceFrame): FhirExtension {
+export function buildActionExtension(frame: AdviceFrame): FhirExtension {
   const nested: FhirExtension[] = [];
   add(nested, valueInteger("sequenceIndex", frame.sequenceIndex));
   add(nested, valueCode("origin", frame.origin));
@@ -176,7 +270,7 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
   add(nested, valueCode("polarity", frame.polarity));
   add(nested, valueCode("polaritySource", frame.polaritySource));
   add(nested, valueCode("modality", frame.modality));
-  addRelation(nested, "relation", frame.relation);
+  const sourceRelation = addRelation(nested, "relation", frame.relation, frame.sourceRelationCoding);
   add(nested, valueString("predicateLemma", frame.predicate.lemma));
   add(nested, valueString("predicateDisplay", frame.predicate.display));
   add(nested, valueString("semanticClass", frame.predicate.semanticClass));
@@ -196,9 +290,18 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
     const config = frame.predicate.realizerConfig?.locales?.[locale];
     if (!config) continue;
     const localized: FhirExtension[] = [{ url: "locale", valueCode: locale }];
+    add(localized, valueString("finiteUnmodalLabel", config.finiteUnmodalLabel));
     add(localized, valueString("fallbackObject", config.fallbackObject));
     add(localized, valueBoolean("implicitMedicationObject", config.implicitMedicationObject));
     add(localized, valueBoolean("directSiteObject", config.directSiteObject));
+    add(localized, valueBoolean("directDose", config.directDose));
+    add(localized, valueString("administrationDurationPrefix", config.administrationDurationPrefix));
+    if (config.routePhrases) for (const route of Object.keys(config.routePhrases)) {
+      localized.push({ url: "routePhrase", extension: [
+        { url: "route", valueCode: route },
+        { url: "text", valueString: config.routePhrases[route] }
+      ] });
+    }
     for (const conceptId of config.suppressActivityConcepts ?? []) {
       add(localized, valueString("suppressActivityConcept", conceptId));
     }
@@ -209,16 +312,70 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
   }
   for (const coding of frame.predicate.codings ?? []) nested.push({ url: "predicateCoding", valueCoding: wireCoding(coding) });
   for (const part of frame.predicate.semanticComponents ?? []) {
-    nested.push({ url: "predicateComponent", extension: [
+    const parts: FhirExtension[] = [
       { url: "role", valueCode: part.role },
       { url: "coding", valueCoding: wireCoding(part.coding) }
-    ] });
+    ];
+    addFieldSources(parts, part.sourceExtensions);
+    nested.push({ ...(part.sourceId ? { id: part.sourceId } : {}), url: "predicateComponent", extension: parts });
   }
   add(nested, valueInteger("spanStart", frame.span.start));
   add(nested, valueInteger("spanEnd", frame.span.end));
+  const sourceTextIndex = nested.length;
   add(nested, valueString("sourceText", frame.sourceText));
   for (const argument of frame.args) nested.push(buildArgumentExtension(argument));
-  return { url: "action", extension: nested };
+  add(nested, sourceRelation);
+  let fieldSources: FhirExtension[] | undefined;
+  if (frame.sourceExtensions) for (const field of frame.sourceExtensions) {
+    if (field.url === "sourceText") {
+      const { valueString: _sourceText, ...annotations } = field;
+      nested[sourceTextIndex] = { ...annotations, ...(frame.sourceText ? { valueString: frame.sourceText } : {}) };
+    } else if (field.url === "predicateRealizerLocale") {
+      const locale = field.extension?.find(part => part.url === "locale")?.valueCode;
+      const current = locale === undefined ? -1 : nested.findIndex(part =>
+        part.url === field.url && part.extension?.some(child => child.url === "locale" && child.valueCode === locale));
+      if (current >= 0) {
+        const active = nested[current], children = active.extension!;
+        const activeFields = children.length;
+        for (const source of field.extension ?? []) {
+          let index = -1;
+          for (let i = 0; i < activeFields; i++) {
+            const child = children[i];
+            if (child.url !== source.url) continue;
+            if (source.url === "routePhrase" &&
+                child.extension?.find(part => part.url === "route")?.valueCode !==
+                source.extension?.find(part => part.url === "route")?.valueCode) continue;
+            if ((source.url === "suppressActivityConcept" || source.url === "suppressSiteConcept") &&
+                child.valueString !== source.valueString) continue;
+            index = i;
+            break;
+          }
+          if (index < 0) children.push(source);
+          else {
+            const child = children[index];
+            if (child.extension && source.extension) addFieldSources(child.extension, source.extension);
+            children[index] = { ...source, ...child };
+          }
+        }
+        nested[current] = { ...field, ...active };
+      } else nested.push(field);
+    } else (fieldSources ??= []).push(field);
+  }
+  addFieldSources(nested, fieldSources);
+  const result: FhirExtension = { url: "action", extension: nested };
+  if (frame.sourceId !== undefined) result.id = frame.sourceId;
+  return result;
+}
+
+export function buildInstructionCoverageExtension(coverage: CanonicalInstructionCoverage): FhirExtension {
+  const fields: FhirExtension[] = [];
+  add(fields, valueInteger("understoodCharacters", coverage.understoodCharacters));
+  add(fields, valueInteger("opaqueCharacters", coverage.opaqueCharacters));
+  add(fields, valueDecimal("ratio", coverage.ratio));
+  add(fields, valueBoolean("complete", coverage.complete));
+  addFieldSources(fields, coverage.sourceExtensions);
+  return { url: "coverage", ...(coverage.sourceId !== undefined ? { id: coverage.sourceId } : {}),
+    extension: fields };
 }
 
 export function buildInstructionGraphExtension(
@@ -226,17 +383,41 @@ export function buildInstructionGraphExtension(
 ): FhirExtension | undefined {
   if (!graph || (!graph.actions.length && !graph.opaqueSpans?.length)) return undefined;
   const nested: FhirExtension[] = [];
-  add(nested, valueString("sourceText", graph.sourceText));
+  if (graph.sourceText) add(nested, valueString("sourceText", graph.sourceText));
   add(nested, valueCode("sourceLocale", graph.sourceLocale));
   add(nested, valueInteger("primaryAdministrationStart", graph.primaryAdministrationSpan?.start));
   add(nested, valueInteger("primaryAdministrationEnd", graph.primaryAdministrationSpan?.end));
+  if (graph.primaryOwnership) {
+    const ownership: FhirExtension[] = [{ url: "resolved", valueBoolean: true }];
+    add(ownership, valueInteger("administrationActionIndex", graph.primaryOwnership.administrationActionIndex));
+    add(ownership, valueInteger("doseActionIndex", graph.primaryOwnership.dose?.actionIndex));
+    add(ownership, valueInteger("doseArgumentIndex", graph.primaryOwnership.dose?.argumentIndex));
+    const activeFields = ownership.length;
+    for (const field of graph.primaryOwnership.sourceExtensions ?? []) {
+      let index = -1;
+      for (let i = 0; i < activeFields; i++) if (ownership[i].url === field.url) { index = i; break; }
+      if (index >= 0) ownership[index] = { ...field, ...ownership[index] };
+      else if (field.url === "resolved" || field.url === "administrationActionIndex" ||
+          field.url === "doseActionIndex" || field.url === "doseArgumentIndex")
+        ownership.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [field] });
+      else ownership.push(field);
+    }
+    const marker: FhirExtension = { url: "primaryOwnership", extension: ownership };
+    if (graph.primaryOwnership.sourceId !== undefined) marker.id = graph.primaryOwnership.sourceId;
+    nested.push(marker);
+  }
   for (const action of graph.actions) nested.push(buildActionExtension(action));
   for (const relation of graph.relations ?? []) {
     const relationNested: FhirExtension[] = [];
+    const sourceCoding = relation.sourceKindCoding;
+    const linkedActions = (relation.kind === AdviceRelation.Before || relation.kind === AdviceRelation.After) &&
+      relation.fromActionIndex !== undefined;
+    const currentCoding = sourceCoding && getGraphRelationByCoding(sourceCoding) === relation.kind &&
+      (sourceCoding.system === "http://hl7.org/fhir/action-relationship-type") === linkedActions;
     // Formal before/after codes apply to explicitly linked actions, not
     // "before food", "after a symptom", or other unlinked textual adjuncts.
-    if ((relation.kind === AdviceRelation.Before || relation.kind === AdviceRelation.After) &&
-        relation.fromActionIndex !== undefined) {
+    if (currentCoding) add(relationNested, valueCoding("kindCoding", sourceCoding));
+    else if (linkedActions) {
       add(relationNested, valueCoding("kindCoding", {
         system: "http://hl7.org/fhir/action-relationship-type",
         code: relation.kind,
@@ -252,16 +433,12 @@ export function buildInstructionGraphExtension(
       add(relationNested, valueInteger("spanStart", relation.span.start));
       add(relationNested, valueInteger("spanEnd", relation.span.end));
     }
-    nested.push({ url: "graphRelation", extension: relationNested });
+    if (sourceCoding && !currentCoding) add(relationNested, valueCoding("sourceKindCoding", sourceCoding));
+    addFieldSources(relationNested, relation.sourceExtensions);
+    nested.push({ url: "graphRelation", ...(relation.sourceId !== undefined ? { id: relation.sourceId } : {}),
+      extension: relationNested });
   }
-  if (graph.coverage) {
-    const coverage: FhirExtension[] = [];
-    add(coverage, valueInteger("understoodCharacters", graph.coverage.understoodCharacters));
-    add(coverage, valueInteger("opaqueCharacters", graph.coverage.opaqueCharacters));
-    add(coverage, valueDecimal("ratio", graph.coverage.ratio));
-    add(coverage, valueBoolean("complete", graph.coverage.complete));
-    nested.push({ url: "coverage", extension: coverage });
-  }
+  if (graph.coverage) nested.push(buildInstructionCoverageExtension(graph.coverage));
   for (const opaque of graph.opaqueSpans ?? []) {
     const opaqueNested: FhirExtension[] = [
       { url: "start", valueInteger: opaque.start },
@@ -271,226 +448,589 @@ export function buildInstructionGraphExtension(
     for (const tokenIndex of opaque.tokenIndices ?? []) {
       opaqueNested.push({ url: "tokenIndex", valueInteger: tokenIndex });
     }
-    nested.push({ url: "opaque", extension: opaqueNested });
+    addFieldSources(opaqueNested, opaque.sourceExtensions);
+    nested.push({ url: "opaque", ...(opaque.sourceId !== undefined ? { id: opaque.sourceId } : {}),
+      extension: opaqueNested });
   }
-  return { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: nested };
+  let fieldSources: FhirExtension[] | undefined;
+  if (graph.sourceExtensions) for (const field of graph.sourceExtensions) {
+    if (field.url === "sourceText") {
+      const { valueString: _sourceText, ...annotations } = field;
+      const current = { ...annotations, ...(graph.sourceText ? { valueString: graph.sourceText } : {}) };
+      if (graph.sourceText) nested[0] = current;
+      else nested.push(current);
+    } else if (field.url === "graphRelation") {
+      // An uninterpreted relation is a complete sibling, not annotations on
+      // the first recognized relation with the same repeated field name.
+      nested.push(field);
+    } else (fieldSources ??= []).push(field);
+  }
+  addFieldSources(nested, fieldSources);
+  const result: FhirExtension = { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: nested };
+  if (graph.sourceId !== undefined) result.id = graph.sourceId;
+  return result;
 }
 
-function parseArgumentExtension(extension: FhirExtension): AdviceArgument | undefined {
-  const role = child(extension, "role")?.valueCode as AdviceArgumentRole | undefined;
-  const text = child(extension, "text")?.valueString;
-  if (!role || text === undefined) return undefined;
-  const argument: AdviceArgument = {
-    role,
-    text,
-    relation: readRelation(extension, "relation"),
-    normalized: child(extension, "normalized")?.valueString,
-    conceptId: child(extension, "conceptId")?.valueString,
-    coding: readCoding(child(extension, "coding")?.valueCoding),
-    codings: children(extension, "argumentCoding")
-      .map((entry) => readCoding(entry.valueCoding))
-      .filter((entry): entry is FhirCoding => Boolean(entry))
-  };
-  const components: NonNullable<AdviceArgument["components"]> = [];
-  for (const component of children(extension, "component")) {
-    const role = child(component, "role")?.valueCode;
-    const text = child(component, "text")?.valueString;
-    if ((role === "head" || role === "qualifier" || role === "amount") && text !== undefined) {
-      const coding = readCoding(child(component, "coding")?.valueCoding);
-      components.push({ role, text, ...(coding ? { coding } : {}) });
-    }
+function firstRelation(coding:FhirCoding|undefined,raw:string|undefined):AdviceRelation|undefined {
+  return getAdviceRelationByCoding(coding)??raw as AdviceRelation|undefined;
+}
+function parseTranslationNode(extension: FhirExtension): { locale?: string; text?: string; source: boolean } {
+  let locale: FhirExtension | undefined, text: FhirExtension | undefined;
+  let source = hasFieldMetadata(extension, "extension");
+  for (const node of extension.extension ?? []) switch (node.url) {
+    case "locale":
+      if (!locale) locale = node;
+      if (hasFieldMetadata(node, "valueCode")) source = true;
+      break;
+    case "text":
+      if (!text) text = node;
+      if (hasFieldMetadata(node, "valueString")) source = true;
+      break;
+    default: source = true;
   }
-  if (components.length) argument.components = components;
-  const spanStart = child(extension, "spanStart")?.valueInteger;
-  const spanEnd = child(extension, "spanEnd")?.valueInteger;
-  if (spanStart !== undefined && spanEnd !== undefined) argument.span = { start: spanStart, end: spanEnd };
-  const quantityExtension = child(extension, "quantity");
-  if (quantityExtension) {
-    const value = child(quantityExtension, "value")?.valueDecimal;
-    const low = child(quantityExtension, "low")?.valueDecimal;
-    const high = child(quantityExtension, "high")?.valueDecimal;
-    const unit = child(quantityExtension, "unit")?.valueString;
-    if (value !== undefined || low !== undefined || high !== undefined || unit !== undefined) {
-      argument.quantity = {
-        value,
-        range: low !== undefined || high !== undefined ? { low, high } : undefined,
-        unit
-      };
-    }
-  }
-  const i18n: Record<string, string> = {};
-  for (const translation of children(extension, "translation")) {
-    const locale = child(translation, "locale")?.valueCode;
-    const translated = child(translation, "text")?.valueString;
-    if (locale && translated) i18n[locale] = translated;
-  }
-  if (Object.keys(i18n).length) argument.i18n = i18n;
-  return argument;
+  return { locale: locale?.valueCode, text: text?.valueString, source };
+}
+function hasFieldMetadata(field: FhirExtension, valueKey: string): boolean {
+  for (const key in field) if (key !== "url" && key !== valueKey) return true;
+  return false;
 }
 
-function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined {
-  const lemma = child(extension, "predicateLemma")?.valueString;
-  const spanStart = child(extension, "spanStart")?.valueInteger;
-  const spanEnd = child(extension, "spanEnd")?.valueInteger;
-  const sourceText = child(extension, "sourceText")?.valueString;
-  const force = child(extension, "force")?.valueCode as AdviceForce | undefined;
-  if (!lemma || spanStart === undefined || spanEnd === undefined || sourceText === undefined || !force) return undefined;
-  const args: AdviceArgument[] = [];
-  for (const argumentExtension of children(extension, "argument")) {
-    const argument = parseArgumentExtension(argumentExtension);
-    if (argument) args.push(argument);
-  }
-  const localeRealizerConfig: NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"] = {};
-  for (const localized of children(extension, "predicateRealizerLocale")) {
-    const locale = child(localized, "locale")?.valueCode;
-    if (!locale) continue;
-    const suppressActivityConcepts = children(localized, "suppressActivityConcept")
-      .map((entry) => entry.valueString).filter((value): value is string => Boolean(value));
-    const suppressSiteConcepts = children(localized, "suppressSiteConcept")
-      .map((entry) => entry.valueString).filter((value): value is string => Boolean(value));
-    localeRealizerConfig![locale] = {
-      fallbackObject: child(localized, "fallbackObject")?.valueString,
-      implicitMedicationObject: child(localized, "implicitMedicationObject")?.valueBoolean,
-      directSiteObject: child(localized, "directSiteObject")?.valueBoolean,
-      suppressActivityConcepts: suppressActivityConcepts.length ? suppressActivityConcepts : undefined,
-      suppressSiteConcepts: suppressSiteConcepts.length ? suppressSiteConcepts : undefined
-    };
-  }
-  // Backward-compatible read of the pre-locale-profile extension fields.
-  const legacyThaiSuppressActivityConcepts = children(
-    extension,
-    "predicateRealizerThaiSuppressActivityConcept"
-  ).map((entry) => entry.valueString).filter((value): value is string => Boolean(value));
-  const legacyThaiFallbackObject = child(extension, "predicateRealizerThaiFallbackObject")?.valueString;
-  if (legacyThaiFallbackObject || legacyThaiSuppressActivityConcepts.length) {
-    localeRealizerConfig!.th = {
-      ...(localeRealizerConfig!.th ?? {}),
-      fallbackObject: legacyThaiFallbackObject ?? localeRealizerConfig!.th?.fallbackObject,
-      suppressActivityConcepts: legacyThaiSuppressActivityConcepts.length
-        ? legacyThaiSuppressActivityConcepts
-        : localeRealizerConfig!.th?.suppressActivityConcepts
-    };
-  }
-  const predicateI18n: Record<string, string> = {};
-  for (const translation of children(extension, "predicateTranslation")) {
-    const locale = child(translation, "locale")?.valueCode;
-    const translated = child(translation, "text")?.valueString;
-    if (locale && translated) predicateI18n[locale] = translated;
-  }
-  const semanticComponents: NonNullable<AdviceFrame["predicate"]["semanticComponents"]> = [];
-  for (const part of children(extension, "predicateComponent")) {
-    const role = child(part, "role")?.valueCode;
-    const coding = readCoding(child(part, "coding")?.valueCoding);
-    if ((role === "activity" || role === "technique" || role === "target-state" ||
-      role === "target-site" || role === "target-object" || role === "operation" || role === "orientation" ||
-      role === "mechanism" || role === "situation") && coding?.system && coding.code) {
-      semanticComponents.push({ role, coding });
+function hasCodingMetadata(coding: FhirCoding | undefined): boolean {
+  if (!coding) return false;
+  for (const key in coding) {
+    switch (key) {
+      case "system": case "version": case "code": case "display": case "userSelected": case "i18n": break;
+      default: return true;
     }
   }
+  return false;
+}
+
+/** Keep only recognized-field metadata; the typed quantity owns its value. */
+function quantityFieldMetadata(field: FhirExtension | undefined, valueKey: "valueDecimal" | "valueString") {
+  if (!field || !hasFieldMetadata(field, valueKey)) return undefined;
+  const { url: _url, valueDecimal: _decimal, valueString: _string, ...metadata } = field;
+  return metadata;
+}
+
+function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefined {
+  let role:FhirExtension|undefined,text:FhirExtension|undefined,relation:FhirExtension|undefined,
+    relationCoding:FhirExtension|undefined,normalized:FhirExtension|undefined,concept:FhirExtension|undefined,
+    coding:FhirExtension|undefined,administrationTargetCount:FhirExtension|undefined,
+    spanStart:FhirExtension|undefined,spanEnd:FhirExtension|undefined,
+    quantity:FhirExtension|undefined;
+  const codings:FhirCoding[]=[],components:NonNullable<AdviceArgument["components"]>=[];
+  let i18n:Record<string,string>|undefined,sourceExtensions:FhirExtension[]|undefined;
+  let codingSources: FhirExtension[] | undefined;
+  for(const entry of extension.extension??[])switch(entry.url){
+    case "role":
+      if(!role)role=entry;
+      if(hasFieldMetadata(entry,"valueCode"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "text":
+      if(!text)text=entry;
+      if(hasFieldMetadata(entry,"valueString"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "relation":
+      if(!relation)relation=entry;
+      if(hasFieldMetadata(entry,"valueCode"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "relationCoding":
+      if(!relationCoding)relationCoding=entry;
+      if(hasFieldMetadata(entry,"valueCoding"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "normalized":
+      if(!normalized)normalized=entry;
+      if(hasFieldMetadata(entry,"valueString"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "conceptId":
+      if(!concept)concept=entry;
+      if(hasFieldMetadata(entry,"valueString"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "coding":
+      if(!coding)coding=entry;
+      if(hasFieldMetadata(entry,"valueCoding")||hasCodingMetadata(entry.valueCoding))(sourceExtensions??=[]).push(entry);
+      break;
+    case "administrationTargetCount":
+      if(!administrationTargetCount)administrationTargetCount=entry;
+      if(hasFieldMetadata(entry,"valueInteger"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "spanStart":
+      if(!spanStart)spanStart=entry;
+      if(hasFieldMetadata(entry,"valueInteger"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "spanEnd":
+      if(!spanEnd)spanEnd=entry;
+      if(hasFieldMetadata(entry,"valueInteger"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "quantity":
+      if(!quantity)quantity=entry;
+      if(hasFieldMetadata(entry,"extension"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "argumentCoding": {
+      const value = readCoding(entry.valueCoding);
+      if (value) {
+        if (codingSources || hasFieldMetadata(entry, "valueCoding")) {
+          if (!codingSources) {
+            codingSources = [];
+            for (const coding of codings) codingSources.push({ url: "argumentCoding", valueCoding: coding });
+          }
+          codingSources.push(entry);
+        }
+        codings.push(value);
+      }
+      break;
+    }
+    case "translation": {
+      const value = parseTranslationNode(entry);
+      if (value.locale && value.text) (i18n ??= {})[value.locale] = value.text;
+      if (value.source) (sourceExtensions ??= []).push(entry);
+      break;
+    }
+    case "component":{
+      let componentRole:FhirExtension|undefined,componentText:FhirExtension|undefined,componentCoding:FhirExtension|undefined;
+      let componentSource:FhirExtension[]|undefined;
+      for(const part of entry.extension??[])switch(part.url){
+        case "role":
+          if (!componentRole) componentRole = part;
+          if (hasFieldMetadata(part, "valueCode")) (componentSource ??= []).push(part);
+          break;
+        case "text":
+          if (!componentText) componentText = part;
+          if (hasFieldMetadata(part, "valueString")) (componentSource ??= []).push(part);
+          break;
+        case "coding":
+          if (!componentCoding) componentCoding = part;
+          if (hasFieldMetadata(part, "valueCoding") || hasCodingMetadata(part.valueCoding)) (componentSource ??= []).push(part);
+          break;
+        default:(componentSource??=[]).push(part);break;
+      }
+      const value=componentRole?.valueCode,body=componentText?.valueString;
+      if((value==="head"||value==="qualifier"||value==="amount")&&body!==undefined){
+        const term=readCoding(componentCoding?.valueCoding);
+        components.push({role:value,text:body,...(term?{coding:term}:{}),
+          ...(entry.id?{sourceId:entry.id}:{}),...(componentSource?{sourceExtensions:componentSource}:{})});
+      } else (sourceExtensions ??= []).push(entry);
+      break;
+    }
+    default:(sourceExtensions??=[]).push(entry);break;
+  }
+  if(!role?.valueCode)return undefined;
+  // Typed argument facts remain usable when their lexical label is absent.
+  // Primitive metadata stays on the source field; projection omits empty text.
+  const result:AdviceArgument={role:role.valueCode as AdviceArgumentRole,text:text?.valueString??"",
+    relation:firstRelation(relationCoding?.valueCoding,relation?.valueCode),
+    normalized:normalized?.valueString,conceptId:concept?.valueString,
+    coding:readCoding(coding?.valueCoding),codings};
+  if(administrationTargetCount?.valueInteger!==undefined)
+    result.administrationTargetCount=administrationTargetCount.valueInteger;
+  if(extension.id!==undefined)result.sourceId=extension.id;
+  if(relationCoding?.valueCoding)result.sourceRelationCoding=readCoding(relationCoding.valueCoding);
+  if(components.length)result.components=components;
+  if (codingSources) for (const field of codingSources) (sourceExtensions ??= []).push(field);
+  if(sourceExtensions)result.sourceExtensions=sourceExtensions;
+  if(spanStart?.valueInteger!==undefined&&spanEnd?.valueInteger!==undefined)
+    result.span={start:spanStart.valueInteger,end:spanEnd.valueInteger};
+  if(quantity){
+    let value:FhirExtension|undefined,low:FhirExtension|undefined,high:FhirExtension|undefined,unit:FhirExtension|undefined;
+    let comparatorExtensions:FhirR6Extension[]|undefined;
+    for(const field of quantity.extension??[])switch(field.url){
+      case "value":if(!value)value=field;break;case "low":if(!low)low=field;break;
+      case "high":if(!high)high=field;break;case "unit":if(!unit)unit=field;break;
+      default:
+        // The quantity decoder owns operators; unfamiliar annotations remain
+        // retained data beside them and must survive a graph rebuild.
+        (comparatorExtensions??=[]).push(field);break;
+    }
+    const amount=value?.valueDecimal,lower=low?.valueDecimal,upper=high?.valueDecimal,units=unit?.valueString;
+    const valueMetadata=quantityFieldMetadata(value,"valueDecimal"),lowMetadata=quantityFieldMetadata(low,"valueDecimal"),
+      highMetadata=quantityFieldMetadata(high,"valueDecimal"),unitMetadata=quantityFieldMetadata(unit,"valueString");
+    const fieldMetadata=valueMetadata||lowMetadata||highMetadata||unitMetadata ? {
+      ...(valueMetadata?{value:valueMetadata}:{}),...(lowMetadata?{low:lowMetadata}:{}),
+      ...(highMetadata?{high:highMetadata}:{}),...(unitMetadata?{unit:unitMetadata}:{})
+    } : undefined;
+    const current=comparatorExtensions?quantityFromWire({extension:comparatorExtensions}):undefined;
+    const comparator=current?.comparator,comparatorElement=current?._comparator;
+    comparatorExtensions=current?.extension;
+    if(amount!==undefined||lower!==undefined||upper!==undefined||units!==undefined||comparator!==undefined||comparatorElement||comparatorExtensions?.length||fieldMetadata)
+      result.quantity={value:amount,range:lower!==undefined||upper!==undefined?{low:lower,high:upper}:undefined,
+        unit:units,...(comparator?{comparator}:{}),...(comparatorElement?{comparatorElement}:{}),
+        ...(comparatorExtensions?{comparatorExtensions}:{}),...(fieldMetadata?{fieldMetadata}:{})};
+  }
+  if(i18n)result.i18n=i18n;
+  return result;
+}
+
+/** Decode a locale-specific realizer configuration as a data-only facet.
+ * No language-specific licensing occurs in this interchange reader. */
+function parseRealizerLocale(extension:FhirExtension):{
+  locale:string;config:NonNullable<NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"]>[string];
+  source?: FhirExtension;
+}|undefined {
+  let locale:FhirExtension|undefined,fallback:FhirExtension|undefined,finite:FhirExtension|undefined,
+    implicit:FhirExtension|undefined,direct:FhirExtension|undefined,
+    directDose:FhirExtension|undefined,durationPrefix:FhirExtension|undefined;
+  let routePhrases:Record<string,string>|undefined;
+  const activities:string[]=[],sites:string[]=[];
+  let annotated = hasFieldMetadata(extension, "extension");
+  for(const field of extension.extension??[]) {
+    const valueKey = field.extension ? "extension" : field.valueBoolean !== undefined ? "valueBoolean"
+      : field.valueCode !== undefined ? "valueCode" : "valueString";
+    if (hasFieldMetadata(field, valueKey)) annotated = true;
+    switch(field.url){
+    case "locale":if(!locale)locale=field;break;
+    case "fallbackObject":if(!fallback)fallback=field;break;
+    case "finiteUnmodalLabel":if(!finite)finite=field;break;
+    case "implicitMedicationObject":if(!implicit)implicit=field;break;
+    case "directSiteObject":if(!direct)direct=field;break;
+    case "directDose":if(!directDose)directDose=field;break;
+    case "administrationDurationPrefix":if(!durationPrefix)durationPrefix=field;break;
+    case "routePhrase": {
+      if (field.extension?.some(part => part.url !== "route" && part.url !== "text" ||
+          hasFieldMetadata(part, part.url === "route" ? "valueCode" : "valueString"))) annotated = true;
+      const route=field.extension?.find(part=>part.url==="route")?.valueCode;
+      const text=field.extension?.find(part=>part.url==="text")?.valueString;
+      if(route!==undefined&&text!==undefined)(routePhrases??={})[route]=text;
+      break;
+    }
+    case "suppressActivityConcept":if(field.valueString)activities.push(field.valueString);break;
+    case "suppressSiteConcept":if(field.valueString)sites.push(field.valueString);break;
+    default: annotated = true; break;
+    }
+  }
+  if(!locale?.valueCode)return undefined;
+  const config: NonNullable<NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"]>[string] = {
+    fallbackObject:fallback?.valueString,
+    implicitMedicationObject:implicit?.valueBoolean,directSiteObject:direct?.valueBoolean,
+    directDose:directDose?.valueBoolean,routePhrases,administrationDurationPrefix:durationPrefix?.valueString,
+    suppressActivityConcepts:activities.length?activities:undefined,suppressSiteConcepts:sites.length?sites:undefined};
+  if (finite?.valueString !== undefined) config.finiteUnmodalLabel = finite.valueString;
+  return {locale:locale.valueCode,...(annotated ? { source: extension } : {}),config};
+}
+function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
+  let lemma:FhirExtension|undefined,start:FhirExtension|undefined,end:FhirExtension|undefined,
+    source:FhirExtension|undefined,force:FhirExtension|undefined,origin:FhirExtension|undefined,
+    confidence:FhirExtension|undefined,polarity:FhirExtension|undefined,polaritySource:FhirExtension|undefined,
+    modality:FhirExtension|undefined,relation:FhirExtension|undefined,relationCoding:FhirExtension|undefined,
+    display:FhirExtension|undefined,semanticClass:FhirExtension|undefined,realizer:FhirExtension|undefined,
+    sequence:FhirExtension|undefined,legacyFallback:FhirExtension|undefined;
+  const args:AdviceArgument[]=[],codings:FhirCoding[]=[],legacyActivities:string[]=[];
+  const semanticComponents:NonNullable<AdviceFrame["predicate"]["semanticComponents"]>=[];
+  let translations:Record<string,string>|undefined;
+  let locales:NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"]|undefined;
+  let sourceExtensions:FhirExtension[]|undefined;
+  let codingSources: FhirExtension[] | undefined;
+  for(const field of extension.extension??[])switch(field.url){
+    case "predicateLemma":
+      if(!lemma)lemma=field;
+      if(hasFieldMetadata(field,"valueString"))(sourceExtensions??=[]).push(field);
+      break;
+    case "spanStart":
+      if(!start)start=field;
+      if(hasFieldMetadata(field,"valueInteger"))(sourceExtensions??=[]).push(field);
+      break;case "spanEnd":
+      if(!end)end=field;
+      if(hasFieldMetadata(field,"valueInteger"))(sourceExtensions??=[]).push(field);
+      break;
+    case "sourceText":
+      if (!source) {
+        source = field;
+        if (hasFieldMetadata(field, "valueString")) (sourceExtensions ??= []).push(field);
+      }
+      break;
+    case "force":
+      if(!force)force=field;
+      if(hasFieldMetadata(field,"valueCode"))(sourceExtensions??=[]).push(field);
+      break;
+    case "origin":
+      if(!origin)origin=field;
+      if(hasFieldMetadata(field,"valueCode"))(sourceExtensions??=[]).push(field);
+      break;case "confidence":
+      if(!confidence)confidence=field;
+      if(hasFieldMetadata(field,"valueDecimal"))(sourceExtensions??=[]).push(field);
+      break;
+    case "polarity":
+      if(!polarity)polarity=field;
+      if(hasFieldMetadata(field,"valueCode"))(sourceExtensions??=[]).push(field);
+      break;case "polaritySource":
+      if(!polaritySource)polaritySource=field;
+      if(hasFieldMetadata(field,"valueCode"))(sourceExtensions??=[]).push(field);
+      break;
+    case "modality":
+      if(!modality)modality=field;
+      if(hasFieldMetadata(field,"valueCode"))(sourceExtensions??=[]).push(field);
+      break;
+    case "relation":
+      if(!relation)relation=field;
+      if(hasFieldMetadata(field,"valueCode"))(sourceExtensions??=[]).push(field);
+      break;
+    case "relationCoding":
+      if(!relationCoding)relationCoding=field;
+      if(hasFieldMetadata(field,"valueCoding"))(sourceExtensions??=[]).push(field);
+      break;
+    case "predicateDisplay":
+      if(!display)display=field;
+      if(hasFieldMetadata(field,"valueString"))(sourceExtensions??=[]).push(field);
+      break;case "semanticClass":
+      if(!semanticClass)semanticClass=field;
+      if(hasFieldMetadata(field,"valueString"))(sourceExtensions??=[]).push(field);
+      break;
+    case "predicateRealizer":
+      if(!realizer)realizer=field;
+      if(hasFieldMetadata(field,"valueCode"))(sourceExtensions??=[]).push(field);
+      break;case "sequenceIndex":
+      if(!sequence)sequence=field;
+      if(hasFieldMetadata(field,"valueInteger"))(sourceExtensions??=[]).push(field);
+      break;
+    case "argument":{const value=parseArgumentExtension(field);if(value)args.push(value);break;}
+    case "predicateCoding": {
+      const value = readCoding(field.valueCoding);
+      if (value) {
+        if (codingSources || hasFieldMetadata(field, "valueCoding")) {
+          if (!codingSources) {
+            codingSources = [];
+            for (const coding of codings) codingSources.push({ url: "predicateCoding", valueCoding: coding });
+          }
+          codingSources.push(field);
+        }
+        codings.push(value);
+      }
+      break;
+    }
+    case "predicateTranslation": {
+      const value = parseTranslationNode(field);
+      if (value.locale && value.text) (translations ??= {})[value.locale] = value.text;
+      if (value.source) (sourceExtensions ??= []).push(field);
+      break;
+    }
+    case "predicateRealizerLocale": {
+      const value = parseRealizerLocale(field);
+      if (value) (locales ??= {})[value.locale] = value.config;
+      if (!value || value.source) (sourceExtensions ??= []).push(field);
+      break;
+    }
+    // Actual historically persisted locale annotations, not new grammar rules.
+    case "predicateRealizerThaiFallbackObject":if(!legacyFallback)legacyFallback=field;break;
+    case "predicateRealizerThaiSuppressActivityConcept":if(field.valueString)legacyActivities.push(field.valueString);break;
+    case "predicateComponent":{
+      let role:FhirExtension|undefined,coding:FhirExtension|undefined,componentSource:FhirExtension[]|undefined;
+      for(const part of field.extension??[])switch(part.url){
+        case "role":
+          if(!role)role=part;
+          if(hasFieldMetadata(part,"valueCode"))(componentSource??=[]).push(part);
+          break;
+        case "coding":
+          if(!coding)coding=part;
+          if(hasFieldMetadata(part,"valueCoding")||hasCodingMetadata(part.valueCoding))(componentSource??=[]).push(part);
+          break;
+        default:(componentSource??=[]).push(part);break;
+      }
+      const value=role?.valueCode,code=readCoding(coding?.valueCoding);
+      if((value==="activity"||value==="technique"||value==="target-state"||value==="target-site"||
+        value==="target-object"||value==="operation"||value==="orientation"||value==="mechanism"||value==="situation")&&code?.system&&code.code)
+        semanticComponents.push({role:value,coding:code,...(field.id?{sourceId:field.id}:{}),
+          ...(componentSource?{sourceExtensions:componentSource}:{})});
+      else (sourceExtensions??=[]).push(field);
+      break;
+    }
+    default:(sourceExtensions??=[]).push(field);break;
+  }
+  if(!lemma?.valueString||start?.valueInteger===undefined||end?.valueInteger===undefined||(!source||(source.valueString===undefined&&source._valueString===undefined))||!force?.valueCode)return undefined;
+  if(legacyFallback?.valueString||legacyActivities.length){
+    locales??={};locales.th={...locales.th,fallbackObject:legacyFallback?.valueString??locales.th?.fallbackObject,
+      suppressActivityConcepts:legacyActivities.length?legacyActivities:locales.th?.suppressActivityConcepts};
+  }
+  const frame:AdviceFrame = {force:force.valueCode as AdviceForce,origin:origin?.valueCode as AdviceFrame["origin"],
+    confidence:confidence?.valueDecimal,polarity:polarity?.valueCode as AdvicePolarity,
+    polaritySource:polaritySource?.valueCode==="shared"?"shared":undefined,
+    modality:modality?.valueCode as AdviceModality,relation:firstRelation(relationCoding?.valueCoding,relation?.valueCode),
+    predicate:{lemma:lemma.valueString,display:display?.valueString,i18n:translations,
+      semanticClass:semanticClass?.valueString,realizer:realizer?.valueCode as AdviceFrame["predicate"]["realizer"],
+      realizerConfig:locales?{locales}:undefined,codings,...(semanticComponents.length?{semanticComponents}:{})},
+    args,span:{start:start.valueInteger,end:end.valueInteger},sourceText:source.valueString??"",sequenceIndex:sequence?.valueInteger};
+  if(extension.id!==undefined)frame.sourceId=extension.id;
+  if(relationCoding?.valueCoding)frame.sourceRelationCoding=readCoding(relationCoding.valueCoding);
+  if (codingSources) for (const field of codingSources) (sourceExtensions ??= []).push(field);
+  if(sourceExtensions)frame.sourceExtensions=sourceExtensions;
+  return frame;
+}
+
+function parseGraphRelation(extension:FhirExtension):CanonicalInstructionRelation|undefined {
+  let coding:FhirExtension|undefined,kind:FhirExtension|undefined,to:FhirExtension|undefined,from:FhirExtension|undefined,
+    start:FhirExtension|undefined,end:FhirExtension|undefined,text:FhirExtension|undefined;
+  let sourceExtensions:FhirExtension[]|undefined;
+  for(const field of extension.extension??[])switch(field.url){
+    case "kindCoding":
+      if(!coding)coding=field;
+      if(hasFieldMetadata(field,"valueCoding"))(sourceExtensions??=[]).push(field);
+      break;case "kind":
+      if(!kind)kind=field;
+      if(hasFieldMetadata(field,"valueCode"))(sourceExtensions??=[]).push(field);
+      break;
+    case "toActionIndex":
+      if(!to)to=field;
+      if(hasFieldMetadata(field,"valueInteger"))(sourceExtensions??=[]).push(field);
+      break;case "fromActionIndex":
+      if(!from)from=field;
+      if(hasFieldMetadata(field,"valueInteger"))(sourceExtensions??=[]).push(field);
+      break;
+    case "spanStart":
+      if(!start)start=field;
+      if(hasFieldMetadata(field,"valueInteger"))(sourceExtensions??=[]).push(field);
+      break;case "spanEnd":
+      if(!end)end=field;
+      if(hasFieldMetadata(field,"valueInteger"))(sourceExtensions??=[]).push(field);
+      break;
+    case "text":
+      if(!text)text=field;
+      if(hasFieldMetadata(field,"valueString"))(sourceExtensions??=[]).push(field);
+      break;
+    default:(sourceExtensions??=[]).push(field);break;
+  }
+  const value=coding?.valueCoding;
+  const relation=getGraphRelationByCoding(value)??firstRelation(undefined,kind?.valueCode);
+  if(!relation||to?.valueInteger===undefined)return undefined;
+  return {kind:relation,...(value ? {sourceKindCoding:readCoding(value)} : {}),fromActionIndex:from?.valueInteger,toActionIndex:to.valueInteger,text:text?.valueString,
+    ...(extension.id !== undefined ? {sourceId:extension.id} : {}),
+    ...(sourceExtensions ? {sourceExtensions} : {}),
+    span:start?.valueInteger!==undefined&&end?.valueInteger!==undefined?{start:start.valueInteger,end:end.valueInteger}:undefined};
+}
+function parseOpaqueSpan(extension: FhirExtension): CanonicalSourceSpan | undefined {
+  let start: FhirExtension | undefined, end: FhirExtension | undefined, text: FhirExtension | undefined;
+  let sourceExtensions: FhirExtension[] | undefined;
+  const tokens: number[] = [];
+  for (const field of extension.extension ?? []) {
+    let valueKey: string | undefined;
+    switch (field.url) {
+      case "start": start ??= field; valueKey = "valueInteger"; break;
+      case "end": end ??= field; valueKey = "valueInteger"; break;
+      case "text": text ??= field; valueKey = "valueString"; break;
+      case "tokenIndex":
+        if (field.valueInteger !== undefined) tokens.push(field.valueInteger);
+        valueKey = "valueInteger";
+        break;
+    }
+    if (!valueKey || hasFieldMetadata(field, valueKey)) (sourceExtensions ??= []).push(field);
+  }
+  return start?.valueInteger !== undefined && end?.valueInteger !== undefined && text?.valueString !== undefined
+    ? { start: start.valueInteger, end: end.valueInteger, text: text.valueString,
+        ...(tokens.length ? { tokenIndices: tokens } : {}),
+        ...(extension.id !== undefined ? { sourceId: extension.id } : {}),
+        ...(sourceExtensions ? { sourceExtensions } : {}) } : undefined;
+}
+function parseGraphCoverage(extension: FhirExtension): CanonicalInstructionCoverage | undefined {
+  let known: FhirExtension | undefined, opaque: FhirExtension | undefined,
+    ratio: FhirExtension | undefined, complete: FhirExtension | undefined;
+  let sourceExtensions: FhirExtension[] | undefined;
+  for (const field of extension.extension ?? []) {
+    let valueKey: string | undefined;
+    switch (field.url) {
+      case "understoodCharacters": known ??= field; valueKey = "valueInteger"; break;
+      case "opaqueCharacters": opaque ??= field; valueKey = "valueInteger"; break;
+      case "ratio": ratio ??= field; valueKey = "valueDecimal"; break;
+      case "complete": complete ??= field; valueKey = "valueBoolean"; break;
+    }
+    if (!valueKey || hasFieldMetadata(field, valueKey)) (sourceExtensions ??= []).push(field);
+  }
+  return known?.valueInteger !== undefined && opaque?.valueInteger !== undefined &&
+      ratio?.valueDecimal !== undefined && complete?.valueBoolean !== undefined
+    ? { understoodCharacters: known.valueInteger, opaqueCharacters: opaque.valueInteger,
+        ratio: ratio.valueDecimal, complete: complete.valueBoolean,
+        ...(extension.id !== undefined ? { sourceId: extension.id } : {}),
+        ...(sourceExtensions ? { sourceExtensions } : {}) } : undefined;
+}
+
+function parsePrimaryOwnership(extension: FhirExtension): CanonicalInstructionGraph["primaryOwnership"] {
+  let resolved: FhirExtension | undefined, administration: FhirExtension | undefined,
+    doseAction: FhirExtension | undefined, doseArgument: FhirExtension | undefined;
+  let sourceExtensions: FhirExtension[] | undefined;
+  for (const field of extension.extension ?? []) switch (field.url) {
+    case "resolved":
+      if (!resolved) resolved = field;
+      if (hasFieldMetadata(field, "valueBoolean")) (sourceExtensions ??= []).push(field);
+      break;
+    case "administrationActionIndex":
+      if (!administration) administration = field;
+      if (hasFieldMetadata(field, "valueInteger")) (sourceExtensions ??= []).push(field);
+      break;
+    case "doseActionIndex":
+      if (!doseAction) doseAction = field;
+      if (hasFieldMetadata(field, "valueInteger")) (sourceExtensions ??= []).push(field);
+      break;
+    case "doseArgumentIndex":
+      if (!doseArgument) doseArgument = field;
+      if (hasFieldMetadata(field, "valueInteger")) (sourceExtensions ??= []).push(field);
+      break;
+    default: (sourceExtensions ??= []).push(field); break;
+  }
+  if (resolved?.valueBoolean !== true) return undefined;
   return {
-    force,
-    origin: child(extension, "origin")?.valueCode as AdviceFrame["origin"] | undefined,
-    confidence: child(extension, "confidence")?.valueDecimal,
-    polarity: child(extension, "polarity")?.valueCode as AdvicePolarity | undefined,
-    polaritySource: child(extension, "polaritySource")?.valueCode === "shared" ? "shared" : undefined,
-    modality: child(extension, "modality")?.valueCode as AdviceModality | undefined,
-    relation: readRelation(extension, "relation"),
-    predicate: {
-      lemma,
-      display: child(extension, "predicateDisplay")?.valueString,
-      i18n: Object.keys(predicateI18n).length ? predicateI18n : undefined,
-      semanticClass: child(extension, "semanticClass")?.valueString,
-      realizer: child(extension, "predicateRealizer")?.valueCode as AdviceFrame["predicate"]["realizer"] | undefined,
-      realizerConfig: Object.keys(localeRealizerConfig ?? {}).length
-        ? { locales: localeRealizerConfig }
-        : undefined,
-      codings: children(extension, "predicateCoding")
-        .map((entry) => readCoding(entry.valueCoding))
-        .filter((entry): entry is FhirCoding => Boolean(entry)),
-      ...(semanticComponents.length ? { semanticComponents } : {})
-    },
-    args,
-    span: { start: spanStart, end: spanEnd },
-    sourceText,
-    sequenceIndex: child(extension, "sequenceIndex")?.valueInteger
+    ...(extension.id !== undefined ? { sourceId: extension.id } : {}),
+    ...(sourceExtensions ? { sourceExtensions } : {}),
+    ...(administration?.valueInteger !== undefined ? { administrationActionIndex: administration.valueInteger } : {}),
+    ...(doseAction?.valueInteger !== undefined && doseArgument?.valueInteger !== undefined
+      ? { dose: { actionIndex: doseAction.valueInteger, argumentIndex: doseArgument.valueInteger } } : {})
   };
 }
 
-export function parseInstructionGraphExtension(
-  extensions: FhirExtension[] | undefined
-): CanonicalInstructionGraph | undefined {
-  const extension = extensions?.find((entry) => entry.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL);
-  if (!extension) return undefined;
-  const actions: AdviceFrame[] = [];
-  for (const actionExtension of children(extension, "action")) {
-    const action = parseActionExtension(actionExtension);
-    if (action) actions.push(action);
-  }
-  const relations: CanonicalInstructionRelation[] = [];
-  for (const entry of children(extension, "graphRelation")) {
-    const edgeCoding = child(entry, "kindCoding")?.valueCoding;
-    const kind = edgeCoding?.system === "http://hl7.org/fhir/action-relationship-type" &&
-      (edgeCoding.code === "before" || edgeCoding.code === "after")
-      ? edgeCoding.code as AdviceRelation : readRelation(entry, "kind");
-    const toActionIndex = child(entry, "toActionIndex")?.valueInteger;
-    if (!kind || toActionIndex === undefined) continue;
-    const spanStart = child(entry, "spanStart")?.valueInteger;
-    const spanEnd = child(entry, "spanEnd")?.valueInteger;
-    relations.push({
-      kind,
-      fromActionIndex: child(entry, "fromActionIndex")?.valueInteger,
-      toActionIndex,
-      text: child(entry, "text")?.valueString,
-      span: spanStart !== undefined && spanEnd !== undefined
-        ? { start: spanStart, end: spanEnd }
-        : undefined
-    });
-  }
-  const coverageExtension = child(extension, "coverage");
-  let coverage: CanonicalInstructionCoverage | undefined;
-  if (coverageExtension) {
-    const understoodCharacters = child(coverageExtension, "understoodCharacters")?.valueInteger;
-    const opaqueCharacters = child(coverageExtension, "opaqueCharacters")?.valueInteger;
-    const ratio = child(coverageExtension, "ratio")?.valueDecimal;
-    const complete = child(coverageExtension, "complete")?.valueBoolean;
-    if (
-      understoodCharacters !== undefined &&
-      opaqueCharacters !== undefined &&
-      ratio !== undefined &&
-      complete !== undefined
-    ) {
-      coverage = { understoodCharacters, opaqueCharacters, ratio, complete };
+/** One traversal per known graph/action/argument node. Repeated children retain
+ * order, first scalar fields retain ownership, and unknown metadata remains
+ * outside interpreted clinical meaning. No indexed heap copies or cached
+ * input identities are needed to read the same mutable external input again. */
+export function parseInstructionGraphExtension<T extends Pick<FhirExtension,"url">>(extensions:readonly T[]|undefined):CanonicalInstructionGraph|undefined {
+  let graph:FhirExtension|undefined;
+  for(const item of extensions??[])if(item.url===MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL){graph=item as FhirExtension;break;}
+  if(!graph)return undefined;
+  const actions:AdviceFrame[]=[],relations:CanonicalInstructionRelation[]=[],opaque:CanonicalSourceSpan[]=[];
+  let coverage:FhirExtension|undefined,start:FhirExtension|undefined,end:FhirExtension|undefined,
+    ownership:FhirExtension|undefined,
+    source:FhirExtension|undefined,locale:FhirExtension|undefined,sourceExtensions:FhirExtension[]|undefined;
+  for(const field of graph.extension??[])switch(field.url){
+    case "action":{const action=parseActionExtension(field);if(action)actions.push(action);break;}
+    case "graphRelation": {
+      const relation = parseGraphRelation(field);
+      if (relation) relations.push(relation);
+      else (sourceExtensions ??= []).push(field);
+      break;
     }
+    case "opaque":{const span=parseOpaqueSpan(field);if(span)opaque.push(span);break;}
+    case "coverage":if(!coverage)coverage=field;break;
+    case "primaryAdministrationStart":
+      if (!start) {
+        start = field;
+        if (hasFieldMetadata(field, "valueInteger")) (sourceExtensions ??= []).push(field);
+      }
+      break;
+    case "primaryAdministrationEnd":
+      if (!end) {
+        end = field;
+        if (hasFieldMetadata(field, "valueInteger")) (sourceExtensions ??= []).push(field);
+      }
+      break;
+    case "primaryOwnership":if(!ownership)ownership=field;break;
+    case "sourceText":
+      if (!source) {
+        source = field;
+        if (hasFieldMetadata(field, "valueString")) (sourceExtensions ??= []).push(field);
+      }
+      break;
+    case "sourceLocale":
+      if (!locale) {
+        locale = field;
+        if (hasFieldMetadata(field, "valueCode")) (sourceExtensions ??= []).push(field);
+      }
+      break;
+    default:(sourceExtensions??=[]).push(field);
   }
-  const opaqueSpans: CanonicalSourceSpan[] = [];
-  for (const entry of children(extension, "opaque")) {
-    const start = child(entry, "start")?.valueInteger;
-    const end = child(entry, "end")?.valueInteger;
-    const text = child(entry, "text")?.valueString;
-    if (start === undefined || end === undefined || text === undefined) continue;
-    const tokenIndices = children(entry, "tokenIndex")
-      .map((token) => token.valueInteger)
-      .filter((value): value is number => value !== undefined);
-    opaqueSpans.push({
-      start,
-      end,
-      text,
-      ...(tokenIndices.length ? { tokenIndices } : {})
-    });
-  }
-  if (!actions.length && !opaqueSpans.length) return undefined;
-  const primaryAdministrationStart = child(extension, "primaryAdministrationStart")?.valueInteger;
-  const primaryAdministrationEnd = child(extension, "primaryAdministrationEnd")?.valueInteger;
-  return {
-    actions,
-    primaryAdministrationSpan:
-      primaryAdministrationStart !== undefined && primaryAdministrationEnd !== undefined
-        ? { start: primaryAdministrationStart, end: primaryAdministrationEnd }
-        : undefined,
-    relations: relations.length ? relations : undefined,
-    opaqueSpans: opaqueSpans.length ? opaqueSpans : undefined,
-    coverage,
-    sourceText: child(extension, "sourceText")?.valueString ?? "",
-    sourceLocale: child(extension, "sourceLocale")?.valueCode
-  };
+  if(!actions.length&&!opaque.length)return undefined;
+  const parsedCoverage = coverage ? parseGraphCoverage(coverage) : undefined;
+  if (coverage && !parsedCoverage) (sourceExtensions ??= []).push(coverage);
+  const result:CanonicalInstructionGraph={actions,...(sourceExtensions ? {sourceExtensions} : {}),
+    ...(ownership ? {primaryOwnership:parsePrimaryOwnership(ownership)} : {}),
+    primaryAdministrationSpan:start?.valueInteger!==undefined&&end?.valueInteger!==undefined
+    ?{start:start.valueInteger,end:end.valueInteger}:undefined,
+    relations:relations.length?relations:undefined,opaqueSpans:opaque.length?opaque:undefined,
+    coverage:parsedCoverage,sourceText:source?.valueString??"",sourceLocale:locale?.valueCode};
+  if(graph.id!==undefined)result.sourceId=graph.id;
+  return result;
 }

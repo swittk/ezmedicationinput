@@ -146,6 +146,36 @@
         ]
       },
       {
+        "id": "Extension.extension:countScope",
+        "path": "Extension.extension",
+        "sliceName": "countScope",
+        "min": 0,
+        "max": "1",
+        "definition": "Newly authored rows must include countScope=step: step.count repeats that step. Omission is reserved for the previous unversioned encoding. In an unmarked first phase with repeatCycle and no explicit whole-course count, step.count is the whole-course repetition bound; import migrates that legacy meaning and preserves the supplied source."
+      },
+      {
+        "id": "Extension.extension:countScope.extension",
+        "path": "Extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:countScope.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "countScope"
+      },
+      {
+        "id": "Extension.extension:countScope.value[x]",
+        "path": "Extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "code"
+          }
+        ],
+        "fixedCode": "step"
+      },
+      {
         "id": "Extension.extension:step",
         "path": "Extension.extension",
         "sliceName": "step",
@@ -1333,6 +1363,9 @@
         "type": [
           {
             "code": "code"
+          },
+          {
+            "code": "string"
           }
         ]
       },
@@ -2805,6 +2838,9 @@
         "type": [
           {
             "code": "code"
+          },
+          {
+            "code": "string"
           }
         ]
       },
@@ -4400,6 +4436,9 @@
         "type": [
           {
             "code": "code"
+          },
+          {
+            "code": "string"
           }
         ]
       },
@@ -6328,6 +6367,9 @@
         "type": [
           {
             "code": "code"
+          },
+          {
+            "code": "string"
           }
         ]
       },

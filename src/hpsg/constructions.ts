@@ -4,9 +4,15 @@ import {
 } from "../medication-condition";
 import { lexInput } from "../lexer/lex";
 import { LexKind } from "../lexer/token-types";
+import { resolveSymptomDefinition } from "../symptom-terminology";
 import { annotateLexTokens } from "../lexer/meaning";
 import type { Token } from "../parser-state";
-import type { MedicationCondition } from "../types";
+import type { MedicationCondition, ParseOptions } from "../types";
+import { actionMatchAt } from "../instruction-graph";
+import { ACTION_DIRECTIVE_PREFIXES, normalizeTokenLower } from "./lexical-classes";
+import { contextualDoseLexicalEnd } from "./rules/core-rules";
+import { maximumDosePerPeriodAt, maximumCountLeadAt } from "./rule-context";
+import { maximumOccurrenceAt, isIndependentMaximum, type MaximumPredicateScope } from "./rules/timing-rules";
 import { lexicalSign, type HpsgGuardExpression, type HpsgSynsem, type HpsgPhraseRule } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
 import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, type AdviceArgument, type AdviceFrame } from "../types";
@@ -637,10 +643,26 @@ function guardExpressionHasDayDomain(value: HpsgGuardExpression): boolean {
     value.parts.every(guardExpressionHasDayDomain);
 }
 
-function guardHasMeasurement(value: MedicationCondition): boolean {
+export function guardHasMeasurement(value: MedicationCondition): boolean {
   return value.kind === "measurement" ||
     (value.kind === "all" || value.kind === "any") && value.conditions.some(guardHasMeasurement) ||
     value.kind === "not" && guardHasMeasurement(value.condition);
+}
+
+/** Only the final predicate daughter supplies scope for a following bare limit. */
+function guardFinalPredicateMaximumScope(value: HpsgGuardExpression, options?: ParseOptions): MaximumPredicateScope {
+  if (value.kind === "coordination") {
+    const last = value.parts[value.parts.length - 1];
+    return last ? guardFinalPredicateMaximumScope(last, options) : "unresolved";
+  }
+  if (value.kind === "negation") return guardFinalPredicateMaximumScope(value.operand, options);
+  if (value.kind !== "predicate") return "unresolved";
+  if (value.value.kind === "measurement") return "measurement";
+  return value.value.kind === "state" && Boolean(resolveSymptomDefinition(
+      value.value.name, options?.prnReasonMap, options?.symptomMap)) ||
+    value.dayInvariant === true || value.value.kind === "text" &&
+      medicationConditionAtomLexeme(value.value.text).licensesBareIf === true
+    ? "condition" : "unresolved";
 }
 
 /** Create a binary feature-structure derivation from already licensed daughters. */
@@ -765,6 +787,11 @@ export function scopeMedicationGuardSign(guard: ParsedMedicationGuard, scope: Hp
 function guardPredicateConstituent(
   context: GuardConstituentContext, tokens: Token[], start: number, end: number
 ): HpsgSign | undefined {
+  // Candidate and final predicates share the same lexical extent; the enclosing
+  // guard retains its independent source range, including a consequent delimiter.
+  while (start < end && /\s/u.test(context.source[start])) start++;
+  while (end > start && /[\s.!?;,]/u.test(context.source[end - 1])) end--;
+  if (start >= end) return undefined;
   const tokenRange = (from: number, to: number) => tokens.filter(token => token.sourceStart < to && from < token.sourceEnd);
   const atom = (from: number, to: number): HpsgSign | undefined => {
     const members = tokenRange(from, to);
@@ -818,13 +845,18 @@ function guardPredicateConstituent(
  * @param source Exact clinician text.
  * @param existingTokens Already-lexed tokens when the caller has a source context.
  * @param withholdingConsequent License supplied only by a typed medication-withholding action daughter.
+ * @param options Registered action vocabulary used by the enclosing clause.
+ * @param scope An already selected conditional relation and optional closed predicate span.
  */
 export function parseMedicationGuard(
-  source: string, existingTokens?: Token[], withholdingConsequent?: true
+  source: string, existingTokens?: Token[], withholdingConsequent?: true, options?: ParseOptions,
+  scope?: { relation: AdviceRelation; start: number; markerEnd: number; end?: number }
 ): ParsedMedicationGuard | undefined {
-  const lead = medicationGuardLeadLexeme(source, withholdingConsequent);
+  const lead = scope ? { start: scope.start, end: scope.markerEnd,
+    marker: scope.relation === AdviceRelation.Unless ? "unless" as const : "if" as const }
+    : medicationGuardLeadLexeme(source, withholdingConsequent);
   if (!lead) return undefined;
-  let tail = source.slice(lead.end), end = source.length;
+  let end = scope?.end ?? source.length, tail = source.slice(lead.end, end);
   const alternateCue = MEDICATION_GUARD_BOUNDARIES.alternative.exec(tail);
   const alternative = alternateCue ? { start: lead.end + alternateCue.index,
     end: lead.end + alternateCue.index + alternateCue[0].length } : undefined;
@@ -835,24 +867,106 @@ export function parseMedicationGuard(
     end = (otherwise ?? alternative)!.start;
     tail = source.slice(lead.end, end);
   }
-  const prefix = source.slice(0, lead.start).trim();
-  if (!prefix || /[.;!?]$/u.test(prefix)) {
-    const comma = tail.search(/[,;:]/u), action = MEDICATION_GUARD_BOUNDARIES.administrationHead.exec(tail);
-    end = Math.min(end, lead.end + Math.min(comma >= 0 ? comma : tail.length, action?.index ?? tail.length));
-  } else end = Math.min(end, lead.end + medicationGuardClauseBoundary(tail));
-  let predicateStart = lead.end, predicateEnd = end;
-  while (predicateStart < predicateEnd && /\s/u.test(source[predicateStart])) predicateStart++;
-  while (predicateEnd > predicateStart && /[\s.!?;,]/u.test(source[predicateEnd - 1])) predicateEnd--;
-  if (predicateStart >= predicateEnd) return undefined;
   const tokens = existingTokens ?? annotateLexTokens(lexInput(source));
   const markerTokens = tokens.filter(token => token.sourceStart < lead.end && lead.start < token.sourceEnd);
   if (!markerTokens.length) return undefined;
-  const context: GuardConstituentContext = { source, range: { start: lead.start, end },
-    ...(withholdingConsequent ? { withholdingConsequent } : {}) };
   const marker = lexicalSign({ type: "guard-marker-sign", rule: "hpsg.lex.guard.marker", tokens: markerTokens,
     synsem: { head: {}, valence: {}, cont: { guard: { marker: lead.marker } } }, score: 1 });
-  const predicate = guardPredicateConstituent(context, tokens, predicateStart, predicateEnd);
-  const sign = predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate);
+  const prefix = source.slice(0, lead.start).trim();
+  let scopedGuard: HpsgSign | undefined;
+  if (scope?.end === undefined && (!prefix || /[.;!?]$/u.test(prefix))) {
+    const comma = tail.search(/[,;:]/u);
+    end = Math.min(end, lead.end + (comma >= 0 ? comma : tail.length));
+    // Registered administration heads and their directive prefixes delimit the
+    // consequent. Locale lexing supplies their canonical tokens and source spans.
+    const administrationAt = (index: number) => {
+      if (index < 0 || index >= tokens.length) return undefined;
+      const match = actionMatchAt(tokens, index, options), action = match?.definition;
+      return match && (action?.primaryAdministrationHead || action?.definesDose && action.administrationMethod)
+        ? match : undefined;
+    };
+    let delimitedConsequent = false;
+    if (comma >= 0) {
+      let next = tokens.findIndex(token => token.sourceStart >= end + 1);
+      for (const directive of ACTION_DIRECTIVE_PREFIXES) {
+        if (next >= 0 && next + directive.parts.length <= tokens.length &&
+            directive.parts.every((part, offset) => normalizeTokenLower(tokens[next + offset]) === part)) {
+          next += directive.parts.length;
+          break;
+        }
+      }
+      // A complete consequent after the delimiter licenses an antecedent
+      // containing its own activity, including a quantified ability predicate.
+      const match = administrationAt(next);
+      delimitedConsequent = Boolean(match && (!match.definition.procedural ||
+        contextualDoseLexicalEnd(tokens, next + match.length, options) !== undefined));
+    }
+    for (let index = 0; !delimitedConsequent && index < tokens.length; index++) {
+      const token = tokens[index];
+      if (token.sourceStart < lead.end) continue;
+      if (token.sourceStart >= end) break;
+      const match = administrationAt(index);
+      if (!match) continue;
+      const doseEnd = contextualDoseLexicalEnd(tokens, index + match.length, options);
+      let consequentStart = token.sourceStart;
+      for (const directive of ACTION_DIRECTIVE_PREFIXES) {
+        const start = index - directive.parts.length;
+        if (start >= 0 && tokens[start].sourceStart >= lead.end &&
+            directive.parts.every((part, offset) => normalizeTokenLower(tokens[start + offset]) === part)) {
+          consequentStart = tokens[start].sourceStart;
+          break;
+        }
+      }
+      const context: GuardConstituentContext = { source, range: { start: lead.start, end: consequentStart },
+        ...(withholdingConsequent ? { withholdingConsequent } : {}) };
+      const predicate = guardPredicateConstituent(context, tokens, lead.end, consequentStart);
+      const guard = predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate);
+      const condition = guard?.synsem.cont.clinicalAdjunct?.condition;
+      if (!condition || doseEnd === undefined &&
+          !predicate?.synsem.cont.guard?.licensesBareIf && !guardHasMeasurement(condition)) continue;
+      end = consequentStart;
+      scopedGuard = guard;
+      break;
+    }
+  } else if (scope?.end === undefined) {
+    end = Math.min(end, lead.end + medicationGuardClauseBoundary(tail));
+    const boundaryIndex = tokens.findIndex(token => token.sourceStart >= end);
+    const lexicalContext = { tokens, options, limit: boundaryIndex < 0 ? tokens.length : boundaryIndex };
+    for (let index = 0; index < lexicalContext.limit; index++) {
+      const token = tokens[index];
+      if (token.sourceStart < lead.end) continue;
+      if (token.sourceStart >= end) break;
+      const maximumHead = maximumCountLeadAt(lexicalContext, index);
+      if (!maximumHead) continue;
+      const maximum = maximumDosePerPeriodAt(lexicalContext, index, maximumHead) ??
+        maximumOccurrenceAt(lexicalContext, index, maximumHead);
+      if (!maximum) continue;
+      const capStart = token.sourceStart;
+      const context: GuardConstituentContext = { source, range: { start: lead.start, end: capStart },
+        ...(withholdingConsequent ? { withholdingConsequent } : {}) };
+      const predicate = guardPredicateConstituent(context, tokens, lead.end, capStart);
+      // Marker-sensitive guard composition licenses the preceding predicate;
+      // the cap's quantity/count daughters remain independently owned.
+      const guard = predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate);
+      const condition = guard?.synsem.cont.clinicalAdjunct?.condition;
+      if (!condition) continue;
+      // A bare comparative maximum can be the predicate's own complement.
+      // An opaque state prefix does not prove an independent treatment limit.
+      // An implicit occurrence frequency can qualify the patient's history.
+      // Separators, maximum heads or a complete structured predicate retain
+      // independent limit ownership; a period can still belong to history.
+      const expression = predicate?.synsem.cont.guard?.expression;
+      if (!isIndependentMaximum(lexicalContext, index, maximum,
+          expression ? guardFinalPredicateMaximumScope(expression, options) : "unresolved")) continue;
+      end = capStart;
+      scopedGuard = guard;
+      break;
+    }
+  }
+  const context: GuardConstituentContext = { source, range: { start: lead.start, end },
+    ...(withholdingConsequent ? { withholdingConsequent } : {}) };
+  const predicate = scopedGuard ? undefined : guardPredicateConstituent(context, tokens, lead.end, end);
+  const sign = scopedGuard ?? (predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate));
   const condition = sign?.synsem.cont.clinicalAdjunct?.condition;
   return sign && condition ? { condition, start: lead.start, markerEnd: lead.end, end, text: source.slice(lead.start, end),
     otherwiseHold: Boolean(otherwise), ...(otherwise ? { otherwise } : {}),

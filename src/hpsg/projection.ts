@@ -1,7 +1,10 @@
 import { equalStructuredValues } from "../stable-structure";
+import { sameInstructionSourceOccurrence } from "./unification";
+import { NEXT_DAY_SCHEDULE_RULE, NEXT_DAY_ONSET_RULE } from "./lexical-classes";
 import { ParserState, Token } from "../parser-state";
 import {
   EventTiming,
+  FhirPeriodUnit,
   FhirDayOfWeek,
   FhirDosage,
   RouteCode,
@@ -79,6 +82,7 @@ function applySchedule(
   if (schedule.treatmentStartOffsetDays !== undefined) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     target.treatmentStartOffsetDays = schedule.treatmentStartOffsetDays;
+    target.phaseStartReference = schedule.phaseStartReference;
   }
   if (schedule.timingReference !== undefined) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
@@ -106,6 +110,7 @@ function applySchedule(
   if (schedule.boundsStart !== undefined || schedule.boundsEnd !== undefined) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     if (schedule.boundsStart !== undefined) target.boundsStart = schedule.boundsStart;
+    if (schedule.openEndedStart) target.openEndedStart = true;
     if (schedule.boundsEnd !== undefined) target.boundsEnd = schedule.boundsEnd;
   }
   if (schedule.repeatCycle !== undefined) {
@@ -238,7 +243,9 @@ function appendScheduleEvidence(
 function cloneClinicalQuantity(value: HpsgClinicalQuantityFeature): HpsgClinicalQuantityFeature {
   return {
     ...value,
-    numerator: { ...value.numerator },
+    numerator: "range" in value.numerator
+      ? { ...value.numerator, range: { ...value.numerator.range } }
+      : { ...value.numerator },
     denominators: value.denominators.map((term) => ({ ...term })),
     projectedDose: value.projectedDose ? { ...value.projectedDose } : undefined,
     ...(value.carrierMaterial ? { carrierMaterial: {
@@ -251,7 +258,7 @@ function cloneClinicalQuantity(value: HpsgClinicalQuantityFeature): HpsgClinical
   };
 }
 
-function cloneSiteRestrictions(
+export function cloneSiteRestrictions(
   restrictions: NonNullable<HpsgSign["synsem"]["valence"]["site"]>["restrictions"]
 ) {
   return restrictions?.map((restriction) => ({
@@ -265,21 +272,33 @@ function cloneSiteRestrictions(
   }));
 }
 
-function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined): boolean {
+export function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined, positionsRepeat = true): boolean {
   return Boolean(schedule && (
     schedule.frequency !== undefined ||
     schedule.frequencyMax !== undefined ||
     schedule.period !== undefined ||
     schedule.periodMax !== undefined ||
     schedule.dayOfWeek?.length ||
-    schedule.when?.length ||
-    schedule.timeOfDay?.length ||
+    positionsRepeat && (schedule.when?.length || schedule.timeOfDay?.length) ||
     schedule.dayOfMonth?.length ||
     schedule.calendarEvents?.length ||
     schedule.weekdayOrdinal !== undefined ||
     schedule.cycleDayConstraint !== undefined ||
     schedule.repeatCycle !== undefined
   ));
+}
+
+/** A single dated clock locates an elapsed administration; it does not
+ * supply a repeat cadence. Course bounds and independent recurrences retain
+ * their usual ownership of clock slots. */
+export function hasRecurringAdministrationSchedule(
+  schedule: HpsgScheduleFeature | undefined, positionsRepeat = true
+): boolean {
+  const datedPoint = schedule?.boundsStart?.length === 10 && !schedule.openEndedStart &&
+    schedule.timeOfDay?.length === 1 &&
+    !schedule.when?.length && !schedule.boundsEnd && schedule.duration === undefined &&
+    schedule.durationMax === undefined && schedule.durationUnit === undefined;
+  return hasRecurringSchedule(schedule, positionsRepeat && !datedPoint);
 }
 
 function appendRange(target: TextRange[], value: TextRange): void {
@@ -302,12 +321,12 @@ function applyClinicalAdjunct(
     clause.dose || clause.method || clause.route || clause.site ||
     hasRecurringSchedule(clause.schedule)
   );
-  if (hasAdministration && adjunct.conditionTarget) clinical.conditionTarget = {
-    ...adjunct.conditionTarget,
-    when: adjunct.conditionTarget.when ? [...adjunct.conditionTarget.when] : undefined,
-    timeOfDay: adjunct.conditionTarget.timeOfDay ? [...adjunct.conditionTarget.timeOfDay] : undefined,
-    clockRange: adjunct.conditionTarget.clockRange ? { ...adjunct.conditionTarget.clockRange } : undefined
-  };
+  if (hasAdministration && adjunct.conditionTarget) {
+    clinical.conditionTarget = adjunct.conditionTarget;
+    if ((adjunct.conditionTarget.members ?? [adjunct.conditionTarget]).some(target =>
+      target.excludedWeekdays?.length || target.excludedDates?.length))
+      acceptedKinds.add("calendar-exclusion");
+  }
   if (adjunct.treatmentPause && hasAdministration) {
     clinical.treatmentPause = { ...adjunct.treatmentPause, range: { ...adjunct.treatmentPause.range } };
     acceptedKinds.add("treatment-pause");
@@ -340,8 +359,9 @@ function applyClinicalAdjunct(
       // permission to drop the exclusion and schedule the medication daily.
       // Retain the full FHIR exclusion extension for review and editing.
       clinical.excludedWeekdays = [...adjunct.excludedWeekdays];
-      // Selected-dose exclusions are scoped after partitioning source anchors.
-      if (allowed.length && !adjunct.conditionTarget) schedule.dayOfWeek = allowed;
+      // Target-owned exclusions remain on their nominal until binding;
+      // these unscoped exclusions already belong to the administration.
+      if (allowed.length) schedule.dayOfWeek = allowed;
     }
     if (adjunct.excludedDates?.length) {
       clinical.excludedDates = [...adjunct.excludedDates];
@@ -506,7 +526,8 @@ export function projectHpsgSignToState(
       if (
         !existing.some((candidate) =>
           candidate.text === instruction.text &&
-          candidate.coding?.code === instruction.coding?.code
+          candidate.coding?.code === instruction.coding?.code &&
+          sameInstructionSourceOccurrence(candidate, instruction)
         )
       ) {
         const projected: CanonicalAdditionalInstructionExpr = {
@@ -538,14 +559,17 @@ export function projectHpsgSignToState(
   for (const scoped of sign.synsem.cont.scopedAdministrations ?? []) {
     const condition = scoped.condition;
     const scopes = state.primaryClause.instructionScopes ?? (state.primaryClause.instructionScopes = []);
-    if (!scopes.some(scope => scope.kind === condition.relation &&
-        scope.span.start === condition.sourceStart && scope.span.end === condition.sourceEnd &&
-        scope.target.start === condition.targetStart && scope.target.end === condition.targetEnd)) {
-      scopes.push({
-        kind: condition.relation,
-        span: { start: condition.sourceStart, end: condition.sourceEnd },
-        target: { start: condition.targetStart, end: condition.targetEnd }
-      });
+    const targets = condition.targetRanges ?? [{ start: condition.targetStart, end: condition.targetEnd }];
+    for (const target of targets) {
+      if (!scopes.some(scope => scope.kind === condition.relation &&
+          scope.span.start === condition.sourceStart && scope.span.end === condition.sourceEnd &&
+          scope.target.start === target.start && scope.target.end === target.end)) {
+        scopes.push({
+          kind: condition.relation,
+          span: { start: condition.sourceStart, end: condition.sourceEnd },
+          target
+        });
+      }
     }
   }
 
@@ -557,6 +581,16 @@ export function projectHpsgSignToState(
       if (clinical.status === "resolved" && clinical.projectedDose) {
         state.dose = clinical.projectedDose.value;
         state.unit = clinical.projectedDose.unit;
+        // The setters above create the resolved scalar dose. Its authored
+        // qualifier belongs to that amount, not just the nonclinical path.
+        const comparator = clinical.projectedDose.comparator ?? dose.comparator;
+        if (comparator !== undefined && state.primaryClause.dose)
+          state.primaryClause.dose.comparator = comparator;
+      } else if (clinical.status === "resolved" && dose.range) {
+        // The selected range is the dose, including a divided weighted total
+        // or an independently authored range beside its rate.
+        state.doseRange = dose.range;
+        if (dose.unit !== undefined) state.unit = dose.unit;
       } else {
         // A rate or unresolved expression is not a scalar medication dose.
         delete state.primaryClause.dose;
@@ -571,6 +605,9 @@ export function projectHpsgSignToState(
       if (dose.unit !== undefined) {
         state.unit = dose.unit;
       }
+      if (dose.comparator !== undefined) {
+        (state.primaryClause.dose ??= {}).comparator = dose.comparator;
+      }
     }
   }
 
@@ -579,31 +616,78 @@ export function projectHpsgSignToState(
     applySchedule(state, schedule, deps);
   }
 
+  // HPSG composition already distinguishes clock qualifiers from independent events.
+  const positions = schedule?.when;
+
+  const dividedCount = dose?.attachmentClass !== "procedure"
+    ? dose?.clinicalQuantity?.dividedDoseCount : undefined;
+
+  // NEXT day/daypart locates the composed administration positions once.
+  // An independently stated cadence or course keeps its own recurrence; the onset supplies
+  // neither a daily repetition nor an invented event clock.
+  let nextDayCourseDuration = false;
+  if (schedule?.phaseStartReference === "treatment-day-start" &&
+      schedule.count === undefined && schedule.countMax === undefined &&
+      schedule.frequency === undefined && schedule.frequencyMax === undefined &&
+      schedule.period === undefined && schedule.periodMax === undefined && schedule.periodUnit === undefined &&
+      !schedule.timingCode && (!schedule.timingReference || schedule.timingReference === "previous") &&
+      !schedule.dayOfWeek?.length && !schedule.dayOfMonth?.length &&
+      !schedule.calendarEvents?.length && schedule.weekdayOrdinal === undefined &&
+      !schedule.cycleDayConstraint && !schedule.repeatCycle && !schedule.activityTiming?.length &&
+      schedule.duration === undefined && schedule.durationMax === undefined && schedule.durationUnit === undefined &&
+      !schedule.boundsEnd && sign.evidence.some(item => item.rule === NEXT_DAY_SCHEDULE_RULE)) {
+    // A PRN onset locates eligibility; it does not prescribe one lifetime use.
+    if (!state.asNeeded) {
+      if (schedule.timingReference === "previous") {
+        // The timing anaphor resolves its positions during regimen composition.
+        // NEXT owns one civil day without guessing a lifetime count beforehand.
+        state.duration = 1;
+        state.durationUnit = FhirPeriodUnit.Day;
+        nextDayCourseDuration = true;
+      } else {
+        state.count = dividedCount ?? Math.max(1, (positions?.length ?? 0) + (schedule.timeOfDay?.length ?? 0));
+      }
+    }
+  }
+
   const clinicalDuration = dose?.attachmentClass !== "procedure"
     ? dose?.clinicalQuantity?.administrationDuration
     : undefined;
-  if (clinicalDuration) {
+  if (clinicalDuration || dividedCount !== undefined) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
-    target.administrationDuration = clinicalDuration.value;
-    target.administrationDurationUnit = clinicalDuration.unit;
-    // Duration qualifies each infusion. It is never regimen boundsDuration;
-    // a single-occurrence count is only appropriate without a recurrence.
-    // Keep a separately owned course duration (for example, daily for three
-    // days). Only the overlapping timing artifact without typed schedule-field
-    // ownership belongs to the clinical quantity's elapsed-time daughter.
-    const hasCourseDurationEvidence = sign.evidence.some(item =>
-      item.scheduleFields?.some(field =>
-        field === "duration" || field === "durationMax" || field === "durationUnit"
-      )
-    );
-    if (!hasCourseDurationEvidence) {
-      delete target.duration;
-      delete target.durationMax;
-      delete target.durationUnit;
+    if (clinicalDuration) {
+      target.administrationDuration = clinicalDuration.value;
+      target.administrationDurationUnit = clinicalDuration.unit;
+      target.administrationDurationComparator = clinicalDuration.comparator;
+      // Duration qualifies each infusion. It is never regimen boundsDuration;
+      // an occurrence count is only appropriate without a recurrence. Explicit
+      // divisions retain their finite cardinality; otherwise this is one infusion.
+      // Keep a separately owned course duration (for example, daily for three
+      // days). Only the overlapping timing artifact without typed schedule-field
+      // ownership belongs to the clinical quantity's elapsed-time daughter.
+      const hasCourseDurationEvidence = sign.evidence.some(item =>
+        item.scheduleFields?.some(field =>
+          field === "duration" || field === "durationMax" || field === "durationUnit"
+        )
+      );
+      if (!hasCourseDurationEvidence && !nextDayCourseDuration) {
+        delete target.duration;
+        delete target.durationMax;
+        delete target.durationUnit;
+      }
     }
-    if (!hasRecurringSchedule(schedule) && !hasRecurringSchedule(target) &&
+    // The explicit daily schedule owns the total's divisions. The rate's
+    // elapsed duration never supplies a recurring period.
+    if (dividedCount !== undefined && target.frequency === 1 &&
+        target.period === 1 && target.periodUnit === "d") {
+      target.frequency = dividedCount;
+      target.timingCode = undefined;
+    }
+    if (!hasRecurringAdministrationSchedule(target, dividedCount === undefined) &&
         !sign.synsem.valence.prn && !state.asNeeded &&
-        target.count === undefined) target.count = 1;
+        (dividedCount !== undefined || !sign.evidence.some(item => item.rule === NEXT_DAY_ONSET_RULE)) &&
+        (dividedCount !== undefined || target.timingReference !== "previous") &&
+        target.count === undefined && target.countMax === undefined) target.count = dividedCount ?? 1;
   }
 
   const rejectedClinicalRanges = sign.synsem.cont.clinicalAdjunct
@@ -662,15 +746,7 @@ function cloneAdministrationTarget(site: CanonicalSiteExpr): CanonicalSiteExpr {
     } : undefined,
     spatialRelation: site.spatialRelation ? { ...site.spatialRelation } : undefined,
     ...(site.restrictions?.length ? {
-      restrictions: site.restrictions.map(restriction => ({
-        ...restriction,
-        range: restriction.range ? { ...restriction.range } : undefined,
-        markerRange: restriction.markerRange ? { ...restriction.markerRange } : undefined,
-        predicate: {
-          ...restriction.predicate,
-          range: restriction.predicate.range ? { ...restriction.predicate.range } : undefined
-        }
-      }))
+      restrictions: cloneSiteRestrictions(site.restrictions)
     } : {}),
     evidence: site.evidence?.map((item) => ({
       ...item,

@@ -24,6 +24,7 @@
     "ทั้งสอง": "both"
   },
   "doseTargetEventMembers": {
+    "MORN.early": ["MORN.early"],
     "MORN": [
       "MORN",
       "MORN.early",
@@ -748,8 +749,38 @@
     "entire",
     "full"
   ],
+  "doseComparatorWordings": {
+    "~": [["about"], ["approximately"], ["approx"], ["around"], ["roughly"], ["ประมาณ"], ["ราว"]],
+    ">=": [["at", "least"], ["no", "less", "than"], ["not", "less", "than"], ["greater", "than", "or", "equal", "to"], ["more", "than", "or", "equal", "to"], ["อย่างน้อย"], ["อย่าง", "น้อย"], ["ไม่ต่ำกว่า"], ["ไม่", "ต่ำ", "กว่า"]],
+    "<=": [["at", "most"], ["no", "more", "than"], ["no", "greater", "than"], ["not", "greater", "than"], ["not", "more", "than"], ["less", "than", "or", "equal", "to"], ["up", "to"], ["ไม่เกิน"], ["ไม่", "เกิน"], ["อย่างมาก"], ["อย่าง", "มาก"]],
+    ">": [["greater", "than"], ["more", "than"], ["มากกว่า"], ["มาก", "กว่า"]],
+    "<": [["less", "than"], ["น้อยกว่า"], ["น้อย", "กว่า"]]
+  },
+  "quantityComparatorPrefixes": {
+    "en": {
+      "~": "approximately ",
+      ">=": "at least ",
+      "<=": "at most ",
+      ">": "more than ",
+      "<": "less than ",
+      "ad": "sufficient to achieve "
+    },
+    "th": {
+      "~": "ประมาณ ",
+      ">=": "อย่างน้อย ",
+      "<=": "ไม่เกิน ",
+      ">": "มากกว่า ",
+      "<": "น้อยกว่า ",
+      "ad": "ปริมาณเพียงพอสำหรับ "
+    }
+  },
+  "doseComparatorSymbols": {
+    "~": "~", "≈": "~", ">=": ">=", "≥": ">=", "<=": "<=", "≤": "<=", ">": ">", "<": "<"
+  },
   "millionDoseMultiplierTokens": [
-    "m"
+    "m",
+    "million",
+    "ล้าน"
   ],
   "scheduleUnitSeparatorTokens": [
     "/"
@@ -813,6 +844,21 @@
       "than"
     ],
     [
+      "not",
+      "more",
+      "than"
+    ],
+    [
+      "not",
+      "greater",
+      "than"
+    ],
+    [
+      "no",
+      "greater",
+      "than"
+    ],
+    [
       "ไม่",
       "เกิน"
     ]
@@ -856,13 +902,14 @@
     "further",
     "another"
   ],
-  "maximumPeriodPrepositions": [
-    "in",
-    "within",
-    "per",
-    "/",
-    "a"
-  ],
+  "maximumPeriodPrepositions": {
+    "in": {},
+    "within": { "rolling": true },
+    "over": {},
+    "per": { "unitDenominator": true },
+    "/": { "unitDenominator": true },
+    "a": { "unitDenominator": true }
+  },
   "maximumPeriodModifiers": [
     "rolling",
     "consecutive"
@@ -961,6 +1008,135 @@
   "calendarComplementDeterminers": [
     "the",
     "all"
+  ],
+  "calendarWeekdayLexemes": [
+    {
+      "day": "mon",
+      "en": [
+        "monday",
+        "mondays",
+        "mon",
+        "mons",
+        "mond"
+      ],
+      "th": [
+        "จันทร์"
+      ],
+      "thContextual": [
+        "จ",
+        "จัน"
+      ]
+    },
+    {
+      "day": "tue",
+      "en": [
+        "tuesday",
+        "tuesdays",
+        "tue",
+        "tues"
+      ],
+      "th": [
+        "อังคาร"
+      ],
+      "thContextual": [
+        "อ",
+        "อัง"
+      ]
+    },
+    {
+      "day": "wed",
+      "en": [
+        "wednesday",
+        "wednesdays",
+        "wed",
+        "weds"
+      ],
+      "th": [
+        "พุธ"
+      ],
+      "thContextual": [
+        "พ"
+      ]
+    },
+    {
+      "day": "thu",
+      "en": [
+        "thursday",
+        "thursdays",
+        "thu",
+        "thur",
+        "thurs"
+      ],
+      "th": [
+        "พฤหัสบดี",
+        "พฤหัส"
+      ],
+      "thContextual": [
+        "พฤ"
+      ]
+    },
+    {
+      "day": "fri",
+      "en": [
+        "friday",
+        "fridays",
+        "fri",
+        "fris"
+      ],
+      "th": [
+        "ศุกร์"
+      ],
+      "thContextual": [
+        "ศ",
+        "ศุก"
+      ]
+    },
+    {
+      "day": "sat",
+      "en": [
+        "saturday",
+        "saturdays",
+        "sat",
+        "sats"
+      ],
+      "th": [
+        "เสาร์"
+      ],
+      "thContextual": [
+        "ส",
+        "เสา"
+      ]
+    },
+    {
+      "day": "sun",
+      "en": [
+        "sunday",
+        "sundays",
+        "sun",
+        "suns"
+      ],
+      "th": [
+        "อาทิตย์"
+      ],
+      "thContextual": [
+        "อา",
+        "อาท"
+      ]
+    }
+  ],
+  "calendarWeekdayPrefix": "วัน",
+  "calendarWeekdayGroups": [
+    "weekend",
+    "weekends",
+    "weekday",
+    "weekdays"
+  ],
+  "calendarDayListConnectors": "\\b(?:and|or|on|the|every|each)\\b|(?:และ|หรือ|วัน|ทุก)|[\\s,\\/&+]+",
+  "calendarExclusionCue": "\\b(?:except|excluding)\\b|ยกเว้น(?!\\s*กรณี)",
+  "calendarExclusionWeekdayCue": "เว้น",
+  "calendarExclusionDayHeads": [
+    "day",
+    "days"
   ],
   "calendarUniversalDayQuantifiers": [
     "all",
@@ -1110,6 +1286,7 @@
     "monthly": "Month",
     "hourly": "Hour"
   },
+  "daypartIntervalTokens": ["night", "nights"],
   "intervalUnitTokens": {
     "min": "Minute",
     "mins": "Minute",
@@ -1125,6 +1302,7 @@
     "day": "Day",
     "days": "Day",
     "wk": "Week",
+    "wks": "Week",
     "w": "Week",
     "week": "Week",
     "weeks": "Week",
@@ -1230,6 +1408,14 @@
       "เหลือ"
     ]
   ],
+  "clinicalRateAdministrationHeads": {
+    "infuse": "infuse",
+    "infusion": "infuse",
+    "run": "infuse",
+    "administer": "give",
+    "give": "give"
+  },
+  "medicationObjectModifiers": ["this", "same"],
   "medicationObjectFillers": [
     "medication",
     "medicine",
@@ -1279,11 +1465,20 @@
   "eventArticleTokens": [
     "the"
   ],
+  "instructionNominalArticles": [
+    "the",
+    "a",
+    "an",
+    "any"
+  ],
   "fixedEventPhrases": {
     "early morning": "Early Morning",
     "meal morning": "Breakfast",
     "meal noon": "Lunch",
-    "meal evening": "Dinner"
+    "meal evening": "Dinner",
+    "morning meal": "Breakfast",
+    "noon meal": "Lunch",
+    "evening meal": "Dinner"
   },
   "mealRelationTokens": {
     "ac": "before",
@@ -1336,6 +1531,8 @@
     "to",
     "through",
     "-",
+    "–",
+    "—",
     "ถึง"
   ],
   "eventOffsetMinimumLeadSequences": [
@@ -1820,6 +2017,30 @@
       "polarity": "negate"
     },
     {
+      "parts": ["may", "not"],
+      "polarity": "negate",
+      "modality": "may",
+      "force": "warning"
+    },
+    {
+      "parts": ["might", "not"],
+      "polarity": "negate",
+      "modality": "might",
+      "force": "warning"
+    },
+    {
+      "parts": ["can", "not"],
+      "polarity": "negate",
+      "modality": "can",
+      "force": "warning"
+    },
+    {
+      "parts": ["could", "not"],
+      "polarity": "negate",
+      "modality": "could",
+      "force": "warning"
+    },
+    {
       "parts": [
         "should",
         "not"
@@ -1873,12 +2094,33 @@
       "modality": "must"
     },
     {
+      "parts": ["may"],
+      "modality": "may",
+      "force": "warning"
+    },
+    {
+      "parts": ["can"],
+      "modality": "can",
+      "force": "warning"
+    },
+    {
+      "parts": ["might"],
+      "modality": "might",
+      "force": "warning"
+    },
+    {
+      "parts": ["could"],
+      "modality": "could",
+      "force": "warning"
+    },
+    {
       "parts": [
         "do"
       ]
     }
   ],
   "courseDurationUnits": ["min", "h", "d", "wk", "mo", "a"],
+  "dottedDoseUnitAbbreviations": { "ml": "mL" },
   "instructionDurationUnits": {
     "second": "s",
     "seconds": "s",
@@ -2140,6 +2382,9 @@
       }
     }
   },
+  "actionCoordinationConnectorAliases": {
+    "and again": "and"
+  },
   "actionCoordinationConnectors": [
     "and",
     "or"
@@ -2310,6 +2555,11 @@
     "dose",
     "doses"
   ],
+  "relativeTimeEndLeads": ["until", "through", "till", "before", "by"],
+  "nextDayModifiers": ["next", "following"],
+  "nextDayHeads": ["day", "morning", "afternoon", "evening", "night"],
+  "nextDayStartLeads": ["from", "starting"],
+  "nextDayPrepositions": ["on"],
   "treatmentPeriodStartLeads": [
     "from",
     "starting",
@@ -2458,6 +2708,10 @@
     "MORN": {
       "startHour": 0,
       "endHour": 12
+    },
+    "MORN.early": {
+      "startHour": 0,
+      "endHour": 9
     },
     "AFT": {
       "startHour": 12,

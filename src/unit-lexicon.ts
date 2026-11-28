@@ -2,9 +2,11 @@ import {
   DEFAULT_UNIT_BY_NORMALIZED_FORM,
   DEFAULT_UNIT_SYNONYMS,
   HOUSEHOLD_VOLUME_UNITS,
-  KNOWN_DOSAGE_FORMS_TO_DOSE
+  KNOWN_DOSAGE_FORMS_TO_DOSE,
+  stripUcumAnnotations
 } from "./maps";
 import unitTerminologySource from "./unit-terminology.json";
+import { FhirPeriodUnit } from "./types";
 import type {
   DoseUnitApproximation,
   DoseUnitKind,
@@ -174,7 +176,10 @@ function getDoseUnitTerminologyEntry(unit: string | undefined): DoseUnitTerminol
   if (!unit) {
     return undefined;
   }
-  return DOSE_UNIT_TERMINOLOGY_BY_KEY.get(normalizeUnitKey(unit) ?? "");
+  // Parsed unit codes are already normalized. Reuse their indexed entry
+  // directly; external mixed-case/whitespace aliases still normalize below.
+  return DOSE_UNIT_TERMINOLOGY_BY_KEY.get(unit) ??
+    DOSE_UNIT_TERMINOLOGY_BY_KEY.get(normalizeUnitKey(unit) ?? "");
 }
 
 export function getDoseUnitKind(unit: string | undefined): DoseUnitKind | undefined {
@@ -189,6 +194,7 @@ export function getDoseUnitApproximation(
     return undefined;
   }
   const terminologyEntry = getDoseUnitTerminologyEntry(unit);
+  if (!context) return terminologyEntry?.approximateQuantity;
   const override = unitApproximationOverride(unit, context) ??
     unitApproximationOverride(terminologyEntry?.unit ?? "", context);
   if (override) {
@@ -251,4 +257,58 @@ export function isDiscreteUnit(unit: string): boolean {
   }
   const semantics = getDoseUnitSemantics(unit);
   return Boolean(semantics && DISCRETE_UNIT_KINDS.has(semantics.kind));
+}
+
+/** Interpret a quantity's time unit without changing its authored representation. */
+export function getQuantityDurationUnit(
+  quantity: { code?: string; unit?: string; system?: string } | undefined
+): FhirPeriodUnit | undefined {
+  // A local code belongs to its stated terminology, even if it spells a
+  // familiar UCUM symbol. Keep unknown durations available without guessing.
+  if (quantity?.code && quantity.system && quantity.system !== "http://unitsofmeasure.org") return undefined;
+  let candidate = quantity?.code
+    ? stripUcumAnnotations(quantity.code.trim())
+    : quantity?.unit?.trim();
+  // Explicit UCUM codes are case-sensitive (S is conductance; s is time).
+  // Uncoded labels and the supported systemless shorthand remain permissive.
+  if (!quantity?.code || !quantity.system) candidate = candidate?.toLowerCase();
+  switch (candidate) {
+    case "s":
+    case "sec":
+    case "second":
+    case "seconds":
+      return FhirPeriodUnit.Second;
+    case "min":
+    case "mins":
+    case "minute":
+    case "minutes":
+      return FhirPeriodUnit.Minute;
+    case "h":
+    case "hr":
+    case "hrs":
+    case "hour":
+    case "hours":
+      return FhirPeriodUnit.Hour;
+    case "d":
+    case "day":
+    case "days":
+      return FhirPeriodUnit.Day;
+    case "wk":
+    case "wks":
+    case "week":
+    case "weeks":
+      return FhirPeriodUnit.Week;
+    case "mo":
+    case "month":
+    case "months":
+      return FhirPeriodUnit.Month;
+    case "a":
+    case "yr":
+    case "yrs":
+    case "year":
+    case "years":
+      return FhirPeriodUnit.Year;
+    default:
+      return undefined;
+  }
 }

@@ -1,8 +1,11 @@
+import { hasAdviceArgumentFacts, preservesAdviceFrameFacts } from "../advice";
+import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
+import { normalizeLoosePhraseKey } from "../utils/text";
 import { formBodySiteRestriction } from "../body-site-grammar";
+import { EVENT_TIMING_TOKENS } from "../maps";
 import { composeLocalizedRecords } from "../localization";
-import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
-import { localizeAdviceRelation } from "../relation-terminology";
-import { ACTION_COORDINATION_CONNECTOR_I18N, MEAL_TIMING_BY_RELATION, coordinationConnectorKind } from "./lexical-classes";
+import { joinLocalizedTokens } from "../locale-realization";
+import { ACTION_COORDINATION_CONNECTOR_I18N, CLOCK_LEAD_TOKENS, DOSE_TARGET_DAYPART_CLOCK_RANGES, FIXED_CLOCK_DAYPART_QUALIFICATION_RULE, MEAL_TIMING_BY_RELATION, mealInstructionWording, isNextDayScheduleRule, coordinationConnectorKind } from "./lexical-classes";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { getUnitCategory } from "../utils/units";
 import {
@@ -24,7 +27,7 @@ import {
 } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
 import { selectHpsgConstruction } from "./constructions";
-import { AdviceRelation, BodySiteSpatialRelation, FhirCoding, PrnReasonLookupRequest, RouteCode } from "../types";
+import { AdviceArgumentRole, AdviceFrame, BodySiteSpatialRelation, EventTiming, FhirCoding, FhirPeriodUnit, PrnReasonLookupRequest, RouteCode } from "../types";
 
 export interface HpsgUnificationContext {
   normalizeSiteText(text: string): string;
@@ -345,16 +348,85 @@ function mergePrnLookupRequests(
   return result.length ? result : undefined;
 }
 
+/** Keep separately selected occurrences while retaining unframed instruction deduplication. */
+export function sameInstructionSourceOccurrence(
+  left: HpsgInstructionFeature,
+  right: HpsgInstructionFeature
+): boolean {
+  const leftFrames = left.frames;
+  const rightFrames = right.frames;
+  if (!leftFrames?.length || !rightFrames?.length) return true;
+  return leftFrames.length === rightFrames.length && leftFrames.every((frame, index) =>
+    frame.span.start === rightFrames[index].span.start &&
+    frame.span.end === rightFrames[index].span.end
+  );
+}
+
+function instructionFrameRefines(rich: AdviceFrame, weak: AdviceFrame): boolean {
+  if (rich.predicate.lemma !== weak.predicate.lemma ||
+      rich.predicate.semanticClass !== weak.predicate.semanticClass ||
+      rich.force !== weak.force || !preservesAdviceFrameFacts(weak, rich)) return false;
+  for (let index = 0; index < weak.args.length; index += 1) {
+    const argument = weak.args[index];
+    let ordinal = 0;
+    for (let prior = 0; prior < index; prior += 1) {
+      if (weak.args[prior].role === argument.role) ordinal += 1;
+    }
+    let candidate;
+    for (const actual of rich.args) {
+      if (actual.role === argument.role && ordinal-- === 0) { candidate = actual; break; }
+    }
+    const value = normalizeLoosePhraseKey(argument.normalized ?? argument.text);
+    if (candidate) {
+      if (value !== normalizeLoosePhraseKey(candidate.normalized ?? candidate.text)) return false;
+      continue;
+    }
+    // The selected indexed action may resolve a provisional Object into its
+    // typed valence, but only for that same source-local nominal value.
+    const predicate = weak.predicate;
+    if (hasAdviceArgumentFacts(argument) || argument.role !== AdviceArgumentRole.Object ||
+        predicate.display || predicate.realizer ||
+        predicate.realizerConfig || predicate.codings?.length || predicate.i18n ||
+        predicate.semanticComponents?.length || !rich.predicate.display ||
+        !resolveMedicationInstructionAction(rich.predicate.lemma)?.acceptsAmount ||
+        !rich.args.some(actual => actual.role === AdviceArgumentRole.Amount && actual.quantity && actual.span &&
+          actual.span.start >= weak.span.start && actual.span.end <= weak.span.end &&
+          value === normalizeLoosePhraseKey(actual.text))) return false;
+  }
+  return true;
+}
+
+function instructionRefines(rich: HpsgInstructionFeature, weak: HpsgInstructionFeature): boolean {
+  if (rich.coding?.code || weak.coding?.code || !rich.frames?.length || !weak.frames?.length) return false;
+  for (const frame of weak.frames) {
+    let overlapping: AdviceFrame | undefined;
+    for (const candidate of rich.frames) {
+      const nested = candidate.span.start <= frame.span.start && frame.span.end <= candidate.span.end ||
+        frame.span.start <= candidate.span.start && candidate.span.end <= frame.span.end;
+      if (!nested) continue;
+      if (overlapping) return false;
+      overlapping = candidate;
+    }
+    if (!overlapping || !instructionFrameRefines(overlapping, frame)) return false;
+  }
+  return true;
+}
+
 function mergeInstructions(
   left: HpsgInstructionFeature[] | undefined,
   right: HpsgInstructionFeature[] | undefined
 ): HpsgInstructionFeature[] | undefined {
   const result: HpsgInstructionFeature[] = [];
   for (const instruction of [...(left ?? []), ...(right ?? [])]) {
+    if (result.some(candidate => instructionRefines(candidate, instruction))) continue;
+    for (let index = result.length - 1; index >= 0; index -= 1) {
+      if (instructionRefines(instruction, result[index])) result.splice(index, 1);
+    }
     if (
       !result.some((candidate) =>
         candidate.text === instruction.text &&
-        sameCoding(candidate.coding, instruction.coding)
+        sameCoding(candidate.coding, instruction.coding) &&
+        sameInstructionSourceOccurrence(candidate, instruction)
       )
     ) {
       result.push(instruction);
@@ -388,6 +460,16 @@ function mergeStructuredFeature<T>(left: T | undefined, right: T | undefined): T
   return equalStructuredValues(left, right) ? left : undefined;
 }
 
+/** Partition the selected dose range without manufacturing a scalar endpoint. */
+function divideDoseRange(
+  range: NonNullable<HpsgDoseFeature["range"]>, count: number
+): NonNullable<HpsgDoseFeature["range"]> {
+  return {
+    low: range.low === undefined ? undefined : range.low / count,
+    high: range.high === undefined ? undefined : range.high / count,
+  };
+}
+
 function mergeDose(
   left: HpsgDoseFeature | undefined,
   right: HpsgDoseFeature | undefined
@@ -401,7 +483,8 @@ function mergeDose(
       !sameOptionalScalar(left.divisionCount, right.divisionCount)) {
     return undefined;
   }
-  if (!sameOptionalScalar(left.unit, right.unit)) {
+  if (!sameOptionalScalar(left.unit, right.unit) ||
+      !sameOptionalScalar(left.comparator, right.comparator)) {
     return undefined;
   }
   if (
@@ -411,32 +494,109 @@ function mergeDose(
   ) {
     return undefined;
   }
-  let clinicalQuantity = mergeStructuredFeature(left.clinicalQuantity, right.clinicalQuantity);
-  if (!clinicalQuantity && left.clinicalQuantity && right.clinicalQuantity) return undefined;
   let value = mergeOptionalScalar(left.value, right.value);
   let unit = mergeOptionalScalar(left.unit, right.unit);
-  const divisionCount = mergeOptionalScalar(left.divisionCount, right.divisionCount);
-  if (clinicalQuantity && divisionCount !== undefined && clinicalQuantity.status !== "unsupported" &&
+  let range = mergeOptionalScalar(left.range, right.range);
+  let divisionCount = mergeOptionalScalar(left.divisionCount, right.divisionCount);
+  let clinicalQuantity = mergeStructuredFeature(left.clinicalQuantity, right.clinicalQuantity);
+  if (!clinicalQuantity && left.clinicalQuantity && right.clinicalQuantity) {
+    // A period total and its independent rate keep separate denominators.
+    // The selected division may already be resolved or arrive with the rate.
+    const rateDose = left.clinicalQuantity.representation === "rate-quantity" ? left : right;
+    const dividedDose = rateDose === left ? right : left;
+    const rate = rateDose.clinicalQuantity!, divided = dividedDose.clinicalQuantity!;
+    if (rate.representation !== "rate-quantity" || divided.representation !== "dose") return undefined;
+    if ("range" in divided.numerator) {
+      const count = divided.dividedDoseCount ?? divisionCount;
+      if (!divided.dailyTotal || divided.status === "unsupported" || count === undefined || !dividedDose.unit ||
+          !sameOptionalScalar(divided.dividedDoseCount, divisionCount) ||
+          !sameOptionalScalar(rate.dividedDoseCount, count) || rate.projectedDose || rateDose.range) return undefined;
+      if (divided.status === "resolved") {
+        if (!dividedDose.range) return undefined;
+        range = dividedDose.range;
+      } else range = divideDoseRange(divided.numerator.range, count);
+      unit = dividedDose.unit;
+      clinicalQuantity = { ...rate, dividedDoseCount: count };
+      divisionCount = undefined;
+    } else {
+      if (divided.status !== "resolved" || divided.dividedDoseCount === undefined || !divided.projectedDose ||
+          !sameOptionalScalar(rate.dividedDoseCount, divided.dividedDoseCount) ||
+          rate.projectedDose && !equalStructuredValues(rate.projectedDose, divided.projectedDose)) return undefined;
+      clinicalQuantity = { ...rate, projectedDose: divided.projectedDose,
+        dividedDoseCount: divided.dividedDoseCount };
+    }
+  }
+  if (clinicalQuantity && divisionCount !== undefined && clinicalQuantity.dividedDoseCount !== divisionCount &&
+      clinicalQuantity.status !== "unsupported" &&
       clinicalQuantity.denominators.some(term => term.dimension === "time")) {
-    const doseUnit = [clinicalQuantity.numerator.unit,
-      ...clinicalQuantity.denominators.filter(term => term.dimension !== "time").map(term => term.unit)
-    ].join("/");
-    value = clinicalQuantity.numerator.value / divisionCount;
-    unit = doseUnit;
-    clinicalQuantity = {
-      ...clinicalQuantity, representation: "dose", status: "resolved", reviewReason: undefined,
-      dividedDoseCount: divisionCount, projectedDose: { value, unit }
-    };
+    // An explicit division turns a standalone period total into doses over
+    // its authored denominator. The quantity owner distinguishes this from
+    // an explicit infusion/AT rate; a separate amount or duration keeps its
+    // independent rate unchanged, whichever daughter arrives first.
+    const dividedPeriodTotal = clinicalQuantity.representation === "rate-quantity" &&
+      (clinicalQuantity.dailyTotal || clinicalQuantity.requiresPatientWeight &&
+        !("range" in clinicalQuantity.numerator)) &&
+      !clinicalQuantity.projectedDose && value === undefined && range === undefined &&
+      !clinicalQuantity.administrationDuration;
+    const independentRate = clinicalQuantity.representation === "rate-quantity" && !dividedPeriodTotal;
+    const rangedActiveDose = range !== undefined && (independentRate ||
+      clinicalQuantity.representation === "dose-with-rate-ratio");
+    const activeDose = clinicalQuantity.projectedDose ??
+      (independentRate || rangedActiveDose
+        ? value !== undefined && unit ? {
+            value, unit, comparator: mergeOptionalScalar(left.comparator, right.comparator)
+          } : undefined
+        : clinicalQuantity.numerator);
+    if (activeDose) {
+      let doseUnit = activeDose.unit;
+      // A separate authored dose already owns its unit; patient-mass
+      // denominators on an independent infusion rate cannot qualify it.
+      if (!clinicalQuantity.projectedDose && !independentRate) {
+        for (const term of clinicalQuantity.denominators)
+          if (term.dimension !== "time") doseUnit += "/" + term.unit;
+      }
+      const projectedDose = "range" in activeDose ? undefined : {
+        value: activeDose.value / divisionCount, unit: doseUnit,
+        ...(activeDose.comparator ? { comparator: activeDose.comparator } : {})
+      };
+      if ("range" in activeDose) range = divideDoseRange(activeDose.range, divisionCount);
+      value = projectedDose?.value;
+      unit = doseUnit;
+      clinicalQuantity = {
+        ...clinicalQuantity, status: "resolved", reviewReason: undefined,
+        ...(dividedPeriodTotal ? { representation: "dose" as const } : {}),
+        // A carrier preparation also divides its separate administered volume.
+        // Its original total stays in numerator; an independent fixed flow-rate
+        // numerator stays unchanged.
+        ...(clinicalQuantity.rateNumerator ? { rateNumerator: {
+          ...clinicalQuantity.rateNumerator, value: clinicalQuantity.rateNumerator.value / divisionCount
+        } } : {}),
+        dividedDoseCount: divisionCount, projectedDose
+      };
+      if (!projectedDose) divisionCount = undefined;
+    } else if (rangedActiveDose && range && unit) {
+      // Divide the authored active range. A carrier preparation also divides
+      // its separate volume; an independent flow rate keeps its numerator.
+      range = divideDoseRange(range, divisionCount);
+      clinicalQuantity = { ...clinicalQuantity, dividedDoseCount: divisionCount,
+        ...(clinicalQuantity.rateNumerator ? { rateNumerator: {
+          ...clinicalQuantity.rateNumerator, value: clinicalQuantity.rateNumerator.value / divisionCount
+        } } : {}) };
+    }
   } else if (clinicalQuantity?.representation === "rate-quantity" && value !== undefined && unit) {
     // Independently supplied volume and rate are compatible arguments of one
     // administration. Neither may erase the other during feature unification.
-    clinicalQuantity = { ...clinicalQuantity, projectedDose: { value, unit } };
+    const comparator = mergeOptionalScalar(left.comparator, right.comparator);
+    clinicalQuantity = { ...clinicalQuantity, projectedDose: {
+      value, unit, ...(comparator ? { comparator } : {})
+    } };
   }
   return {
     attachmentClass: mergedClass,
     value,
-    range: mergeOptionalScalar(left.range, right.range),
+    range,
     unit,
+    comparator: mergeOptionalScalar(left.comparator, right.comparator),
     clinicalQuantity,
     divisionCount
   };
@@ -511,6 +671,7 @@ function mergeSchedule(
     !sameOptionalScalar(left.timingCode, right.timingCode) ||
     !sameOptionalScalar(left.timingReference, right.timingReference) ||
     !sameOptionalScalar(left.treatmentStartOffsetDays, right.treatmentStartOffsetDays) ||
+    !sameOptionalScalar(left.phaseStartReference, right.phaseStartReference) ||
     !sameOptionalScalar(left.count, right.count) ||
     !sameOptionalScalar(left.countMax, right.countMax) ||
     !sameOptionalScalar(left.duration, right.duration) ||
@@ -545,6 +706,7 @@ function mergeSchedule(
     timingCode: mergeOptionalScalar(left.timingCode, right.timingCode),
     timingReference: mergeOptionalScalar(left.timingReference, right.timingReference),
     treatmentStartOffsetDays: mergeOptionalScalar(left.treatmentStartOffsetDays, right.treatmentStartOffsetDays),
+    phaseStartReference: mergeOptionalScalar(left.phaseStartReference, right.phaseStartReference),
     count: mergeOptionalScalar(left.count, right.count),
     countMax: mergeOptionalScalar(left.countMax, right.countMax),
     duration: mergeOptionalScalar(left.duration, right.duration),
@@ -554,6 +716,7 @@ function mergeSchedule(
       left.administrationOffsetMinutes, right.administrationOffsetMinutes
     ),
     boundsStart: mergeOptionalScalar(left.boundsStart, right.boundsStart),
+    openEndedStart: left.openEndedStart ?? right.openEndedStart,
     boundsEnd: mergeOptionalScalar(left.boundsEnd, right.boundsEnd),
     frequency: mergeOptionalScalar(left.frequency, right.frequency),
     frequencyMax: mergeOptionalScalar(left.frequencyMax, right.frequencyMax),
@@ -595,6 +758,29 @@ function mergeCondition(
   return sameCondition(left, right) ? left : undefined;
 }
 
+function mergeConditionTargets(
+  left: HpsgClinicalAdjunctFeature["conditionTarget"],
+  right: HpsgClinicalAdjunctFeature["conditionTarget"]
+): HpsgClinicalAdjunctFeature["conditionTarget"] {
+  if (!left) return right;
+  if (!right || equalStructuredValues(left, right)) return left;
+  const members: NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]>[] = [];
+  const append = (target: NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]>) => {
+    if (target.members) {
+      for (const member of target.members) append(member);
+    } else if (!members.some(member => equalStructuredValues(member, target))) {
+      members.push(target);
+    }
+  };
+  append(left);
+  append(right);
+  if (members.length === 1) return members[0];
+  // Calendar restrictions belong to their individual selectors. Predicate
+  // targets still require the existing single shared condition owner.
+  return members.every(member => member.excludedDates?.length || member.excludedWeekdays?.length)
+    ? { members } : undefined;
+}
+
 function mergeClinicalAdjunct(
   left: HpsgClinicalAdjunctFeature | undefined,
   right: HpsgClinicalAdjunctFeature | undefined
@@ -605,8 +791,8 @@ function mergeClinicalAdjunct(
       !equalStructuredValues(left.condition, right.condition)) {
     return undefined;
   }
-  if (left.conditionTarget && right.conditionTarget &&
-      !equalStructuredValues(left.conditionTarget, right.conditionTarget)) return undefined;
+  const conditionTarget = mergeConditionTargets(left.conditionTarget, right.conditionTarget);
+  if (!conditionTarget && left.conditionTarget && right.conditionTarget) return undefined;
   if (left.calendarDayCondition && right.calendarDayCondition &&
       !equalStructuredValues(left.calendarDayCondition, right.calendarDayCondition)) return undefined;
   if (left.treatmentPause && right.treatmentPause &&
@@ -615,7 +801,7 @@ function mergeClinicalAdjunct(
     treatmentPause: left.treatmentPause ?? right.treatmentPause,
     condition: left.condition ?? right.condition,
     calendarDayCondition: left.calendarDayCondition ?? right.calendarDayCondition,
-    conditionTarget: left.conditionTarget ?? right.conditionTarget,
+    conditionTarget,
     excludedDates: appendUnique(left.excludedDates, right.excludedDates),
     excludedWeekdays: appendUnique(left.excludedWeekdays, right.excludedWeekdays),
     unresolved: left.unresolved || right.unresolved ? true : undefined,
@@ -646,20 +832,25 @@ function mergeScopeRequirements(
   return result.length ? result : undefined;
 }
 
-function normalizedInstruction(value: string | undefined): string {
-  return (value ?? "").toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
-}
-
 function scopedInstruction(
   condition: HpsgConditionFeature,
   target: HpsgSynsem
 ): HpsgInstructionFeature[] | undefined {
-  if (!condition.safety) return target.valence.instructions;
-  const full = normalizedInstruction(condition.fullText);
-  const targetInstructions = (target.valence.instructions ?? []).filter((instruction) => {
-    const candidate = normalizedInstruction(instruction.text);
-    return !candidate || !full.includes(candidate);
+  // The selected condition owns these action daughters regardless of their
+  // surface normalization. Keep unrelated or unframed instructions separate.
+  let hasOwnedInstruction = false;
+  const targetInstructions = (target.valence.instructions ?? []).filter(instruction => {
+    const owned = instruction.frames?.length && instruction.frames.every(frame =>
+      condition.frames.some(selected =>
+        selected.predicate.lemma === frame.predicate.lemma &&
+        selected.polarity === frame.polarity &&
+        selected.span.start <= frame.span.start && frame.span.end <= selected.span.end
+      )
+    );
+    if (owned) hasOwnedInstruction = true;
+    return !owned;
   });
+  if (!condition.safety && !hasOwnedInstruction) return target.valence.instructions;
   return mergeInstructions(
     [{ text: condition.fullText, frames: condition.frames }],
     targetInstructions
@@ -734,40 +925,69 @@ export function unifySynsem(
   }
   let schedule = mergeSchedule(left.head.schedule, right.head.schedule);
   if (schedule === undefined && left.head.schedule && right.head.schedule) return undefined;
-  // A stated daily total divided into N doses is not N repetitions of the
-  // undivided scalar. The division complement licenses a typed period total,
+  // A stated period total divided into N doses is not N repetitions of the
+  // undivided amount. The division complement licenses a typed period total,
   // and the resulting schedule represents the individual administrations.
   // Ordinary "30 mg daily" has no division complement and stays untouched.
-  // A resolved weight-based dose (mg/kg) also needs this explicit daily-total
-  // projection when "daily" is separate from the unit, not written as "/day".
-  // Preserve its patient-mass denominator and weight requirement; only append
-  // the source-backed daily period. Rates with an existing time denominator
-  // must never be divided here a second time.
+  // A resolved weight-based dose (mg/kg) needs the same projection when its
+  // period is separate from the unit. Preserve its patient-mass denominator
+  // and weight requirement; append only the already-selected schedule period.
+  // Rates with a time denominator must never be divided here a second time.
   const quantity = dose?.clinicalQuantity;
   if (dose?.divisionCount !== undefined &&
       (!quantity || (quantity.representation === "dose" && quantity.status === "resolved" &&
         !quantity.denominators.some(term => term.dimension === "time"))) &&
-      dose.value !== undefined && dose.unit &&
-      schedule?.frequency === 1 && schedule.period === 1 && schedule.periodUnit === "d") {
-    const category = getUnitCategory(dose.unit);
-    const dimension: HpsgClinicalQuantityDimension = category === "other"
-      ? (dose.unit === "[iU]" ? "biologic-activity" : "administration-unit")
-      : category;
-    const projectedDose = { value: dose.value / dose.divisionCount, unit: dose.unit };
-    dose = { ...dose, value: projectedDose.value, clinicalQuantity: {
-      ...quantity,
-      representation: "dose", status: "resolved",
-      numerator: quantity?.numerator ?? { value: dose.value, unit: dose.unit, dimension },
-      denominators: [...(quantity?.denominators ?? []), { value: 1, unit: "d", dimension: "time" }],
-      dailyTotal: true, dividedDoseCount: dose.divisionCount, projectedDose
-    } };
-    schedule = { ...schedule, frequency: dose.divisionCount, timingCode: undefined };
+      (dose.value !== undefined || dose.range !== undefined) && dose.unit &&
+      schedule && (schedule.frequency ?? 1) === 1 && schedule.period !== undefined && schedule.periodUnit) {
+    const divisionCount = dose.divisionCount;
+    if (dose.value !== undefined) {
+      const category = getUnitCategory(dose.unit);
+      const dimension: HpsgClinicalQuantityDimension = category === "other"
+        ? (dose.unit === "[iU]" ? "biologic-activity" : "administration-unit")
+        : category;
+      const projectedDose = { value: dose.value / dose.divisionCount, unit: dose.unit,
+        ...(dose.comparator ? { comparator: dose.comparator } : {}) };
+      dose = { ...dose, value: projectedDose.value, clinicalQuantity: {
+        ...quantity,
+        representation: "dose", status: "resolved",
+        numerator: quantity?.numerator ?? { value: dose.value, unit: dose.unit, dimension,
+          ...(dose.comparator ? { comparator: dose.comparator } : {}) },
+        denominators: [...(quantity?.denominators ?? []),
+          { value: schedule.period, unit: schedule.periodUnit, dimension: "time" }],
+        dailyTotal: true, dividedDoseCount: dose.divisionCount, projectedDose
+      } };
+    } else if (dose.range) {
+      // The projected range and recurrence own the completed division.
+      // Consume its complement before a later independent rate can attach.
+      dose = { ...dose, range: divideDoseRange(dose.range, divisionCount), divisionCount: undefined,
+        ...(quantity ? { clinicalQuantity: {
+          ...quantity, denominators: [...quantity.denominators,
+            { value: schedule.period, unit: schedule.periodUnit, dimension: "time" as const }],
+          dailyTotal: true, dividedDoseCount: divisionCount
+        } } : {})
+      };
+    }
+    schedule = { ...schedule, frequency: divisionCount, timingCode: undefined };
   }
-  if (dose?.clinicalQuantity?.dividedDoseCount !== undefined) {
-    const period = dose.clinicalQuantity.denominators.find(term => term.dimension === "time");
+  // An independently owned rate may already have divided the separate dose.
+  // Its count applies to the authored total's schedule, never the rate period.
+  if (dose?.clinicalQuantity?.representation === "rate-quantity" &&
+      dose.clinicalQuantity.dividedDoseCount !== undefined &&
+      (dose.clinicalQuantity.projectedDose || dose.range) && schedule &&
+      (schedule.frequency ?? 1) === 1 && schedule.period !== undefined && schedule.periodUnit) {
+    schedule = { ...schedule, frequency: dose.clinicalQuantity.dividedDoseCount, timingCode: undefined };
+  }
+  // A divided total supplies its authored period. An independent rate
+  // denominator belongs to the infusion and cannot create a recurrence.
+  const dividedQuantity = dose?.clinicalQuantity;
+  const periodTotal = dividedQuantity?.representation === "dose" ? dividedQuantity
+    : left.head.dose?.clinicalQuantity?.representation === "dose" ? left.head.dose.clinicalQuantity
+    : right.head.dose?.clinicalQuantity?.representation === "dose" ? right.head.dose.clinicalQuantity : undefined;
+  if (dividedQuantity?.dividedDoseCount !== undefined && periodTotal) {
+    const period = periodTotal.denominators.find(term => term.dimension === "time");
     if (period) {
       const dividedSchedule = {
-        frequency: dose.clinicalQuantity.dividedDoseCount,
+        frequency: dividedQuantity.dividedDoseCount,
         period: period.value,
         periodUnit: period.unit as HpsgScheduleFeature["periodUnit"]
       };
@@ -964,15 +1184,41 @@ function schedulePeriodMatches(left: HpsgScheduleFeature, right: HpsgScheduleFea
     left.periodUnit === right.periodUnit;
 }
 
-function refinedDailyCadenceSynsem(
+function hasIndependentCadenceEvidence(sign: HpsgSign): boolean {
+  return sign.evidence.some(item => item.scheduleDefault !== "weekday-recurrence" &&
+    item.scheduleFields?.some(field => field === "frequency" || field === "frequencyMax" ||
+      field === "period" || field === "periodMax" || field === "periodUnit" || field === "timingCode"));
+}
+
+function refinedDefaultCadenceSynsem(
   cadenceSign: HpsgSign,
   explicitSign: HpsgSign
 ): HpsgSynsem | undefined {
   const cadence = cadenceSign.synsem.head.schedule;
   const explicit = explicitSign.synsem.head.schedule;
-  if (!cadence || !explicit || !hasDailyFrequencyDefaultEvidence(cadenceSign)) return undefined;
-  if (cadence.frequency !== 1 || explicit.frequency === undefined || explicit.frequency === 1) return undefined;
-  if (!schedulePeriodMatches(cadence, explicit)) return undefined;
+  if (!cadence || !explicit || cadence.frequency !== 1) return undefined;
+  if (cadence.period === 1 && cadence.periodUnit === FhirPeriodUnit.Week && cadence.dayOfWeek?.length &&
+      explicit.period !== undefined && explicit.periodUnit !== undefined &&
+      (explicit.frequency !== 1 || !schedulePeriodMatches(cadence, explicit)) &&
+      cadenceSign.evidence.some(item => item.scheduleDefault === "weekday-recurrence") &&
+      !hasIndependentCadenceEvidence(cadenceSign) && hasIndependentCadenceEvidence(explicitSign)) {
+    // The weekday remains a restriction; only its inferred weekly cadence yields.
+    // Once an authored cadence owns this sign, later cadence conflicts stay conflicts.
+    return {
+      ...cadenceSign.synsem,
+      head: {
+        ...cadenceSign.synsem.head,
+        schedule: {
+          ...cadence,
+          frequency: undefined,
+          period: undefined,
+          periodUnit: undefined
+        }
+      }
+    };
+  }
+  if (explicit.frequency === undefined || explicit.frequency === 1 || !hasDailyFrequencyDefaultEvidence(cadenceSign) ||
+      !schedulePeriodMatches(cadence, explicit)) return undefined;
   return {
     ...cadenceSign.synsem,
     head: {
@@ -982,31 +1228,63 @@ function refinedDailyCadenceSynsem(
   };
 }
 
-/** A meal relation beside fixed clocks qualifies those same administrations.
+/** A meal relation or matching daypart qualifies the same fixed-clock administrations.
  * Explicit coordination or separate quantified heads retain their event union.
  * @param clockSign Daughter supplying exact clock anchors.
- * @param mealSign Daughter supplying a recognized meal-relative modifier.
+ * @param mealSign Daughter supplying a recognized meal or daypart modifier.
  * @param context Existing source ranges, used only for adjacency/coordination.
  */
-function fixedClockMealAdjunctSynsem(
-  clockSign: HpsgSign, mealSign: HpsgSign, context: HpsgUnificationContext
-): HpsgSynsem | undefined {
+function fixedClockEventAdjunctSynsem(
+  clockSign: HpsgSign, mealSign: HpsgSign, context: HpsgUnificationContext,
+  mealSynsem: HpsgSynsem = mealSign.synsem
+): { synsem: HpsgSynsem; qualifiedDaypartTokens?: number[] } | undefined {
   const clock = clockSign.synsem.head.schedule;
-  const meal = mealSign.synsem.head.schedule;
-  if (!clock?.timeOfDay?.length || clock.when?.length || !meal?.when?.length ||
-      meal.timeOfDay?.length || !context.sourceText ||
-      (clockSign.synsem.head.dose && mealSign.synsem.head.dose)) return undefined;
+  const meal = mealSynsem.head.schedule;
+  if (!clock?.timeOfDay?.length || !meal?.when?.length ||
+      !context.sourceText ||
+      (clockSign.synsem.head.dose && mealSynsem.head.dose)) return undefined;
   const isMeal = (event: NonNullable<HpsgScheduleFeature["when"]>[number]) => {
     for (const values of MEAL_TIMING_BY_RELATION.values()) {
       for (const value of values.values()) if (value === event) return true;
     }
     return false;
   };
-  if (!meal.when.every(isMeal)) return undefined;
+  const mealQualification = meal.when.every(isMeal);
+  let qualifiedDayparts: Set<EventTiming> | undefined;
+  if (meal.offset === undefined && meal.offsetMin === undefined && meal.offsetMax === undefined) {
+    for (const event of meal.when) {
+      const range = DOSE_TARGET_DAYPART_CLOCK_RANGES.get(event);
+      // A matching clock owns only its daypart qualifier. Other coordinated
+      // events, such as bedtime, retain their independent occurrences.
+      if (range && clock.timeOfDay.some(value => {
+        const hour = Number(value.slice(0, 2));
+        return hour >= range.startHour && hour < range.endHour;
+      })) (qualifiedDayparts ??= new Set()).add(event);
+    }
+  }
+  const daypartQualification = Boolean(qualifiedDayparts?.size);
+  // A composed daypart daughter may already contain an independent clock.
+  // Its local qualifier can still attach across this constituent boundary.
+  // Meal counsel retains its existing clock-free daughter requirement.
+  if (!daypartQualification && (!mealQualification || meal.timeOfDay?.length)) return undefined;
   const tokensFor = (sign: HpsgSign, field: "when" | "timeOfDay") => {
     const indices = new Set<number>();
+    let qualifyingIndices: Set<number> | undefined;
+    // When the complete typed event daughter qualifies, its evidence owns
+    // the whole phrase, including registered multiword daypart expressions.
+    if (field === "when" && qualifiedDayparts &&
+        meal.when!.some(event => !qualifiedDayparts!.has(event))) {
+      qualifyingIndices = new Set();
+      for (const token of sign.tokens)
+        if (qualifiedDayparts.has(EVENT_TIMING_TOKENS[token.canonical ?? token.lower]))
+          qualifyingIndices.add(token.index);
+    }
     for (const item of sign.evidence) {
-      if (item.scheduleFields?.indexOf(field) === -1 || !item.scheduleFields) continue;
+      // A refined NEXT daypart still owns its onset tokens, not the
+      // remaining meal modifier or a coordinator between them.
+      if (item.scheduleFields?.indexOf(field) === -1 || !item.scheduleFields ||
+          field === "when" && mealSynsem !== mealSign.synsem && isNextDayScheduleRule(item.rule)) continue;
+      if (qualifyingIndices && !item.tokenIndices.some(index => qualifyingIndices!.has(index))) continue;
       for (const index of item.tokenIndices) indices.add(index);
     }
     return sign.tokens.filter(token => indices.has(token.index));
@@ -1043,6 +1321,7 @@ function fixedClockMealAdjunctSynsem(
     for (const sign of [clockSign, mealSign]) {
       for (const evidence of sign.evidence) {
         if (!evidence.scheduleFields?.length ||
+            !(mealSynsem !== mealSign.synsem && isNextDayScheduleRule(evidence.rule)) &&
             !evidence.scheduleFields.every(field => fields.indexOf(field) >= 0)) continue;
         for (const index of evidence.tokenIndices) allowed.add(index);
       }
@@ -1051,57 +1330,108 @@ function fixedClockMealAdjunctSynsem(
       token.sourceStart >= bridgeStart && token.sourceEnd <= bridgeEnd);
     if (!bridge.length || bridge.some(token =>
       coordinationConnectorKind(token.canonical ?? token.lower) !== "unknown" ||
-      (!/^[,;:]$/u.test(token.original) && !allowed.has(token.index)))) return undefined;
+      (!/^[,;:]$/u.test(token.original) &&
+        !CLOCK_LEAD_TOKENS.has(token.canonical ?? token.lower) && !allowed.has(token.index)))) return undefined;
   }
   const text = context.sourceText(mealStart, mealEnd).trim();
   if (!text) return undefined;
-  const i18n: Record<string, string> = {};
-  if (meal.offset === undefined && meal.offsetMin === undefined && meal.offsetMax === undefined) {
-    for (const locale of ["en", "th"]) {
-      const descriptions: string[] = [];
-      for (const event of meal.when) {
-        for (const [relation, values] of MEAL_TIMING_BY_RELATION) {
-          for (const [anchor, value] of values) {
-            if (value !== event) continue;
-            const kind = relation === "before" ? AdviceRelation.Before :
-              relation === "after" ? AdviceRelation.After : AdviceRelation.With;
-            descriptions.push(joinLocalizedTokens(locale, [
-              localizeAdviceRelation(kind, locale), localizedTimeArgument(anchor, locale)
-            ]));
-          }
-        }
-      }
-      if (descriptions.length) i18n[locale] = descriptions.join(", ");
-    }
+  // The typed qualifier modifies the existing clock, adding no separate
+  // administration position. Retain its source evidence on this construction.
+  if (daypartQualification) {
+    const when = meal.when.filter(event => !qualifiedDayparts!.has(event));
+    return { synsem: { ...mealSynsem, head: { ...mealSynsem.head,
+      schedule: { ...meal, when: when.length ? when : undefined } } },
+      qualifiedDaypartTokens: meals.map(token => token.index) };
   }
-  const instruction: HpsgInstructionFeature = {
-    text: i18n.en ?? text,
-    ...(Object.keys(i18n).length ? { i18n } : {}),
-    evidence: [{ rule: "hpsg.cx.schedule.fixed-clock-meal-qualification",
-      spans: [{ start: mealStart, end: mealEnd, text }] }]
-  };
-  return {
-    ...mealSign.synsem,
-    head: { ...mealSign.synsem.head, schedule: {
+  const instruction: HpsgInstructionFeature =
+    meal.offset === undefined && meal.offsetMin === undefined && meal.offsetMax === undefined
+      ? mealInstructionWording(meal.when, text) : { text };
+  instruction.evidence = [{ rule: "hpsg.cx.schedule.fixed-clock-meal-qualification",
+    spans: [{ start: mealStart, end: mealEnd, text }] }];
+  return { synsem: {
+    ...mealSynsem,
+    head: { ...mealSynsem.head, schedule: {
       ...meal, when: undefined, offset: undefined, offsetMin: undefined, offsetMax: undefined
     } },
-    valence: { ...mealSign.synsem.valence,
-      instructions: mergeInstructions(mealSign.synsem.valence.instructions, [instruction]) }
-  };
+    valence: { ...mealSynsem.valence,
+      instructions: mergeInstructions(mealSynsem.valence.instructions, [instruction]) }
+  } };
+}
+
+/** An exact clock refines the daypart of NEXT within one administration.
+ * Its lexical evidence identifies only that inferred anchor; independently
+ * coordinated events retain their own occurrence. */
+function nextDayClockAdjunctSynsem(
+  clockSign: HpsgSign, onsetSign: HpsgSign, context: HpsgUnificationContext
+): HpsgSynsem | undefined {
+  const clock = clockSign.synsem.head.schedule, onset = onsetSign.synsem.head.schedule;
+  if (!clock?.timeOfDay?.length || !onset?.when?.length ||
+      onset.phaseStartReference !== "treatment-day-start") return undefined;
+  const nextDay = onsetSign.evidence.find(item => isNextDayScheduleRule(item.rule));
+  if (!nextDay) return undefined;
+  const onsetIndices = new Set(nextDay.tokenIndices), clockIndices = new Set<number>();
+  for (const evidence of clockSign.evidence)
+    if ((evidence.scheduleFields?.indexOf("timeOfDay") ?? -1) >= 0)
+      for (const index of evidence.tokenIndices) clockIndices.add(index);
+  let onsetStart = Infinity, onsetEnd = -Infinity, clockStart = Infinity, clockEnd = -Infinity;
+  let daypart: EventTiming | undefined;
+  for (const token of onsetSign.tokens) {
+    if (!onsetIndices.has(token.index)) continue;
+    onsetStart = Math.min(onsetStart, token.sourceStart);
+    onsetEnd = Math.max(onsetEnd, token.sourceEnd);
+    daypart ??= EVENT_TIMING_TOKENS[token.canonical ?? token.lower];
+  }
+  for (const token of clockSign.tokens) {
+    // A clock-list daughter can own a trailing connector. It belongs to the
+    // bridge, not the last clock, so it cannot hide explicit event coordination.
+    if (!clockIndices.has(token.index) ||
+        coordinationConnectorKind(token.canonical ?? token.lower) !== "unknown") continue;
+    clockStart = Math.min(clockStart, token.sourceStart);
+    clockEnd = Math.max(clockEnd, token.sourceEnd);
+  }
+  if (!daypart || clockStart === Infinity) return undefined;
+  const bridgeStart = onsetEnd <= clockStart ? onsetEnd : clockEnd;
+  const bridgeEnd = onsetEnd <= clockStart ? clockStart : onsetStart;
+  if (bridgeStart > bridgeEnd) return undefined;
+  // A coordinator can still be an uncombined daughter. Its declared lexical
+  // surface in this owned bridge retains both events in either word order.
+  if (context.sourceText &&
+      coordinationConnectorKind(context.sourceText(bridgeStart, bridgeEnd)) !== "unknown") return undefined;
+  for (const sign of [clockSign, onsetSign])
+    for (const token of sign.tokens)
+      if (token.sourceStart >= bridgeStart && token.sourceEnd <= bridgeEnd &&
+          coordinationConnectorKind(token.canonical ?? token.lower) !== "unknown") return undefined;
+  const when = onset.when.filter(event => event !== daypart);
+  return { ...onsetSign.synsem, head: { ...onsetSign.synsem.head,
+    schedule: { ...onset, when: when.length ? when : undefined } } };
 }
 
 function scheduleRefinementSynsems(
   left: HpsgSign,
   right: HpsgSign,
   context: HpsgUnificationContext
-): { left: HpsgSynsem; right: HpsgSynsem; refined: boolean } {
-  const qualifiedRight = fixedClockMealAdjunctSynsem(left, right, context);
-  if (qualifiedRight) return { left: left.synsem, right: qualifiedRight, refined: true };
-  const qualifiedLeft = fixedClockMealAdjunctSynsem(right, left, context);
-  if (qualifiedLeft) return { left: qualifiedLeft, right: right.synsem, refined: true };
-  const refinedLeft = refinedDailyCadenceSynsem(left, right);
+): { left: HpsgSynsem; right: HpsgSynsem; refined: boolean; qualifiedDaypartTokens?: number[] } {
+  const nextDayRight = nextDayClockAdjunctSynsem(left, right, context);
+  if (nextDayRight) {
+    const qualified = fixedClockEventAdjunctSynsem(left, right, context, nextDayRight);
+    return { left: left.synsem, right: qualified?.synsem ?? nextDayRight, refined: true,
+      qualifiedDaypartTokens: qualified?.qualifiedDaypartTokens };
+  }
+  const nextDayLeft = nextDayClockAdjunctSynsem(right, left, context);
+  if (nextDayLeft) {
+    const qualified = fixedClockEventAdjunctSynsem(right, left, context, nextDayLeft);
+    return { left: qualified?.synsem ?? nextDayLeft, right: right.synsem, refined: true,
+      qualifiedDaypartTokens: qualified?.qualifiedDaypartTokens };
+  }
+  const qualifiedRight = fixedClockEventAdjunctSynsem(left, right, context);
+  if (qualifiedRight) return { left: left.synsem, right: qualifiedRight.synsem, refined: true,
+    qualifiedDaypartTokens: qualifiedRight.qualifiedDaypartTokens };
+  const qualifiedLeft = fixedClockEventAdjunctSynsem(right, left, context);
+  if (qualifiedLeft) return { left: qualifiedLeft.synsem, right: right.synsem, refined: true,
+    qualifiedDaypartTokens: qualifiedLeft.qualifiedDaypartTokens };
+  const refinedLeft = refinedDefaultCadenceSynsem(left, right);
   if (refinedLeft) return { left: refinedLeft, right: right.synsem, refined: true };
-  const refinedRight = refinedDailyCadenceSynsem(right, left);
+  const refinedRight = refinedDefaultCadenceSynsem(right, left);
   if (refinedRight) return { left: left.synsem, right: refinedRight, refined: true };
   return { left: left.synsem, right: right.synsem, refined: false };
 }
@@ -1162,6 +1492,8 @@ export function combineSigns(
     evidence: [
       ...left.evidence,
       ...right.evidence,
+      ...(refinement.qualifiedDaypartTokens ? [{ rule: FIXED_CLOCK_DAYPART_QUALIFICATION_RULE,
+        tokenIndices: refinement.qualifiedDaypartTokens }] : []),
       {
         rule,
         tokenIndices

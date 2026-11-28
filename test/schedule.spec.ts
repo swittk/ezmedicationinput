@@ -1,12 +1,51 @@
 import type { MedicationCondition } from "../src/types";
 import { describe, expect, it } from "vitest";
-import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits, evaluateMedicationCondition, toDosageDetails, toFhirR5Dosages, formatSig } from "../src/index";
+import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits, evaluateMedicationCondition, toDosageDetails, toFhirR5Dosages, formatSig, formatParseBatch } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
+import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount } from "../src/dosage-course";
 import {
-  EventTiming, FhirDosage, FhirR6DosageDetails, NextDueDoseOptions,
+  EventTiming, FhirDosage, FhirR6DosageInstruction, FhirR6RelativeTime, NextDueDoseOptions,
   FhirPeriodUnit, FhirDayOfWeek
 } from "../src/types";
+import { normalizeClock } from "../src/execution/calendar";
+import { lexInput } from "../src/lexer/lex";
+import { parseClauseState } from "../src/parser";
+import { createBoundaryPlan } from "../src/regimen/planner";
+import { buildRegimenGraph } from "../src/regimen/regimen";
+import { scopeSequentialPhaseSemantics } from "../src/regimen/regimen";
+import { anchoredScheduleDurationEnd } from "../src/regimen/regimen";
+import { buildCanonicalParallelRegimen } from "../src/regimen/parallel-course";
+import { courseFromAdministrations, courseFromParallel } from "../src/canonical/compile";
+import { clauseForAdministration } from "../src/canonical/compile";
+import { courseFromPartialParallel } from "../src/canonical/compile";
+import { courseToR5 } from "../src/adapters/canonical-course";
+import { courseToR6 } from "../src/adapters/canonical-course";
+import { courseFromR6 } from "../src/adapters/canonical-course";
+import { toEzDosages } from "../src/index";
+import { fromFhir } from "../src/index";
+import { TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src/index";
+import { projectCanonicalCourse } from "../src/index";
+import { importCanonicalCourse } from "../src/index";
+import type { CanonicalAdministration } from "../src/canonical/course";
+import type { CanonicalCourse } from "../src/canonical/course";
+import type { CanonicalBoundary } from "../src/canonical/course";
+import { FhirPeriodUnit as Unit } from "../src/types";
+import { describe as round38_execution20_describe } from "vitest";
+import { expect as round38_execution20_expect } from "vitest";
+import { it as round38_execution20_it } from "vitest";
+import { calculateTotalUnits as round38_execution20_calculateTotalUnits } from "../src/index";
+import { nextDueDoses as round38_execution20_nextDueDoses } from "../src/index";
+import { parseSig as round38_execution20_parseSig } from "../src/index";
+import { toFhirR5Dosages as round38_execution20_toFhirR5Dosages } from "../src/index";
+import type { CanonicalAdministration as round38_execution20_CanonicalAdministration } from "../src/canonical/course";
+import type { CanonicalCourse as round38_execution20_CanonicalCourse } from "../src/canonical/course";
+import { FhirPeriodUnit as round38_execution20_FhirPeriodUnit } from "../src/types";
+import type { FhirDosage as round38_execution20_FhirDosage } from "../src/types";
+import type { FhirR6DosageInstruction as round38_execution20_FhirR6DosageInstruction } from "../src/types";
+import { addCalendarDaysAtClock as round38_execution20_addCalendarDaysAtClock } from "../src/execution/calendar";
+import { addCalendarMonths as round38_execution20_addCalendarMonths } from "../src/execution/calendar";
+import { getTimeParts as round38_execution20_getTimeParts } from "../src/execution/calendar";
 
 const EVENT_CLOCK = {
   [EventTiming.Morning]: "08:00",
@@ -1309,7 +1348,7 @@ describe("typed step addition without changing the baseline administrations", ()
       timing: { repeat: { timeOfDay: clocks.map(clock => clock + ":00") } },
       doseAndRate: [{ doseQuantity: { value, unit: "tab" } }]
     });
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [
         {
           end: relativeDay(7),
@@ -1350,7 +1389,7 @@ describe("typed step addition without changing the baseline administrations", ()
 
 describe("typed waking-hours baseline and independent optional bedtime administration", () => {
   it("keeps a separate optional bedtime half-tablet out of the waking-hour base condition", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [{ component: [
         {
           doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
@@ -1422,7 +1461,7 @@ describe("finite waking and bedtime phase followed by an added noon administrati
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { repeat: { when: [event] } }
     });
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [
         {
           end: relativeDay(7),
@@ -1477,7 +1516,7 @@ describe("finite waking and bedtime phase followed by an added noon administrati
 
 
 describe("waking-hours overnight shifts", () => {
-  const course: FhirR6DosageDetails = {
+  const course: FhirR6DosageInstruction = {
     step: [{ component: [{
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { repeat: {
@@ -1520,23 +1559,23 @@ describe("waking-hours overnight shifts", () => {
     }
   });
 
-  it("does not manufacture prior-day administrations when a course begins at midnight", () => {
+  it("admits overnight administrations after a midnight order", () => {
     for (const dosage of variants) {
       expect(nextDueDoses(dosage, {
         ...options,
         from: "2026-11-02T00:00:00+07:00",
         limit: 4
       })).toEqual([
+        "2026-11-02T01:00:00+07:00",
+        "2026-11-02T04:00:00+07:00",
         "2026-11-02T22:00:00+07:00",
-        "2026-11-03T01:00:00+07:00",
-        "2026-11-03T04:00:00+07:00",
-        "2026-11-03T22:00:00+07:00"
+        "2026-11-03T01:00:00+07:00"
       ]);
     }
   });
 
   it("anchors weekday filtering to the waking date rather than post-midnight clock date", () => {
-    const mondayCourse: FhirR6DosageDetails = {
+    const mondayCourse: FhirR6DosageInstruction = {
       step: [{ component: [{
         ...course.step[0].component[0],
         timing: { repeat: {
@@ -1593,7 +1632,7 @@ describe("waking-hours overnight shifts", () => {
         from: "2026-11-02T00:00:00+07:00",
         durationValue: 2,
         durationUnit: FhirPeriodUnit.Day
-      }).totalUnits).toBe(4);
+      }).totalUnits).toBe(6);
     }
   });
 });
@@ -1607,14 +1646,14 @@ describe("repeating R6 course intervals crossing cycle boundaries", () => {
     }] },
     offsetDuration: { value, unit: "d", system: "http://unitsofmeasure.org", code: "d" }
   });
-  const makeCycle = (start: number, end: number): FhirR6DosageDetails => ({
+  const makeCycle = (start: number, end: number): FhirR6DosageInstruction => ({
     repeatCycle: { value: 14, unit: "d", code: "d" },
     step: [{ start: relative(start), end: relative(end), component: [{
       timing: { repeat: { timeOfDay: ["08:00:00"] } },
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
     }] }]
   });
-  const on = (dosage: FhirR6DosageDetails | FhirDosage[], day: string) =>
+  const on = (dosage: FhirR6DosageInstruction | FhirDosage[], day: string) =>
     nextDueDoses(dosage, {
       orderedAt, from: day + "T00:00:00+07:00",
       timeZone: "Asia/Bangkok", limit: 6
@@ -1729,7 +1768,8 @@ describe("repeating R6 course intervals crossing cycle boundaries", () => {
 
   it("stops the already-supported three-cycle instruction after the third course", () => {
     const parsed = parseSig("1 tab daily for 7 days then stop for 7 days repeat for 3 cycles");
-    expect(parsed.fhirNext.step[0].count).toBe(3);
+    expect(getCourseCycleCount(parsed.fhirNext)).toBe(3);
+    expect(parsed.fhirNext.step[0].count).toBeUndefined();
     for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
       expect(nextDueDoses(dosage, { orderedAt, from: "2026-12-14T00:00:00+07:00",
         timeZone: "Asia/Bangkok", limit: 3
@@ -1742,7 +1782,7 @@ describe("repeating R6 course intervals crossing cycle boundaries", () => {
 
   it("keeps the last counted cycle's finite tail but never starts a fourth cycle", () => {
     const course = makeCycle(7, 21);
-    course.step[0].count = 3;
+    course.modifierExtension = [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 3 }];
     for (const dosage of [course, toFhirR5Dosages(course)]) {
       expect(on(dosage, "2026-12-14")).toEqual(["2026-12-14T08:00:00+07:00"]);
       expect(on(dosage, "2026-12-21")).toEqual([]);
@@ -1757,7 +1797,8 @@ describe("repeating R6 course intervals crossing cycle boundaries", () => {
       const input = "Take 1 tablet daily for 7 days" + tail + " for 3 cycles.";
       const parsed = parseSig(input);
       expect(parsed.fhirNext.repeatCycle?.value).toBe(14);
-      expect(parsed.fhirNext.step[0].count).toBe(3);
+      expect(getCourseCycleCount(parsed.fhirNext)).toBe(3);
+      expect(parsed.fhirNext.step[0].count).toBeUndefined();
       expect(parsed.fhirNext.renderedInstruction).toBe(input);
       for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
         expect(nextDueDoses(dosage, { orderedAt, from: "2026-12-14T00:00:00+07:00",
@@ -1772,7 +1813,7 @@ describe("repeating R6 course intervals crossing cycle boundaries", () => {
 
   it.each([1, 3])("shows a source-less cycle count of %i in both languages", count => {
     const course = makeCycle(0, 7);
-    course.step[0].count = count;
+    course.modifierExtension = [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: count }];
     for (const input of [course, toFhirR5Dosages(course)]) {
       expect(formatSig(input, "long", { locale: "en" }))
         .toContain(count + (count === 1 ? " cycle" : " cycles"));
@@ -1818,7 +1859,7 @@ describe("scalar R5 retained-course execution parity", () => {
       }] },
       offsetDuration: { value, unit: "d", code: "d" }
     });
-    const delayed: FhirR6DosageDetails = { step: [{
+    const delayed: FhirR6DosageInstruction = { step: [{
       start: day(14), end: day(21), component: [{
         timing: { repeat: { timeOfDay: ["08:00:00"] } },
         doseAndRate: [{ doseQuantity: { value: 0.5, unit: "tab" } }]
@@ -2291,4 +2332,4694 @@ describe("conditional counseling keeps the standing medication scheduled", () =>
       expect(parsePublicSig(source).fhir[0].asNeeded).toBe(true);
     }
   );
+});
+
+
+{
+
+const parseSig = parsePublicSig;
+
+
+const freshExecutionInput = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+const origin = "2026-01-01T00:00:00Z";
+const options = { from: origin, orderedAt: origin, timeZone: "UTC" };
+const dose = (value = 1): CanonicalAdministration => ({
+  kind: "administration", amounts: [{ quantity: { value, unit: "tab" } }],
+  schedule: { recurrence: { frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["09:00:00"] } },
+});
+const supply = (dosage: CanonicalAdministration | CanonicalCourse, days: number, extra = {}) =>
+  calculateTotalUnits({ ...options, dosage, durationValue: days, durationUnit: Unit.Day, ...extra });
+const relative = (value: number, unit = "d") => ({
+  anchor: "treatment-start" as const, displacement: { value, unit },
+});
+const capacity = (count = 2): CanonicalAdministration => ({
+  ...dose(), asNeeded: true,
+  amounts: [{ range: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } }],
+  schedule: { recurrence: { countMax: count,
+    occurrenceCap: { max: 2, period: 1, periodUnit: Unit.Day } } },
+  limits: [{ scope: "period", amount: { value: 3, unit: "tab" }, period: { value: 24, unit: "h" } }],
+});
+
+
+describe("scoped maximum quantities retain all usable information", () => {
+  it.each([false, true])("intersects exact lifetime ceilings regardless of order (%s)", reverse => {
+    const input = dose();
+    const values = reverse ? [20, 10] : [10, 20];
+    input.limits = values.map(value => ({ scope: "lifetime", amount: { value, unit: "tab" } }));
+    expect(supply(input, 30).totalUnits).toBe(10);
+    expect(supply(input, 30).explanation).not.toContain("could not be applied");
+  });
+  it.each([false, true])("keeps the known lifetime ceiling beside an incomplete quantity (%s)", reverse => {
+    const input = dose();
+    input.limits = [{ scope: "lifetime", amount: { value: 10, unit: "tab" } },
+      { scope: "lifetime", amount: { unit: "tab" } }];
+    if (reverse) input.limits!.reverse();
+    expect(supply(input, 14)).toMatchObject({ totalUnits: 10, quantityKind: "maximum" });
+    expect(supply(input, 14).explanation).toContain("could not be applied");
+    expect(input.limits).toHaveLength(2);
+  });
+  it("normalizes compatible mass ceilings and leaves incompatible information unresolved", () => {
+    const input = dose(500); input.amounts![0].quantity!.unit = "mg";
+    input.limits = [{ scope: "lifetime", amount: { value: 2, unit: "g" } },
+      { scope: "lifetime", amount: { value: 1500, unit: "mg" } },
+      { scope: "lifetime", amount: { value: 1, unit: "mL" } }];
+    expect(supply(input, 10).totalUnits).toBe(1500);
+    expect(supply(input, 10).explanation).toContain("could not be applied");
+    expect(input.limits[2].amount!.unit).toBe("mL");
+  });
+  it("uses the live supported R5 maximum after lifting", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00", "20:00:00"] } },
+      maxDosePerPeriod: [{ numerator: { value: 2, unit: "tab" }, denominator: { value: 1, unit: "d" } }] };
+    const lifted = toEzDosages([row])[0];
+    const edited = { ...lifted,
+      maxDosePerPeriod: [{ numerator: { value: 1, unit: "tab" }, denominator: { value: 1, unit: "d" } }] };
+    expect(nextDueDoses(edited, { ...options, limit: 2 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
+    ]);
+  });
+});
+
+describe("finite use capacity allocates actual feasible quantities", () => {
+  it.each([[1, 1, 2], [2, 1, 3], [2, 2, 4], [3, 2, 5], [4, 2, 6]])(
+    "%s uses over %s days has maximum %s tablets", (count, days, expected) => {
+      expect(supply(capacity(count), days).totalUnits).toBe(expected);
+    });
+  it("keeps scarce full doses feasible under a second longer rolling ceiling", () => {
+    const input = capacity(2);
+    input.limits!.push({ scope: "period", amount: { value: 4, unit: "tab" }, period: { value: 48, unit: "h" } });
+    expect(supply(input, 2).totalUnits).toBe(4);
+  });
+  it("reserves two scarce uses for unequal future capacity windows", () => {
+    const member = capacity(3); // One recorded administration leaves two uses.
+    member.limits!.push({ scope: "period", amount: { value: 3.5, unit: "tab" }, period: { value: 48, unit: "h" } });
+    // Prior2 expires from the24h cap atJan1 01:00, then the48h cap
+    // atJan2 01:00. Quantities1.5 and2 atthose times attain the3.5 cap.
+    expect(supply(member, 2, { priorDoseTimes: ["2025-12-31T01:00:00Z"] }).totalUnits).toBe(3.5);
+  });
+  it("optimizes the remaining dose after a full upper dose", () => {
+    const member = capacity(2); member.amounts![0].range!.high!.value = 3;
+    member.limits = [{ scope: "period", amount: { value: 4, unit: "tab" }, period: { value: 24, unit: "h" } },
+      { scope: "period", amount: { value: 5, unit: "tab" }, period: { value: 48, unit: "h" } }];
+    // Three atday0 plus two atday1; the48h maximum proves five is optimal.
+    expect(supply(member, 2).totalUnits).toBe(5);
+  });
+  it.each([true, false])("solves quantities jointly across separate daily slots (explicit count%s)", finite => {
+    const member = capacity(2); member.amounts![0].range!.low!.value = 1.5;
+    member.schedule!.recurrence!.occurrenceCap!.max = 1;
+    if (!finite) member.schedule!.recurrence!.countMax = undefined;
+    member.limits![0].period = { value: 48, unit: "h" };
+    expect(supply(member, 2).totalUnits).toBe(3); //1.5 on each day.
+  });
+  it("solves fractional doses jointly under a calendar-month allowance", () => {
+    const member = capacity(2); member.amounts![0].range!.low!.value = 1.5;
+    member.schedule!.recurrence!.occurrenceCap!.max = 1;
+    member.limits![0].period = { value: 1, unit: "mo" };
+    expect(supply(member, 2).totalUnits).toBe(3);
+  });
+  it("retains a feasible strict-low optimum instead of assigning a forbidden endpoint", () => {
+    const member = capacity(2); member.amounts![0].range!.low!.comparator = ">";
+    expect(supply(member, 1).totalUnits).toBe(3); //1.5+1.5, each strictly greater than one.
+  });
+  it("handles a repeated calendar release after a cutoff re-enters history", () => {
+    const member = capacity(3);
+    member.limits = [{ scope: "period", amount: { value: 4, unit: "tab" }, period: { value: 1, unit: "mo" } },
+      { scope: "period", amount: { value: 2, unit: "tab" }, period: { value: 24, unit: "h" } }];
+    const query = { ...options, dosage: member, from: "2026-03-30T07:20:00Z", orderedAt: "2026-03-30T07:20:00Z",
+      priorDoseTimes: ["2026-02-28T07:30:00Z", "2026-03-30T07:15:00Z"], durationUnit: Unit.Minute };
+    expect(calculateTotalUnits({ ...query, durationValue: 1450 }).totalUnits).toBe(0);
+    expect(calculateTotalUnits({ ...query, durationValue: 1460 }).totalUnits).toBe(2);
+  });
+  it("proves an ordinary large full-dose plan without entering bounded search", () => {
+    const member = capacity(50); member.schedule!.recurrence!.occurrenceCap!.max = 50;
+    member.limits![0].amount!.value = 100;
+    expect(supply(member, 1).totalUnits).toBe(100);
+  });
+  it("reports a supply-only exact-planning bound without altering the source", () => {
+    const member = capacity(33); member.schedule!.recurrence!.occurrenceCap!.max = 1;
+    member.amounts![0].range!.low!.value = 1.5;
+    member.limits![0].amount!.value = 65; member.limits![0].period = { value: 66, unit: "d" };
+    const source = JSON.stringify(member);
+    expect(() => supply(member, 33)).toThrow(/32-slot or 50,000-state/);
+    expect(JSON.stringify(member)).toBe(source);
+    expect(nextDueDoses(member, { ...options, limit: 1 })).toEqual([]);
+  });
+  it("retains untimed capacity in an explicitly one-civil-day phase", () => {
+    const member = capacity(2); member.schedule!.recurrence!.courseLength = { value: 1, unit: "d" };
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+      stages: [{ administrations: [member] }] };
+    expect(supply(course, 2).totalUnits).toBe(6);
+  });
+  it("does not fit two strict lower doses into one three-tablet window", () => {
+    const input = capacity(2); input.amounts![0].range!.low = { value: 1.5, comparator: ">", unit: "tab" };
+    expect(supply(input, 1).totalUnits).toBe(2);
+    expect(supply(input, 2).totalUnits).toBe(4);
+  });
+});
+
+describe("civil boundaries retain the intended instant", () => {
+  it("retains milliseconds at a zero-day treatment start", () => {
+    const member = dose(); member.schedule = { recurrence: { count: 1 } };
+    const course: CanonicalCourse = { kind: "course", stages: [{ start: relative(0), administrations: [member] }] };
+    const at = "2026-01-01T08:00:00.500Z";
+    expect(nextDueDoses(course, { from: at, orderedAt: at, timeZone: "UTC", limit: 1 }))
+      .toEqual(["2026-01-01T08:00:00.500+00:00"]);
+  });
+  it("repeats an implicit first-day start by civil days across spring DST", () => {
+    const member = dose(); member.schedule!.recurrence!.clocks = ["08:30:00"];
+    const course: CanonicalCourse = { kind: "course", stages: [{
+      count: 3, end: relative(1), administrations: [member],
+    }] };
+    const config = { from: "2026-03-07T09:00:00-05:00", orderedAt: "2026-03-07T09:00:00-05:00",
+      timeZone: "America/New_York" };
+    expect(nextDueDoses(course, { ...config, limit: 4 })).toEqual([
+      "2026-03-08T08:30:00-04:00", "2026-03-09T08:30:00-04:00", "2026-03-10T08:30:00-04:00",
+    ]);
+    expect(calculateTotalUnits({ ...config, dosage: course, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(3);
+  });
+  it("uses the first midnight of a folded date-only start", () => {
+    const input = dose(); input.schedule = { explicitEvents: ["2021-10-28T21:30:00Z"],
+      recurrence: { calendarWindow: { start: "2021-10-29", end: "2021-10-29" } } };
+    expect(nextDueDoses(input, { from: "2021-10-28T21:00:00Z", timeZone: "Asia/Amman", limit: 1 }))
+      .toEqual(["2021-10-29T00:30:00+03:00"]);
+  });
+  it.each([Unit.Day, Unit.Week])("preserves fractional seconds in a civil %s supply horizon", unit => {
+    const day = unit === Unit.Day ? "2026-01-02" : "2026-01-08";
+    const input = dose(); input.schedule = { explicitEvents: [
+      day + "T12:00:00.250Z", day + "T12:00:00.500Z",
+    ] };
+    expect(calculateTotalUnits({ ...options, dosage: input, from: "2026-01-01T12:00:00.500Z",
+      durationValue: 1, durationUnit: unit }).totalUnits).toBe(1);
+    for (const [fraction, expected] of [["250", 1], ["500", 0]] as const) {
+      const single = { ...input, schedule: { explicitEvents: [day + "T12:00:00." + fraction + "Z"] } };
+      expect(calculateTotalUnits({ ...options, dosage: single, from: "2026-01-01T12:00:00.500Z",
+        durationValue: 1, durationUnit: unit }).totalUnits).toBe(expected);
+    }
+  });
+});
+
+describe("overlapping cycles use one chronological admission stream", () => {
+  it("compares authored clocks with the inferred upper-frequency plan in a short query", () => {
+    const member = dose(); member.schedule!.recurrence = { frequency: 1, frequencyMax: 2,
+      period: 1, periodUnit: Unit.Day, clocks: ["06:00:00"], courseLength: { value: 2, unit: "d" } };
+    member.limits = [{ scope: "period", amount: { value: 4, unit: "tab" }, period: { value: 24, unit: "h" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+      stages: [{ administrations: [member] }] };
+    const query = { ...options, from: "2026-01-02T06:00:00Z", limit: 2 };
+    expect(nextDueDoses(course, query)).toEqual(["2026-01-02T06:00:00+00:00", "2026-01-02T06:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: course, durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(2);
+  });
+  it("fills the shared ranged ceiling over full days and still compares a short authored window", () => {
+    const member = dose();
+    member.amounts = [{ range: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } }];
+    member.schedule!.recurrence = { frequency: 1, frequencyMax: 2, period: 1, periodUnit: Unit.Day,
+      clocks: ["09:00:00"], courseLength: { value: 2, unit: "d" } };
+    member.limits = [{ scope: "period", amount: { value: 4, unit: "tab" }, period: { value: 1, unit: "d" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+      stages: [{ administrations: [member] }] };
+    expect(supply(course, 2).totalUnits).toBe(8);
+    expect(calculateTotalUnits({ ...options, dosage: course, from: "2026-01-02T09:00:00Z",
+      durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(4);
+  });
+  it("does not use a retained inapplicable cap to discard a larger authored plan", () => {
+    const member = dose();
+    member.amounts = [{ range: { low: { value: 2, unit: "tab" }, high: { value: 3, unit: "tab" } } }];
+    member.schedule!.recurrence = { frequency: 1, frequencyMax: 2, period: 1, periodUnit: Unit.Day,
+      clocks: ["06:00:00", "09:00:00"], courseLength: { value: 2, unit: "d" } };
+    member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 1, unit: "d" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+      stages: [{ administrations: [member] }] };
+    expect(calculateTotalUnits({ ...options, dosage: course, from: "2026-01-01T05:00:00Z",
+      durationValue: 5, durationUnit: Unit.Hour }).totalUnits).toBe(6);
+  });
+  it("detects elapsed-phase overlap first introduced by a later shortened civil cycle", () => {
+    const member = dose(); member.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: Unit.Day,
+      clocks: ["00:00:00", "00:30:00"], courseLength: { value: 24, unit: "h" } };
+    member.limits = [{ scope: "period", amount: { value: 2, unit: "tab" }, period: { value: 2, unit: "h" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+      stages: [{ administrations: [member] }] };
+    const query = { from: "2026-03-09T00:00:00-04:00", orderedAt: "2026-03-06T00:00:00-05:00",
+      timeZone: "America/New_York", limit: 2 };
+    expect(nextDueDoses(course, query)).toEqual(["2026-03-09T00:00:00-04:00", "2026-03-09T00:00:00-04:00"]);
+    expect(nextDueDoses(course, { ...query, limit: 3 })).toEqual([
+      "2026-03-09T00:00:00-04:00", "2026-03-09T00:00:00-04:00", "2026-03-10T00:00:00-04:00"
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: course, durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(2);
+  });
+});
+
+describe("historical and shifted anchors use the same recurrence as scheduling", () => {
+  it("consumes all waking-hour interval events before a late finite-count query", () => {
+    const member = dose(); member.schedule!.recurrence = { count: 4, frequency: 1,
+      period: 4, periodUnit: Unit.Hour, anchors: [EventTiming.Wake] };
+    const query = { ...options, from: "2026-01-01T17:00:00Z", eventClock: { WAKE: "08:00", HS: "20:00" }, limit: 5 };
+    expect(nextDueDoses(member, query)).toEqual(["2026-01-02T08:00:00+00:00"]);
+    expect(nextDueDoses(member, { ...query, priorCount: 2 })).toEqual([
+      "2026-01-02T08:00:00+00:00", "2026-01-02T12:00:00+00:00",
+    ]);
+    expect(supply(member, 1, query).totalUnits).toBe(1);
+  });
+  it("includes a previous dinner's positive offset after midnight", () => {
+    const member = dose(); member.schedule!.recurrence!.anchors = [EventTiming["After Dinner"]];
+    member.schedule!.recurrence!.clocks = undefined;
+    const query = { ...options, from: "2026-01-02T00:00:00Z", eventClock: { CV: "23:45" }, mealOffsets: { PCV: 30 }, limit: 1 };
+    expect(nextDueDoses(member, query)).toEqual(["2026-01-02T00:15:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: member, durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(1);
+    const counted = { ...member, schedule: { ...member.schedule,
+      recurrence: { ...member.schedule!.recurrence, count: 2 } } };
+    expect(nextDueDoses(counted, { ...query, from: "2026-01-03T00:00:00Z", limit: 2 }))
+      .toEqual(["2026-01-03T00:15:00+00:00"]);
+  });
+  it.each([1, 2])("counts a recorded historical administration once with cap %s", ceiling => {
+    const member = dose(); member.schedule!.recurrence!.count = 2;
+    member.limits = [{ scope: "period", amount: { value: ceiling, unit: "tab" }, period: { value: 24, unit: "h" } }];
+    const query = { ...options, from: "2026-01-02T00:00:00Z", priorDoseTimes: ["2026-01-01T09:00:00Z"], limit: 3 };
+    expect(nextDueDoses(member, query)).toEqual(["2026-01-02T09:00:00+00:00"]);
+    expect(nextDueDoses(member, { ...query, priorCount: 2 })).toEqual([]);
+  });
+});
+
+describe("supply context applies to actual admission", () => {
+  it("uses concentration when enforcing a mass maximum on a volume dose", () => {
+    const member = dose(5); member.amounts![0].quantity!.unit = "mL";
+    member.schedule!.recurrence = { frequency: 1, period: 6, periodUnit: Unit.Hour };
+    member.limits = [{ scope: "period", amount: { value: 200, unit: "mg" }, period: { value: 24, unit: "h" } }];
+    expect(supply(member, 1, { context: { strengthRatio: {
+      numerator: { value: 100, unit: "mg" }, denominator: { value: 5, unit: "mL" },
+    } } }).totalUnits).toBe(10);
+    expect(supply(member, 1).totalUnits).toBe(20);
+    expect(supply(member, 1).explanation).toContain("could not be applied");
+  });
+});
+
+
+describe("round23 execution families", () => {
+  const origin = "2026-01-01T00:00:00Z";
+  const options = { from: origin, orderedAt: origin, timeZone: "UTC" };
+  const relative = (value: number, unit = "d") => ({
+    anchor: "treatment-start" as const, displacement: { value, unit },
+  });
+  const dose = (value = 1): CanonicalAdministration => ({
+    kind: "administration", amounts: [{ quantity: { value, unit: "tab" } }],
+    schedule: { recurrence: { frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"] } },
+  });
+  const ranged = (low = 1.5, high = 2, maximum = 3, hours = 48): CanonicalAdministration => ({
+    ...dose(), amounts: [{ range: { low: { value: low, unit: "tab" }, high: { value: high, unit: "tab" } } }],
+    limits: [{ scope: "period", amount: { value: maximum, unit: "tab" }, period: { value: hours, unit: "h" } }],
+  });
+  const supply = (dosage: CanonicalAdministration | CanonicalCourse, days: number, extra = {}) =>
+    calculateTotalUnits({ ...options, dosage, durationValue: days, durationUnit: Unit.Day, ...extra });
+
+  describe("calendar and clock identity", () => {
+    it.each(["d", "wk", "mo", "a"])("keeps a zero-%s boundary at the second fall-back instant", unit => {
+      const member = dose(); member.schedule!.recurrence = { count: 1 };
+      const course: CanonicalCourse = { kind: "course", stages: [{ start: relative(0, unit), administrations: [member] }] };
+      const anchor = "2026-11-01T06:30:00Z";
+      const opts = { from: anchor, orderedAt: anchor, timeZone: "America/New_York", limit: 3 };
+      expect(nextDueDoses(course, opts)).toEqual(["2026-11-01T01:30:00-05:00"]);
+      expect(supply(course, 1, opts).totalUnits).toBe(1);
+    });
+    it("orders a midnight clock before the previous dinner's shifted clock", () => {
+      const member = dose(); member.schedule!.recurrence!.clocks = ["00:15:00"];
+      member.schedule!.recurrence!.anchors = [EventTiming["After Dinner"]];
+      const opts = { ...options, from: "2026-01-02T00:00:00Z", eventClock: { CV: "23:30" }, mealOffsets: { PCV: 60 } };
+      expect(nextDueDoses(member, { ...opts, limit: 1 })).toEqual(["2026-01-02T00:15:00+00:00"]);
+      expect(nextDueDoses(member, { ...opts, limit: 4 })).toEqual([
+        "2026-01-02T00:15:00+00:00", "2026-01-02T00:30:00+00:00",
+        "2026-01-03T00:15:00+00:00", "2026-01-03T00:30:00+00:00",
+      ]);
+      const capped: CanonicalAdministration = JSON.parse(JSON.stringify(member));
+      capped.schedule!.recurrence!.occurrenceCap = { max: 1, period: 1, periodUnit: Unit.Day };
+      expect(nextDueDoses(capped, { ...opts, limit: 2 })).toEqual([
+        "2026-01-02T00:15:00+00:00", "2026-01-03T00:15:00+00:00",
+      ]);
+    });
+    it("normalizes an extracted native active-window component like its complete course", () => {
+      const wire: FhirR6DosageInstruction = { step: [{ component: [{
+        timing: { repeat: { frequency: 21, period: 28, periodUnit: Unit.Day,
+          startOffset: { value: 2, unit: "d", code: "d" }, endOffset: { value: 5, unit: "d", code: "d" } } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      }] }] };
+      const batch = fromFhir(wire), native = batch.items[0].meta.canonical.administration!;
+      const anchor = "2026-11-02T00:00:00+07:00";
+      const opts = { from: anchor, orderedAt: anchor, timeZone: "Asia/Bangkok", limit: 3 };
+      for (const input of [wire, toFhirR5Dosages(wire), batch, native]) {
+        expect(nextDueDoses(input, opts)).toEqual([
+          "2026-11-04T00:00:00+07:00", "2026-11-05T00:00:00+07:00", "2026-11-06T00:00:00+07:00",
+        ]);
+        expect(calculateTotalUnits({ dosage: input, ...opts, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(0);
+        expect(calculateTotalUnits({ dosage: input, ...opts, durationValue: 28, durationUnit: Unit.Day }).totalUnits).toBe(21);
+      }
+    });
+  });
+
+  describe("quantity dimensions and scoped ceilings", () => {
+    it.each(["มิลลิลิตร", undefined])("keeps the coded rate-ratio numerator dimension with display %s", unit => {
+      const member = dose();
+      member.amounts = [{ rateRatio: { numerator: { value: 10, code: "mL", system: "http://unitsofmeasure.org", unit },
+        denominator: { value: 1, code: "h", system: "http://unitsofmeasure.org", unit: "hour" } } }];
+      member.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: Unit.Day,
+        clocks: ["08:00:00", "20:00:00"], occurrenceDuration: 1, occurrenceDurationUnit: Unit.Hour };
+      member.limits = [{ scope: "period", amount: { value: 10, unit: "mL" }, period: { value: 24, unit: "h" } }];
+      expect(nextDueDoses(member, { ...options, limit: 2 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
+      ]);
+      expect(supply(member, 1).totalUnits).toBe(10);
+    });
+    it.each(["tablet ", " TABLETS", "tab"])("applies a range maximum expressed as %s", unit => {
+      const member = ranged(1, 3); member.limits = [{ scope: "administration", amount: { value: 2, unit } }];
+      expect(supply(member, 1).totalUnits).toBe(2);
+      const lifetime = freshExecutionInput(member);
+      lifetime.limits = [{ scope: "lifetime", amount: { value: 2, unit } }];
+      expect(supply(lifetime, 3).totalUnits).toBe(2);
+    });
+    it("retains an incompatible ceiling without treating it as a numeric tablet cap", () => {
+      const member = ranged(1, 3); member.limits = [{ scope: "administration", amount: { value: 2, unit: "mL" } }];
+      expect(supply(member, 1).totalUnits).toBe(3);
+      expect(supply(member, 1).explanation).toContain("could not be applied");
+      expect(member.limits[0].amount).toEqual({ value: 2, unit: "mL" });
+    });
+  });
+
+  describe("joint ranged allocation", () => {
+    it("allocates 1.5 plus 1.5 across two authored clocks", () => {
+      const member = ranged();
+      member.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00", "20:00:00"] };
+      expect(nextDueDoses(member, { ...options, limit: 2 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00"
+      ]);
+      expect(supply(member, 1).totalUnits).toBe(3);
+    });
+    it("jointly allocates across daily repeated phases", () => {
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+        stages: [{ start: relative(0), end: relative(1), administrations: [ranged()] }] };
+      expect(supply(course, 2).totalUnits).toBe(3);
+      expect(supply(course, 4).totalUnits).toBe(6);
+    });
+    it("maximizes total quantity separately from admitting the most feasible clocks", () => {
+      // Consecutive days share a 36-hour cap; day 1 and day 3 do not.
+      // Three 1-tablet doses are feasible, but the true maximum is 2 + 0 + 2.
+      expect(supply(ranged(1, 2, 2, 36), 3).totalUnits).toBe(4);
+    });
+    it("keeps the all-slot proof for a longer alternating quantity plan", () => {
+      expect(supply(ranged(1, 2, 3, 48), 50).totalUnits).toBe(75);
+    });
+    it("intersects multiple rolling windows while allocating the timed range", () => {
+      const member = ranged();
+      member.limits!.push({ scope: "period", amount: { value: 4.5, unit: "tab" }, period: { value: 72, unit: "h" } });
+      expect(supply(member, 4).totalUnits).toBe(6);
+    });
+    it("keeps a finite counted phase completion after joint quantity allocation", () => {
+      const member = ranged(); member.schedule!.recurrence!.count = 2;
+      const successor = dose(); successor.schedule!.recurrence!.clocks = ["09:00:00"];
+      successor.schedule!.recurrence!.count = 1;
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 4, unit: "d" },
+        stages: [{ administrations: [member] }, { administrations: [successor] }] };
+      expect(supply(course, 2).totalUnits).toBe(4);
+    });
+    it("enforces strict upper endpoints on timed plans and accepts an interior optimum", () => {
+      const member = ranged(1, 2); member.amounts![0].range!.high!.comparator = "<";
+      expect(() => supply(member, 1)).toThrow(/no attainable maximum/);
+      expect(supply(member, 2).totalUnits).toBe(3);
+    });
+    it("deduplicates recorded ranged history in repeated chronological supply too", () => {
+      const member = ranged(1, 2, 6, 72); member.schedule!.recurrence!.count = 3;
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 7, unit: "d" },
+        stages: [{ start: relative(0), end: relative(7), administrations: [member] }] };
+      expect(supply(course, 1, { from: "2026-01-03T00:00:00Z",
+        priorDoseTimes: ["2026-01-01T08:00:00Z"] }).totalUnits).toBe(2);
+    });
+    it("counts an actual administration once while replaying unmatched finite opportunities", () => {
+      const member = ranged(1, 2, 6, 72); member.schedule!.recurrence!.count = 3;
+      expect(supply(member, 1, { from: "2026-01-03T00:00:00Z", priorDoseTimes: ["2026-01-01T08:00:00Z"] }).totalUnits).toBe(2);
+      expect(supply(member, 1, { from: "2026-01-03T00:00:00Z", priorCount: 1,
+        priorDoseTimes: ["2026-01-01T08:00:00Z"] }).totalUnits).toBe(2);
+      expect(supply(member, 1, { from: "2026-01-03T00:00:00Z", priorCount: 3,
+        priorDoseTimes: ["2026-01-01T08:00:00Z"] }).totalUnits).toBe(0);
+    });
+    it("distinguishes an unattained strict upper supremum from a smaller attainable maximum", () => {
+      const member = ranged(1, 2, 3, 24); member.asNeeded = true;
+      member.schedule!.recurrence = { occurrenceCap: { max: 1, period: 1, periodUnit: Unit.Day } };
+      member.amounts![0].range!.high!.comparator = "<";
+      expect(() => supply(member, 1)).toThrow(/no attainable maximum/);
+      const inclusive: CanonicalAdministration = JSON.parse(JSON.stringify(member));
+      inclusive.amounts![0].range!.high!.comparator = "<=";
+      expect(supply(inclusive, 1).totalUnits).toBe(2);
+      const periodLimited: CanonicalAdministration = JSON.parse(JSON.stringify(member));
+      periodLimited.limits![0].amount!.value = 1.5;
+      expect(supply(periodLimited, 1).totalUnits).toBe(1.5);
+      const administrationLimited: CanonicalAdministration = JSON.parse(JSON.stringify(member));
+      administrationLimited.limits = [{ scope: "administration", amount: { value: 1.5, unit: "tab" } },
+        { scope: "period", amount: { value: 3, unit: "tab" }, period: { value: 24, unit: "h" } }];
+      expect(supply(administrationLimited, 1).totalUnits).toBe(1.5);
+    });
+  });
+
+  describe("untimed capacity inside repeated windows", () => {
+    const prn = (): CanonicalAdministration => ({ ...dose(), asNeeded: true,
+      schedule: { recurrence: { occurrenceCap: { max: 1, period: 1, periodUnit: Unit.Day } } } });
+    it("retains seven daily PRN allowances without creating due times", () => {
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "wk" },
+        stages: [{ start: relative(0), end: relative(7), administrations: [prn()] }] };
+      expect(supply(course, 7)).toMatchObject({ totalUnits: 7, quantityKind: "maximum" });
+      expect(supply(course, 14).totalUnits).toBe(14);
+      expect(nextDueDoses(course, { ...options, limit: 3 })).toEqual([]);
+    });
+    it.each([undefined, 1])("allocates untimed ranges jointly across windows with countMax %s", countMax => {
+      const member = ranged(); member.asNeeded = true;
+      member.schedule!.recurrence = { occurrenceCap: { max: 1, period: 1, periodUnit: Unit.Day } };
+      member.schedule!.recurrence!.countMax = countMax;
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+        stages: [{ start: relative(0), end: relative(1), administrations: [member] }] };
+      expect(supply(course, 2).totalUnits).toBe(3);
+      const bounded: CanonicalCourse = JSON.parse(JSON.stringify(course));
+      const boundedMember = bounded.stages[0].administrations[0];
+      boundedMember.amounts![0].range!.low!.value = 1;
+      boundedMember.amounts![0].range!.high!.comparator = "<";
+      expect(supply(bounded, 2).totalUnits).toBe(3);
+      expect(nextDueDoses(bounded, { ...options, limit: 2 })).toEqual([]);
+    });
+    it("keeps each binding two-day count budget while maximizing ranged supply", () => {
+      const member = ranged(1.5, 2, 3, 96); member.asNeeded = true;
+      member.schedule!.recurrence = { countMax: 1, occurrenceCap: { max: 1, period: 1, periodUnit: Unit.Day } };
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 2, unit: "d" },
+        stages: [{ start: relative(0), end: relative(2), administrations: [member] }] };
+      const retained = JSON.stringify(course);
+      // One dose per source window: 1.5 in days 1–2 and 1.5 in days 3–4.
+      expect(supply(course, 4).totalUnits).toBe(3);
+      expect(supply(course, 2).totalUnits).toBe(2);
+      expect(supply(course, 95, { from: "2026-01-01T09:00:00Z", durationUnit: Unit.Hour,
+        priorDoseTimes: ["2026-01-01T08:00:00Z"] }).totalUnits).toBe(0);
+      expect(nextDueDoses(course, { ...options, limit: 3 })).toEqual([]);
+      expect(member.schedule?.recurrence?.countMax).toBe(1);
+      expect(JSON.stringify(course)).toBe(retained);
+    });
+    it("combines timed and untimed members in their resolved windows", () => {
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "wk" },
+        stages: [{ start: relative(0), end: relative(7), administrations: [prn(), dose(2)] }] };
+      expect(supply(course, 7)).toMatchObject({ totalUnits: 21, quantityKind: "maximum" });
+      expect(nextDueDoses(course, { ...options, limit: 2 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
+      ]);
+    });
+  });
+
+});
+
+describe("review 24: phase history, dimensions, and independent supply oracles", () => {
+  it("retains mixed-unit parallel duration ranges without a day-one cut", () => {
+    const text = "1 drop OD q2h x1d then 1 drop OD QID; 1 drop OS QID x1mo then 1 drop OS BID";
+    const plan = createBoundaryPlan(text);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, text);
+    const clauses = states.map(state => state.primaryClause);
+    clauses[0].schedule!.durationMax = 1;
+    clauses[0].schedule!.durationMaxUnit = "wk";
+    expect(buildCanonicalParallelRegimen(clauses, plan.segments, plan, graph).kind).toBe("unresolved");
+    expect(clauses[0].schedule).toMatchObject({
+      period: 2, periodUnit: "h", duration: 1, durationUnit: "d", durationMax: 1, durationMaxUnit: "wk",
+    });
+    clauses[0].schedule!.durationMaxUnit = "d";
+    const exact = buildCanonicalParallelRegimen(clauses, plan.segments, plan, graph);
+    expect(exact.kind).toBe("resolved");
+    if (exact.kind === "resolved") {
+      expect(exact.stages[0].end).toEqual({ value: 1, unit: "d" });
+      expect(exact.stages[0].components[0].clause.schedule).toMatchObject({
+        duration: 1, durationUnit: "d", durationMax: 1, durationMaxUnit: "d"
+      });
+    }
+    clauses[0].schedule!.durationIsRange = true;
+    clauses[0].schedule!.durationMax = undefined;
+    clauses[0].schedule!.durationMaxUnit = undefined;
+    expect(buildCanonicalParallelRegimen(clauses, plan.segments, plan, graph).kind).toBe("unresolved");
+    expect(clauses[0].schedule).toMatchObject({ duration: 1, durationUnit: "d", durationIsRange: true });
+  });
+  it.each(["approximate", "range"] as const)("preserves independent origins from a typed %s duration compiler input", kind => {
+    // This is the typed clause/compiler boundary, not a claim that the public
+    // grammar parses an approximate-duration surface or a native editing API.
+    const text = "1 drop OS QID x10d then 1 drop OS BID; 1 drop OD BID x7d then 1 drop OD QID";
+    const plan = createBoundaryPlan(text);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, text);
+    const clauses = states.map(state => state.primaryClause);
+    if (kind === "approximate") clauses[0].schedule!.durationComparator = "~";
+    else {
+      clauses[0].schedule!.durationMax = 14;
+      clauses[0].schedule!.durationMaxUnit = Unit.Day;
+      clauses[0].schedule!.durationIsRange = true;
+    }
+    const parallel = buildCanonicalParallelRegimen(clauses, plan.segments, plan, graph);
+    expect(parallel.kind).toBe("unresolved");
+    if (parallel.kind !== "unresolved") return;
+    const native = courseFromPartialParallel(parallel, plan.segments.map(segment => segment.text), text);
+    const projected = projectCanonicalCourse(native);
+    for (const [label, course] of [["native", native], ["R6", courseFromR6(projected.fhirNext)],
+      ["stored R5", importCanonicalCourse(JSON.parse(JSON.stringify(projected.fhir)))]] as const) {
+      const members = course.stages.reduce<CanonicalAdministration[]>((all, stage) => all.concat(stage.administrations), []);
+      const right = members.filter(a => a.target?.text === "right eye");
+      const left = members.filter(a => a.target?.text === "left eye");
+      expect(right, label).toHaveLength(2); expect(left, label).toHaveLength(2);
+      expect(right[0].schedule?.recurrence?.courseLength?.value, label).toBe(7);
+      expect(right[1].phaseOrigin?.value, label).toBe(7);
+      expect(right[1].phaseOrigin?.code ?? right[1].phaseOrigin?.unit, label).toBe("d");
+      expect(left[1].phaseStart?.anchor, label).toBe("unresolved");
+      expect(left[1].phaseOrigin, label).toBeUndefined();
+      if (kind === "approximate") {
+        const length = left[0].schedule?.recurrence?.courseLength;
+        expect(length, label).toMatchObject({ value: 10, comparator: "~" });
+        expect(length?.code ?? length?.unit, label).toBe("d");
+      } else {
+        const range = left[0].schedule?.recurrence?.courseLengthRange;
+        expect(range, label).toMatchObject({ low: { value: 10 }, high: { value: 14 } });
+        expect(range?.low?.code ?? range?.low?.unit, label).toBe("d");
+        expect(range?.high?.code ?? range?.high?.unit, label).toBe("d");
+      }
+      expect(nextDueDoses(right[1], { ...options, limit: 4 }), label).toEqual([
+        "2026-01-08T08:00:00+00:00", "2026-01-08T12:00:00+00:00",
+        "2026-01-08T16:00:00+00:00", "2026-01-08T20:00:00+00:00",
+      ]);
+      expect(() => nextDueDoses(course, options), label).toThrow(/treatment-start offset/);
+    }
+  });
+
+  const infusionRatio = (n?: "<" | "<=" | ">" | ">=", d?: "<" | "<=" | ">" | ">="): CanonicalAdministration => ({
+    ...dose(), amounts: [{ rateRatio: {
+      numerator: { value: 10, unit: "mL", comparator: n }, denominator: { value: 1, unit: "h", comparator: d },
+    } }],
+    schedule: { recurrence: { count: 1, clocks: ["09:00:00"],
+      occurrenceDuration: 2, occurrenceDurationUnit: Unit.Hour } },
+  });
+  it("uses the reciprocal denominator bound for rate-ratio supply", () => {
+    expect(supply(infusionRatio(), 1)).toMatchObject({ totalUnits: 20, unit: "mL" });
+    expect(supply(infusionRatio(undefined, ">="), 1))
+      .toMatchObject({ totalUnits: 20, unit: "mL", quantityKind: "maximum" });
+    expect(() => supply(infusionRatio(undefined, "<="), 1)).toThrow(/lower bound/);
+  });
+  it("combines only determined numerator and denominator bounds", () => {
+    expect(supply(infusionRatio("<=", ">="), 1)).toMatchObject({ totalUnits: 20, quantityKind: "maximum" });
+    expect(() => supply(infusionRatio(">=", "<="), 1)).toThrow(/lower bound/);
+    expect(() => supply(infusionRatio("<=", "<="), 1)).toThrow(/rate ratio.*bound/i);
+    expect(() => supply(infusionRatio(">=", ">="), 1)).toThrow(/rate ratio.*bound/i);
+  });
+  const loadingCourse = (count = 1): CanonicalCourse => {
+    const loading = dose(2); loading.schedule!.recurrence!.count = count;
+    return { kind: "course", stages: [{ administrations: [loading] }, { administrations: [dose()] }] };
+  };
+  it.each([undefined, 1])("opens maintenance after recorded loading (priorCount=%s)", priorCount => {
+    expect(nextDueDoses(loadingCourse(), { ...options, from: "2026-01-02T00:00:00Z",
+      priorCount, priorDoseTimes: ["2026-01-01T09:00:00Z"], limit: 2 })).toEqual([
+      "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+    ]);
+  });
+  it("uses delayed actual loading completion and keeps no-history cadence", () => {
+    expect(nextDueDoses(loadingCourse(), { ...options, from: "2026-01-04T00:00:00Z",
+      priorCount: 1, priorDoseTimes: ["2026-01-03T15:00:00Z"], limit: 2 })).toEqual([
+      "2026-01-04T09:00:00+00:00", "2026-01-05T09:00:00+00:00",
+    ]);
+    expect(nextDueDoses(loadingCourse(), { ...options, limit: 3 })).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+    ]);
+  });
+  it("finishes the remaining loading dose before maintenance", () => {
+    expect(nextDueDoses(loadingCourse(2), { ...options, from: "2026-01-02T00:00:00Z",
+      priorCount: 1, priorDoseTimes: ["2026-01-01T09:00:00Z"], limit: 3 })).toEqual([
+      "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00", "2026-01-04T09:00:00+00:00",
+    ]);
+  });
+  it("calculates an upper-duration-only infusion inside a bounded course", () => {
+    const infusion: CanonicalAdministration = { ...dose(), amounts: [{ rate: { value: 10, unit: "mL/h" } }],
+      schedule: { recurrence: { frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["09:00:00"],
+        occurrenceDurationMax: 2, occurrenceDurationUnit: Unit.Hour } } };
+    const course: CanonicalCourse = { kind: "course", stages: [
+      { start: relative(0), end: relative(2), administrations: [infusion] },
+    ] };
+    expect(supply(course, 2)).toMatchObject({ totalUnits: 40, unit: "mL", quantityKind: "maximum" });
+    expect(supply(course, 2).explanation).toContain("upper bound of the infusion-duration range");
+    const incomplete: CanonicalCourse = JSON.parse(JSON.stringify(course));
+    incomplete.stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationMax = undefined;
+    expect(() => supply(incomplete, 2)).toThrow(/infusion duration/i);
+  });
+  it.each([false, true])("counts eligible calendar doses in an explicit stage (later=%s)", later => {
+    const member = dose();
+    member.schedule!.recurrence!.calendarWindow = { start: "2026-01-01", end: "2026-01-10" };
+    member.schedule!.recurrence!.count = 2;
+    const course: CanonicalCourse = { kind: "course", stages: [
+      ...(later ? [{ start: relative(0), end: relative(1), administrations: [dose(3)] }] : []),
+      { start: relative(3), administrations: [member] },
+    ] };
+    const from = "2026-01-02T00:00:00Z";
+    expect(nextDueDoses(course, { ...options, from, limit: 5 })).toEqual([
+      "2026-01-04T09:00:00+00:00", "2026-01-05T09:00:00+00:00",
+    ]);
+    expect(supply(course, 8, { from }).totalUnits).toBe(2);
+    expect(nextDueDoses(course, { ...options, from: "2026-01-05T00:00:00Z",
+      priorDoseTimes: ["2026-01-02T09:00:00Z"], limit: 5 })).toEqual(["2026-01-05T09:00:00+00:00"]);
+  });
+  it("separates first-stage calendar cadence from explicit eligibility", () => {
+    const member = dose();
+    member.schedule!.recurrence!.calendarWindow = { start: "2026-01-01", end: "2026-01-10" };
+    const course: CanonicalCourse = { kind: "course", stages: [
+      { start: relative(3), end: relative(6), administrations: [member] },
+    ] };
+    expect(nextDueDoses(course, { ...options, limit: 10 })).toEqual([
+      "2026-01-04T09:00:00+00:00", "2026-01-05T09:00:00+00:00", "2026-01-06T09:00:00+00:00",
+    ]);
+    expect(supply(course, 7).totalUnits).toBe(3);
+    const withoutStageStart = { ...course, stages: [{ ...course.stages[0], start: undefined }] };
+    expect(nextDueDoses(withoutStageStart, { ...options, limit: 1 })).toEqual(["2026-01-01T09:00:00+00:00"]);
+  });
+  it("keeps pre-query PRN allowance but consumes recorded administrations", () => {
+    const member = dose(); member.asNeeded = true;
+    member.schedule!.recurrence!.count = 2;
+    member.schedule!.recurrence!.courseLength = { value: 7, unit: "d" };
+    member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 1, unit: "d" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+      cycleCount: 1, stages: [{ administrations: [member] }] };
+    const late = { from: "2026-01-03T00:00:00Z" };
+    expect(nextDueDoses(course, { ...options, ...late, limit: 3 })).toEqual([
+      "2026-01-03T09:00:00+00:00", "2026-01-04T09:00:00+00:00",
+    ]);
+    expect(supply(course, 2, late).totalUnits).toBe(2);
+    const recorded = { ...late, priorDoseTimes: ["2026-01-02T09:00:00Z"] };
+    expect(nextDueDoses(course, { ...options, ...recorded, limit: 3 })).toEqual(["2026-01-03T09:00:00+00:00"]);
+    expect(supply(course, 2, recorded).totalUnits).toBe(1);
+    const delayedRecorded = { ...late, priorDoseTimes: ["2026-01-01T12:00:00Z"] };
+    expect(nextDueDoses(course, { ...options, ...delayedRecorded, limit: 3 }))
+      .toEqual(["2026-01-03T09:00:00+00:00"]);
+    expect(supply(course, 2, delayedRecorded).totalUnits).toBe(1);
+    const scheduled: CanonicalCourse = { ...course, stages: [{ ...course.stages[0],
+      administrations: [{ ...member, asNeeded: false }],
+    }] };
+    expect(nextDueDoses(scheduled, { ...options, ...late, limit: 3 })).toEqual([]);
+    expect(supply(scheduled, 2, late).totalUnits).toBe(0);
+  });
+  it("opens maintenance from the recorded completion of a capped PRN loading phase", () => {
+    const loading = dose(); loading.asNeeded = true;
+    loading.schedule!.recurrence!.count = 1;
+    loading.schedule!.recurrence!.courseLength = { value: 7, unit: "d" };
+    loading.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 1, unit: "d" } }];
+    const maintenance = dose(2);
+    maintenance.schedule!.recurrence!.courseLength = { value: 3, unit: "d" };
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: [loading] }, { administrations: [maintenance] }] };
+    const history = { from: "2026-01-02T00:00:00Z", priorDoseTimes: ["2026-01-01T12:00:00Z"] };
+    expect(nextDueDoses(course, { ...options, ...history, limit: 2 })).toEqual([
+      "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+    ]);
+    expect(supply(course, 2, history).totalUnits).toBe(4);
+  });
+
+  it.each([[2, 2], [3, 1]])("rejects conflicting BID and %s per %s days in both APIs", (frequency, period) => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID" }] },
+        repeat: { frequency, period, periodUnit: Unit.Day } } };
+    const currentR6: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: row.doseAndRate, timing: row.timing,
+    }] }] };
+    for (const input of [row, currentR6]) {
+      const original = JSON.stringify(input);
+      expect(() => nextDueDoses(input, { ...options, limit: 4 })).toThrow(/timing code.*repeat/i);
+      expect(() => calculateTotalUnits({ ...options, dosage: input, durationValue: 2, durationUnit: Unit.Day }))
+        .toThrow(/timing code.*repeat/i);
+      expect(JSON.stringify(input)).toBe(original);
+    }
+  });
+  it.each(["full", "missing period", "code only"])("preserves compatible/incomplete BID clocks (%s)", variant => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ code: "BID" }] }, ...(variant === "code only" ? {} : {
+        repeat: { frequency: 2, ...(variant === "full" ? { period: 1, periodUnit: Unit.Day } : {}) },
+      }) } };
+    const currentR6: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: row.doseAndRate, timing: row.timing,
+    }] }] };
+    for (const input of [row, currentR6]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...options, limit: 2 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(4);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+  it.each([
+    { period: 24, periodUnit: Unit.Hour },
+    { period: 1, periodUnit: Unit.Week },
+    { frequency: 2, periodUnit: Unit.Hour },
+  ])("completes BID by dimensional cadence with partial repeat %j", repeat => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID" }] },
+        repeat } };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: row.doseAndRate, timing: row.timing }] }] };
+    for (const dosage of [row, r6]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(4);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each([
+    { name: "authored hours", repeat: { period: 2, periodUnit: Unit.Hour } },
+    { name: "equivalent minutes", repeat: { period: 120, periodUnit: Unit.Minute } },
+    { name: "frequency only", repeat: { frequency: 1 } },
+    { name: "period only", repeat: { period: 2 } },
+    { name: "unit only", repeat: { periodUnit: Unit.Minute } },
+  ])("keeps hourly interval meaning with $name", ({ repeat }) => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
+      code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "Q2H" }] },
+      repeat,
+    } };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: row.doseAndRate, timing: row.timing }] }] };
+    for (const dosage of [row, r6]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual([
+        "2026-01-01T00:00:00+00:00", "2026-01-01T02:00:00+00:00",
+        "2026-01-01T04:00:00+00:00", "2026-01-01T06:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(24);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each(["foreign", "conflicting"] as const)("retains the existing %s timing code boundary during cadence completion", variant => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
+      code: { coding: [{ system: variant === "foreign" ? "urn:clinic:timing"
+        : "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID" }] },
+      repeat: { period: 24, periodUnit: Unit.Hour, ...(variant === "conflicting" ? { frequency: 1 } : {}) },
+    } };
+    const before = JSON.stringify(row);
+    if (variant === "foreign") {
+      expect(nextDueDoses(row, { ...options, limit: 2 })).toEqual([
+        "2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage: row, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(2);
+    } else {
+      expect(() => nextDueDoses(row, { ...options, limit: 2 })).toThrow(/timing code.*repeat/i);
+      expect(() => calculateTotalUnits({ ...options, dosage: row, durationValue: 2, durationUnit: Unit.Day }))
+        .toThrow(/timing code.*repeat/i);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it("subtracts the upper assumed prior ranged amount from the lifetime ceiling", () => {
+    const member = dose();
+    member.amounts = [{ range: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } }];
+    member.limits = [{ scope: "lifetime", amount: { value: 6, unit: "tab" } }];
+    const before = JSON.stringify(member);
+    expect(supply(member, 10).totalUnits).toBe(6);
+    expect(supply(member, 10, { priorDoseTimes: ["2025-12-31T09:00:00Z"] }).totalUnits).toBe(4);
+    expect(supply(member, 10, { priorDoseTimes: ["2025-12-30T09:00:00Z", "2025-12-31T09:00:00Z"] }).totalUnits).toBe(2);
+    expect(JSON.stringify(member)).toBe(before);
+  });
+});
+
+describe("round 25 execution boundary and history oracles", () => {
+  it.each([1, 2])("replays %s actual PRN loading doses when no nominal clock lies inside its window", count => {
+    const loading = dose(); loading.asNeeded = true;
+    loading.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: Unit.Day,
+      clocks: ["08:00:00"], count, courseLength: { value: 23, unit: "h" } };
+    loading.limits = [{ scope: "period", amount: { value: count, unit: "tab" }, period: { value: 1, unit: "d" } }];
+    const maintenance = dose(2); maintenance.schedule!.recurrence!.clocks = ["10:00:00"];
+    maintenance.schedule!.recurrence!.courseLength = { value: 3, unit: "d" };
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: [loading] }, { administrations: [maintenance] }] };
+    const query = { orderedAt: "2026-01-01T08:30:00Z", from: "2026-01-01T09:15:00Z", timeZone: "UTC", limit: 2 };
+    const actual = count === 1 ? ["2026-01-01T09:00:00Z"] :
+      ["2026-01-01T09:00:00Z", "2026-01-01T09:05:00Z"];
+    expect(nextDueDoses(course, { ...query, priorDoseTimes: actual })).toEqual([
+      "2026-01-01T10:00:00+00:00", "2026-01-02T10:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: course, priorDoseTimes: actual,
+      durationValue: 4, durationUnit: Unit.Hour }).totalUnits).toBe(2);
+    if (count === 2)
+      expect(nextDueDoses(course, { ...query, limit: 1, priorDoseTimes: actual.slice(0, 1) }))
+        .toEqual(["2026-01-02T10:00:00+00:00"]);
+    expect(nextDueDoses(course, { ...query, limit: 1 })).toEqual(["2026-01-02T10:00:00+00:00"]);
+    expect(nextDueDoses(course, { ...query, limit: 1, priorDoseTimes: ["2026-01-01T08:00:00Z"] }))
+      .toEqual(["2026-01-02T10:00:00+00:00"]);
+  });
+
+  const shiftedBedtime = (): CanonicalAdministration => ({
+    ...dose(), schedule: { recurrence: { frequency: 1, period: 1, periodUnit: Unit.Day,
+      anchors: [EventTiming["Before Sleep"]], offset: 60 } },
+  });
+  const bedtime = { eventClock: { [EventTiming["Before Sleep"]]: "00:30" } };
+  it("counts a negative-shift administration before a later nominal anchor", () => {
+    const member = shiftedBedtime(); member.schedule!.recurrence!.count = 2;
+    const query = { orderedAt: "2026-01-01T23:00:00Z", from: "2026-01-02T00:00:00Z", timeZone: "UTC", ...bedtime };
+    expect(nextDueDoses(member, { ...query, limit: 5 })).toEqual(["2026-01-02T23:30:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: member, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(1);
+  });
+  it("includes an in-window administration whose bedtime anchor is beyond the supply end", () => {
+    const member = shiftedBedtime();
+    const query = { orderedAt: "2026-01-01T23:00:00Z", from: "2026-01-01T23:00:00Z", timeZone: "UTC", ...bedtime };
+    expect(nextDueDoses(member, { ...query, limit: 1 })).toEqual(["2026-01-01T23:30:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: member, durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(1);
+    expect(calculateTotalUnits({ ...query, dosage: member, durationValue: 30, durationUnit: Unit.Minute }).totalUnits).toBe(0);
+  });
+
+  it.each([1, 2])("finds ongoing elapsed frequency periods independently of limit %s", limit => {
+    const member = dose(); member.schedule!.recurrence = { frequency: 2, period: 24, periodUnit: Unit.Hour };
+    const query = { orderedAt: "2025-01-01T00:00:00Z", from: "2026-02-01T00:00:00Z", timeZone: "UTC" };
+    expect(nextDueDoses(member, { ...query, limit })).toEqual([
+      "2026-02-01T00:00:00+00:00", "2026-02-01T12:00:00+00:00",
+    ].slice(0, limit));
+  });
+  it("keeps calendar period lookup out of the result enumeration budget", () => {
+    const member = dose(); member.schedule!.recurrence = { frequency: 2, period: 2, periodUnit: Unit.Day };
+    expect(nextDueDoses(member, { orderedAt: "2024-01-01T08:00:00Z", from: "2026-02-01T00:00:00Z",
+      timeZone: "UTC", limit: 1 })).toEqual(["2026-02-01T08:00:00+00:00"]);
+  });
+
+  it("subtracts recorded in-phase PRN use from supply as well as due opportunities", () => {
+    const member = dose(); member.asNeeded = true; member.schedule!.recurrence!.count = 2;
+    const late = { from: "2026-01-02T00:00:00Z" };
+    const history = { ...late, priorDoseTimes: ["2026-01-01T09:00:00Z"] };
+    expect(nextDueDoses(member, { ...options, ...history, limit: 4 })).toEqual(["2026-01-02T09:00:00+00:00"]);
+    expect(supply(member, 3, history).totalUnits).toBe(1);
+    expect(supply(member, 3, late).totalUnits).toBe(2);
+    expect(supply(member, 3, { ...late, priorDoseTimes: ["2025-12-31T09:00:00Z"] }).totalUnits).toBe(2);
+    expect(supply(member, 3, { ...history, priorCount: 0 }).totalUnits).toBe(2);
+  });
+
+  it.each([false, true])("compares alternative chronological plans by quantity in a common unit (reverse %s)", reverse => {
+    const grams = dose(); grams.amounts![0].quantity = { value: 1, unit: "g" };
+    grams.schedule!.recurrence = { frequency: 1, frequencyMax: 2, period: 1, periodUnit: Unit.Day,
+      clocks: ["06:00:00"], courseLength: { value: 2, unit: "d" } };
+    grams.limits = [{ scope: "period", amount: { value: 2, unit: "g" }, period: { value: 1, unit: "d" } }];
+    const milligrams = dose(); milligrams.amounts![0].quantity = { value: 100, unit: "mg" };
+    milligrams.schedule!.recurrence!.clocks = ["06:30:00"];
+    milligrams.schedule!.recurrence!.courseLength = { value: 2, unit: "d" };
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: reverse ? [milligrams, grams] : [grams, milligrams] }] };
+    expect(calculateTotalUnits({ ...options, from: "2026-01-01T06:00:00Z",
+      dosage: course, durationValue: 1, durationUnit: Unit.Hour })).toMatchObject({ totalUnits: 1.1, unit: "g" });
+  });
+
+  it("preserves an unlowered fractional terminal duration in all parallel projections", () => {
+    const text = "1 drop OD q2h for 7 days then 1 drop OD BID for 1.5 days; 1 drop OS QID for 1 month then 1 drop OS BID";
+    const plan = createBoundaryPlan(text);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, text);
+    const clauses = states.map(state => state.primaryClause);
+    expect(clauses[1].schedule).toMatchObject({ duration: 1.5, durationUnit: "d", frequency: 2 });
+    const parallel = buildCanonicalParallelRegimen(clauses, plan.segments, plan, graph);
+    expect(parallel.kind).toBe("resolved");
+    if (parallel.kind !== "resolved") return;
+    const canonical = courseFromParallel(parallel, plan.segments.map(segment => segment.text), text);
+    const projected = projectCanonicalCourse(canonical);
+    const terminal = canonical.stages.reduce<CanonicalAdministration[]>((all, stage) => all.concat(stage.administrations), [])
+      .filter(member => member.target?.text === "right eye" &&
+        member.schedule?.recurrence?.frequency === 2 && member.phaseOrigin?.value === 7);
+    expect(terminal.length).toBeGreaterThan(0);
+    for (const member of terminal) expect(member.schedule?.recurrence?.courseLength).toMatchObject({ value: 1.5, unit: "d" });
+    for (const rows of [projected.fhir, (projected.fhirNext.step ?? []).flatMap(step => step.component)]) {
+      const terminalRows = rows.filter(row => {
+        const site = row.site;
+        const text = site && "concept" in site ? site.concept?.text : site && "text" in site ? site.text : undefined;
+        return text === "right eye" && row.timing?.repeat?.frequency === 2;
+      });
+      expect(terminalRows.length).toBe(terminal.length);
+      for (const row of terminalRows)
+        expect(row.timing?.repeat?.boundsDuration).toMatchObject({ value: 1.5, code: "d" });
+    }
+  });
+
+  it("selects the period-specific institutional frequency mapping without adding generic clocks", () => {
+    const member = dose(); member.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: Unit.Day };
+    const config = { frequencyDefaults: { byFrequency: { "freq:2/per:1d": ["07:00", "19:00"] } } };
+    expect(nextDueDoses(member, { ...options, ...config, limit: 2 })).toEqual([
+      "2026-01-01T07:00:00+00:00", "2026-01-01T19:00:00+00:00",
+    ]);
+    expect(supply(member, 1, config).totalUnits).toBe(2);
+    expect(nextDueDoses(member, { ...options, limit: 2 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",
+    ]);
+  });
+
+  it.each(["ordinary", "repeated", "explicit end"] as const)("gives independently delayed members their full authored course (%s)", mode => {
+    const early = dose(); early.schedule!.recurrence!.courseLength = { value: 7, unit: "d" };
+    const late = dose(2); late.delayMinutes = 2 * 1440;
+    late.schedule!.recurrence!.courseLength = { value: 7, unit: "d" };
+    if (mode === "repeated") {
+      early.limits = [{ scope: "period", amount: { value: 100, unit: "tab" }, period: { value: 1, unit: "d" } }];
+      late.limits = early.limits;
+    }
+    const course = courseFromAdministrations([early, late], "");
+    expect(course.stages[0].end).toBeUndefined();
+    if (mode === "explicit end") course.stages[0].end = relative(4);
+    if (mode === "repeated") {
+      course.cycleInterval = { value: 7, unit: "d" }; course.cycleCount = 1;
+    }
+    const expected = Array.from({ length: mode === "explicit end" ? 4 : 9 }, (_, i) => {
+      const at = "2026-01-" + String(i + 1).padStart(2, "0") + "T09:00:00+00:00";
+      return [...(i < 7 ? [at] : []), ...(i >= 2 ? [at] : [])];
+    }).flat();
+    for (const [label, input] of [["canonical", course], ["R5", courseToR5(course)], ["R6", courseToR6(course)]] as const) {
+      expect(nextDueDoses(input, { ...options, limit: 20 }), label).toEqual(expected);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 14, durationUnit: Unit.Day }).totalUnits, label).toBe(mode === "explicit end" ? 8 : 21);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 7, durationUnit: Unit.Day }).totalUnits, label).toBe(mode === "explicit end" ? 8 : 17);
+    }
+  });
+
+  it.each(["lower", "exact", "upper"] as const)("uses only an actual upper course boundary (%s)", kind => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00"],
+        ...(kind === "exact" ? { boundsDuration: { value: 5, code: "d" } }
+          : { boundsRange: { [kind === "lower" ? "low" : "high"]: { value: 5, code: "d" } } }),
+      } } };
+    const original = JSON.stringify(row);
+    expect(calculateTotalUnits({ ...options, dosage: row, durationValue: 7, durationUnit: Unit.Day }).totalUnits)
+      .toBe(kind === "lower" ? 7 : 5);
+    expect(nextDueDoses(row, { ...options, from: "2026-01-06T00:00:00Z", limit: 1 }))
+      .toEqual(kind === "lower" ? ["2026-01-06T09:00:00+00:00"] : []);
+    expect(JSON.stringify(row)).toBe(original);
+  });
+  it.each(["<", "<=", ">", ">="] as const)("refuses due timestamps for an unresolved %s cap period while explaining supply", comparator => {
+    const member = dose();
+    member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" },
+      period: { value: 2, unit: "d", comparator } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 7, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: [{ ...member, schedule: { recurrence: {
+        ...member.schedule!.recurrence, courseLength: { value: 4, unit: "d" },
+      } } }] }] };
+    for (const input of [member, course]) {
+      const original = JSON.stringify(input);
+      // Even if shared caller options also contain a supply horizon, the due
+      // API cannot silently return a schedule with an unresolved ceiling.
+      const query = { ...options, durationValue: 4, durationUnit: Unit.Day, limit: 4 };
+      expect(() => nextDueDoses(input, query))
+        .toThrow(expect.objectContaining({ code: "unresolved-cap-period" }));
+      expect(supply(input, 4)).toMatchObject({ totalUnits: 4, quantityKind: "maximum",
+        explanation: expect.stringContaining("could not be applied") });
+      expect(JSON.stringify(input)).toBe(original);
+    }
+  });
+
+  it.each([undefined, "~"] as const)("uses the nominal exact/approximate cap period (%s)", comparator => {
+    const member = dose();
+    member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" },
+      period: { value: 2, unit: "d", ...(comparator ? { comparator } : {}) } }];
+    expect(nextDueDoses(member, { ...options, limit: 2 })).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+    ]);
+    expect(supply(member, 4).totalUnits).toBe(2);
+  });
+
+});
+
+
+describe("round 26 execution admission and calendar oracles", () => {
+  it.each([undefined, true, false])("preserves an R6 PRN indication separately from its flag (%s)", flag => {
+    const wire: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      asNeededFor: [{ text: "pain" }], ...(flag === undefined ? {} : { asNeeded: flag }),
+    }] }] };
+    const before = JSON.stringify(wire);
+    const imported = fromFhir(wire, { realizationMode: "normalized", locale: "en" });
+    const clause = clauseForAdministration(courseFromR6(wire, true).stages[0].administrations[0]);
+    if (flag === false) {
+      expect(clause.prn).toBeUndefined();
+      expect(imported.longText).not.toMatch(/as needed/i);
+    } else {
+      expect(clause.prn).toMatchObject({ enabled: true, reasons: [{ text: "pain" }] });
+      expect(imported.longText).toMatch(/as needed.*pain/i);
+    }
+    expect(imported.fhirNext.step![0].component[0].asNeeded).toBe(flag);
+    expect(imported.fhirNext.step![0].component[0].asNeededFor).toEqual([{ text: "pain" }]);
+    expect(JSON.stringify(wire)).toBe(before);
+  });
+
+  it.each([
+    [undefined, true, true], [true, false, true], [false, true, false], [undefined, false, false],
+  ] as const)("uses reason-only PRN semantics without decoded source context (%s/%s)", (flag, reason, prn) => {
+    const wire: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { count: 2, frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00"] } },
+      ...(reason ? { asNeededFor: [{ text: "pain" }] } : {}), ...(flag === undefined ? {} : { asNeeded: flag }),
+    }] }] };
+    const query = { ...options, from: "2026-01-03T00:00:00Z", limit: 4 };
+    const native = courseFromR6(wire);
+    expect(native.stages[0].administrations[0].syntax).toBeUndefined();
+    for (const input of [wire, native]) {
+      expect(nextDueDoses(input, query)).toEqual(prn ? [
+        "2026-01-03T09:00:00+00:00", "2026-01-04T09:00:00+00:00",
+      ] : []);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: prn ? 2 : 0, quantityKind: prn ? "maximum" : "scheduled" });
+      if (prn) {
+        const history = { ...query, priorDoseTimes: ["2026-01-01T09:00:00Z"] };
+        expect(nextDueDoses(input, history)).toEqual(["2026-01-03T09:00:00+00:00"]);
+        expect(calculateTotalUnits({ ...history, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      }
+    }
+    expect(courseToR6(native).step![0].component[0].asNeeded).toBe(flag);
+  });
+
+  it.each([undefined, "~", ">=", "<="] as const)("only derives an exact anchored date for an exact duration (%s)", comparator => {
+    const schedule = { boundsStart: "2026-12-01", duration: 7, durationUnit: Unit.Day,
+      durationComparator: comparator };
+    expect(anchoredScheduleDurationEnd(schedule)).toBe(comparator ? undefined : "2026-12-07");
+    expect(schedule).toEqual({ boundsStart: "2026-12-01", duration: 7,
+      durationUnit: Unit.Day, durationComparator: comparator });
+  });
+
+  it("does not turn a minimum-only or mixed-unit duration range into an exact end", () => {
+    const lower = { boundsStart: "2026-12-01", duration: 1, durationUnit: Unit.Week, durationIsRange: true };
+    expect(anchoredScheduleDurationEnd(lower)).toBeUndefined();
+    expect(anchoredScheduleDurationEnd({ ...lower, durationMax: 1, durationMaxUnit: Unit.Month })).toBeUndefined();
+    expect(anchoredScheduleDurationEnd({ ...lower, durationMax: 1, durationMaxUnit: Unit.Week })).toBe("2026-12-07");
+  });
+
+  it("uses the absolute member start clock for its civil-day duration cap", () => {
+    const member = dose();
+    member.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"],
+      calendarWindow: { start: "2026-01-01T09:00:00Z" }, courseLength: { value: 1, unit: "d" } };
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 2, unit: "d" }, cycleCount: 1,
+      stages: [{ start: relative(0), administrations: [member] }] };
+    expect(nextDueDoses(course, { ...options, limit: 3 })).toEqual(["2026-01-02T08:00:00+00:00"]);
+    expect(supply(course, 2).totalUnits).toBe(1);
+    expect(supply(course, 1).totalUnits).toBe(0);
+  });
+
+  it.each(["quantity", "range", "rate", "ratio"] as const)("admits the resolved per-kg %s amount before shared cap accounting", kind => {
+    const member = dose();
+    member.amounts = kind === "quantity" ? [{ quantity: { value: 1, unit: "mg/kg" } }] :
+      kind === "range" ? [{ range: { low: { value: 0.5, unit: "mg/kg" }, high: { value: 1, unit: "mg/kg" } } }] :
+      kind === "rate" ? [{ rate: { value: 0.5, unit: "mg/kg/h" } }] :
+      [{ rateRatio: { numerator: { value: 1, unit: "mg/kg" }, denominator: { value: 2, unit: "h" } } }];
+    member.schedule!.recurrence!.courseLength = { value: 2, unit: "d" };
+    if (kind === "rate" || kind === "ratio") {
+      member.schedule!.recurrence!.occurrenceDuration = 2;
+      member.schedule!.recurrence!.occurrenceDurationUnit = Unit.Hour;
+    }
+    member.limits = [{ scope: "period", amount: { value: 100, unit: "mg" }, period: { value: 24, unit: "h" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+      stages: [{ administrations: [member] }] };
+    const before = JSON.stringify(course);
+    // At 70 kg the range is 35–70 mg. The independent maximum is
+    // 70 + (35 + 65) + (35 + 65) = 270 mg under each 100 mg/24h cap.
+    expect(supply(course, 3, { patientWeightKg: 70 })).toMatchObject({
+      totalUnits: kind === "range" ? 270 : 210, unit: "mg",
+    });
+    expect(supply(course, 3).unit).toBe("mg/kg");
+    expect(JSON.stringify(course)).toBe(before);
+  });
+
+  it("requires dated history when a count cannot identify its repeated-phase quota", () => {
+    const member = dose(); member.asNeeded = true; member.schedule!.recurrence!.count = 2;
+    member.limits = [{ scope: "period", amount: { value: 2, unit: "tab" }, period: { value: 1, unit: "d" } }];
+    const course: CanonicalCourse = { kind: "course", stages: [{ count: 2, administrations: [member] }] };
+    const query = { ...options, from: "2026-01-02T00:00:00Z", limit: 4 };
+    const original = JSON.stringify(course);
+    expect(() => nextDueDoses(course, { ...query, priorCount: 1 })).toThrow(expect.objectContaining({
+      code: "repeated-course-history-needs-timestamps",
+    }));
+    expect(() => supply(course, 4, { ...query, priorCount: 1 })).toThrow(expect.objectContaining({
+      code: "repeated-course-history-needs-timestamps",
+    }));
+    expect(JSON.stringify(course)).toBe(original);
+    expect(nextDueDoses(course, { ...query, priorDoseTimes: ["2026-01-01T09:00:00Z"] })).toEqual([
+      "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00", "2026-01-04T09:00:00+00:00",
+    ]);
+    expect(nextDueDoses(member, { ...query, priorCount: 1 })).toEqual(["2026-01-02T09:00:00+00:00"]);
+    expect(nextDueDoses(course, { ...options, priorCount: 0, limit: 2 })).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00",
+    ]);
+  });
+
+
+  it("counts PRN history only after the authored calendar start", () => {
+    const member = dose(); member.asNeeded = true;
+    member.schedule!.recurrence!.count = 1;
+    member.schedule!.recurrence!.calendarWindow = { start: "2026-01-03" };
+    const query = { ...options, from: "2026-01-03T00:00:00Z", priorDoseTimes: ["2026-01-02T09:00:00Z"] };
+    expect(nextDueDoses(member, { ...query, limit: 3 })).toEqual(["2026-01-03T09:00:00+00:00"]);
+    expect(supply(member, 2, query).totalUnits).toBe(1);
+    expect(nextDueDoses(member, { ...query, from: "2026-01-04T00:00:00Z",
+      priorDoseTimes: ["2026-01-03T09:00:00Z"], limit: 3 })).toEqual([]);
+  });
+
+  it("finds the monthly allowance before a target skipped-midnight cutoff retreats", () => {
+    const member: CanonicalAdministration = { ...dose(),
+      schedule: { recurrence: { occurrenceCap: { max: 1, period: 1, periodUnit: Unit.Day } } },
+      limits: [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 1, unit: "mo" } }],
+    };
+    expect(calculateTotalUnits({ dosage: member, from: "2026-10-06T00:10:00-03:00",
+      orderedAt: "2026-10-06T00:10:00-03:00", timeZone: "America/Santiago",
+      durationValue: 1, durationUnit: Unit.Hour,
+      priorDoseTimes: ["2026-09-06T01:20:00-03:00"],
+    }).totalUnits).toBe(1);
+  });
+
+  it.each([1, 4])("orders distributed shifted-clock administrations before spending limit %s", limit => {
+    const member = dose();
+    member.schedule!.recurrence = { frequency: 4, period: 2, periodUnit: Unit.Day,
+      clocks: ["00:15:00"], anchors: [EventTiming["After Dinner"]] };
+    const query = { ...options, from: "2026-01-02T00:00:00Z", eventClock: { CV: "23:30" }, mealOffsets: { PCV: 60 } };
+    expect(nextDueDoses(member, { ...query, limit })).toEqual([
+      "2026-01-02T00:15:00+00:00", "2026-01-02T00:30:00+00:00",
+      "2026-01-03T00:15:00+00:00", "2026-01-03T00:30:00+00:00",
+    ].slice(0, limit));
+    const capped = freshExecutionInput(member);
+    capped.schedule!.recurrence!.occurrenceCap = { max: 1, period: 1, periodUnit: Unit.Day };
+    expect(nextDueDoses(capped, { ...query, limit: 2 })).toEqual([
+      "2026-01-02T00:15:00+00:00", "2026-01-03T00:15:00+00:00",
+    ]);
+  });
+  it("merges negative distributed shifts with later same-day clocks", () => {
+    const member = dose(); member.schedule!.recurrence = { frequency: 4, period: 2, periodUnit: Unit.Day,
+      clocks: ["23:45:00"], anchors: [EventTiming["Before Sleep"]], offset: 60 };
+    expect(nextDueDoses(member, { ...options, from: "2026-01-02T00:00:00Z",
+      eventClock: { [EventTiming["Before Sleep"]]: "00:30" }, limit: 4 })).toEqual([
+      "2026-01-02T23:30:00+00:00", "2026-01-02T23:45:00+00:00",
+      "2026-01-03T23:30:00+00:00", "2026-01-03T23:45:00+00:00",
+    ]);
+  });
+});
+
+
+describe("round 26 independent track execution", () => {
+  it("keeps four-week and one-calendar-month transitions independent", () => {
+    const text = "1 drop OD q2h x4wk then qid; 1 drop OS qid x1mo then bid";
+    const parsed = parseSig(text);
+    const query = { ...options, from: "2026-01-29T00:00:00Z" };
+    for (const input of [parsed, parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      // Jan29–31: OD4 + OS4 daily; Feb1–2: OD4 + OS2 daily.
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 5, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 36, unit: "drop" });
+      const native = input === parsed ? parsed.meta.canonical.course! : importCanonicalCourse(input);
+      const members = native.stages.reduce<CanonicalAdministration[]>((all, stage) => all.concat(stage.administrations), []);
+      const right = members.find(a => a.target?.text === "right eye" && a.schedule?.recurrence?.frequency === 4)!;
+      const left = members.find(a => a.target?.text === "left eye" && a.schedule?.recurrence?.frequency === 2)!;
+      expect(right).toBeDefined(); expect(left).toBeDefined();
+      expect(nextDueDoses(right, { ...options, limit: 4 })).toEqual([
+        "2026-01-29T08:00:00+00:00", "2026-01-29T12:00:00+00:00",
+        "2026-01-29T16:00:00+00:00", "2026-01-29T20:00:00+00:00",
+      ]);
+      expect(nextDueDoses(left, { ...options, limit: 2 })).toEqual([
+        "2026-02-01T08:00:00+00:00", "2026-02-01T20:00:00+00:00",
+      ]);
+      expect(supply(right, 5, query).totalUnits).toBe(20);
+      expect(supply(left, 5, query).totalUnits).toBe(4);
+    }
+  });
+
+  it.each([false, true])("keeps an unresolved member boundary distinct from a malformed numeric origin (calendar bound %s)", calendar => {
+    const member: CanonicalAdministration = { ...dose(),
+      phaseStart: { anchor: "unresolved", description: "after the left-eye initial course" } };
+    if (calendar) member.schedule!.recurrence!.calendarWindow = { start: "2026-01-01" };
+    const before = JSON.stringify(member);
+    expect(() => nextDueDoses(member, options)).toThrow(/treatment-start offset/);
+    expect(() => supply(member, 2)).toThrow(/treatment-start offset/);
+    expect(member.phaseOriginIssue).toBeUndefined();
+    expect(JSON.stringify(member)).toBe(before);
+  });
+});
+
+
+describe("round 26 relative boundary precision", () => {
+  it.each(["member", "step start", "step end"] as const)("requires an exact resolved instant for a %s boundary", role => {
+    const configured = (boundary: CanonicalBoundary): CanonicalAdministration | CanonicalCourse =>
+      role === "member" ? { ...dose(), phaseStart: boundary } : {
+        kind: "course", stages: [{ administrations: [dose()],
+          ...(role === "step start" ? { start: boundary } : { end: boundary }) }],
+      };
+    for (const range of [
+      { low: { value: 7, unit: "d" }, high: { value: 10, unit: "d" } },
+      { low: { value: 7, unit: "d" } }, { high: { value: 10, unit: "d" } },
+    ]) {
+      const input = configured({ anchor: "treatment-start", displacementRange: range });
+      const before = JSON.stringify(input);
+      expect(() => nextDueDoses(input, options)).toThrow(/RelativeTime.*range.*treatment-start offset/);
+      expect(() => supply(input, 14)).toThrow(/RelativeTime.*range.*treatment-start offset/);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    for (const boundary of [
+      { anchor: "treatment-start", displacement: { value: 7, unit: "d" } },
+      { anchor: "treatment-start", displacementRange: { low: { value: 7, unit: "d" }, high: { value: 7, unit: "d" } } },
+      { anchor: "treatment-start", displacementRange: { low: { value: 1, unit: "wk" }, high: { value: 7, unit: "d" } } },
+    ] satisfies CanonicalBoundary[]) {
+      const input = configured(boundary);
+      expect(nextDueDoses(input, { ...options,
+        from: role === "step end" ? "2026-01-07T00:00:00Z" : origin, limit: 2 })).toEqual(
+          role === "step end" ? ["2026-01-07T09:00:00+00:00"] : [
+            "2026-01-08T09:00:00+00:00", "2026-01-09T09:00:00+00:00",
+          ]);
+      expect(supply(input, 10).totalUnits).toBe(role === "step end" ? 7 : 3);
+    }
+  });
+
+  it("compares calendar endpoints at the actual anchor instead of averaging months", () => {
+    const member: CanonicalAdministration = { ...dose(), phaseStart: { anchor: "treatment-start",
+      displacementRange: { low: { value: 1, unit: "mo" }, high: { value: 28, unit: "d" } } } };
+    const february = { ...options, orderedAt: "2026-02-01T00:00:00Z", from: "2026-02-01T00:00:00Z" };
+    expect(nextDueDoses(member, { ...february, limit: 1 })).toEqual(["2026-03-01T09:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...february, dosage: member, durationValue: 29, durationUnit: Unit.Day }).totalUnits).toBe(1);
+    expect(() => nextDueDoses(member, options)).toThrow(/RelativeTime.*range.*treatment-start offset/);
+    expect(() => supply(member, 35)).toThrow(/RelativeTime.*range.*treatment-start offset/);
+  });
+});
+
+describe("round27 execution identity and measurement oracles", () => {
+  it("retains inferred civil-frequency milliseconds before period fences", () => {
+    const member = dose();
+    member.schedule = { recurrence: { frequency: 2, period: 2, periodUnit: Unit.Day } };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [member] }] };
+    const anchor = "2026-01-01T08:00:00.500Z";
+    const query = { from: anchor, orderedAt: anchor, timeZone: "UTC", limit: 4 };
+    for (const input of [course, courseToR5(course), courseToR6(course)]) {
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-01-01T08:00:00.500+00:00", "2026-01-02T20:00:00.500+00:00",
+        "2026-01-03T08:00:00.500+00:00", "2026-01-04T20:00:00.500+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(2);
+    }
+    // No institution clock list exists for 42/21d: the source-clock
+    // distributor must retain the same fraction on both daily slots.
+    const dense = dose();
+    dense.schedule!.recurrence = { frequency: 42, period: 21, periodUnit: Unit.Day };
+    expect(nextDueDoses(dense, query)).toEqual([
+      "2026-01-01T08:00:00.500+00:00", "2026-01-01T20:00:00.500+00:00",
+      "2026-01-02T08:00:00.500+00:00", "2026-01-02T20:00:00.500+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: dense, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(4);
+    // A fractional civil unit uses elapsed distribution. Twelve hours
+    // divided by seven produces 6171428 ms and 12342857 ms offsets after flooring.
+    const fractional = dose();
+    fractional.schedule!.recurrence = { frequency: 7, period: 0.5, periodUnit: Unit.Day };
+    expect(nextDueDoses(fractional, { ...query, limit: 3 })).toEqual([
+      "2026-01-01T08:00:00.500+00:00", "2026-01-01T09:42:51.928+00:00",
+      "2026-01-01T11:25:43.357+00:00",
+    ]);
+    const clocked = dose();
+    clocked.schedule!.recurrence = { frequency: 2, period: 2, periodUnit: Unit.Day, clocks: ["08:00:00"] };
+    expect(nextDueDoses(clocked, { ...query, limit: 2 })).toEqual([
+      "2026-01-02T08:00:00+00:00", "2026-01-03T08:00:00+00:00",
+    ]);
+  });
+
+  it.each(["ratio", "quantity"] as const)("sums recognized coded %s units while preserving localized labels", kind => {
+    const infusion = (label: string, code = "mL"): CanonicalAdministration => {
+      const quantity = { value: 10, unit: label, code, system: "http://unitsofmeasure.org" };
+      return { kind: "administration",
+        amounts: [kind === "quantity" ? { quantity } :
+          { rateRatio: { numerator: quantity, denominator: { value: 1, unit: "h", code: "h" } } }],
+        schedule: { recurrence: { count: 1, occurrenceDuration: 1, occurrenceDurationUnit: Unit.Hour } } };
+    };
+    const course: CanonicalCourse = { kind: "course", stages: [{
+      administrations: [infusion("มิลลิลิตร"), infusion("mL")],
+    }] };
+    for (const input of [course, courseToR5(course), courseToR6(course)]) {
+      const original = JSON.stringify(input);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 20, unit: "mL" });
+      expect(JSON.stringify(input)).toBe(original);
+    }
+    const incompatible: CanonicalCourse = { ...course, stages: [{ ...course.stages[0],
+      administrations: [course.stages[0].administrations[0], infusion("mg", "mg")],
+    }] };
+    expect(() => supply(incompatible, 1)).toThrow(expect.objectContaining({ code: "incompatible-dose-units" }));
+  });
+
+  it("uses recorded cycle history once while preserving independent overlapping opportunities", () => {
+    const member = dose(); member.schedule!.recurrence!.clocks = ["08:00:00"];
+    member.limits = [{ scope: "period", amount: { value: 2, unit: "tab" }, period: { value: 48, unit: "h" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+      stages: [{ administrations: [member] }] };
+    const query = { ...options, from: "2026-01-02T00:00:00Z", limit: 1 };
+    for (const input of [course, courseToR5(course), courseToR6(course)]) {
+      const recorded = { ...query, priorDoseTimes: ["2026-01-01T08:00:00Z"] };
+      expect(nextDueDoses(input, recorded)).toEqual(["2026-01-02T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ ...recorded, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      const earlierActual = { ...query, priorDoseTimes: ["2026-01-01T07:00:00Z"] };
+      expect(nextDueDoses(input, earlierActual)).toEqual(["2026-01-02T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ ...earlierActual, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+    }
+    const extendedCourse = freshExecutionInput(course);
+    const extended = extendedCourse.stages[0].administrations[0];
+    extended.schedule!.recurrence!.courseLength = { value: 2, unit: "d" };
+    extended.limits![0].amount!.value = 3;
+    expect(nextDueDoses(extendedCourse, { ...query, limit: 2, priorDoseTimes: ["2026-01-01T08:00:00Z"] }))
+      .toEqual(["2026-01-02T08:00:00+00:00", "2026-01-02T08:00:00+00:00"]);
+  });
+
+  it.each([1, 2])("leaves unspent actual PRN records available to the next finite repetition (count=%s)", count => {
+    const member = dose(); member.asNeeded = true;
+    member.schedule!.recurrence!.count = count;
+    member.schedule!.recurrence!.courseLength = { value: 7, unit: "d" };
+    member.schedule!.recurrence!.occurrenceCap = { max: count, period: 1, periodUnit: Unit.Day };
+    const course: CanonicalCourse = { kind: "course", stages: [{ count: 2, administrations: [member] }] };
+    const query = { ...options, from: "2026-01-03T00:00:00Z", limit: 3,
+      priorDoseTimes: ["2026-01-01T09:00:00Z", "2026-01-02T09:00:00Z"]
+        .flatMap(at => Array<string>(count).fill(at)) };
+    for (const input of [course, courseToR5(course), courseToR6(course)]) {
+      expect(nextDueDoses(input, query)).toEqual([]);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(0);
+    }
+  });
+
+  it.each([[false, 100, 250], [true, 100, 250], [false, 80, 210], [true, 80, 210]] as const)(
+    "intersects the resolved weighted range with its administration maximum (lower-only=%s, period maximum=%s)", (lowerOnly, periodMaximum, totalUnits) => {
+    const member = dose();
+    member.amounts = [{ range: { low: { value: 0.5, unit: "mg/kg" },
+      ...(!lowerOnly ? { high: { value: 1, unit: "mg/kg" } } : {}) } }];
+    member.schedule!.recurrence!.courseLength = { value: 2, unit: "d" };
+    member.limits = [
+      { scope: "period", amount: { value: periodMaximum, unit: "mg" }, period: { value: 24, unit: "h" } },
+      { scope: "administration", amount: { value: 50, unit: "mg" } },
+    ];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+      stages: [{ administrations: [member] }] };
+    for (const input of [course, courseToR5(course), courseToR6(course)]) {
+      const original = JSON.stringify(input);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 3, durationUnit: Unit.Day,
+        patientWeightKg: 70 })).toMatchObject({ totalUnits, unit: "mg" });
+      expect(JSON.stringify(input)).toBe(original);
+    }
+  });
+
+  it.each([false, true])("qualifies chronological supply with retained course safety and keeps member explanations (PRN=%s)", prn => {
+    const member = dose(); member.schedule!.recurrence!.courseLength = { value: 2, unit: "d" };
+    member.limits = [{ scope: "period", amount: { value: 2, unit: "tab" }, period: { value: 24, unit: "h" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+      safety: { limits: [{ scope: "lifetime", amount: { value: 1, unit: "tab" } }] },
+      stages: [{ administrations: [member] }] };
+    member.asNeeded = prn;
+    for (const input of [course, courseToR5(course), courseToR6(course)]) {
+      const result = calculateTotalUnits({ ...options, dosage: input, durationValue: 3, durationUnit: Unit.Day });
+      expect(result).toMatchObject({ totalUnits: 5, quantityKind: "maximum" });
+      expect(result.explanation).toContain("retained but not evaluated");
+      if (prn) expect(result.explanation).toContain("PRN doses may be used less frequently than the available opportunities");
+    }
+  });
+});
+
+describe("previous-phase next-day execution", () => {
+  const versions = ["native", "R5", "R6"] as const;
+  const boundary: CanonicalBoundary = { anchor: "previous-phase-next-day" };
+  const course = (): CanonicalCourse => {
+    const loading = dose(); loading.schedule!.recurrence!.count = 5;
+    const maintenance = dose();
+    maintenance.schedule!.recurrence!.clocks = ["15:00:00"];
+    maintenance.schedule!.recurrence!.courseLength = { value: 2, unit: "d" };
+    return { kind: "course", cycleInterval: { value: 14, unit: "d" }, cycleCount: 1, stages: [
+      { administrations: [loading] },
+      { start: boundary, administrations: [maintenance] },
+    ] };
+  };
+  const wire = (value: CanonicalCourse, version: typeof versions[number]) =>
+    version === "native" ? value : version === "R5" ? courseToR5(value) : courseToR6(value);
+
+  it.each(versions)("starts the day after five completed morning doses (%s)", version => {
+    const input = wire(course(), version), original = JSON.stringify(input);
+    expect(nextDueDoses(input, { ...options, limit: 10 })).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+      "2026-01-04T09:00:00+00:00", "2026-01-05T09:00:00+00:00",
+      "2026-01-06T15:00:00+00:00", "2026-01-07T15:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 8, durationUnit: Unit.Day }).totalUnits).toBe(7);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+
+  it.each(versions)("uses completed doses and a midnight duration clock after an evening order (%s)", version => {
+    const input = wire(course(), version);
+    const query = { from: "2026-01-01T18:00:00Z", orderedAt: "2026-01-01T18:00:00Z", timeZone: "UTC", limit: 10 };
+    expect(nextDueDoses(input, query)).toEqual([
+      "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00", "2026-01-04T09:00:00+00:00",
+      "2026-01-05T09:00:00+00:00", "2026-01-06T09:00:00+00:00",
+      "2026-01-07T15:00:00+00:00", "2026-01-08T15:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 8, durationUnit: Unit.Day }).totalUnits).toBe(7);
+  });
+
+  it.each(versions)("keeps the original successor window during a late query (%s)", version => {
+    const input = wire(course(), version);
+    const query = { ...options, from: "2026-01-07T12:00:00Z", limit: 4 };
+    expect(nextDueDoses(input, query)).toEqual(["2026-01-07T15:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(1);
+  });
+
+  it.each(versions)("uses the next civil date and midnight cap across spring DST (%s)", version => {
+    const value = course();
+    value.stages[1].administrations[0].schedule!.recurrence!.clocks = ["07:00:00"];
+    const input = wire(value, version);
+    const query = { orderedAt: "2027-03-09T08:00:00-05:00", from: "2027-03-13T12:00:00-05:00",
+      timeZone: "America/New_York", limit: 4 };
+    expect(nextDueDoses(input, query)).toEqual([
+      "2027-03-14T07:00:00-04:00", "2027-03-15T07:00:00-04:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(2);
+  });
+
+  it.each(versions)("does not add an empty day after an exclusive midnight duration end (%s)", version => {
+    const value = course();
+    const repeat = value.stages[0].administrations[0].schedule!.recurrence!;
+    repeat.count = undefined;
+    repeat.courseLength = { value: 5, unit: "d" };
+    const input = wire(value, version);
+    const query = { ...options, from: "2026-01-06T00:00:00Z", limit: 4 };
+    expect(nextDueDoses(input, query)).toEqual(["2026-01-06T15:00:00+00:00", "2026-01-07T15:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(2);
+  });
+
+  it.each(versions)("waits for shared cap admission before opening the next day (%s)", version => {
+    const value = course();
+    value.stages[0].administrations[0].limits = [
+      { scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 48, unit: "h" } },
+    ];
+    const input = wire(value, version);
+    const query = { ...options, from: "2026-01-09T12:00:00Z", limit: 4 };
+    expect(nextDueDoses(input, query)).toEqual(["2026-01-10T15:00:00+00:00", "2026-01-11T15:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(2);
+  });
+
+  it.each(versions)("resolves supplied displacement and exact range from the new midnight (%s)", version => {
+    const offsets: CanonicalBoundary[] = [
+      { ...boundary, displacement: { value: 18, unit: "h" } },
+      { ...boundary, displacementRange: { low: { value: 1, unit: "d" }, high: { value: 24, unit: "h" } } },
+    ];
+    for (const offset of offsets) {
+      const value = course(); value.stages[1].start = offset;
+      const input = wire(value, version), original = JSON.stringify(input);
+      const query = { ...options, from: "2026-01-06T00:00:00Z", limit: 4 };
+      expect(nextDueDoses(input, query)).toEqual(["2026-01-07T15:00:00+00:00", "2026-01-08T15:00:00+00:00"]);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(2);
+      expect(JSON.stringify(input)).toBe(original);
+    }
+  });
+
+  it.each(versions)("requires a completed predecessor for a first-stage boundary (%s)", version => {
+    const value = course();
+    value.stages = [value.stages[1]];
+    const input = wire(value, version), original = JSON.stringify(input);
+    expect(() => nextDueDoses(input, { ...options, limit: 2 }))
+      .toThrow(expect.objectContaining({ code: "previous-phase-required" }));
+    expect(() => calculateTotalUnits({ ...options, dosage: input, durationValue: 3, durationUnit: Unit.Day }))
+      .toThrow(expect.objectContaining({ code: "previous-phase-required" }));
+    expect(JSON.stringify(input)).toBe(original);
+  });
+
+  it("retains unsupported offsets without silently dropping their qualifiers or range", () => {
+    const invalid: CanonicalBoundary[] = [
+      { ...boundary, displacement: { value: 1, unit: "d", comparator: ">=" } },
+      { ...boundary, displacementRange: { low: { value: 1, unit: "d" }, high: { value: 2, unit: "d" } } },
+      { ...boundary, displacement: { value: 1, unit: "d" },
+        displacementRange: { low: { value: 1, unit: "d" }, high: { value: 1, unit: "d" } } },
+    ];
+    const diagnostics = [
+      /requires a treatment-start offset/,
+      /range endpoints must resolve to the same treatment-start offset/,
+      expect.objectContaining({ code: "phase-boundary-displacement-conflict" }),
+    ];
+    for (let index = 0; index < invalid.length; index++) {
+      const value = course(); value.stages[1].start = invalid[index];
+      const original = JSON.stringify(value);
+      expect(() => nextDueDoses(value, { ...options, limit: 10 })).toThrow(diagnostics[index]);
+      expect(() => supply(value, 10)).toThrow(diagnostics[index]);
+      expect(JSON.stringify(value)).toBe(original);
+    }
+  });
+
+  it("does not use a dependent successor to invent an open predecessor completion", () => {
+    const value = course(); value.stages[0].administrations[0].schedule!.recurrence!.count = undefined;
+    expect(nextDueDoses(value, { ...options, limit: 3 })).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+    ]);
+    expect(supply(value, 3).totalUnits).toBe(3);
+  });
+});
+
+describe("member previous-phase next-day context", () => {
+  const versions = ["native", "R5", "R6"] as const;
+  const course = (): CanonicalCourse => {
+    const loading = dose(); loading.schedule!.recurrence!.count = 5;
+    const nextDay = dose(2);
+    nextDay.phaseStart = { anchor: "previous-phase-next-day" };
+    nextDay.schedule!.recurrence!.clocks = ["06:00:00"];
+    const dayTen = dose(3);
+    dayTen.phaseOrigin = { value: 9, unit: "d" };
+    dayTen.schedule!.recurrence!.clocks = ["15:00:00"];
+    return { kind: "course", stages: [
+      { administrations: [loading] }, { administrations: [nextDay, dayTen] },
+    ] };
+  };
+  const wire = (value: CanonicalCourse, version: typeof versions[number]) =>
+    version === "native" ? value : version === "R5" ? courseToR5(value) : courseToR6(value);
+
+  it.each(versions)("preserves independent next-day and day10 member timelines and amounts (%s)", version => {
+    const input = wire(course(), version), original = JSON.stringify(input);
+    const query = { ...options, from: "2026-01-06T00:00:00Z", limit: 8 };
+    expect(nextDueDoses(input, query)).toEqual([
+      "2026-01-06T06:00:00+00:00", "2026-01-07T06:00:00+00:00", "2026-01-08T06:00:00+00:00",
+      "2026-01-09T06:00:00+00:00", "2026-01-10T06:00:00+00:00", "2026-01-10T15:00:00+00:00",
+      "2026-01-11T06:00:00+00:00", "2026-01-11T15:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 6, durationUnit: Unit.Day }).totalUnits).toBe(18);
+    expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 11, durationUnit: Unit.Day }).totalUnits).toBe(23);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+
+  it.each(versions)("does not treat a later member clock as same-day eligibility (%s)", version => {
+    const value = course();
+    value.stages[1].administrations[0].schedule!.recurrence!.clocks = ["15:00:00"];
+    const input = wire(value, version);
+    const query = { ...options, from: "2026-01-05T12:00:00Z", limit: 2 };
+    expect(nextDueDoses(input, query)).toEqual(["2026-01-06T15:00:00+00:00", "2026-01-07T15:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+  });
+
+  it.each(versions)("gives a next-day member its midnight duration clock after an evening order (%s)", version => {
+    const value = course();
+    value.stages[1].administrations[0].schedule!.recurrence!.courseLength = { value: 2, unit: "d" };
+    const input = wire(value, version);
+    const query = { orderedAt: "2026-01-01T18:00:00Z", from: "2026-01-07T00:00:00Z", timeZone: "UTC", limit: 3 };
+    expect(nextDueDoses(input, query)).toEqual([
+      "2026-01-07T06:00:00+00:00", "2026-01-08T06:00:00+00:00", "2026-01-11T15:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(4);
+  });
+
+  it.each(versions)("threads accepted capped completion into the member boundary (%s)", version => {
+    const value = course(); value.cycleInterval = { value: 14, unit: "d" }; value.cycleCount = 1;
+    value.stages[0].administrations[0].limits = [
+      { scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 48, unit: "h" } },
+    ];
+    const input = wire(value, version);
+    const query = { ...options, from: "2026-01-09T12:00:00Z", limit: 3 };
+    expect(nextDueDoses(input, query)).toEqual([
+      "2026-01-10T06:00:00+00:00", "2026-01-10T15:00:00+00:00", "2026-01-11T06:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(7);
+  });
+
+  it.each(versions)("keeps the member's supplied offset relative to its completed predecessor (%s)", version => {
+    const value = course();
+    value.stages[1].administrations[0].phaseStart!.displacement = { value: 1, unit: "d" };
+    const input = wire(value, version), original = JSON.stringify(input);
+    const query = { ...options, from: "2026-01-06T00:00:00Z", limit: 2 };
+    expect(nextDueDoses(input, query)).toEqual(["2026-01-07T06:00:00+00:00", "2026-01-08T06:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+
+  it.each(versions)("does not invent predecessor context for a first-stage member (%s)", version => {
+    const value = course(); value.stages = [value.stages[1]];
+    const input = wire(value, version), original = JSON.stringify(input);
+    expect(() => nextDueDoses(input, { ...options, limit: 2 }))
+      .toThrow(expect.objectContaining({ code: "previous-phase-required" }));
+    expect(() => calculateTotalUnits({ ...options, dosage: input, durationValue: 3, durationUnit: Unit.Day }))
+      .toThrow(expect.objectContaining({ code: "previous-phase-required" }));
+    expect(JSON.stringify(input)).toBe(original);
+  });
+});
+
+describe("round28 execution ownership", () => {
+  const versions = ["native", "R5", "R6"] as const;
+  const wire = (course: CanonicalCourse, version: typeof versions[number]) =>
+    version === "native" ? course : version === "R5" ? courseToR5(course) : courseToR6(course);
+
+  it.each(versions)("keeps QOD on alternate days and rejects contradictory daily recurrence (%s)", version => {
+    const member = dose();
+    member.schedule = { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "QOD" }] },
+      recurrence: { frequency: 1, period: 2, periodUnit: Unit.Day, clocks: ["09:00:00"] } };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [member] }] };
+    const matching = wire(course, version);
+    expect(nextDueDoses(matching, { ...options, limit: 3 })).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-03T09:00:00+00:00", "2026-01-05T09:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...options, dosage: matching, durationValue: 6, durationUnit: Unit.Day }).totalUnits).toBe(3);
+    const conflictingCourse: CanonicalCourse = JSON.parse(JSON.stringify(course));
+    conflictingCourse.stages[0].administrations[0].schedule!.recurrence!.period = 1;
+    const conflicting = wire(conflictingCourse, version), source = JSON.stringify(conflicting);
+    expect(() => nextDueDoses(conflicting, { ...options, limit: 3 }))
+      .toThrow(expect.objectContaining({ code: "timing-code-repeat-conflict" }));
+    expect(() => calculateTotalUnits({ ...options, dosage: conflicting, durationValue: 2, durationUnit: Unit.Day }))
+      .toThrow(expect.objectContaining({ code: "timing-code-repeat-conflict" }));
+    expect(JSON.stringify(conflicting)).toBe(source);
+  });
+
+  it.each(versions)("uses the member's treatment-relative civil clock after an elapsed stage start (%s)", version => {
+    const member = dose();
+    member.phaseOrigin = { value: 1, unit: "d" };
+    member.schedule!.recurrence!.clocks = ["06:00:00"];
+    member.schedule!.recurrence!.courseLength = { value: 1, unit: "d" };
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "wk" }, cycleCount: 1,
+      stages: [{ start: relative(20, "h"), administrations: [member] }] };
+    const query = { orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-01T08:00:00Z", timeZone: "UTC", limit: 4 };
+    for (const origin of [{ value: 1, unit: "d" }, { value: 24, unit: "h" }]) {
+      const variant: CanonicalCourse = JSON.parse(JSON.stringify(course));
+      variant.stages[0].administrations[0].phaseOrigin = origin;
+      const input = wire(variant, version), source = JSON.stringify(input);
+      expect(nextDueDoses(input, query)).toEqual(["2026-01-03T06:00:00+00:00"]);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      expect(JSON.stringify(input)).toBe(source);
+    }
+    const unshifted: CanonicalCourse = JSON.parse(JSON.stringify(course));
+    unshifted.stages[0].administrations[0].phaseOrigin = undefined;
+    expect(nextDueDoses(wire(unshifted, version), query)).toEqual(["2026-01-02T06:00:00+00:00"]);
+  });
+
+  it.each(versions)("uses actual history, not past PRN opportunities, for disjoint-cycle caps (%s)", version => {
+    const member = dose(); member.asNeeded = true;
+    member.schedule!.recurrence!.clocks = ["08:00:00"];
+    member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 48, unit: "h" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+      stages: [{ administrations: [member] }] };
+    const query = { ...options, from: "2026-01-02T00:00:00Z", limit: 2 };
+    const input = wire(course, version), source = JSON.stringify(input);
+    expect(nextDueDoses(input, query)).toEqual(["2026-01-02T08:00:00+00:00", "2026-01-04T08:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+    const recorded = { ...query, priorDoseTimes: ["2026-01-01T08:00:00Z"] };
+    expect(nextDueDoses(input, recorded)).toEqual(["2026-01-03T08:00:00+00:00", "2026-01-05T08:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...recorded, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+    expect(JSON.stringify(input)).toBe(source);
+    const scheduledCourse: CanonicalCourse = JSON.parse(JSON.stringify(course));
+    scheduledCourse.stages[0].administrations[0].asNeeded = false;
+    const scheduled = wire(scheduledCourse, version);
+    expect(nextDueDoses(scheduled, query)).toEqual(["2026-01-03T08:00:00+00:00", "2026-01-05T08:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: scheduled, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+  });
+
+  it.each(versions)("repeats the resolved two-day window of a predecessor-relative step (%s)", version => {
+    const course: CanonicalCourse = { kind: "course", stages: [
+      { end: relative(2), administrations: [dose()] },
+      { start: { anchor: "previous-phase-next-day", displacement: { value: 0, unit: "d" } },
+        end: relative(4), count: 2, administrations: [dose(2)] },
+    ] };
+    const input = wire(course, version), source = JSON.stringify(input);
+    expect(nextDueDoses(input, { ...options, limit: 12 })).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00",
+      "2026-01-03T09:00:00+00:00", "2026-01-04T09:00:00+00:00",
+      "2026-01-05T09:00:00+00:00", "2026-01-06T09:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 9, durationUnit: Unit.Day }).totalUnits).toBe(10);
+    expect(JSON.stringify(input)).toBe(source);
+  });
+
+  it.each(versions)("completes an implicit single immediate dose only after cap admission (%s)", version => {
+    const loading = dose(); loading.schedule = { recurrence: { anchors: [EventTiming.Immediate] } };
+    loading.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 48, unit: "h" } }];
+    const maintenance = dose(2); maintenance.schedule!.recurrence!.courseLength = { value: 1, unit: "d" };
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 3, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: [loading] }, { administrations: [maintenance] }] };
+    const query = { orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-01T08:00:00Z", timeZone: "UTC", limit: 4 };
+    const input = wire(course, version), source = JSON.stringify(input);
+    expect(nextDueDoses(input, query)).toEqual(["2026-01-01T08:00:00+00:00", "2026-01-01T09:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(3);
+    const blocked = { ...query, priorDoseTimes: ["2025-12-31T08:00:00Z"] };
+    expect(nextDueDoses(input, blocked)).toEqual([]);
+    expect(calculateTotalUnits({ ...blocked, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+    const recorded = { ...query, from: "2026-01-01T08:30:00Z", priorDoseTimes: ["2026-01-01T08:00:00Z"] };
+    expect(nextDueDoses(input, recorded)).toEqual(["2026-01-01T09:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...recorded, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(2);
+    expect(JSON.stringify(input)).toBe(source);
+  });
+
+  it.each(versions)("uses coded physical units for container estimates (%s)", version => {
+    const member = dose(); member.schedule!.recurrence!.count = 1;
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [member] }] };
+    for (const [value, code, containers] of [[200, "mg", undefined], [200, "mL", 2], [0.2, "L", 2]] as const) {
+      member.amounts = [{ quantity: { value, system: "http://unitsofmeasure.org", code } }];
+      const inputs = version === "native" ? [course, member] :
+        version === "R5" ? [courseToR5(course), courseToR5(course)[0]] : [courseToR6(course)];
+      for (const input of inputs) {
+        const source = JSON.stringify(input);
+        const result = calculateTotalUnits({ ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day,
+          context: { containerValue: 120, containerUnit: "mL" } });
+        expect(result.totalUnits).toBe(value);
+        expect(result.unit).toBe(code);
+        expect(result.totalContainers).toBe(containers);
+        expect(JSON.stringify(input)).toBe(source);
+      }
+    }
+  });
+
+  it.each(versions)("combines independent member clock maxima but retains shared-cap joint plans (%s)", version => {
+    const first = dose(), second = dose();
+    for (const [member, clock, condition] of [[first, "06:00:00", "A"], [second, "09:00:00", "B"]] as const) {
+      member.schedule!.recurrence = { frequency: 1, frequencyMax: 2, period: 1, periodUnit: Unit.Day,
+        clocks: [clock], courseLength: { value: 2, unit: "d" } };
+      member.predicate = { kind: "state", name: condition, expected: true };
+      member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 24, unit: "h" } }];
+    }
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: [first, second] }] };
+    const query = { ...options, from: "2026-01-01T06:00:00Z", durationValue: 2.5, durationUnit: Unit.Hour,
+      evaluateCondition: (condition: import("../src").MedicationCondition, at: string) =>
+        condition.kind === "state" && at.includes(condition.name === "A" ? "T06:00:00" : "T08:00:00") };
+    expect(calculateTotalUnits({ ...query, dosage: wire(course, version) }).totalUnits).toBe(2);
+    for (const location of ["course", "stage"] as const) {
+      const shared = { limits: [{ scope: "period" as const, amount: { value: 1, unit: "tab" }, period: { value: 24, unit: "h" } }] };
+      const variant: CanonicalCourse = JSON.parse(JSON.stringify(course));
+      variant.safety = location === "course" ? shared : undefined;
+      variant.stages[0].safety = location === "stage" ? shared : undefined;
+      const input = wire(variant, version), source = JSON.stringify(input);
+      expect(calculateTotalUnits({ ...query, dosage: input }).totalUnits).toBe(1);
+      expect(JSON.stringify(input)).toBe(source);
+    }
+  });
+
+  it.each(versions)("retains a joint repeated-course maximum with overlapping per-member caps (%s)", version => {
+    const first = dose(), second = dose();
+    for (const [member, clock, name] of [[first, "06:00:00", "A"], [second, "07:00:00", "B"]] as const) {
+      member.schedule!.recurrence = { frequency: 1, frequencyMax: 2, period: 1, periodUnit: Unit.Day,
+        clocks: [clock], courseLength: { value: 2, unit: "d" } };
+      member.predicate = { kind: "state", name, expected: true };
+      member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 24, unit: "h" } }];
+    }
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" }, cycleCount: 2,
+      stages: [{ administrations: [first, second] }] };
+    const query = { ...options, from: "2026-01-01T06:00:00Z", durationValue: 2, durationUnit: Unit.Day,
+      evaluateCondition: (condition: import("../src").MedicationCondition, at: string) =>
+        condition.kind === "state" && at.includes(condition.name === "A" ? "T06:00:00" : "T07:00:00") };
+    for (const shared of [false, true]) {
+      const variant = freshExecutionInput(course);
+      variant.safety = shared ? { limits: [{ scope: "period", amount: { value: 2, unit: "tab" },
+        period: { value: 24, unit: "h" } }] } : undefined;
+      const input = wire(variant, version), source = JSON.stringify(input);
+      // Each member contributes Jan1 and Jan2 once; the overlapping Jan2 cycle
+      // cannot spend either member's 24-hour allowance a second time.
+      expect(calculateTotalUnits({ ...query, dosage: input }).totalUnits).toBe(4);
+      expect(JSON.stringify(input)).toBe(source);
+    }
+  });
+
+  it.each(versions)("opens a next-day member from its own finite track beside an unbounded track (%s)", version => {
+    const first = dose(), next = dose(2), independent = dose();
+    first.sourceMember = 0; first.phasePredecessors = [];
+    first.schedule!.recurrence!.count = 5;
+    next.sourceMember = 1; next.phasePredecessors = [0];
+    next.phaseStart = { anchor: "previous-phase-next-day" };
+    next.schedule!.recurrence!.clocks = ["06:00:00"];
+    next.schedule!.recurrence!.courseLength = { value: 2, unit: "d" };
+    independent.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: Unit.Day,
+      clocks: ["08:00:00", "20:00:00"] };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [first, next, independent] }] };
+    const input = wire(course, version), source = JSON.stringify(input);
+    const query = { ...options, from: "2026-01-05T00:00:00Z", limit: 10 };
+    expect(nextDueDoses(input, query)).toEqual([
+      "2026-01-05T08:00:00+00:00", "2026-01-05T09:00:00+00:00", "2026-01-05T20:00:00+00:00",
+      "2026-01-06T06:00:00+00:00", "2026-01-06T08:00:00+00:00", "2026-01-06T20:00:00+00:00",
+      "2026-01-07T06:00:00+00:00", "2026-01-07T08:00:00+00:00", "2026-01-07T20:00:00+00:00",
+      "2026-01-08T08:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 4, durationUnit: Unit.Day }).totalUnits).toBe(13);
+    expect(JSON.stringify(input)).toBe(source);
+  });
+
+  it.each(versions)("wakes a same-track successor after accepted capped doses without waiting for an unbounded member (%s)", version => {
+    const first = dose(), next = dose(2), independent = dose();
+    first.sourceMember = 0; first.phasePredecessors = [];
+    first.schedule!.recurrence!.count = 2;
+    first.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 48, unit: "h" } }];
+    next.sourceMember = 1; next.phasePredecessors = [0];
+    next.phaseStart = { anchor: "previous-phase-next-day" };
+    next.schedule!.recurrence!.clocks = ["06:00:00"];
+    next.schedule!.recurrence!.courseLength = { value: 2, unit: "d" };
+    independent.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: Unit.Day,
+      clocks: ["08:00:00", "20:00:00"] };
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 10, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: [first, next, independent] }] };
+    const input = wire(course, version), source = JSON.stringify(input);
+    expect(nextDueDoses(input, { ...options, from: "2026-01-04T00:00:00Z", limit: 6 })).toEqual([
+      "2026-01-04T06:00:00+00:00", "2026-01-04T08:00:00+00:00", "2026-01-04T20:00:00+00:00",
+      "2026-01-05T06:00:00+00:00", "2026-01-05T08:00:00+00:00", "2026-01-05T20:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 5, durationUnit: Unit.Day }).totalUnits).toBe(16);
+    expect(JSON.stringify(input)).toBe(source);
+  });
+
+  it.each(versions)("joins its own accepted predecessors before resuming the later global stage (%s)", version => {
+    const first = dose(), second = dose(), next = dose(2), independent = dose(), final = dose(3);
+    for (const [member, id, hours] of [[first, 0, 48], [second, 1, 72]] as const) {
+      member.sourceMember = id; member.phasePredecessors = [];
+      member.schedule!.recurrence!.count = 2;
+      member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: hours, unit: "h" } }];
+    }
+    next.sourceMember = 2; next.phasePredecessors = [0, 1];
+    next.phaseStart = { anchor: "previous-phase-next-day" };
+    next.schedule!.recurrence!.clocks = ["06:00:00"];
+    next.schedule!.recurrence!.courseLength = { value: 1, unit: "d" };
+    independent.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: Unit.Day,
+      clocks: ["08:00:00", "20:00:00"], courseLength: { value: 4, unit: "d" } };
+    final.schedule!.recurrence!.count = 1;
+    final.schedule!.recurrence!.clocks = ["07:00:00"];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 10, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: [next, second, independent, first] }, { administrations: [final] }] };
+    const input = wire(course, version), source = JSON.stringify(input);
+    expect(nextDueDoses(input, { ...options, from: "2026-01-05T00:00:00Z", limit: 4 })).toEqual([
+      "2026-01-05T06:00:00+00:00", "2026-01-06T07:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 6, durationUnit: Unit.Day }).totalUnits).toBe(17);
+    expect(JSON.stringify(input)).toBe(source);
+  });
+
+  it.each(versions)("keeps a civil-day start distinct from the treatment clock over DST (%s)", version => {
+    const member = dose();
+    member.phaseStart = { anchor: "treatment-day-start", displacement: { value: 1, unit: "d" } };
+    member.schedule!.recurrence!.clocks = ["06:00:00"];
+    member.schedule!.recurrence!.courseLength = { value: 1, unit: "d" };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [member] }] };
+    const query = { orderedAt: "2026-03-07T15:00:00Z", from: "2026-03-07T15:00:00Z",
+      timeZone: "America/New_York", limit: 2 };
+    const input = wire(course, version), source = JSON.stringify(input);
+    expect(nextDueDoses(input, query)).toEqual(["2026-03-08T06:00:00-04:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(1);
+    expect(JSON.stringify(input)).toBe(source);
+    const anchored = freshExecutionInput(course);
+    anchored.stages[0].administrations[0].phaseStart!.anchor = "treatment-start";
+    expect(nextDueDoses(wire(anchored, version), query)).toEqual(["2026-03-09T06:00:00-04:00"]);
+  });
+
+  it.each(versions)("retains a known infusion dose without inventing an exact qualified-duration completion (%s)", version => {
+    for (const qualifier of ["at most", "at least"]) {
+      const parsed = parseSig("Infuse 500 mL over " + qualifier + " 2 hours");
+      const first = parsed.meta.canonical.course!.stages[0].administrations[0];
+      const next = dose(100);
+      next.amounts![0].quantity!.unit = "mL";
+      next.schedule!.recurrence!.courseLength = { value: 1, unit: "d" };
+      const course: CanonicalCourse = { kind: "course", stages: [
+        { administrations: [first] }, { administrations: [next] },
+      ] };
+      const query = { orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-01T08:00:00Z", timeZone: "UTC", limit: 4 };
+      const input = wire(course, version), source = JSON.stringify(input);
+      expect(nextDueDoses(input, query)).toEqual(["2026-01-01T08:00:00+00:00"]);
+      const total = calculateTotalUnits({ ...query, dosage: input, durationValue: 2, durationUnit: Unit.Day });
+      expect(total.totalUnits).toBe(500);
+      expect(total.unit).toBe("mL");
+      expect(JSON.stringify(input)).toBe(source);
+    }
+  });
+
+  it("carries the duration's upper or lower bound through rate-derived supply", () => {
+    const member = dose();
+    member.amounts = [{ rate: { value: 50, system: "http://unitsofmeasure.org", code: "mL/h" } }];
+    member.schedule = { recurrence: { count: 1, occurrenceDuration: 2, occurrenceDurationUnit: Unit.Hour,
+      occurrenceDurationComparator: "<=" } };
+    expect(supply(member, 1)).toMatchObject({ totalUnits: 100, unit: "mL", quantityKind: "maximum" });
+    member.schedule.recurrence!.occurrenceDurationComparator = ">=";
+    const source = JSON.stringify(member);
+    expect(() => supply(member, 1)).toThrow(expect.objectContaining({ code: "dose-amount-lower-bound" }));
+    expect(JSON.stringify(member)).toBe(source);
+    member.schedule.recurrence!.occurrenceDurationComparator = undefined;
+    const exact = supply(member, 1);
+    expect(exact).toMatchObject({ totalUnits: 100, unit: "mL" });
+    expect(exact.quantityKind).not.toBe("maximum");
+  });
+});
+
+describe("round 30 execution clinical oracles", () => {
+  const versions = ["native", "R6", "persisted R5"] as const;
+  const wire = (value: CanonicalCourse, version: typeof versions[number]) =>
+    version === "native" ? value : version === "R6" ? courseToR6(value) :
+      JSON.parse(JSON.stringify(courseToR5(value))) as FhirDosage[];
+  const course = (member: CanonicalAdministration): CanonicalCourse =>
+    ({ kind: "course", stages: [{ administrations: [member] }] });
+  const gts = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+  const coded = (code: string, system: string | undefined = gts) => {
+    const member = dose();
+    member.schedule = { code: { coding: [{ code, ...(system ? { system } : {}) }] } };
+    return member;
+  };
+
+  it.each(versions)("applies equivalent fractional rolling caps and retains cross-cycle history (%s)", version => {
+    for (const period of [{ value: 0.5, unit: "d" }, { value: 12, unit: "h" },
+      { value: 0.5, unit: "wk" }, { value: 3.5, unit: "d" }]) {
+      const member = dose();
+      member.schedule!.recurrence!.clocks = ["08:00:00", "16:00:00"];
+      member.schedule!.recurrence!.frequency = 2;
+      member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period }];
+      const input = wire(course(member), version), original = JSON.stringify(input);
+      const second = period.unit === "h" || period.value === 0.5 && period.unit === "d"
+        ? "2026-01-02T08:00:00+00:00" : "2026-01-05T08:00:00+00:00";
+      expect(nextDueDoses(input, { ...options, limit: 2 })).toEqual(["2026-01-01T08:00:00+00:00", second]);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      expect(JSON.stringify(input)).toBe(original);
+    }
+    const member = dose(); member.schedule!.recurrence = { frequency: 1, period: 8, periodUnit: Unit.Hour };
+    member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 0.5, unit: "d" } }];
+    const repeated = course(member); repeated.stages[0].end = relative(8, "h");
+    repeated.cycleInterval = { value: 8, unit: "h" }; repeated.cycleCount = 5;
+    const query = { from: "2026-01-01T08:00:00Z", orderedAt: "2026-01-01T08:00:00Z", timeZone: "UTC" };
+    const input = wire(repeated, version);
+    expect(nextDueDoses(input, { ...query, limit: 10 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-02T00:00:00+00:00", "2026-01-02T16:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 40, durationUnit: Unit.Hour }).totalUnits).toBe(3);
+  });
+
+  it.each(versions)("completes capped non-PRN loading from the actual off-clock record (%s)", version => {
+    const loading = dose(); loading.schedule!.recurrence = { count: 1, frequency: 1, period: 12, periodUnit: Unit.Hour };
+    loading.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 12, unit: "h" } }];
+    const maintenance = dose(2); maintenance.schedule!.recurrence = {
+      frequency: 1, period: 12, periodUnit: Unit.Hour, courseLength: { value: 1, unit: "d" },
+    };
+    const value: CanonicalCourse = { kind: "course", cycleInterval: { value: 3, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: [loading] }, { administrations: [maintenance] }] };
+    const query = { orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-01T10:00:00Z", timeZone: "UTC" };
+    const input = wire(value, version), original = JSON.stringify(input);
+    const actual = { ...query, priorDoseTimes: ["2026-01-01T09:00:00Z"] };
+    expect(nextDueDoses(input, { ...actual, limit: 2 })).toEqual([
+      "2026-01-01T21:00:00+00:00", "2026-01-02T09:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...actual, dosage: input, durationValue: 10.5, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+    expect(calculateTotalUnits({ ...actual, dosage: input, durationValue: 12, durationUnit: Unit.Hour }).totalUnits).toBe(2);
+    expect(nextDueDoses(input, { ...query, priorDoseTimes: ["2026-01-01T08:00:00Z"], limit: 1 }))
+      .toEqual(["2026-01-01T20:00:00+00:00"]);
+    expect(nextDueDoses(input, { ...query, priorDoseTimes: ["2025-12-31T19:00:00Z"], limit: 1 }))
+      .toEqual(["2026-01-01T20:00:00+00:00"]);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+
+  it.each(versions)("skips only the waking window whose exact clock is in a DST gap (%s)", version => {
+    const member = dose(); member.schedule!.recurrence = {
+      frequency: 1, period: 4, periodUnit: Unit.Hour, anchors: [EventTiming.Wake],
+    };
+    const input = wire(course(member), version), original = JSON.stringify(input);
+    const query = { from: "2026-03-07T00:00:00-05:00", orderedAt: "2026-03-07T00:00:00-05:00",
+      timeZone: "America/New_York", eventClock: { WAKE: "02:30", HS: "14:00" } };
+    expect(nextDueDoses(input, { ...query, limit: 6 })).toEqual([
+      "2026-03-07T02:30:00-05:00", "2026-03-07T06:30:00-05:00", "2026-03-07T10:30:00-05:00",
+      "2026-03-09T02:30:00-04:00", "2026-03-09T06:30:00-04:00", "2026-03-09T10:30:00-04:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(6);
+    expect(() => nextDueDoses(input, { ...query, limit: 1, eventClock: { WAKE: "14:00", HS: "14:00" } }))
+      .toThrow(/WAKE precedes HS/);
+    expect(() => nextDueDoses(input, { ...query, limit: 1, eventClock: { WAKE: "14:00:00.5000", HS: "14:00:00.5" } }))
+      .toThrow(/WAKE precedes HS/);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+
+  it.each(versions)("uses configured QOD clocks for alternate-day due, history and supply (%s)", version => {
+    const member = coded("QOD"); member.schedule!.recurrence = { frequency: 1, period: 2, periodUnit: Unit.Day, count: 2 };
+    const value = course(member), query = { ...options, frequencyDefaults: { byCode: { QOD: ["07:00"] } } };
+    const input = wire(value, version), original = JSON.stringify(input);
+    expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([
+      "2026-01-01T07:00:00+00:00", "2026-01-03T07:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 8, durationUnit: Unit.Hour }).totalUnits).toBe(1);
+    expect(nextDueDoses(input, { ...query, from: "2026-01-01T08:00:00Z", limit: 3 })).toEqual([
+      "2026-01-03T07:00:00+00:00",
+    ]);
+    expect(JSON.stringify(input)).toBe(original);
+    expect(nextDueDoses(input, { ...options, limit: 1, frequencyDefaults: { byCode: { QOD: ["07:00"] } } }))
+      .toEqual(["2026-01-01T07:00:00+00:00"]);
+    const clockCourse = freshExecutionInput(value);
+    clockCourse.stages[0].administrations[0].schedule!.recurrence!.clocks = ["10:00:00"];
+    expect(nextDueDoses(wire(clockCourse, version), { ...query, limit: 1 })).toEqual(["2026-01-01T10:00:00+00:00"]);
+    const uncodedCourse = freshExecutionInput(value);
+    uncodedCourse.stages[0].administrations[0].schedule!.code = undefined;
+    expect(nextDueDoses(wire(uncodedCourse, version), { ...query, limit: 2 })).toEqual([
+      "2026-01-01T00:00:00+00:00", "2026-01-03T00:00:00+00:00",
+    ]);
+  });
+
+  it.each(versions)("executes bare daily Timing codes without changing authored recurrence (%s)", version => {
+    const clocks = { QD: ["09:00"], BID: ["08:00", "20:00"], TID: ["08:00", "14:00", "20:00"],
+      QID: ["08:00", "12:00", "16:00", "20:00"], AM: ["08:00"], PM: ["15:00"], QOD: ["09:00"] };
+    for (const [code, times] of Object.entries(clocks)) {
+      const member = coded(code), input = wire(course(member), version), original = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...options, limit: times.length })).toEqual(
+        times.map(time => `2026-01-01T${time}:00+00:00`));
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(times.length);
+      expect(JSON.stringify(input)).toBe(original);
+      expect(member.schedule!.recurrence).toBeUndefined();
+    }
+    const bid = wire(course(coded("BID")), version);
+    expect(nextDueDoses(bid, { ...options, limit: 2, frequencyDefaults: { byCode: { BID: ["07:00", "19:00"] } } }))
+      .toEqual(["2026-01-01T07:00:00+00:00", "2026-01-01T19:00:00+00:00"]);
+    expect(nextDueDoses(wire(course(coded("WARD", "https://example.org/timing")), version), { ...options, limit: 1 })).toEqual([]);
+  });
+
+  it.each(versions)("checks hourly GTS cadence while accepting equivalent period units (%s)", version => {
+    const member = coded("Q4H"); member.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: Unit.Day };
+    member.schedule!.code!.coding!.unshift({ system: "https://example.org/timing", code: "BID" });
+    const value = course(member), input = wire(value, version), original = JSON.stringify(input);
+    expect(() => nextDueDoses(input, { ...options, limit: 2 })).toThrow(/timing code.*repeat/i);
+    expect(() => calculateTotalUnits({ ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day }))
+      .toThrow(/timing code.*repeat/i);
+    expect(JSON.stringify(input)).toBe(original);
+    for (const [period, periodUnit] of [[4, Unit.Hour], [240, Unit.Minute]] as const) {
+      const matchingCourse = freshExecutionInput(value);
+      matchingCourse.stages[0].administrations[0].schedule!.recurrence = { frequency: 1, period, periodUnit };
+      const matching = wire(matchingCourse, version);
+      expect(nextDueDoses(matching, { ...options, limit: 3 })).toEqual([
+        "2026-01-01T00:00:00+00:00", "2026-01-01T04:00:00+00:00", "2026-01-01T08:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage: matching, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(6);
+    }
+    const rangedCourse = freshExecutionInput(value);
+    rangedCourse.stages[0].administrations[0].schedule!.recurrence = { frequency: 1, period: 2, periodMax: 4, periodUnit: Unit.Hour };
+    const ranged = wire(rangedCourse, version), rangedSource = JSON.stringify(ranged);
+    // Q4H is a concrete cadence inside the authored 2–4 hour range.
+    // Maximum supply still uses the independent range ceiling.
+    expect(nextDueDoses(ranged, { ...options, limit: 3 })).toEqual([
+      "2026-01-01T00:00:00+00:00", "2026-01-01T04:00:00+00:00", "2026-01-01T08:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...options, dosage: ranged, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(12);
+    expect(JSON.stringify(ranged)).toBe(rangedSource);
+    const uncodedCourse = freshExecutionInput(rangedCourse);
+    delete uncodedCourse.stages[0].administrations[0].schedule!.code;
+    const uncoded = wire(uncodedCourse, version), uncodedSource = JSON.stringify(uncoded);
+    expect(nextDueDoses(uncoded, { ...options, limit: 3 })).toEqual([
+      "2026-01-01T00:00:00+00:00", "2026-01-01T02:00:00+00:00", "2026-01-01T04:00:00+00:00",
+    ]);
+    expect(JSON.stringify(uncoded)).toBe(uncodedSource);
+  });
+
+  it.each(versions)("keeps local timing codes separate from GTS cadence while honoring institution clocks (%s)", version => {
+    const member = coded("BID", "https://example.org/timing");
+    member.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: Unit.Day };
+    const value = course(member), input = wire(value, version), original = JSON.stringify(input);
+    const query = { ...options, frequencyDefaults: { byCode: { BID: ["07:00"] } } };
+    expect(nextDueDoses(input, { ...query, limit: 2 })).toEqual([
+      "2026-01-01T07:00:00+00:00", "2026-01-02T07:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 8, durationUnit: Unit.Hour }).totalUnits).toBe(1);
+    expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual(["2026-01-01T09:00:00+00:00"]);
+    expect(JSON.stringify(input)).toBe(original);
+    for (const system of [gts, undefined]) {
+      const standardCourse = freshExecutionInput(value);
+      standardCourse.stages[0].administrations[0].schedule!.code = { coding: [{ code: "BID", ...(system ? { system } : {}) }] };
+      const standard = wire(standardCourse, version);
+      expect(() => nextDueDoses(standard, { ...query, limit: 1 })).toThrow(/timing code.*repeat/i);
+    }
+  });
+
+  it.each(versions)("preserves authored clock fractions to millisecond precision (%s)", version => {
+    for (const [clock, expected] of [["08:30:00.500", "08:30:00.500"],
+      ["08:30:00.9996", "08:30:00.999"], ["23:59:59.999999999", "23:59:59.999"],
+      ["08:30:59.123", "08:30:59.123"], ["08:30:00.000000001", "08:30:00"]] as const) {
+      for (const event of [false, true]) {
+        const member = dose(); member.schedule!.recurrence = { count: 1, frequency: 1, period: 1, periodUnit: Unit.Day,
+          ...(event ? { anchors: [EventTiming.Morning] } : { clocks: [clock] }) };
+        const input = wire(course(member), version), original = JSON.stringify(input);
+        const query = { ...options, ...(event ? { eventClock: { MORN: clock } } : {}) };
+        expect(nextDueDoses(input, { ...query, limit: 1 })).toEqual([`2026-01-01T${expected}+00:00`]);
+        expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+        expect(JSON.stringify(input)).toBe(original);
+      }
+    }
+  });
+
+  it.each(versions)("keeps a fractional exact clock absent on a DST-gap date (%s)", version => {
+    const member = dose(); member.schedule!.recurrence!.clocks = ["02:30:00.500"];
+    const input = wire(course(member), version);
+    const query = { from: "2026-03-08T00:00:00-05:00", orderedAt: "2026-03-08T00:00:00-05:00", timeZone: "America/New_York" };
+    expect(nextDueDoses(input, { ...query, limit: 1 })).toEqual(["2026-03-09T02:30:00.500-04:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+  });
+
+  it.each(versions)("sums zero inactive quantities without choosing their incompatible unit (%s)", version => {
+    for (const reverse of [false, true]) {
+      const inactive = dose(100); inactive.amounts![0].quantity!.unit = "mg";
+      inactive.schedule!.recurrence!.clocks = ["20:00:00"];
+      const active = dose(5); active.amounts![0].quantity!.unit = "mL";
+      const members = reverse ? [active, inactive] : [inactive, active];
+      const value: CanonicalCourse = { kind: "course", stages: [{ administrations: members }] };
+      const input = wire(value, version);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 12, durationUnit: Unit.Hour }))
+        .toMatchObject({ totalUnits: 5, unit: "mL" });
+      const allInactive = freshExecutionInput(value);
+      for (const member of allInactive.stages[0].administrations) member.schedule!.recurrence!.clocks = ["20:00:00"];
+      expect(calculateTotalUnits({ ...options, dosage: wire(allInactive, version), durationValue: 12, durationUnit: Unit.Hour }))
+        .toMatchObject({ totalUnits: 0, unit: reverse ? "mL" : "mg" });
+      const allActive = freshExecutionInput(value);
+      for (const member of allActive.stages[0].administrations) member.schedule!.recurrence!.clocks = ["09:00:00"];
+      expect(() => calculateTotalUnits({ ...options, dosage: wire(allActive, version), durationValue: 12, durationUnit: Unit.Hour }))
+        .toThrow(/Cannot sum medication supply/);
+    }
+  });
+});
+
+describe("round 31 execution clinical oracles", () => {
+  const versions = ["native", "R6", "persisted R5"] as const;
+  const wire = (value: CanonicalCourse, version: typeof versions[number]) =>
+    version === "native" ? value : version === "R6" ? courseToR6(value) :
+      JSON.parse(JSON.stringify(courseToR5(value))) as FhirDosage[];
+  const course = (member: CanonicalAdministration): CanonicalCourse =>
+    ({ kind: "course", stages: [{ administrations: [member] }] });
+  const gts = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+
+  it.each(versions)("executes fractional-day singleton cadences as elapsed intervals (%s)", version => {
+    for (const [period, periodUnit, times, total] of [
+      [0.5, Unit.Day, ["00:00", "12:00"], 2],
+      [12, Unit.Hour, ["00:00", "12:00"], 2],
+      [0.25, Unit.Day, ["00:00", "06:00", "12:00", "18:00"], 4],
+      [6, Unit.Hour, ["00:00", "06:00", "12:00", "18:00"], 4],
+    ] as const) {
+      const member = dose(); member.schedule!.recurrence = { frequency: 1, period, periodUnit };
+      const input = wire(course(member), version), original = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...options, limit: times.length })).toEqual(
+        times.map(time => "2026-01-01T" + time + ":00+00:00"));
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(total);
+      expect(JSON.stringify(input)).toBe(original);
+    }
+    for (const [period, periodUnit] of [[0.5, Unit.Week], [3.5, Unit.Day]] as const) {
+      const member = dose(); member.schedule!.recurrence = { frequency: 1, period, periodUnit };
+      const input = wire(course(member), version);
+      expect(nextDueDoses(input, { ...options, limit: 3 })).toEqual([
+        "2026-01-01T00:00:00+00:00", "2026-01-04T12:00:00+00:00", "2026-01-08T00:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(2);
+    }
+    const daily = dose(); daily.schedule!.recurrence!.clocks = undefined;
+    expect(nextDueDoses(wire(course(daily), version), { ...options, limit: 2 })).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00",
+    ]);
+  });
+
+  it.each(versions)("retains explicit events as the complete supply plan beside timing ranges (%s)", version => {
+    for (const ranged of [{ periodMax: 2 }, { frequencyMax: 3 }, { periodMax: 2, frequencyMax: 3 }]) {
+      const member = dose(); member.schedule = {
+        explicitEvents: ["2026-01-01T09:00:00Z"],
+        recurrence: { frequency: 1, period: 1, periodUnit: Unit.Day, ...ranged },
+      };
+      const complete = wire(course(member), version);
+      const inputs = version === "native" ? [complete, member] : version === "persisted R5"
+        ? [complete, (complete as FhirDosage[])[0]] : [complete];
+      for (const input of inputs) {
+        const original = JSON.stringify(input);
+        expect(nextDueDoses(input, { ...options, limit: 5 })).toEqual(["2026-01-01T09:00:00+00:00"]);
+        expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(1);
+        expect(JSON.stringify(input)).toBe(original);
+      }
+      member.schedule.explicitEvents = undefined;
+      expect(calculateTotalUnits({ ...options, dosage: wire(course(member), version),
+        durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe("frequencyMax" in ranged ? 9 : 3);
+    }
+  });
+
+  it.each(versions)("uses hourly GTS spacing for a matching unanchored aggregate frequency (%s)", version => {
+    for (const [code, frequency, period, periodUnit, hours, total] of [
+      ["Q4H", 6, 1, Unit.Day, ["00", "04", "08"], 6],
+      ["Q4H", 12, 2, Unit.Day, ["00", "04", "08"], 6],
+      ["Q4H", 3, 12, Unit.Hour, ["00", "04", "08"], 6],
+      ["Q6H", 4, 1, Unit.Day, ["00", "06", "12"], 4],
+    ] as const) {
+      const member = dose(); member.schedule = {
+        code: { coding: [{ system: gts, code }] }, recurrence: { frequency, period, periodUnit },
+      };
+      const input = wire(course(member), version), original = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...options, limit: 3 })).toEqual(
+        hours.map(hour => "2026-01-01T" + hour + ":00:00+00:00"));
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(total);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 4, durationUnit: Unit.Hour }).totalUnits).toBe(1);
+      expect(JSON.stringify(input)).toBe(original);
+    }
+    const member = dose(); member.schedule = {
+      code: { coding: [{ system: gts, code: "Q4H" }] },
+      recurrence: { frequency: 6, period: 1, periodUnit: Unit.Day,
+        clocks: ["02:00:00", "06:00:00", "10:00:00", "14:00:00", "18:00:00", "22:00:00"] },
+    };
+    const authored = wire(course(member), version), original = JSON.stringify(authored);
+    expect(nextDueDoses(authored, { ...options, limit: 3 })).toEqual([
+      "2026-01-01T02:00:00+00:00", "2026-01-01T06:00:00+00:00", "2026-01-01T10:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...options, dosage: authored, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(6);
+    expect(JSON.stringify(authored)).toBe(original);
+    member.schedule.explicitEvents = ["2026-01-01T11:00:00Z"];
+    member.schedule.recurrence!.clocks = undefined;
+    const explicit = wire(course(member), version);
+    expect(nextDueDoses(explicit, { ...options, limit: 3 })).toEqual(["2026-01-01T11:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...options, dosage: explicit, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+  });
+
+  it.each(versions)("finds the first valid elapsed-interval clock after a DST-gap lookahead (%s)", version => {
+    for (const [period, periodUnit] of [[4, Unit.Hour], [240, Unit.Minute]] as const) {
+      const member = dose(); member.schedule!.recurrence = { frequency: 1, period, periodUnit, clocks: ["02:30:00"] };
+      const input = wire(course(member), version), original = JSON.stringify(input);
+      const query = { from: "2026-03-09T00:00:00-04:00", orderedAt: "2026-03-07T03:00:00-05:00", timeZone: "America/New_York" };
+      expect(nextDueDoses(input, { ...query, limit: 6 })).toEqual([
+        "2026-03-09T02:30:00-04:00", "2026-03-09T06:30:00-04:00", "2026-03-09T10:30:00-04:00",
+        "2026-03-09T14:30:00-04:00", "2026-03-09T18:30:00-04:00", "2026-03-09T22:30:00-04:00",
+      ]);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(6);
+      expect(calculateTotalUnits({ ...query, from: "2026-03-08T00:00:00-05:00", dosage: input,
+        durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+      // An already-valid origin keeps elapsed cadence across the DST change.
+      expect(nextDueDoses(input, { ...query, orderedAt: "2026-03-07T00:00:00-05:00", limit: 2 })).toEqual([
+        "2026-03-09T03:30:00-04:00", "2026-03-09T07:30:00-04:00",
+      ]);
+      expect(JSON.stringify(input)).toBe(original);
+    }
+  });
+
+  it.each(versions)("keeps exact clock fractions through meal offsets and midnight shifts (%s)", version => {
+    for (const [clock, event, offsetMinutes, from, expected] of [
+      ["17:00:00.111", EventTiming["After Dinner"], 30, origin, "2026-01-01T17:30:00.111+00:00"],
+      ["17:00:00.999999999", EventTiming["After Dinner"], 30, origin, "2026-01-01T17:30:00.999+00:00"],
+      ["23:45:00.111", EventTiming["After Dinner"], 30, "2026-01-02T00:00:00Z", "2026-01-02T00:15:00.111+00:00"],
+      ["00:15:00.111", EventTiming["Before Dinner"], -30, origin, "2026-01-01T23:45:00.111+00:00"],
+      ["17:00:00", EventTiming["After Dinner"], 30, origin, "2026-01-01T17:30:00+00:00"],
+    ] as const) {
+      const member = dose(); member.schedule!.recurrence!.clocks = undefined;
+      member.schedule!.recurrence!.anchors = [event];
+      const input = wire(course(member), version), original = JSON.stringify(input);
+      const query = { ...options, from, eventClock: { CV: clock }, mealOffsets: { [event]: offsetMinutes } };
+      expect(nextDueDoses(input, { ...query, limit: 1 })).toEqual([expected]);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      expect(JSON.stringify(input)).toBe(original);
+    }
+  });
+
+  it.each(versions)("does not measure an indeterminate rate for nonperiod scheduling limits (%s)", version => {
+    for (const scope of ["lifetime", "administration", "period"] as const) {
+      const member = dose();
+      member.amounts = [{ rateRatio: { numerator: { value: 10, unit: "mL", comparator: "<=" },
+        denominator: { value: 1, unit: "h", comparator: "<=" } } }];
+      member.schedule!.recurrence!.occurrenceDuration = 1;
+      member.schedule!.recurrence!.occurrenceDurationUnit = Unit.Hour;
+      member.limits = scope === "period"
+        ? [{ scope, expression: { language: "text/plain", expression: "prescribed maximum" }, period: { value: 1, unit: "d" } }]
+        : [{ scope, amount: { value: 100, unit: "mL" } }];
+      const input = wire(course(member), version), original = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...options, limit: 2 })).toEqual([
+        "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00",
+      ]);
+      expect(() => calculateTotalUnits({ ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day }))
+        .toThrow(expect.objectContaining({ code: "rate-ratio-bound-unresolved" }));
+      expect(JSON.stringify(input)).toBe(original);
+      member.limits = [{ scope: "period", amount: { value: 100, unit: "mL" }, period: { value: 1, unit: "d" } }];
+      expect(() => nextDueDoses(wire(course(member), version), { ...options, limit: 2 }))
+        .toThrow(expect.objectContaining({ code: "rate-ratio-bound-unresolved" }));
+    }
+  });
+
+  it.each(versions)("executes bare QOD on independently dated alternate days (%s)", version => {
+    const member = dose(); member.schedule = { code: { coding: [{ system: gts, code: "QOD" }] } };
+    const input = wire(course(member), version), original = JSON.stringify(input);
+    expect(nextDueDoses(input, { ...options, limit: 3 })).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-03T09:00:00+00:00", "2026-01-05T09:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 6, durationUnit: Unit.Day }).totalUnits).toBe(3);
+    expect(JSON.stringify(input)).toBe(original);
+    expect(member.schedule.recurrence).toBeUndefined();
+  });
+});
+
+
+describe("round 32 execution cause-family oracles", () => {
+  const ucum = "http://unitsofmeasure.org";
+  const forms = (source: FhirR6DosageInstruction) => [
+    courseFromR6(source), source,
+    JSON.parse(JSON.stringify(toFhirR5Dosages(source))) as FhirDosage[],
+  ];
+  const daily = { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00"] };
+  const component = (quantity: { value: number; unit?: string }, timing = { repeat: daily }) =>
+    ({ doseAndRate: [{ doseQuantity: quantity }], timing });
+
+  it.each(["code only", "localized display", "scaled denominator"])(
+    "uses the same concentration meaning for caps and containers (%s)", variant => {
+      const source: FhirR6DosageInstruction = { step: [{ component: [{
+        ...component({ value: 1, unit: "mL" }, { repeat: { ...daily,
+          frequency: 2, timeOfDay: ["08:00:00", "20:00:00"] } }),
+        safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 5, unit: "mg" },
+          period: { value: 24, code: "h", system: ucum } }] },
+      }] }] };
+      const context = { strengthRatio: {
+        numerator: { value: 5, system: ucum, code: "mg",
+          ...(variant === "localized display" ? { unit: "มิลลิกรัม" } : {}) },
+        denominator: { value: variant === "scaled denominator" ? 1000 : 1, system: ucum,
+          code: variant === "scaled denominator" ? "uL" : "mL",
+          ...(variant === "localized display" ? { unit: "มิลลิลิตร" } : {}) },
+      }, containerValue: 5, containerUnit: "mg" };
+      const original = JSON.stringify({ source, context });
+      for (const dosage of forms(source)) {
+        expect(calculateTotalUnits({ ...options, dosage, context,
+          durationValue: 1, durationUnit: Unit.Day })).toMatchObject({
+          totalUnits: 1, unit: "mL", totalContainers: 1,
+          totalContainerQuantity: { value: 5, unit: "mg" },
+        });
+      }
+      expect(JSON.stringify({ source, context })).toBe(original);
+    });
+
+  it("uses coded concentration endpoints for approximate ingredient mass", () => {
+    const source = parseSig("1 drop OD QID").fhirNext;
+    const context = { dosageForm: "eye drops", strengthRatio: {
+      numerator: { value: 500, code: "ug", system: ucum },
+      denominator: { value: 100, code: "mL", system: ucum },
+    }, containerValue: 5, containerUnit: "mL" };
+    const original = JSON.stringify({ source, context });
+    for (const dosage of forms(source)) {
+      expect(calculateTotalUnits({ ...options, dosage, context, roundToMultiple: 300,
+        durationValue: 1, durationUnit: Unit.Day })).toMatchObject({
+        totalUnits: 300, totalApproximateQuantity: { value: 15, unit: "mL" },
+        totalApproximateIngredientQuantity: { value: 75, unit: "ug" }, totalContainers: 3,
+      });
+    }
+    expect(JSON.stringify({ source, context })).toBe(original);
+  });
+
+  it.each(["absent", "empty timing", "unknown code"])(
+    "keeps an absent scalar schedule unknown instead of counting zero (%s)", variant => {
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }],
+        ...(variant === "absent" ? {} : { timing: variant === "empty timing" ? {} :
+          { code: { coding: [{ system: "https://example.org/ward", code: "WARD" }] } } }) };
+      const source: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+      const original = JSON.stringify(source);
+      for (const dosage of [row, ...forms(source)]) {
+        expect(() => calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: Unit.Day }))
+          .toThrow(expect.objectContaining({ code: "timing-required" }));
+      }
+      expect(JSON.stringify(source)).toBe(original);
+    });
+
+  it("keeps executable zero windows, bare codes and explicit events distinct from missing timing", () => {
+    const exact: FhirR6DosageInstruction = { step: [{ component: [component({ value: 1, unit: "mL" })] }] };
+    for (const dosage of forms(exact))
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 8, durationUnit: Unit.Hour }))
+        .toMatchObject({ totalUnits: 0, unit: "mL" });
+    for (const timing of [
+      { code: { coding: [{ code: "BID" }] } },
+      { event: ["2026-01-01T08:00:00Z", "2026-01-01T20:00:00Z"] },
+    ]) {
+      const source: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }], timing,
+      }] }] };
+      for (const dosage of forms(source))
+        expect(calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: 2, unit: "mL" });
+    }
+  });
+
+  it.each([false, true])("never assigns the measured component's unit to a nonzero unitless amount (reverse %s)", reverse => {
+    const rows = [component({ value: 1 }), component({ value: 100, unit: "mg" })];
+    if (reverse) rows.reverse();
+    const source: FhirR6DosageInstruction = { step: [{ component: rows }] };
+    const original = JSON.stringify(source);
+    for (const dosage of forms(source))
+      expect(() => calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: Unit.Day }))
+        .toThrow(expect.objectContaining({ code: "incompatible-dose-units" }));
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it("sums compatible dimensions while retaining unitless-only quantities and inactive zero members", () => {
+    for (const [quantities, expected] of [
+      [[{ value: 1 }, { value: 2 }], { totalUnits: 3 }],
+      [[{ value: 1, unit: "g" }, { value: 100, unit: "mg" }], { totalUnits: 1.1, unit: "g" }],
+      [[{ value: 0 }, { value: 100, unit: "mg" }], { totalUnits: 100, unit: "mg" }],
+      [[{ value: 100, unit: "mg" }, { value: 0 }], { totalUnits: 100, unit: "mg" }],
+      [[{ value: 0, unit: "mg" }, { value: 2 }], { totalUnits: 2 }],
+    ] as const) {
+      // A zero contribution is a positive dose whose clock lies outside this query.
+      const source: FhirR6DosageInstruction = { step: [{ component: quantities.map(quantity =>
+        quantity.value === 0 ? component({ ...quantity, value: 1 },
+          { repeat: { ...daily, timeOfDay: ["20:00:00"] } }) : component(quantity)) }] };
+      for (const dosage of forms(source)) {
+        const result = calculateTotalUnits({ ...options, dosage, durationValue: 12, durationUnit: Unit.Hour });
+        expect(result).toMatchObject(expected);
+        if (!("unit" in expected)) expect(result.unit).toBeUndefined();
+      }
+    }
+  });
+
+  it.each([[1.5, "h"], [90, "min"], [5400, "s"], [90.5, "min"], [0.5, "s"]] as const)(
+    "executes treatment-start +%s %s as an elapsed offset", (value, code) => {
+      const offsetMs = value * (code === "h" ? 3600000 : code === "min" ? 60000 : 1000);
+      const expected = new Date(Date.parse(origin) + offsetMs).toISOString().replace("Z", "+00:00").replace(".000", "");
+      const source: FhirR6DosageInstruction = { step: [{
+        start: { contextCode: { coding: [{
+          system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+        }] }, offsetDuration: { value, code, system: ucum } },
+        component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { repeat: { count: 1 } } }],
+      }] };
+      const original = JSON.stringify(source);
+      for (const dosage of forms(source)) {
+        expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([expected]);
+        expect(calculateTotalUnits({ ...options, dosage, durationValue: 3, durationUnit: Unit.Hour }))
+          .toMatchObject({ totalUnits: 1, unit: "tab" });
+      }
+      expect(JSON.stringify(source)).toBe(original);
+    });
+
+  it("keeps conditional opportunities available while the existing supply result explains its assumption", () => {
+    const source = parseSig("1 tab daily if SBP > 160").fhirNext;
+    const original = JSON.stringify(source);
+    for (const dosage of forms(source)) {
+      const expected = ["2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00"];
+      expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual(expected);
+      expect(nextDueDoses(dosage, { ...options, limit: 2, evaluateCondition: () => true })).toEqual(expected);
+      expect(nextDueDoses(dosage, { ...options, limit: 2, evaluateCondition: () => false })).toEqual([]);
+      expect(nextDueDoses(dosage, { ...options, limit: 2, evaluateCondition: () => undefined })).toEqual([]);
+      const maximum = calculateTotalUnits({ ...options, dosage, durationValue: 2, durationUnit: Unit.Day });
+      expect(maximum).toMatchObject({ totalUnits: 2, unit: "tab", quantityKind: "maximum" });
+      expect(maximum.explanation).toContain("every scheduled clinical condition was assumed true");
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 2, durationUnit: Unit.Day,
+        evaluateCondition: () => false }).totalUnits).toBe(0);
+    }
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it.each([
+    { name: "empty repeat", repeat: {} },
+    { name: "frequency without period", repeat: { frequency: 2 } },
+    { name: "frequency with unmeasured period", repeat: { frequency: 2, period: 1 } },
+    { name: "multiple uses without cadence", repeat: { count: 2 } },
+  ])("keeps $name unknown through scalar and conditional counting", ({ repeat }) => {
+    for (const conditional of [false, true]) {
+      const source = structuredClone(parseSig(conditional ? "1 tab daily if SBP > 160" : "1 tab daily").fhirNext);
+      source.step![0].component[0].timing = { repeat };
+      const original = JSON.stringify(source);
+      for (const dosage of forms(source))
+        expect(() => calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: Unit.Day }))
+          .toThrow(expect.objectContaining({ code: "timing-required" }));
+      expect(JSON.stringify(source)).toBe(original);
+    }
+  });
+
+  it("preserves one-time counts and measured infusion supply without recurring cadence", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ rateRatio: { numerator: { value: 50, unit: "mL" },
+        denominator: { value: 1, unit: "h", code: "h" } } }],
+      timing: { repeat: { count: 1, duration: 2, durationUnit: Unit.Hour } },
+    }] }] };
+    for (const dosage of forms(source))
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 100, unit: "mL" });
+  });
+});
+
+describe("round 33 execution history and clock ownership", () => {
+  const forms = (source: FhirR6DosageInstruction) => [
+    source, JSON.parse(JSON.stringify(toFhirR5Dosages(source))) as FhirDosage[],
+    importCanonicalCourse(source),
+  ];
+  const fixed = (clock: string): FhirR6DosageInstruction => ({ step: [{ component: [{
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+    timing: { repeat: { frequency: 1, period: 4, periodUnit: Unit.Hour, timeOfDay: [clock] } },
+  }] }] });
+
+  it.each(["08.5:30", "08:30.5"])("rejects an impossible civil clock before origin search: %s", clock => {
+    // Assert the existing clock boundary first so a regression fails without
+    // entering the impossible origin search in this synchronous test.
+    expect(() => normalizeClock(clock)).toThrow(/Invalid clock/);
+    const source = fixed(clock), before = JSON.stringify(source);
+    for (const dosage of forms(source)) {
+      expect(() => nextDueDoses(dosage, { ...options, limit: 1 })).toThrow(/Invalid clock/);
+      expect(() => calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toThrow(/Invalid clock/);
+    }
+    expect(importCanonicalCourse(source).stages[0].administrations[0].schedule?.recurrence?.clocks)
+      .toEqual([clock]);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it("retains fractional seconds and advances across a real spring clock gap", () => {
+    for (const dosage of forms(fixed("08:30:00.5"))) {
+      expect(nextDueDoses(dosage, { ...options, limit: 2 }).map(Date.parse)).toEqual([
+        Date.parse("2026-01-01T08:30:00.500Z"), Date.parse("2026-01-01T12:30:00.500Z"),
+      ]);
+    }
+    const query = { from: "2026-03-08T00:00:00-05:00", orderedAt: "2026-03-08T00:00:00-05:00",
+      timeZone: "America/New_York", limit: 2 };
+    for (const dosage of forms(fixed("02:30:00")))
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-03-09T02:30:00-04:00", "2026-03-09T06:30:00-04:00",
+      ]);
+  });
+
+  it.each([false, true])("does not spend conditional replay slots on recorded doses (retained cap %s)", retainedCap => {
+    const source = structuredClone(parseSig("1 tab daily if SBP > 160").fhirNext);
+    const member = source.step![0].component[0];
+    member.timing!.repeat!.count = 2;
+    if (retainedCap) member.safety = { doseLimit: [{ scope: "period",
+      valueQuantity: { value: 500, unit: "mg" }, period: { value: 1, unit: "d" } }] };
+    const before = JSON.stringify(source);
+    for (const dosage of forms(source)) {
+      const query = { ...options, from: "2026-01-02T00:00:00Z",
+        priorDoseTimes: ["2026-01-01T09:00:00Z"], evaluateCondition: () => true, limit: 1 };
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-01-02T09:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      expect(nextDueDoses(dosage, { ...options, limit: 2, evaluateCondition: () => true })).toEqual([
+        "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00",
+      ]);
+      expect(nextDueDoses(dosage, { ...query, evaluateCondition: () => false })).toEqual([]);
+    }
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+
+  it.each(["native", "R5", "R6"] as const)("completes uncapped loading from recorded history on the chronological route (%s)", version => {
+    const loading = dose();
+    loading.schedule!.recurrence = { count: 1, frequency: 1, period: 12, periodUnit: Unit.Hour };
+    const maintenance = dose(2);
+    maintenance.schedule!.recurrence = { frequency: 1, period: 12, periodUnit: Unit.Hour,
+      courseLength: { value: 1, unit: "d" } };
+    maintenance.limits = [{ scope: "period", amount: { value: 4, unit: "tab" }, period: { value: 12, unit: "h" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 3, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: [loading] }, { administrations: [maintenance] }] };
+    const dosage = version === "native" ? course : version === "R6" ? courseToR6(course) :
+      JSON.parse(JSON.stringify(courseToR5(course))) as FhirDosage[];
+    const before = JSON.stringify(dosage);
+    const query = { orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-01T10:00:00Z", timeZone: "UTC", limit: 2 };
+    const recorded = { ...query, priorDoseTimes: ["2026-01-01T09:00:00Z"] };
+    expect(nextDueDoses(dosage, recorded)).toEqual([
+      "2026-01-01T21:00:00+00:00", "2026-01-02T09:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage, ...recorded, durationValue: 10.5, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+    expect(calculateTotalUnits({ dosage, ...recorded, durationValue: 12, durationUnit: Unit.Hour }).totalUnits).toBe(2);
+    expect(nextDueDoses(dosage, query)[0]).toBe("2026-01-01T20:00:00+00:00");
+    expect(nextDueDoses(dosage, { ...query, priorDoseTimes: ["2025-12-31T09:00:00Z"] })[0])
+      .toBe("2026-01-01T20:00:00+00:00");
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+
+  it.each(["native", "R5", "R6"] as const)("keeps recorded loading completion within its phase and cycle (%s)", version => {
+    const first = dose(), second = dose(), maintenance = dose(2);
+    first.schedule!.recurrence = second.schedule!.recurrence =
+      { count: 1, frequency: 1, period: 4, periodUnit: Unit.Hour };
+    maintenance.schedule!.recurrence = { frequency: 1, period: 4, periodUnit: Unit.Hour,
+      courseLength: { value: 1, unit: "d" } };
+    maintenance.limits = [{ scope: "period", amount: { value: 4, unit: "tab" }, period: { value: 4, unit: "h" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 3, unit: "d" }, cycleCount: 2,
+      stages: [{ administrations: [first] }, { administrations: [second] }, { administrations: [maintenance] }] };
+    const dosage = version === "native" ? course : version === "R6" ? courseToR6(course) :
+      JSON.parse(JSON.stringify(courseToR5(course))) as FhirDosage[];
+    const query = { orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-04T16:00:00Z", timeZone: "UTC",
+      priorDoseTimes: ["2026-01-01T09:00:00Z", "2026-01-01T14:00:00Z",
+        "2026-01-04T10:00:00Z", "2026-01-04T15:00:00Z"], limit: 2 };
+    // Cycle two: the first actual dose at 10:00 opens the second phase at
+    // 14:00. Its actual dose at 15:00 opens maintenance at 19:00. Earlier-cycle records cannot close either phase.
+    expect(nextDueDoses(dosage, query)).toEqual([
+      "2026-01-04T19:00:00+00:00", "2026-01-04T23:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage, ...query, durationValue: 2, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+    expect(calculateTotalUnits({ dosage, ...query, durationValue: 4, durationUnit: Unit.Hour }).totalUnits).toBe(2);
+  });
+});
+
+it("round33 supplies half a tablet from a spaced Thai fraction", () => {
+  const source = "๑ / ๒ เม็ด วันละครั้ง";
+  const fraction = lexInput(source).find(token => token.value === 0.5);
+  expect(fraction).toMatchObject({ original: "๑ / ๒", sourceText: "๑ / ๒", sourceStart: 0, sourceEnd: 5 });
+  const parsed = parseSig(source, { locale: "th" });
+  expect(parsed.input).toBe(source);
+  expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 0.5, unit: "tab" });
+  for (const dosage of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))])
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(3.5);
+});
+
+describe("round74 duration terminology ownership", () => {
+  it.each([
+    [{ value: 60, code: "S", system: "http://unitsofmeasure.org" }, true],
+    [{ value: 60, code: "s", system: "urn:clinic:duration" }, true],
+    [{ value: 60, code: "s", system: "http://unitsofmeasure.org" }, false],
+    [{ value: 60, unit: "SECONDS" }, false],
+    [{ value: 10, unit: "hours" }, true]
+  ] as const)("preserves the course-length unit identity %j", (quantity, admitted) => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day,
+        timeOfDay: ["09:00:00"], boundsDuration: quantity } }
+    }] }] };
+    const rows = toFhirR5Dosages(source), before = JSON.stringify(source);
+    for (const input of [source, rows, courseFromR6(source)]) {
+      const unresolved = "system" in quantity && (quantity.system !== "http://unitsofmeasure.org" || quantity.code === "S");
+      if (unresolved) {
+        expect(() => nextDueDoses(input, { ...options, limit: 1 }))
+          .toThrow(expect.objectContaining({ code: "course-duration-unresolved" }));
+        expect(() => calculateTotalUnits({ dosage: input, ...options, durationValue: 10, durationUnit: Unit.Hour }))
+          .toThrow(expect.objectContaining({ code: "course-duration-unresolved" }));
+      } else {
+        expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual(admitted ? ["2026-01-01T09:00:00+00:00"] : []);
+        expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 10, durationUnit: Unit.Hour }).totalUnits)
+          .toBe(admitted ? 1 : 0);
+      }
+    }
+    expect(toDosageDetails(rows).step[0].component[0].timing!.repeat!.boundsDuration).toEqual(quantity);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+
+  it.each(["none", "count", "end"] as const)("does not ignore an unknown upper course duration beside %s", boundary => {
+    const authored = { value: 3, unit: "treatment blocks", system: "urn:clinic:duration", code: "d",
+      extension: [{ url: "urn:clinic:duration-note", valueString: "Preserve the prescribed duration" }] };
+    const source: FhirR6DosageInstruction = { step: [{
+      ...(boundary === "end" ? { end: { contextCode: { coding: [{
+        system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+      }] }, offsetDuration: { value: 2, unit: "d", system: "http://unitsofmeasure.org", code: "d" } } } : {}),
+      component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00"],
+        ...(boundary === "count" ? { count: 2 } : {}), boundsDuration: authored,
+      } } }],
+    }] };
+    for (const input of [freshExecutionInput(source), courseFromR6(freshExecutionInput(source)),
+      freshExecutionInput(toFhirR5Dosages(source))]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("treatment blocks");
+      expect(() => nextDueDoses(input, { ...options, limit: 5 }))
+        .toThrow(expect.objectContaining({ code: "course-duration-unresolved" }));
+      expect(() => calculateTotalUnits({ dosage: input, ...options, durationValue: 5, durationUnit: Unit.Day }))
+        .toThrow(expect.objectContaining({ code: "course-duration-unresolved" }));
+      expect(projectCanonicalCourse(importCanonicalCourse(input)).fhirNext.step[0].component[0].timing?.repeat?.boundsDuration)
+        .toEqual(authored);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const known = freshExecutionInput(source);
+    known.step![0].component[0].timing!.repeat!.boundsDuration = { ...authored, unit: "days", system: "http://unitsofmeasure.org" };
+    const expected = boundary === "none" ? 3 : 2;
+    expect(nextDueDoses(known, { ...options, limit: 5 })).toEqual(Array.from({ length: expected },
+      (_, day) => "2026-01-0" + (day + 1) + "T09:00:00+00:00"));
+    expect(calculateTotalUnits({ dosage: known, ...options, durationValue: 5, durationUnit: Unit.Day }))
+      .toMatchObject({ totalUnits: expected, unit: "tab" });
+  });
+
+  it.each(["S", "s"])("keeps an unknown coded repeat cycle unresolved (%s)", code => {
+    const source: FhirR6DosageInstruction = { repeatCycle: { value: 60, code,
+      system: code === "S" ? "http://unitsofmeasure.org" : "urn:clinic:duration" },
+      step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat: { count: 1 } } }] }] };
+    for (const input of [source, toFhirR5Dosages(source), courseFromR6(source)]) {
+      expect(() => nextDueDoses(input, { ...options, limit: 2 })).toThrow(/cycle/i);
+      expect(() => calculateTotalUnits({ dosage: input, ...options, durationValue: 1, durationUnit: Unit.Day })).toThrow(/cycle/i);
+    }
+  });
+});
+
+describe("round34 execution boundary regressions", () => {
+  const versions = ["native", "R5", "R6"] as const;
+  const wire = (course: CanonicalCourse, version: typeof versions[number]) =>
+    version === "native" ? course : version === "R5" ? courseToR5(course) : courseToR6(course);
+
+  it.each(versions)("keeps the second fold instant as the first inferred weekly slot (%s)", version => {
+    const member = dose();
+    member.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: Unit.Week };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [member] }] };
+    const input = wire(course, version), original = JSON.stringify(input);
+    const query = { orderedAt: "2026-11-01T06:30:00Z", from: "2026-11-01T06:30:00Z",
+      timeZone: "America/New_York" };
+    expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([
+      "2026-11-01T01:30:00-05:00", "2026-11-04T01:30:00-05:00", "2026-11-08T01:30:00-05:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Week }).totalUnits).toBe(2);
+    expect(JSON.stringify(input)).toBe(original);
+
+    // An authored 01:30 still resolves to the first fold, before this order.
+    const authored = freshExecutionInput(course);
+    authored.stages[0].administrations[0].schedule!.recurrence!.clocks = ["01:30:00"];
+    expect(nextDueDoses(wire(authored, version), { ...query, limit: 2 })).toEqual([
+      "2026-11-04T01:30:00-05:00", "2026-11-08T01:30:00-05:00",
+    ]);
+  });
+
+  it.each(versions)("resolves Vienna authored clocks to the first fold instant (%s)", version => {
+    const member = dose();
+    member.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["02:30:00"] };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [member] }] };
+    const input = wire(course, version), before = JSON.stringify(input);
+    const query = { orderedAt: "2026-10-25T00:00:00Z", from: "2026-10-25T00:00:00Z", timeZone: "Europe/Vienna" };
+    expect(nextDueDoses(input, { ...query, limit: 2 })).toEqual([
+      "2026-10-25T02:30:00+02:00", "2026-10-26T02:30:00+01:00"
+    ]);
+    expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(1);
+    expect(nextDueDoses(input, { ...query, from: "2026-10-25T01:00:00Z", limit: 1 }))
+      .toEqual(["2026-10-26T02:30:00+01:00"]);
+    const gap = { orderedAt: "2026-03-29T00:00:00Z", from: "2026-03-29T00:00:00Z", timeZone: "Europe/Vienna" };
+    expect(nextDueDoses(input, { ...gap, limit: 1 })).toEqual(["2026-03-30T02:30:00+02:00"]);
+    expect(calculateTotalUnits({ dosage: input, ...gap, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(versions)("repeats a clamped civil month from the resolved prior exclusive end (%s)", version => {
+    const maintenance = dose(2);
+    maintenance.schedule!.recurrence!.courseLength = { value: 2, unit: "d" };
+    const course: CanonicalCourse = { kind: "course", stages: [
+      { start: relative(1, "mo"), end: relative(2, "mo"), count: 2, administrations: [dose()] },
+      { administrations: [maintenance] },
+    ] };
+    const input = wire(course, version), original = JSON.stringify(input);
+    const query = { from: "2026-01-31T00:00:00Z", orderedAt: "2026-01-31T00:00:00Z", timeZone: "UTC" };
+    // First window: Feb 28 through Mar 30. Second: Mar 31 through Apr 29.
+    // Maintenance then supplies two tablets on Apr 30 and May 1.
+    const expected = [
+      "2026-02-28",
+      ...Array.from({ length: 31 }, (_, index) => "2026-03-" + ("0" + (index + 1)).slice(-2)),
+      ...Array.from({ length: 30 }, (_, index) => "2026-04-" + ("0" + (index + 1)).slice(-2)),
+      "2026-05-01",
+    ].map(day => day + "T09:00:00+00:00");
+    expect(nextDueDoses(input, { ...query, limit: 80 })).toEqual(expected);
+    expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 91, durationUnit: Unit.Day }).totalUnits).toBe(65);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+
+  it.each(versions)("retains clamped one-month spans when the first repeated step starts at treatment (%s)", version => {
+    const course: CanonicalCourse = { kind: "course", stages: [
+      { start: relative(0), end: relative(1, "mo"), count: 3, administrations: [dose()] },
+    ] };
+    const input = wire(course, version), original = JSON.stringify(input);
+    const query = { from: "2026-01-31T00:00:00Z", orderedAt: "2026-01-31T00:00:00Z", timeZone: "UTC" };
+    // Jan31-Feb28, Feb28-Mar28, Mar28-Apr28: 28 + 28 + 31 days.
+    const expected = ["2026-01-31",
+      ...Array.from({ length: 28 }, (_, index) => "2026-02-" + ("0" + (index + 1)).slice(-2)),
+      ...Array.from({ length: 31 }, (_, index) => "2026-03-" + ("0" + (index + 1)).slice(-2)),
+      ...Array.from({ length: 27 }, (_, index) => "2026-04-" + ("0" + (index + 1)).slice(-2)),
+    ].map(day => day + "T09:00:00+00:00");
+    expect(nextDueDoses(input, { ...query, limit: 100 })).toEqual(expected);
+    expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 91, durationUnit: Unit.Day }).totalUnits).toBe(87);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+
+  it.each(versions)("keeps a member's treatment-relative weekly origin through repeated civil windows (%s)", version => {
+    const member = dose();
+    member.phaseStart = relative(1, "mo");
+    member.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: Unit.Week, clocks: ["09:00:00"] };
+    const course: CanonicalCourse = { kind: "course", stages: [
+      { start: relative(1, "mo"), end: relative(2, "mo"), count: 2, administrations: [member] },
+    ] };
+    const query = { from: "2026-01-31T00:00:00Z", orderedAt: "2026-01-31T00:00:00Z", timeZone: "UTC" };
+    // The member is anchored to Feb 28, so the second step window keeps
+    // Saturdays Apr 4/11/18/25 instead of restarting weekly cadence Mar 31.
+    const days = ["2026-02-28", "2026-03-07", "2026-03-14", "2026-03-21", "2026-03-28",
+      "2026-04-04", "2026-04-11", "2026-04-18", "2026-04-25"];
+    for (const cutoff of ["none", "calendar", "phase"] as const) {
+      const variant: CanonicalCourse = JSON.parse(JSON.stringify(course));
+      const limited = variant.stages[0].administrations[0];
+      limited.schedule!.recurrence!.calendarWindow = cutoff === "calendar" ? { end: "2026-04-13T00:00:00Z" } : undefined;
+      limited.phaseEnd = cutoff === "phase" ? relative(2, "mo") : undefined;
+      const input = wire(variant, version), original = JSON.stringify(input);
+      const count = cutoff === "phase" ? 5 : cutoff === "calendar" ? 7 : 9;
+      const expected = days.slice(0, count).map(day => day + "T09:00:00+00:00");
+      expect(nextDueDoses(input, { ...query, limit: 20 })).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 91, durationUnit: Unit.Day }).totalUnits)
+        .toBe(count);
+      expect(JSON.stringify(input)).toBe(original);
+    }
+  });
+
+  it.each(versions)("returns zero before a future ranged-frequency or ranged-period window (%s)", version => {
+    for (const kind of ["frequency", "period"] as const) {
+      const member = dose();
+      member.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: Unit.Day,
+        ...(kind === "frequency" ? { frequencyMax: 2 } : { periodMax: 2 }),
+        clocks: ["09:00:00"], calendarWindow: { start: "2026-01-10T00:00:00Z" } };
+      const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [member] }] };
+      const input = version === "native" ? member : version === "R5" ? courseToR5(course)[0] : courseToR6(course);
+      const original = JSON.stringify(input);
+      for (const from of ["2026-01-01T00:00:00Z", "2026-01-09T00:00:00Z"])
+        expect(calculateTotalUnits({ ...options, dosage: input, from, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+      expect(calculateTotalUnits({ ...options, dosage: input, from: "2026-01-10T00:00:00Z",
+        durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(kind === "frequency" ? 2 : 1);
+      expect(JSON.stringify(input)).toBe(original);
+    }
+  });
+
+  it.each(versions)("withholds untimed PRN calendar capacity when a supplied evaluator is unknown (%s)", version => {
+    const parsed = parseSig("Take 1 tablet as needed up to 2 times daily only on dialysis days.");
+    const course = importCanonicalCourse(parsed.fhirNext);
+    const input = wire(course, version), original = JSON.stringify(input);
+    const query = { ...options, dosage: input, durationValue: 3, durationUnit: Unit.Day };
+    expect(calculateTotalUnits(query).totalUnits).toBe(6);
+    expect(calculateTotalUnits({ ...query, evaluateCondition: () => true }).totalUnits).toBe(6);
+    expect(calculateTotalUnits({ ...query, evaluateCondition: () => undefined }).totalUnits).toBe(0);
+    expect(calculateTotalUnits({ ...query, evaluateCondition: () => false }).totalUnits).toBe(0);
+    expect(calculateTotalUnits({ ...query, evaluateCondition: (_condition, at) =>
+      at.startsWith("2026-01-01") ? true : at.startsWith("2026-01-02") ? undefined : false }).totalUnits).toBe(2);
+    expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual([]);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+
+  it.each(versions)("combines independent member clock plans across fixed overlapping cycles (%s)", version => {
+    const first = dose(), second = dose();
+    for (const [member, clock, name] of [[first, "06:00:00", "A"], [second, "09:00:00", "B"]] as const) {
+      member.schedule!.recurrence = { frequency: 1, frequencyMax: 2, period: 1, periodUnit: Unit.Day,
+        clocks: [clock], courseLength: { value: 2, unit: "d" } };
+      member.predicate = { kind: "state", name, text: name, expected: true };
+      member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 24, unit: "h" } }];
+    }
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" }, cycleCount: 2,
+      stages: [{ administrations: [first, second] }] };
+    const input = wire(course, version), original = JSON.stringify(input);
+    const query = { ...options, from: "2026-01-02T06:00:00Z", durationValue: 2.5, durationUnit: Unit.Hour,
+      evaluateCondition: (condition: import("../src").MedicationCondition, at: string) =>
+        condition.kind === "state" && at.includes(condition.name === "A" ? "T06:00:00" : "T08:00:00") };
+    // Jan 2 is shared by both cycles. A's authored 06:00 and B's inferred
+    // 08:00 are independently feasible: each spends only its own 24-hour cap.
+    // Their fixed two-day windows do not couple those clock choices.
+    expect(calculateTotalUnits({ ...query, dosage: input }).totalUnits).toBe(2);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+});
+
+
+describe("round35 execution cap and history oracles", () => {
+  const versions = ["native", "R5", "R6"] as const;
+  const wire = (member: CanonicalAdministration | CanonicalCourse, version: typeof versions[number]) => {
+    const course: CanonicalCourse = member.kind === "course" ? member : { kind: "course", stages: [{ administrations: [member] }] };
+    return version === "native" ? member : version === "R5"
+      ? JSON.parse(JSON.stringify(courseToR5(course))) as FhirDosage[] : courseToR6(course);
+  };
+  const ranged = (maximum = 3): CanonicalAdministration => ({
+    ...dose(), amounts: [{ range: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } }],
+    schedule: { recurrence: { frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"] } },
+    limits: [{ scope: "period", amount: { value: maximum, unit: "tab" }, period: { value: 48, unit: "h" } }],
+  });
+  it.each(versions)("proves a partial final rolling-cap partition without subset search (%s)", version => {
+    const input = wire(ranged(), version), before = JSON.stringify(input);
+    // Each adjacent pair supplies at most three. The final unpaired clock
+    // can supply at most two: alternating 2,1,...,2 attains the bound.
+    for (const [days, total] of [[50, 75], [51, 77], [52, 78], [53, 80]])
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: days, durationUnit: Unit.Day }).totalUnits)
+        .toBe(total);
+    // Query starts after the last clock; no empty tail partition receives a cap.
+    expect(calculateTotalUnits({ ...options, dosage: input, from: "2026-01-01T09:00:00Z",
+      durationValue: 51, durationUnit: Unit.Day }).totalUnits).toBe(77);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(versions)("counts delayed recorded administrations once before nominal replay (%s)", version => {
+    for (const delayMinutes of [0, 120, -120]) {
+      const value = dose(); value.delayMinutes = delayMinutes;
+      value.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: Unit.Day,
+        clocks: ["08:00:00"], count: 2 };
+      value.limits = [{ scope: "period", amount: { value: 2, unit: "tab" }, period: { value: 48, unit: "h" } }];
+      const input = wire(value, version), before = JSON.stringify(input);
+      const clock = delayMinutes === 120 ? "10:00:00" : delayMinutes === -120 ? "06:00:00" : "08:00:00";
+      const query = { ...options, from: "2026-01-02T00:00:00Z", priorDoseTimes: ["2026-01-01T" + clock + "Z"], limit: 3 };
+      const historyBefore = JSON.stringify(query);
+      expect(nextDueDoses(input, query)).toEqual(["2026-01-02T" + clock + "+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      expect(nextDueDoses(input, { ...query, priorDoseTimes: ["2026-01-01T" + clock + "Z", "2026-01-02T" + clock + "Z"],
+        from: "2026-01-03T00:00:00Z" })).toEqual([]);
+      expect(JSON.stringify(query)).toBe(historyBefore);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each(versions)("finishes counted ranged loading at its last quantity-admitted event (%s)", version => {
+    const loading = ranged(1); loading.schedule!.recurrence!.count = 2;
+    const maintenance = dose(2); maintenance.schedule!.recurrence = {
+      frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"], count: 2,
+    };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [loading] }, { administrations: [maintenance] }] };
+    const input = wire(course, version), before = JSON.stringify(input);
+    // One tablet at Jan 1 08:00 and Jan 3 08:00 completes loading.
+    // Maintenance starts at the next authored 08:00, on Jan 4.
+    expect(nextDueDoses(input, { ...options, limit: 8 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-03T08:00:00+00:00",
+      "2026-01-04T08:00:00+00:00", "2026-01-05T08:00:00+00:00",
+    ]);
+    for (const [days, total] of [[2, 1], [3, 2], [4, 4], [5, 6]])
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: days, durationUnit: Unit.Day }).totalUnits).toBe(total);
+    expect(JSON.stringify(input)).toBe(before);
+    const uncappedCourse = freshExecutionInput(course);
+    uncappedCourse.stages[0].administrations[0].limits = undefined;
+    const uncapped = wire(uncappedCourse, version);
+    expect(nextDueDoses(uncapped, { ...options, limit: 8 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
+      "2026-01-03T08:00:00+00:00", "2026-01-04T08:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: uncapped, ...options, durationValue: 4, durationUnit: Unit.Day }).totalUnits).toBe(8);
+  });
+
+  it.each(versions)("shares range-cap history and exclusion admission with counted completion (%s)", version => {
+    const loading = ranged(1); loading.schedule!.recurrence!.count = 2;
+    const maintenance = dose(2); maintenance.schedule!.recurrence = {
+      frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"], count: 1,
+    };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [loading] }, { administrations: [maintenance] }] };
+    const input = wire(course, version);
+    const query = { ...options, from: "2026-01-02T00:00:00Z", priorDoseTimes: ["2026-01-01T08:00:00Z"], limit: 4 };
+    // The recorded dose releases exactly at Jan3 08:00. It consumes the
+    // loading count once; the new Jan3 dose completes that phase.
+    expect(nextDueDoses(input, query)).toEqual(["2026-01-03T08:00:00+00:00", "2026-01-04T08:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(1);
+    expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(3);
+    const excludedCourse = freshExecutionInput(course);
+    excludedCourse.stages[0].administrations[0].excludedDates = ["2026-01-03"];
+    const excluded = wire(excludedCourse, version);
+    expect(nextDueDoses(excluded, { ...options, limit: 4 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-04T08:00:00+00:00", "2026-01-05T08:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: excluded, ...options, durationValue: 5, durationUnit: Unit.Day }).totalUnits).toBe(4);
+    // A whole-course repeat uses the same count admission without running
+    // supply maximization when the caller only requests administration clocks.
+    const repeatedCourse = freshExecutionInput(excludedCourse);
+    repeatedCourse.cycleInterval = { value: 7, unit: "d" }; repeatedCourse.cycleCount = 1;
+    expect(nextDueDoses(wire(repeatedCourse, version), { ...options, limit: 4 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-04T08:00:00+00:00", "2026-01-05T08:00:00+00:00",
+    ]);
+  });
+
+  it.each(versions)("retains strict range admission and fractional loading amounts (%s)", version => {
+    const loading = ranged(3); loading.amounts![0].range!.low!.value = 1.5;
+    loading.schedule!.recurrence!.count = 2;
+    const maintenance = dose(2); maintenance.schedule!.recurrence = {
+      frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"], count: 1,
+    };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [loading] }, { administrations: [maintenance] }] };
+    expect(nextDueDoses(wire(course, version), { ...options, limit: 4 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00", "2026-01-03T08:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: wire(course, version), ...options, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(5);
+    const strictCourse = freshExecutionInput(course), strictLoading = strictCourse.stages[0].administrations[0];
+    strictLoading.amounts![0].range!.low = { value: 1, unit: "tab", comparator: ">" };
+    strictLoading.limits![0].amount!.value = 2;
+    const input = wire(strictCourse, version), before = JSON.stringify(input);
+    expect(nextDueDoses(input, { ...options, limit: 4 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-03T08:00:00+00:00", "2026-01-04T08:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 4, durationUnit: Unit.Day }).totalUnits).toBe(6);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(versions)("keeps spaced administration and periodic mass caps in their authored units (%s)", version => {
+    const value = dose(); value.amounts = [{ range: {
+      low: { value: 500, unit: "mg" }, high: { value: 1500, unit: "mg" },
+    } }];
+    value.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00", "20:00:00"] };
+    value.limits = [
+      { scope: "administration", amount: { value: 1, unit: "g " } },
+      { scope: "period", amount: { value: 1.5, unit: "g " }, period: { value: 24, unit: "h" } },
+    ];
+    const input = wire(value, version), before = JSON.stringify(input);
+    const result = calculateTotalUnits({ dosage: input, ...options, durationValue: 2, durationUnit: Unit.Day });
+    expect(result).toMatchObject({ totalUnits: 3000, unit: "mg" });
+    expect(result.explanation).not.toContain("could not be applied");
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(versions)("keeps counted delayed points eligible after an immediate predecessor (%s)", version => {
+    const immediate = dose(2); immediate.schedule!.recurrence = { anchors: ["IMD"] };
+    const delayed = dose(); delayed.schedule!.recurrence = { count: 1 }; delayed.delayMinutes = 720;
+    const final = dose(3); final.schedule!.recurrence = { count: 1 }; final.delayMinutes = 60;
+    const course: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [immediate] }, { administrations: [delayed] }, { administrations: [final] },
+    ] };
+    const input = wire(course, version), before = JSON.stringify(input);
+    const query = { from: "2026-11-21T07:00:00Z", orderedAt: "2026-11-21T08:00:00Z", timeZone: "UTC", limit: 4 };
+    expect(nextDueDoses(input, query)).toEqual([
+      "2026-11-21T08:00:00+00:00", "2026-11-21T20:00:00+00:00", "2026-11-21T21:00:00+00:00",
+    ]);
+    expect(nextDueDoses(input, { ...query, from: "2026-11-22T00:00:00Z" })).toEqual([]);
+    expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(6);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(versions)("uses a single dated successor as the effective open-phase cutoff (%s)", version => {
+    const loading = dose(); loading.schedule!.recurrence = {
+      frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["22:00:00"], calendarWindow: { start: "2026-12-01" },
+    };
+    const maintenance = dose(2); maintenance.schedule!.recurrence = {
+      frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["06:00:00"], calendarWindow: { start: "2026-12-02" },
+    };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [loading] }, { administrations: [maintenance] }] };
+    const input = wire(course, version), before = JSON.stringify(input);
+    const query = { orderedAt: "2026-12-01T12:00:00Z", from: "2026-11-21T08:00:00Z", timeZone: "UTC" };
+    expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([
+      "2026-12-01T22:00:00+00:00", "2026-12-02T06:00:00+00:00", "2026-12-03T06:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: input, ...query, from: "2026-12-01T00:00:00Z",
+      durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(5);
+    expect(JSON.stringify(input)).toBe(before);
+    expect(loading.schedule!.recurrence!.count).toBeUndefined();
+    expect(loading.schedule!.recurrence!.calendarWindow!.end).toBeUndefined();
+    // A real earlier endpoint remains the predecessor's endpoint; the
+    // explicit successor still starts on its own date after the gap.
+    loading.schedule!.recurrence!.calendarWindow!.end = "2026-12-01T22:00:00Z";
+    expect(nextDueDoses(wire(course, version), { ...query, limit: 3 })).toEqual([
+      "2026-12-01T22:00:00+00:00", "2026-12-02T06:00:00+00:00", "2026-12-03T06:00:00+00:00",
+    ]);
+    loading.schedule!.recurrence!.calendarWindow!.end = "2026-12-01T21:00:00Z";
+    const earlier = wire(course, version), earlierBefore = JSON.stringify(earlier);
+    expect(nextDueDoses(earlier, { ...query, limit: 3 })).toEqual([
+      "2026-12-02T06:00:00+00:00", "2026-12-03T06:00:00+00:00", "2026-12-04T06:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: earlier, ...query, from: "2026-12-01T00:00:00Z",
+      durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(4);
+    expect(JSON.stringify(earlier)).toBe(earlierBefore);
+  });
+
+  it.each(versions)("intersects compatible spaced mass maxima without changing authored measurements (%s)", version => {
+    for (const reverse of [false, true]) {
+      const value = dose(500); value.amounts![0].quantity!.unit = "mg";
+      value.limits = [{ scope: "lifetime", amount: { value: 1, unit: "g " } },
+        { scope: "lifetime", amount: { value: 2000, unit: "mg" } }];
+      if (reverse) value.limits.reverse();
+      const authored = JSON.stringify(value);
+      const authoredLimits = JSON.parse(JSON.stringify(value.limits)) as NonNullable<CanonicalAdministration["limits"]>;
+      const input = wire(value, version), before = JSON.stringify(input);
+      expect(JSON.stringify(value)).toBe(authored);
+      const result = calculateTotalUnits({ dosage: input, ...options, durationValue: 7, durationUnit: Unit.Day });
+      expect(result).toMatchObject({ totalUnits: 1000, unit: "mg" });
+      expect(result.explanation).not.toContain("could not be applied");
+      expect(JSON.stringify(input)).toBe(before);
+      const projected = projectCanonicalCourse({ kind: "course", stages: [{ administrations: [value] }] });
+      for (const exported of [projected.fhir, projected.fhirNext])
+        expect(importCanonicalCourse(exported).stages[0].administrations[0].limits)
+          .toEqual(expect.arrayContaining(authoredLimits.map(limit => expect.objectContaining(limit))));
+      expect(JSON.stringify(value)).toBe(authored);
+    }
+  });
+
+  it.each(versions)("repeats an omitted midnight displacement as civil days across the fall-back (%s)", version => {
+    const member = dose(); member.schedule!.recurrence!.clocks = ["00:30:00"];
+    for (const explicitZero of [false, true]) {
+      const course: CanonicalCourse = { kind: "course", stages: [{
+        start: { anchor: "treatment-day-start", ...(explicitZero ? { displacement: { value: 0, unit: "d" } } : {}) },
+        end: { anchor: "treatment-day-start", displacement: { value: 1, unit: "d" } },
+        count: 2, administrations: [member],
+      }] };
+      const input = wire(course, version), before = JSON.stringify(input);
+      const query = { from: "2026-11-01T04:00:00Z", orderedAt: "2026-11-01T04:00:00Z", timeZone: "America/New_York" };
+      expect(nextDueDoses(input, { ...query, limit: 5 })).toEqual([
+        "2026-11-01T00:30:00-04:00", "2026-11-02T00:30:00-05:00",
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(2);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+});
+}
+
+
+describe("phase-local supplied count ownership", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const forms = (course: CanonicalCourse) => [course, fresh(courseToR5(course)),
+    fresh(courseToR6(course)), fresh(toFhirR5Dosages(courseToR6(course)))];
+  const infusion = (dated: boolean) => parsePublicSig("Infuse 100 mL over 2 hours" +
+    (dated ? " starting 2026-11-22 at 08:00" : "") + ", then infuse 50 mL over 1 hour")
+    .meta.canonical.course!;
+
+  it.each([false, true])("preserves single-administration completion with an explicit zero count (%s)", dated => {
+    const query = { orderedAt: dated ? "2026-11-22T00:00:00Z" : "2026-11-22T08:00:00Z",
+      from: "2026-11-22T08:00:00Z", timeZone: "UTC", priorCount: 0, limit: 4 };
+    for (const dosage of forms(infusion(dated))) {
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-11-22T08:00:00+00:00", "2026-11-22T10:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 150, unit: "mL" });
+    }
+  });
+
+  it.each([{ dated: false, hour: "09" }, { dated: true, hour: "09" }, { dated: true, hour: "10" }])(
+    "does not charge recorded loading use to a future infusion ($dated at $hour)", ({ dated, hour }) => {
+    const query = { orderedAt: dated ? "2026-11-22T00:00:00Z" : "2026-11-22T08:00:00Z",
+      from: "2026-11-22T" + hour + ":00:00Z", timeZone: "UTC", priorCount: 1,
+      priorDoseTimes: ["2026-11-22T08:00:00Z"], limit: 4 };
+    for (const dosage of forms(infusion(dated))) {
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-11-22T10:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 50, unit: "mL" });
+    }
+  });
+
+  it.each([false, true])("keeps the future finite course's entire scalar or ranged allowance (%s)", ranged => {
+    const note = { url: "urn:clinical:phase-history", valueString: "Retain the authored phase" };
+    const amount = (value: number) => ranged
+      ? { doseRange: { low: { value, unit: "tab" }, high: { value: value * 2, unit: "tab" } } }
+      : { doseQuantity: { value, unit: "tab" } };
+    const rows: FhirDosage[] = [1, 2].map(value => ({ sequence: value, extension: [note],
+      doseAndRate: [amount(value)], timing: { repeat: { count: 2,
+        frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00"] } } }));
+    const course = importCanonicalCourse(fresh(rows));
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-02T00:00:00Z",
+      timeZone: "UTC", priorCount: 1, priorDoseTimes: ["2026-01-01T09:00:00Z"], limit: 5 };
+    for (const options of [query, { from: query.from, timeZone: "UTC", priorCount: 1, limit: 5 }]) {
+      for (const dosage of forms(course)) {
+        expect(nextDueDoses(dosage, options)).toEqual([
+          "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00", "2026-01-04T09:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage, ...options, durationValue: 4, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: ranged ? 10 : 5, unit: "tab" });
+      }
+    }
+    expect(courseToR5(course)[1].extension).toContainEqual(note);
+  });
+});
+
+
+describe("authored immediate start and integer sequence execution", () => {
+  it.each([true, false])("uses the authored start for an immediate dose with an earlier order (%s)", explicitOrder => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { count: 1, when: [EventTiming.Immediate],
+        boundsPeriod: { start: "2026-12-05T08:00:00Z" } } } };
+    const options = { from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 3,
+      ...(explicitOrder ? { orderedAt: "2026-12-04T00:00:00Z" } : {}) };
+    for (const dosage of [row, [row], { step: [{ component: [row] }] }]) {
+      expect(nextDueDoses(dosage, options)).toEqual(["2026-12-05T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+    }
+  });
+
+  it("keeps single-row and array supply for an authored zero sequence", () => {
+    const row: FhirDosage = { sequence: 0, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00"] } } };
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC", limit: 1 };
+    for (const dosage of [row, [row]]) {
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-01-01T09:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+    }
+    expect(row.sequence).toBe(0);
+  });
+
+  it.each([-2, 0, 1])("orders distinct integer sequences and keeps equal values concurrent (%s)", first => {
+    const row = (sequence: number, value: number): FhirDosage => ({ sequence,
+      doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
+      timing: { repeat: { count: 1, frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00"] } } });
+    const dosage = [row(first + 2, 4), row(first, 1), row(first, 2)];
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC", limit: 4 };
+    expect(nextDueDoses(dosage, query)).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(7);
+    expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(3);
+    expect(calculateTotalUnits({ dosage, ...query, from: "2026-01-02T00:00:00Z",
+      durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(4);
+    expect(dosage.map(item => item.sequence)).toEqual([first + 2, first, first]);
+  });
+});
+
+
+describe("ordinary recurrence and partial-event supply boundaries", () => {
+  const options = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC" };
+  const forms = (course: CanonicalCourse) => [course, courseToR5(course), courseToR6(course)];
+  const member = (): CanonicalAdministration => ({ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] });
+
+  it("uses BID clocks when only an upper frequency bound is supplied", () => {
+    for (const frequency of [undefined, 2]) {
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
+        code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID" }] },
+        repeat: { ...(frequency === undefined ? {} : { frequency }), frequencyMax: 3, period: 1, periodUnit: Unit.Day }
+      } };
+      for (const input of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+        expect(nextDueDoses(input, { ...options, limit: 4 })).toEqual([
+          "2027-01-01T08:00:00+00:00", "2027-01-01T20:00:00+00:00",
+          "2027-01-02T08:00:00+00:00", "2027-01-02T20:00:00+00:00"
+        ]);
+        // Numerical supply retains the independent authored upper bound.
+        expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(3);
+      }
+    }
+  });
+
+  it.each([true, false])("excludes impossible weekdays from a partial event window (clock=%s)", clock => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
+      event: ["2026-11"], repeat: { dayOfWeek: [FhirDayOfWeek.Monday], ...(clock ? { timeOfDay: ["09:00:00"] } : {}) }
+    } };
+    for (const input of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+      const query = { dosage: input, orderedAt: "2026-11-01T00:00:00Z", timeZone: "UTC", durationValue: 2, durationUnit: Unit.Hour };
+      expect(calculateTotalUnits({ ...query, from: "2026-11-01T08:00:00Z" }).totalUnits).toBe(0);
+      expect(() => calculateTotalUnits({ ...query, from: "2026-11-02T08:00:00Z" })).toThrow(/month precision/);
+    }
+  });
+
+  it("applies a counted cycle phase end to an event-only timing", () => {
+    for (const days of [1, 7]) {
+      const dose = member(); dose.schedule = { explicitEvents: ["2027-02"] };
+      dose.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 1, unit: "d" } }];
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 7, unit: "d" }, cycleCount: 1,
+        stages: [{ end: { anchor: "treatment-start", displacement: { value: days, unit: "d" } }, administrations: [dose] }] };
+      for (const input of forms(course)) {
+        const query = { dosage: input, orderedAt: "2027-01-28T00:00:00Z", from: "2027-02-01T00:00:00Z",
+          timeZone: "UTC", durationValue: 1, durationUnit: Unit.Day };
+        if (days === 1) expect(calculateTotalUnits(query).totalUnits).toBe(0);
+        else expect(() => calculateTotalUnits(query)).toThrow(/month precision/);
+      }
+    }
+  });
+
+  it("keeps zero as a ranged infusion lower bound with a fixed-duration control", () => {
+    for (const variant of ["standard", "typed", "exact"] as const) {
+      const dose = member(); dose.amounts = [{ rate: { value: 10, unit: "mL/h" } }];
+      dose.schedule = { recurrence: { frequency: 2, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00", "20:00:00"],
+        ...(variant === "typed" ? { occurrenceDurationRange: { low: { value: 0, unit: "h" }, high: { value: 2, unit: "h" } } }
+          : { occurrenceDuration: variant === "exact" ? 2 : 0, occurrenceDurationUnit: Unit.Hour,
+            ...(variant === "standard" ? { occurrenceDurationMax: 2 } : {}) }) } };
+      dose.limits = [{ scope: "period", amount: { value: 30, unit: "mL" }, period: { value: 24, unit: "h" } }];
+      for (const input of forms({ kind: "course", stages: [{ administrations: [dose] }] }))
+        // A 1-hour and a 2-hour infusion attain 30 mL; two fixed 2-hour doses cannot both fit the cap.
+        expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 1, durationUnit: Unit.Day }).totalUnits)
+          .toBe(variant === "exact" ? 20 : 30);
+    }
+  });
+});
+
+
+describe("configured clocks within elapsed frequency periods", () => {
+  const options = { orderedAt: "2027-03-13T00:00:00-05:00", from: "2027-03-13T00:00:00-05:00",
+    timeZone: "America/New_York", frequencyDefaults: { byFrequency: { "freq:2/per:24h": ["07:00", "18:00"] } } };
+
+  it("uses configured first-cycle positions while retaining a 24-hour elapsed cycle", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 2, period: 24, periodUnit: Unit.Hour } } };
+    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+      expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual([
+        "2027-03-13T07:00:00-05:00", "2027-03-13T18:00:00-05:00",
+        "2027-03-14T08:00:00-04:00", "2027-03-14T19:00:00-04:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...options, from: "2027-03-14T07:30:00-04:00",
+        durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(1);
+      expect(nextDueDoses(dosage, { ...options, frequencyDefaults: undefined, limit: 2 })).toEqual([
+        "2027-03-13T00:00:00-05:00", "2027-03-13T12:00:00-05:00"
+      ]);
+    }
+  });
+
+  it("uses the same configured grid for prior count, remaining due doses and supply", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { count: 3, frequency: 2, period: 24, periodUnit: Unit.Hour } } };
+    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+      const query = { ...options, from: "2027-03-13T13:00:00-05:00" };
+      expect(nextDueDoses(dosage, { ...query, limit: 4 })).toEqual([
+        "2027-03-13T18:00:00-05:00", "2027-03-14T08:00:00-04:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(2);
+    }
+  });
+});
+
+
+describe("untimed one-use allowances and supply explanations", () => {
+  const versions = ["native", "R5", "R6"] as const;
+  const wire = (course: CanonicalCourse, version: typeof versions[number]) =>
+    version === "native" ? course : version === "R5" ? courseToR5(course) : courseToR6(course);
+  const options = { orderedAt: "2027-01-01T08:00:00Z", from: "2027-01-01T08:00:00Z", timeZone: "UTC" };
+
+  it.each(versions)("keeps one untimed PRN use available until actual consumption (%s)", version => {
+    const member: CanonicalAdministration = { kind: "administration", asNeeded: true,
+      amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { recurrence: { count: 1 } } };
+    const input = wire({ kind: "course", stages: [{ administrations: [member] }] }, version);
+    const original = JSON.stringify(input);
+    expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual([]);
+    const query = { ...options, dosage: input, from: "2027-01-01T12:00:00Z", durationValue: 1, durationUnit: Unit.Day };
+    expect(calculateTotalUnits(query)).toMatchObject({ totalUnits: 1, quantityKind: "maximum" });
+    expect(calculateTotalUnits({ ...query, priorDoseTimes: ["2027-01-01T09:00:00Z"] }).totalUnits).toBe(0);
+    expect(calculateTotalUnits({ ...query, priorCount: 1 }).totalUnits).toBe(0);
+    expect(JSON.stringify(input)).toBe(original);
+    const scheduled = wire({ kind: "course", stages: [{ administrations: [{ ...member, asNeeded: false }] }] }, version);
+    expect(nextDueDoses(scheduled, { ...options, limit: 1 })).toEqual(["2027-01-01T08:00:00+00:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: scheduled }).totalUnits).toBe(0);
+  });
+
+  it.each(versions)("uses the same supported unit normalization for course comparison and conversion (%s)", version => {
+    const member = (value: number, unit: string): CanonicalAdministration => ({ kind: "administration",
+      amounts: [{ quantity: { value, unit } }], schedule: { recurrence: { count: 1 } } });
+    const input = wire({ kind: "course", stages: [{ administrations: [member(1, "g "), member(500, "mg")] }] }, version);
+    const original = JSON.stringify(input);
+    const query = { ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day };
+    expect(calculateTotalUnits(query)).toMatchObject({ totalUnits: 1.5, unit: "g " });
+    expect(JSON.stringify(input)).toBe(original);
+    const incompatible = wire({ kind: "course", stages: [{ administrations: [member(1, "g "), member(500, "mL")] }] }, version);
+    expect(() => calculateTotalUnits({ ...query, dosage: incompatible }))
+      .toThrow(expect.objectContaining({ code: "incompatible-dose-units" }));
+  });
+
+  it.each(versions)("qualifies a frequency maximum without claiming the inferred clocks supplied the total (%s)", version => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { recurrence: {
+        frequency: 1, frequencyMax: 2, period: 1, periodUnit: Unit.Day, clocks: ["06:00:00"] } } }] }] };
+    const input = wire(course, version), original = JSON.stringify(input);
+    const query = { dosage: input, orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T06:00:00Z",
+      timeZone: "UTC", durationValue: 1, durationUnit: Unit.Hour };
+    const total = calculateTotalUnits(query);
+    expect(total).toMatchObject({ totalUnits: 1, quantityKind: "maximum" });
+    expect(total.explanation).toContain("frequency range was evaluated for maximum supply");
+    expect(total.explanation).not.toContain("upper bound of the prescribed frequency range was used");
+    expect(calculateTotalUnits({ ...query, from: query.orderedAt, durationUnit: Unit.Day }).totalUnits).toBe(2);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+});
+
+
+describe("standard and typed infusion-duration successor uncertainty", () => {
+  it.each(["native", "R5", "R6"] as const)("uses one completion rule while preserving determinate windows (%s)", version => {
+    for (const variant of ["standard", "typed", "exact"] as const) {
+      const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+        amounts: [{ rate: { value: 10, unit: "mL/h" } }], schedule: { recurrence: { count: 1, clocks: ["09:00:00"],
+          ...(variant === "typed" ? { occurrenceDurationRange: { low: { value: 1, unit: "h" }, high: { value: 2, unit: "h" } } }
+            : { occurrenceDuration: 1, occurrenceDurationUnit: Unit.Hour,
+              ...(variant === "standard" ? { occurrenceDurationMax: 2 } : {}) }) } } }] },
+        { administrations: [{ kind: "administration", amounts: [{ quantity: { value: 100, unit: "mL" } }],
+          schedule: { recurrence: { count: 1, clocks: ["10:30:00"] } } }] }] };
+      const input = version === "native" ? course : version === "R5" ? courseToR5(course) : courseToR6(course);
+      const original = JSON.stringify(input);
+      const query = { dosage: input, orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T09:00:00Z",
+        timeZone: "UTC", durationValue: 3, durationUnit: Unit.Hour };
+      expect(calculateTotalUnits({ ...query, durationValue: 1.5 }).totalUnits).toBe(variant === "exact" ? 10 : 20);
+      if (variant === "exact") {
+        expect(calculateTotalUnits(query).totalUnits).toBe(110);
+        expect(nextDueDoses(input, { ...query, limit: 2 })).toEqual([
+          "2027-01-01T09:00:00+00:00", "2027-01-01T10:30:00+00:00"
+        ]);
+      } else expect(() => calculateTotalUnits(query)).toThrow(expect.objectContaining({ code: "course-duration-unresolved" }));
+      expect(JSON.stringify(input)).toBe(original);
+    }
+  });
+});
+
+
+describe("shared current cadence, phase and quantity owners", () => {
+  const origin = "2026-01-01T00:00:00Z";
+  const query = { orderedAt: origin, from: origin, timeZone: "UTC", limit: 3 };
+  const ucum = "http://unitsofmeasure.org";
+  const gts = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+  const member = (recurrence: NonNullable<CanonicalAdministration["schedule"]>["recurrence"]): CanonicalAdministration => ({
+    kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { recurrence },
+  });
+  const course = (administration: CanonicalAdministration): CanonicalCourse => ({
+    kind: "course", stages: [{ administrations: [administration] }],
+  });
+  const views = (native: CanonicalCourse) => {
+    const wire = projectCanonicalCourse(native);
+    return [native, wire.fhir, wire.fhirNext];
+  };
+  const supply = (dosage: Parameters<typeof nextDueDoses>[0], extra = {}) => calculateTotalUnits({
+    dosage, ...query, durationValue: 1, durationUnit: Unit.Day, ...extra,
+  });
+
+  it("keeps the elapsed hourly code inside a period range at its authored clock", () => {
+    const administration = member({ frequency: 1, period: 4, periodMax: 7,
+      periodUnit: Unit.Hour, clocks: ["08:00:00"] });
+    administration.schedule!.code = { coding: [{ system: gts, code: "Q4H" }] };
+    for (const input of views(course(administration))) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T12:00:00+00:00", "2026-01-01T16:00:00+00:00",
+      ]);
+      expect(supply(input).totalUnits).toBe(4);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const daily = member({ frequency: 1, frequencyMax: 3, period: 1, periodUnit: Unit.Day });
+    daily.schedule!.code = { coding: [{ system: gts, code: "BID" }] };
+    expect(nextDueDoses(daily, { ...query, limit: 2 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",
+    ]);
+  });
+
+  it("previews a compatible aggregate hourly code with its elapsed spacing", () => {
+    const administration = member({ frequency: 6, period: 1, periodUnit: Unit.Day });
+    administration.schedule!.code = { coding: [{ system: gts, code: "Q4H" }] };
+    for (const input of views(course(administration))) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "short", { locale: "en", realizationMode: "normalized" })).toContain("Q4H");
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("every 4 hours");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("ทุก 4 ชั่วโมง");
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-01-01T00:00:00+00:00", "2026-01-01T04:00:00+00:00", "2026-01-01T08:00:00+00:00",
+      ]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const positioned = member({ frequency: 6, period: 1, periodUnit: Unit.Day,
+      clocks: ["08:00:00", "10:00:00", "12:00:00", "14:00:00", "16:00:00", "18:00:00"] });
+    positioned.schedule!.code = administration.schedule!.code;
+    expect(nextDueDoses(positioned, query)).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-01T10:00:00+00:00", "2026-01-01T12:00:00+00:00",
+    ]);
+    expect(formatSig(positioned, "long", { locale: "en" })).not.toContain("every 4 hours");
+  });
+
+  it("clips an elapsed undated predecessor without reordering authored starts", () => {
+    const first = member({ frequency: 2, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00", "20:00:00"] });
+    first.amounts![0].quantity!.unit = "drop";
+    const next = member({ frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["18:00:00"],
+      calendarWindow: { start: "2026-12-05" } });
+    next.amounts![0].quantity = { value: 2, unit: "drop" };
+    const native: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [first] }, { administrations: [next] },
+    ] };
+    for (const input of views(native)) {
+      const before = JSON.stringify(input);
+      const early = { from: "2026-12-05T07:00:00Z", timeZone: "UTC", limit: 2 };
+      expect(nextDueDoses(input, early)).toEqual(["2026-12-05T08:00:00+00:00", "2026-12-05T18:00:00+00:00"]);
+      const late = { from: "2026-12-05T19:00:00Z", timeZone: "UTC", limit: 2 };
+      expect(nextDueDoses(input, late)).toEqual(["2026-12-06T18:00:00+00:00", "2026-12-07T18:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...late, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(2);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const late = { from: "2026-12-05T19:00:00Z", timeZone: "UTC", limit: 1 };
+    const repeated = { ...native, stages: [{ ...native.stages[0], count: 2 }, native.stages[1]] };
+    expect(nextDueDoses(repeated, late)).toEqual(["2026-12-06T18:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage: repeated, ...late, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(2);
+    expect(nextDueDoses(course(first), late)).toEqual(["2026-12-05T20:00:00+00:00"]);
+    const authored: CanonicalCourse = { ...native, stages: [
+      { ...native.stages[0], start: { anchor: "treatment-start", displacement: { value: 1, unit: "d" } } },
+      native.stages[1],
+    ] };
+    expect(() => nextDueDoses(authored, { ...query, orderedAt: "2026-12-05T00:00:00Z" }))
+      .toThrow(expect.objectContaining({ code: "invalid-stage-order" }));
+  });
+
+  const endOnlyCourse = (): FhirR6DosageInstruction => ({
+    renderedInstruction: "Take 1 tablet at 08:00 through 4 December 2026",
+    extension: [{ url: "https://example.org/current-order-note", valueString: "Retain current source" }],
+    step: [{ id: "ending-phase", component: [{ id: "daily-tablet",
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00"],
+        boundsPeriod: { end: "2026-12-04T23:59:59Z", _end: { id: "authored-end" } } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab", extension: [
+        { url: "https://example.org/quantity-note", valueString: "Retain tablet annotation" },
+      ] } }],
+    }] }],
+  });
+
+  it("retains an end-only daily dose before expiry and returns no remaining scalar supply after it", () => {
+    const source = endOnlyCourse(), original = JSON.stringify(source);
+    const native = importCanonicalCourse(source), projected = projectCanonicalCourse(native);
+    expect(projected.fhirNext.renderedInstruction).toBe(source.renderedInstruction);
+    expect(projected.fhirNext.extension).toEqual(expect.arrayContaining(source.extension!));
+    const returned = projected.fhirNext.step![0].component![0];
+    expect(returned.timing?.repeat?.boundsPeriod).toEqual(source.step![0].component![0].timing!.repeat!.boundsPeriod);
+    expect(returned.doseAndRate?.[0].doseQuantity?.extension)
+      .toEqual(source.step![0].component![0].doseAndRate![0].doseQuantity!.extension);
+    for (const input of [native, projected.fhir[0], source]) {
+      const before = JSON.stringify(input);
+      const early = { from: "2026-12-04T07:00:00Z", timeZone: "UTC", limit: 3 };
+      expect(nextDueDoses(input, early)).toEqual(["2026-12-04T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...early, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      const late = { from: "2026-12-05T07:00:00Z", timeZone: "UTC", limit: 3 };
+      expect(nextDueDoses(input, late)).toEqual([]);
+      expect(calculateTotalUnits({ dosage: input, ...late, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it("keeps an expired end-only phase empty before a dated replacement without inventing its start", () => {
+    const source = endOnlyCourse();
+    source.renderedInstruction += "; then take 2 tablets daily at 08:00 from 5 December 2026";
+    source.step!.push({ id: "dated-replacement", component: [{
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00"],
+        boundsPeriod: { start: "2026-12-05T00:00:00Z" } } },
+      doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+    }] });
+    const original = JSON.stringify(source), native = importCanonicalCourse(source);
+    for (const input of [native, projectCanonicalCourse(native).fhir, source]) {
+      const before = JSON.stringify(input);
+      const early = { from: "2026-12-04T07:00:00Z", timeZone: "UTC", limit: 3 };
+      expect(nextDueDoses(input, early)).toEqual([
+        "2026-12-04T08:00:00+00:00", "2026-12-05T08:00:00+00:00", "2026-12-06T08:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...early, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      const late = { from: "2026-12-05T07:00:00Z", timeZone: "UTC", limit: 3 };
+      expect(nextDueDoses(input, late)).toEqual([
+        "2026-12-05T08:00:00+00:00", "2026-12-06T08:00:00+00:00", "2026-12-07T08:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...late, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(2);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it("keeps an unknown step count active instead of assuming one repetition", () => {
+    const first = member({ frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"] });
+    const next = member({ frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"] });
+    next.amounts![0].quantity!.value = 2;
+    const ordinary: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [first], end: { anchor: "treatment-start", displacement: { value: 1, unit: "d" } } },
+      { administrations: [next] },
+    ] };
+    const unknown: FhirR6DosageInstruction = projectCanonicalCourse(ordinary).fhirNext;
+    unknown.step![0]._count = { id: "phase-repetitions", extension: [
+      { url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown" },
+      { url: "https://example.org/current-count-note", valueString: "retain annotation" },
+    ] };
+    const native = importCanonicalCourse(unknown);
+    expect(native.stages[0].countUnresolved).toBe(true);
+    const projected = projectCanonicalCourse(native);
+    expect(projected.fhirNext.step![0]._count).toEqual(unknown.step![0]._count);
+    for (const input of [native, projected.fhir, unknown]) {
+      const before = JSON.stringify(input);
+      expect(() => nextDueDoses(input, query)).toThrow(expect.objectContaining({ code: "step-repeat-unresolved" }));
+      expect(() => supply(input, { durationValue: 3 })).toThrow(expect.objectContaining({ code: "step-repeat-unresolved" }));
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("Phase repetition count is unspecified");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const single: FhirR6DosageInstruction = { step: [{ ...unknown.step![0], end: undefined }] };
+    const batch = fromFhir(single, { locale: "en", realizationMode: "normalized" });
+    expect(formatParseBatch(batch, "long")).toContain("Phase repetition count is unspecified");
+    expect(formatSig(toFhirR5Dosages(single)[0], "long", { locale: "en", realizationMode: "normalized" }))
+      .toContain("Phase repetition count is unspecified");
+    expect(supply(ordinary, { durationValue: 3 }).totalUnits).toBe(5);
+    const twice = { ...ordinary, stages: [{ ...ordinary.stages[0], count: 2 }, ordinary.stages[1]] };
+    expect(supply(twice, { durationValue: 3 }).totalUnits).toBe(4);
+  });
+
+  it("deduplicates a loading instant shared by inferred historical cadence", () => {
+    const administration = member({ anchors: [EventTiming.Immediate], frequency: 2,
+      period: 48, periodUnit: Unit.Hour, count: 2 });
+    for (const input of views(course(administration))) {
+      const before = JSON.stringify(input);
+      const options = { ...query, from: "2026-01-02T00:00:00Z" };
+      expect(nextDueDoses(input, options)).toEqual(["2026-01-02T00:00:00+00:00"]);
+      expect(supply(input, options).totalUnits).toBe(1);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    // A configured first recurrence at 08:00 is distinct from the 00:00 loading instant.
+    expect(nextDueDoses(administration, { ...query, from: "2026-01-01T01:00:00Z", config: {
+      frequencyDefaults: { byFrequency: { "freq:2/per:48h": ["08:00:00", "20:00:00"] } },
+    } })).toEqual(["2026-01-01T08:00:00+00:00"]);
+  });
+
+  it("keeps a variable daily count inside its explicit clock window", () => {
+    const administration = member({ frequency: 1, frequencyMax: 2, period: 1, periodUnit: Unit.Day,
+      clockWindow: { start: "08:00:00", end: "10:00:00" } });
+    for (const input of views(course(administration))) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T09:00:00+00:00", "2026-01-02T08:00:00+00:00",
+      ]);
+      expect(supply(input).totalUnits).toBe(2);
+      expect(supply(input, { from: "2026-01-01T19:30:00Z", durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const once = member({ frequency: 1, period: 1, periodUnit: Unit.Day,
+      clockWindow: { start: "08:00:00", end: "10:00:00" } });
+    expect(nextDueDoses(once, { ...query, limit: 2 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
+    ]);
+  });
+
+  it("compares annotations on compound unit components without changing source units", () => {
+    const administration = member({ frequency: 2, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00", "20:00:00"] });
+    administration.amounts = [{ range: {
+      low: { value: 1, unit: "mg{drug}/kg", code: "mg{drug}/kg", system: ucum },
+      high: { value: 2, unit: "mg/kg", code: "mg/kg", system: ucum },
+    } }];
+    administration.limits = [{ scope: "period", amount: { value: 3, unit: "mg/kg", code: "mg/kg", system: ucum },
+      period: { value: 24, unit: "h" } }];
+    expect(supply(administration)).toMatchObject({ totalUnits: 3, unit: "mg/kg", quantityKind: "maximum" });
+    // Wire Range endpoints use one authored code; the cap keeps its distinct
+    // unannotated code. Native mixed endpoints remain checked above.
+    const wireMember: CanonicalAdministration = { ...administration, amounts: [{ range: {
+      low: administration.amounts[0].range!.low,
+      high: { ...administration.amounts[0].range!.low, value: 2 },
+    } }] };
+    for (const input of views(course(wireMember))) {
+      const before = JSON.stringify(input);
+      expect(supply(input)).toMatchObject({ totalUnits: 3, unit: "mg{drug}/kg", quantityKind: "maximum" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(administration.amounts[0].range!.low!.code).toBe("mg{drug}/kg");
+  });
+
+  it("omits a global cycle pause when an absolute event can lead its nominal cycle", () => {
+    const source = (delayMinutes: number): CanonicalCourse => ({ kind: "course", cycleInterval: { value: 28, unit: "d" },
+      stages: [{ end: { anchor: "treatment-start", displacement: { value: 27, unit: "d" } },
+        administrations: [{ ...member(undefined), delayMinutes,
+          schedule: { explicitEvents: ["2026-01-29T00:30:00Z"] } }] }],
+    });
+    for (const input of views(source(-60))) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...query, from: "2026-01-28T00:00:00Z", limit: 1 }))
+        .toEqual(["2026-01-28T23:30:00+00:00"]);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).not.toMatch(/no (?:dose|medication)/i);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(formatSig(source(0), "long", { locale: "en", realizationMode: "normalized" })).toMatch(/no (?:dose|medication)/i);
+  });
+});
+
+
+describe("current rolling limits and finite range capacity", () => {
+  const ucum = "http://unitsofmeasure.org";
+  const quantity = (value: number, code: string) => ({ value, code, system: ucum });
+  const options = { orderedAt: "2026-11-01T00:00:00Z", from: "2026-11-01T00:00:00Z", timeZone: "UTC" };
+  const member = (): CanonicalAdministration => ({ kind: "administration", amounts: [{ quantity: quantity(5, "mL") }],
+    schedule: { recurrence: { frequency: 2, period: 1, periodUnit: Unit.Day,
+      clocks: ["08:00:00", "20:00:00"], courseLength: quantity(1, "d") } } });
+  const views = (administration: CanonicalAdministration) => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [administration] }] };
+    return [course, JSON.parse(JSON.stringify(courseToR5(course))) as FhirDosage[],
+      JSON.parse(JSON.stringify(courseToR6(course))) as FhirR6DosageInstruction];
+  };
+
+  it("uses the registered annotated strength unit without changing the dose or concentration", () => {
+    const administration = member();
+    administration.limits = [{ scope: "period", amount: quantity(100, "mg"), period: quantity(24, "h") }];
+    for (const code of ["mg", "mg{amoxicillin}"]) {
+      const context = { strengthRatio: { numerator: quantity(100, code), denominator: quantity(5, "mL") } };
+      const originalContext = JSON.stringify(context);
+      for (const dosage of views(administration)) {
+        const original = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, { ...options, context, limit: 4 })).toEqual(["2026-11-01T08:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage, ...options, context, durationValue: 1, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: 5, unit: "mL" });
+        expect(JSON.stringify(dosage)).toBe(original);
+      }
+      expect(JSON.stringify(context)).toBe(originalContext);
+    }
+  });
+
+  it("retains an open rolling ceiling through ranged admission and maximum attainability", () => {
+    const administration = member();
+    administration.asNeeded = true;
+    administration.amounts = [{ range: { low: quantity(1, "mL"), high: quantity(2, "mL") } }];
+    for (const comparator of ["<", "<="] as const) {
+      administration.limits = [{ scope: "period", amount: { ...quantity(2, "mL"), comparator }, period: quantity(24, "h") }];
+      for (const dosage of views(administration)) {
+        const original = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual(comparator === "<"
+          ? ["2026-11-01T08:00:00+00:00"]
+          : ["2026-11-01T08:00:00+00:00", "2026-11-01T20:00:00+00:00"]);
+        const supply = () => calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day });
+        if (comparator === "<") expect(supply).toThrowError(expect.objectContaining({ code: "ranged-capacity-open-maximum" }));
+        else expect(supply()).toMatchObject({ totalUnits: 2, unit: "mL", quantityKind: "maximum" });
+        expect(JSON.stringify(dosage)).toBe(original);
+      }
+    }
+    // An independent closed allowance inside the open bound is attainable.
+    administration.limits = [
+      { scope: "period", amount: { ...quantity(2, "mL"), comparator: "<" }, period: quantity(24, "h") },
+      { scope: "lifetime", amount: quantity(1.5, "mL") },
+    ];
+    for (const dosage of views(administration))
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 1.5, unit: "mL", quantityKind: "maximum" });
+    // Untimed capacity uses the same open constraint and creates no due clock.
+    administration.schedule = { recurrence: { occurrenceCap: { max: 2, period: 1, periodUnit: Unit.Day } } };
+    administration.limits = administration.limits.slice(0, 1);
+    for (const dosage of views(administration)) {
+      expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual([]);
+      expect(() => calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toThrowError(expect.objectContaining({ code: "ranged-capacity-open-maximum" }));
+    }
+  });
+
+  it("resolves upper-only BID at its licensed clocks before counting a partial day", () => {
+    for (const frequency of [undefined, 0, 2]) {
+      const administration = member();
+      administration.amounts = [{ quantity: { value: 1, unit: "tab" } }];
+      administration.schedule = { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID" }] },
+        recurrence: { ...(frequency === undefined ? {} : { frequency }), frequencyMax: 2, period: 1, periodUnit: Unit.Day } };
+      for (const dosage of views(administration)) {
+        const original = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([
+          "2026-11-01T08:00:00+00:00", "2026-11-01T20:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+        expect(calculateTotalUnits({ dosage, ...options, from: "2026-11-01T08:00:00Z", durationValue: 1,
+          durationUnit: Unit.Hour }).totalUnits).toBe(1);
+        expect(JSON.stringify(dosage)).toBe(original);
+      }
+    }
+  });
+
+  it("excludes all possible partial dates before deciding whether supply needs a resolved event", () => {
+    const administration = member();
+    administration.amounts = [{ quantity: { value: 1, unit: "tab" } }];
+    administration.schedule = { explicitEvents: ["2026-11"], recurrence: { clocks: ["09:00:00"] } };
+    administration.excludedDates = ["2026-11-30"];
+    for (const dosage of views(administration)) {
+      const original = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, from: "2026-11-30T00:00:00Z", timeZone: "UTC", durationValue: 1,
+        durationUnit: Unit.Day }).totalUnits).toBe(0);
+      expect(nextDueDoses(dosage, { from: "2026-11-30T00:00:00Z", timeZone: "UTC", limit: 2 })).toEqual([]);
+      expect(() => calculateTotalUnits({ dosage, from: "2026-11-29T00:00:00Z", timeZone: "UTC", durationValue: 1,
+        durationUnit: Unit.Day })).toThrowError(expect.objectContaining({ code: "timing-required" }));
+      expect(JSON.stringify(dosage)).toBe(original);
+    }
+  });
+
+  it("attains a lifetime amount with smaller complete doses across distinct untimed days", () => {
+    const administration = member();
+    administration.asNeeded = true;
+    administration.amounts = [{ range: { low: quantity(2, "mL"), high: quantity(3, "mL") } }];
+    administration.schedule = { recurrence: { occurrenceCap: { max: 1, period: 1, periodUnit: Unit.Day } } };
+    administration.limits = [{ scope: "lifetime", amount: quantity(4, "mL") }];
+    for (const dosage of views(administration)) {
+      const original = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 3 })).toEqual([]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "mL", quantityKind: "maximum" });
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 2, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 4, unit: "mL", quantityKind: "maximum" });
+      expect(JSON.stringify(dosage)).toBe(original);
+    }
+  });
+});
+
+
+describe("elapsed occurrence ceilings share the rolling count ledger", () => {
+  const options = { orderedAt: "2026-12-01T18:00:00Z", from: "2026-12-01T18:00:00Z", timeZone: "UTC" };
+  const expected = ["2026-12-01T18:00:00+00:00", "2026-12-02T00:00:00+00:00",
+    "2026-12-02T18:00:00+00:00", "2026-12-03T00:00:00+00:00"];
+  const member = (): CanonicalAdministration => ({ kind: "administration", asNeeded: true,
+    amounts: [{ range: { low: { value: 2, unit: "mL" }, high: { value: 3, unit: "mL" } } }],
+    schedule: { recurrence: { period: 6, periodUnit: Unit.Hour,
+      occurrenceCap: { max: 2, period: 24, periodUnit: Unit.Hour } } } });
+  const course = (administration: CanonicalAdministration): CanonicalCourse =>
+    ({ kind: "course", stages: [{ administrations: [administration] }] });
+
+  it.each([[24, Unit.Hour], [1440, Unit.Minute]] as const)(
+    "keeps elapsed occurrence counts separate from ranged medication quantities (%s %s)", (period, periodUnit) => {
+      const administration = member();
+      administration.schedule!.recurrence!.occurrenceCap = { max: 2, period, periodUnit };
+      administration.limits = [{ scope: "period", amount: { value: 5, unit: "mL" }, period: { value: 24, unit: "h" } }];
+      const dosage = course(administration), before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual(expected);
+      for (const [hours, amount] of [[24, 5], [48, 10]] as const)
+        expect(calculateTotalUnits({ dosage, ...options, durationValue: hours, durationUnit: Unit.Hour }))
+          .toMatchObject({ totalUnits: amount, unit: "mL", quantityKind: "maximum" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    });
+
+  it("uses elapsed untimed count capacity without creating doses or midnight resets", () => {
+    const administration = member();
+    administration.schedule = { recurrence: { occurrenceCap: { max: 2, period: 24, periodUnit: Unit.Hour } } };
+    administration.limits = [{ scope: "period", amount: { value: 5, unit: "mL" }, period: { value: 24, unit: "h" } }];
+    const dosage = course(administration), before = JSON.stringify(dosage);
+    expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual([]);
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 24, durationUnit: Unit.Hour }))
+      .toMatchObject({ totalUnits: 5, unit: "mL", quantityKind: "maximum" });
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 48, durationUnit: Unit.Hour }))
+      .toMatchObject({ totalUnits: 10, unit: "mL", quantityKind: "maximum" });
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+  it("counts a bilateral administration once while its quantity includes both eyes", () => {
+    const administration = member();
+    administration.amounts = [{ range: { low: { value: 1, unit: "drop" }, high: { value: 2, unit: "drop" } } }];
+    administration.targetCount = 2;
+    administration.target = { text: "both eyes", coding: [{ system: "http://snomed.info/sct", code: "40638003" }] };
+    administration.limits = [{ scope: "period", amount: { value: 6, unit: "drop" }, period: { value: 24, unit: "h" } }];
+    const dosage = course(administration), before = JSON.stringify(dosage);
+    expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual(expected);
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 24, durationUnit: Unit.Hour }))
+      .toMatchObject({ totalUnits: 6, unit: "drop", quantityKind: "maximum" });
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+  it("retains the elapsed allowance across repeated phase boundaries and actual-dose history", () => {
+    const administration = member();
+    administration.amounts = [{ quantity: { value: 1, unit: "tab" } }];
+    administration.asNeeded = undefined;
+    administration.schedule!.recurrence!.courseLength = { value: 12, unit: "h" };
+    const dosage: CanonicalCourse = { ...course(administration), cycleInterval: { value: 12, unit: "h" }, cycleCount: 4 };
+    const before = JSON.stringify(dosage);
+    expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual(expected);
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 48, durationUnit: Unit.Hour }).totalUnits).toBe(4);
+    const history = { ...options, from: "2026-12-02T06:00:00Z",
+      priorDoseTimes: ["2026-12-01T18:00:00Z", "2026-12-02T00:00:00Z"] };
+    expect(nextDueDoses(dosage, { ...history, limit: 2 })).toEqual(expected.slice(2));
+    expect(calculateTotalUnits({ dosage, ...history, durationValue: 24, durationUnit: Unit.Hour }).totalUnits).toBe(2);
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+});
+
+
+describe("shared accepted counts across partitioned clock members", () => {
+  const options = { orderedAt: "2026-11-29T18:00:00Z", from: "2026-11-29T18:00:00Z", timeZone: "UTC" };
+  const dates = ["2026-11-29T20:00:00+00:00", "2026-11-30T20:00:00+00:00",
+    "2026-12-01T08:00:00+00:00", "2026-12-01T20:00:00+00:00"];
+  const course = (): CanonicalCourse => ({ kind: "course", stages: [{ administrations: [
+    { kind: "administration", sourceMember: 0, text: "1 tablet at 08:00 except Mondays",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }], excludedWeekdays: [FhirDayOfWeek.Monday],
+      schedule: { recurrence: { clocks: ["08:00:00"], sharedCount: { groupId: "authored-course", count: 4 } } } },
+    { kind: "administration", sourceMember: 1, text: "1 tablet at 20:00",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { clocks: ["20:00:00"], sharedCount: { groupId: "authored-course", count: 4 } } } },
+  ] }] });
+
+  it("admits one morning and three evening doses rather than reserving two per clock", () => {
+    const native = course();
+    for (const dosage of [native, courseToR5(native), courseToR6(native)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 5 })).toEqual(dates);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 4, unit: "tab" });
+      const late = { ...options, from: "2026-12-01T00:00:00Z" };
+      expect(nextDueDoses(dosage, { ...late, limit: 5 })).toEqual(dates.slice(2));
+      expect(calculateTotalUnits({ dosage, ...late, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(2);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("spends one actual administration once across both member streams", () => {
+    const dosage = course(), before = JSON.stringify(dosage);
+    const late = { ...options, from: "2026-12-01T00:00:00Z" };
+    const remaining = [...dates.slice(2), "2026-12-02T08:00:00+00:00"];
+    for (const history of [{ priorDoseTimes: ["2026-11-30T22:00:00Z"] }, { priorCount: 1 },
+      { priorCount: 1, priorDoseTimes: ["2026-11-30T22:00:00Z"] }]) {
+      expect(nextDueDoses(dosage, { ...late, ...history, limit: 5 })).toEqual(remaining);
+      expect(calculateTotalUnits({ dosage, ...late, ...history, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(3);
+    }
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+  it("retains dated rolling use when its total count is supplied independently", () => {
+    const native = course();
+    for (const member of native.stages[0].administrations)
+      member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 24, unit: "h" } }];
+    const query = { ...options, from: "2026-12-01T00:00:00Z", priorCount: 1,
+      priorDoseTimes: ["2026-11-30T22:00:00Z"] };
+    for (const dosage of [native, courseToR5(native), courseToR6(native)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...query, limit: 5 })).toEqual([
+        "2026-12-02T08:00:00+00:00", "2026-12-03T08:00:00+00:00", "2026-12-04T08:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(3);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("keeps both clock streams advancing after a coincident recorded administration", () => {
+    const native = course();
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-02T00:00:00Z", timeZone: "UTC",
+      priorDoseTimes: ["2026-01-01T20:00:00Z"] };
+    for (const dosage of [native, courseToR5(native), courseToR6(native)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...query, limit: 5 })).toEqual([
+        "2026-01-02T08:00:00+00:00", "2026-01-02T20:00:00+00:00", "2026-01-03T08:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(3);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("uses a supplied prior count for one identifiable exact-count cycle", () => {
+    const native: CanonicalCourse = { kind: "course", cycleInterval: { value: 7, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: [{ kind: "administration", asNeeded: true,
+        amounts: [{ quantity: { value: 1, unit: "tab" } }],
+        schedule: { recurrence: { clocks: ["09:00:00"], count: 2 } },
+        limits: [{ scope: "period", amount: { value: 2, unit: "tab" }, period: { value: 24, unit: "h" } }]
+      }] }] };
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-02T00:00:00Z", timeZone: "UTC", priorCount: 1 };
+    for (const dosage of [native, courseToR5(native), courseToR6(native)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...query, limit: 3 })).toEqual(["2026-01-02T09:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("applies the shared allowance to ranged amounts and upper count allowances", () => {
+    const dosage = course();
+    for (const member of dosage.stages[0].administrations) {
+      member.amounts = [{ range: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } }];
+      member.schedule!.recurrence!.sharedCount = { groupId: "authored-course", countMax: 4 };
+    }
+    const before = JSON.stringify(dosage);
+    expect(nextDueDoses(dosage, { ...options, limit: 5 })).toEqual(dates);
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+      .toMatchObject({ totalUnits: 8, unit: "tab", quantityKind: "maximum" });
+    expect(JSON.stringify(dosage)).toBe(before);
+    for (const member of dosage.stages[0].administrations) member.amounts = [{ quantity: { value: 1, unit: "tab" } }];
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+      .toMatchObject({ totalUnits: 4, quantityKind: "maximum", explanation: expect.stringContaining("upper count bound") });
+  });
+
+  it.each([
+    { label: "binding rolling maximum", high: 2, cap: 2, lifetime: undefined, oneDay: 2, twoDays: 4 },
+    { label: "nonbinding rolling maximum", high: 2, cap: 4, lifetime: undefined, oneDay: 4, twoDays: 4 },
+    { label: "already maximal fixed range", high: 1, cap: 2, lifetime: undefined, oneDay: 2, twoDays: 2 },
+    { label: "binding lifetime maximum", high: 2, cap: 2, lifetime: 3, oneDay: 2, twoDays: 3 },
+  ])("keeps later ranged opportunities only while $label can improve supply", ({ high, cap, lifetime, oneDay, twoDays }) => {
+    const native: CanonicalCourse = { kind: "course", stages: [{ administrations: ["08:00:00", "20:00:00"].map(
+      (clock, sourceMember) => ({ kind: "administration", sourceMember,
+        text: `1–${high} mL at ${clock}; at most two uses total`,
+        amounts: [{ range: { low: { value: 1, unit: "mL" }, high: { value: high, unit: "mL" } } }],
+        schedule: { recurrence: { clocks: [clock], sharedCount: { groupId: "two-use-range", countMax: 2 } } },
+        limits: [{ scope: "period", amount: { value: cap, unit: "mL" }, period: { value: 24, unit: "h" } },
+          ...(lifetime === undefined ? [] : [{ scope: "lifetime" as const, amount: { value: lifetime, unit: "mL" } }])],
+      })) }] };
+    const query = { orderedAt: "2026-11-23T00:00:00Z", from: "2026-11-23T00:00:00Z", timeZone: "UTC" };
+    const forms = [native, courseToR5(native), courseToR6(native)];
+    const snapshots = forms.map(dosage => JSON.stringify(dosage));
+    forms.forEach((dosage, index) => {
+      // Due clocks admit the first two low-end doses. Maximum supply may instead
+      // choose 2 mL on each morning, when the preceding 24-hour use has expired.
+      expect(nextDueDoses(dosage, { ...query, limit: 5 })).toEqual([
+        "2026-11-23T08:00:00+00:00", "2026-11-23T20:00:00+00:00",
+      ]);
+      const day = calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day });
+      const both = calculateTotalUnits({ dosage, ...query, durationValue: 2, durationUnit: Unit.Day });
+      expect(day).toMatchObject({ totalUnits: oneDay, unit: "mL", quantityKind: "maximum" });
+      expect(both).toMatchObject({ totalUnits: twoDays, unit: "mL", quantityKind: "maximum" });
+      if (high === 2 && cap === 2 && lifetime === undefined)
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 30, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: 4, unit: "mL", quantityKind: "maximum" });
+      expect(day.explanation).toContain("largest admissible amount within the prescribed dose range");
+      expect(both.explanation).toContain("largest admissible amount within the prescribed dose range");
+      expect(JSON.stringify(dosage)).toBe(snapshots[index]);
+    });
+  });
+
+  it("starts a successor after the shared exact count completes", () => {
+    const native = course();
+    native.stages.push({ administrations: [{ kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }],
+      schedule: { recurrence: { clocks: ["12:00:00"], count: 1 } } }] });
+    for (const dosage of [native, courseToR5(native), courseToR6(native)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 6 })).toEqual([...dates, "2026-12-02T12:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(6);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("renews the shared total at the next authored course cycle", () => {
+    const dosage = course();
+    dosage.cycleInterval = { value: 7, unit: "d" };
+    dosage.cycleCount = 2;
+    const before = JSON.stringify(dosage);
+    expect(nextDueDoses(dosage, { ...options, limit: 9 })).toEqual([...dates,
+      "2026-12-06T20:00:00+00:00", "2026-12-07T20:00:00+00:00",
+      "2026-12-08T08:00:00+00:00", "2026-12-08T20:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 14, durationUnit: Unit.Day }).totalUnits).toBe(8);
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+});
+
+
+describe("conditional shared-course opportunity admission", () => {
+  const options = { orderedAt: "2026-11-23T00:00:00Z", from: "2026-11-23T00:00:00Z", timeZone: "UTC" };
+  const guard: MedicationCondition = { kind: "not", condition: {
+    kind: "measurement", name: "systolicBloodPressure", operation: "lt", value: 90,
+    unit: "mmHg", text: "systolic BP is below 90",
+  } };
+  const course = (): CanonicalCourse => ({ kind: "course", stages: [{ administrations: [
+    { kind: "administration", sourceMember: 0, predicate: guard,
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { clocks: ["08:00:00"], sharedCount: { groupId: "conditional-course", count: 4 } } } },
+    { kind: "administration", sourceMember: 1,
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { clocks: ["20:00:00"], sharedCount: { groupId: "conditional-course", count: 4 } } } },
+  ] }] });
+  const evenings = ["2026-11-23T20:00:00+00:00", "2026-11-24T20:00:00+00:00",
+    "2026-11-25T20:00:00+00:00", "2026-11-26T20:00:00+00:00"];
+  const mornings = evenings.map(at => at.replace("T20:", "T08:"));
+
+  it("evaluates only the morning opportunities inside the shared count or requested supply window", () => {
+    const native = course();
+    for (const dosage of [native, courseToR5(native), courseToR6(native)]) {
+      const before = JSON.stringify(dosage);
+      let observed: string[] = [];
+      const evaluateCondition = (condition: MedicationCondition, at: string) => {
+        expect(condition).toEqual(guard);
+        observed.push(at);
+        return false;
+      };
+      expect(nextDueDoses(dosage, { ...options, evaluateCondition, limit: 5 })).toEqual(evenings);
+      expect(observed).toEqual(mornings);
+      observed = [];
+      expect(calculateTotalUnits({ dosage, ...options, evaluateCondition, durationValue: 2, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      expect(observed).toEqual(mornings.slice(0, 2));
+      observed = [];
+      expect(calculateTotalUnits({ dosage, ...options, evaluateCondition, durationValue: 7, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 4, unit: "tab" });
+      expect(observed).toEqual(mornings);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("evaluates a changing condition at the displaced administration time", () => {
+    const dosage = course(), observed: string[] = [];
+    dosage.stages[0].administrations[0].delayMinutes = 60;
+    const before = JSON.stringify(dosage);
+    const evaluateCondition = (_condition: MedicationCondition, at: string) => {
+      observed.push(at);
+      return Date.parse(at) >= Date.parse("2026-11-24T00:00:00Z");
+    };
+    expect(nextDueDoses(dosage, { ...options, evaluateCondition, limit: 5 })).toEqual([
+      evenings[0], "2026-11-24T09:00:00+00:00", evenings[1], "2026-11-25T09:00:00+00:00",
+    ]);
+    expect(observed).toEqual(["2026-11-23T09:00:00+00:00", "2026-11-24T09:00:00+00:00", "2026-11-25T09:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage, ...options, evaluateCondition, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(3);
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+  it("retains recorded accepted use without reevaluating it through the present condition", () => {
+    const dosage = course(), observed: string[] = [], before = JSON.stringify(dosage);
+    const evaluateCondition = (_condition: MedicationCondition, at: string) => { observed.push(at); return false; };
+    const history = { ...options, from: "2026-11-24T00:00:00Z", priorDoseTimes: ["2026-11-23T08:00:00Z"], evaluateCondition };
+    expect(nextDueDoses(dosage, { ...history, limit: 5 })).toEqual(evenings.slice(1));
+    expect(observed).toEqual(mornings.slice(1));
+    expect(calculateTotalUnits({ dosage, ...history, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(3);
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+  it("finishes a bounded search without inventing completion when all members are withheld", () => {
+    const dosage = course();
+    dosage.stages[0].administrations[1].predicate = guard;
+    dosage.stages.push({ administrations: [{ kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }],
+      schedule: { recurrence: { clocks: ["12:00:00"], count: 1 } } }] });
+    const before = JSON.stringify(dosage), evaluateCondition = () => false;
+    expect(nextDueDoses(dosage, { ...options, evaluateCondition, limit: 5 })).toEqual([]);
+    expect(calculateTotalUnits({ dosage, ...options, evaluateCondition, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(0);
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+});
+
+
+describe("review814 current finite allowances and supplied cadence endpoints", () => {
+  const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  const course = (administration: CanonicalAdministration): CanonicalCourse => ({ kind: "course", stages: [{ administrations: [administration] }] });
+  const member = (recurrence: NonNullable<NonNullable<CanonicalAdministration["schedule"]>["recurrence"]>, value = 1): CanonicalAdministration => ({
+    kind: "administration", text: "Retain this current administration", amounts: [{ quantity: { value, unit: "tab" } }], schedule: { recurrence }
+  });
+  const forms = (native: CanonicalCourse) => [native, courseToR5(native), courseToR6(native)];
+
+  it.each([false, true])("uses only an exact one-use count as an order-time instruction (exact=%s)", exact => {
+    const repeat = exact ? { count: 1 } : { countMax: 1 };
+    const native = course(member(repeat));
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...query, limit: 3 })).toEqual(exact ? ["2026-01-01T00:00:00+00:00"] : []);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: exact ? "scheduled" : "maximum" });
+      const retained = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(retained.schedule?.recurrence).toMatchObject(repeat);
+      expect(retained.schedule?.recurrence?.clocks).toBeUndefined();
+      const later = { ...query, from: "2026-01-02T00:00:00Z" };
+      expect(nextDueDoses(dosage, { ...later, limit: 3 })).toEqual([]);
+      expect(calculateTotalUnits({ dosage, ...later, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(exact ? 0 : 1);
+      expect(calculateTotalUnits({ dosage, ...later, priorCount: 1, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+      expect(retained.text).toBe(native.stages[0].administrations[0].text);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each([false, true])("uses an authored sole period endpoint in both due dates and supply (clock=%s)", clock => {
+    const repeat = { frequency: 1, periodMax: 2, periodUnit: Unit.Day, ...(clock ? { clocks: ["09:00:00"] } : {}) };
+    const native = course(member(repeat));
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage), suffix = clock ? "09:00:00" : "00:00:00";
+      expect(nextDueDoses(dosage, { ...query, limit: 3 })).toEqual([1, 3, 5].map(day => `2026-01-0${day}T${suffix}+00:00`));
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab", quantityKind: "maximum" });
+      const retained = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(retained.schedule?.recurrence).toMatchObject(repeat);
+      expect(retained.schedule?.recurrence?.period).toBeUndefined();
+      expect(retained.text).toBe(native.stages[0].administrations[0].text);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("keeps a known scalar container estimate through an equivalent course wrapper", () => {
+    const scalar = member({ frequency: 2, period: 1, periodUnit: Unit.Day }, 2);
+    const options = { ...query, durationValue: 1, durationUnit: Unit.Day, context: { containerValue: 3 } };
+    const expected = calculateTotalUnits({ dosage: scalar, ...options });
+    expect(expected).toMatchObject({ totalUnits: 4, unit: "tab", totalContainers: 2 });
+    for (const dosage of forms(course(scalar))) {
+      const before = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, ...options })).toMatchObject({ totalUnits: 4, unit: "tab", totalContainers: 2 });
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.recurrence)
+        .toMatchObject({ frequency: 2, period: 1, periodUnit: Unit.Day });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each(["once", "stage", "course"] as const)("shares one count across member origins and resets only at the next %s occurrence", repetition => {
+    const sharedCount = { groupId: "two current uses", count: 2 };
+    const evening = member({ clocks: ["20:00:00"], sharedCount });
+    const morning = member({ clocks: ["08:00:00"], sharedCount, calendarWindow: { start: "2026-01-02" } });
+    evening.sourceMember = 0; morning.sourceMember = 1;
+    const native: CanonicalCourse = { kind: "course", stages: [{ administrations: [evening, morning], ...(repetition === "stage" ? { count: 2 } : {}) }],
+      ...(repetition === "course" ? { cycleInterval: { value: 3, unit: "d" }, cycleCount: 2 } : {}) };
+    const options = { ...query, from: "2026-01-01T12:00:00Z", orderedAt: "2026-01-01T12:00:00Z" };
+    const expected = ["2026-01-01T20:00:00+00:00", "2026-01-02T08:00:00+00:00",
+      ...(repetition === "stage" ? ["2026-01-02T20:00:00+00:00", "2026-01-03T08:00:00+00:00"] :
+        repetition === "course" ? ["2026-01-04T20:00:00+00:00", "2026-01-05T08:00:00+00:00"] : [])];
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 6 })).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: expected.length, unit: "tab" });
+      expect(nextDueDoses(dosage, { ...options, from: "2026-01-02T00:00:00Z", limit: 6 })).toEqual(expected.slice(1));
+      const retained = importCanonicalCourse(dosage).stages[0].administrations;
+      expect(retained.map(value => value.schedule?.recurrence?.sharedCount)).toEqual([sharedCount, sharedCount]);
+      expect(retained[1].schedule?.recurrence?.calendarWindow?.start).toBe("2026-01-02");
+      expect(retained[0].schedule?.recurrence?.count).toBeUndefined();
+      expect(retained[1].schedule?.recurrence?.count).toBeUndefined();
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+});
+
+
+describe("review814 bounded ranged supply opportunities", () => {
+  const start = "2026-01-01T00:00:00Z";
+  const options = { orderedAt: start, from: start, timeZone: "UTC", priorDoseTimes: ["2025-12-31T12:00:00Z"] };
+  it.each(["terminal", "repeated", "dependent"] as const)("retains later maximum-supply opportunities with %s completion", kind => {
+    const ranged: CanonicalAdministration = { kind: "administration", text: "1–2 tablets at 08:00 or 20:00, one use in one day",
+      amounts: [{ range: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } }],
+      limits: [{ scope: "period", amount: { value: 3, unit: "tab" }, period: { value: 24, unit: "h" } }],
+      schedule: { recurrence: { count: 1, clocks: ["08:00:00", "20:00:00"], courseLength: { value: 1, unit: "d" } } } };
+    const native: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "wk" }, cycleCount: 1,
+      stages: [{ administrations: [ranged], ...(kind === "repeated" ? { count: 2 } : {}) },
+        ...(kind === "dependent" ? [{ administrations: [{ kind: "administration" as const,
+          amounts: [{ quantity: { value: 1, unit: "tab" } }],
+          schedule: { recurrence: { count: 1, clocks: ["10:00:00"] } } }] }] : [])] };
+    const expectedDue = ["2026-01-01T08:00:00+00:00", ...(kind === "terminal" ? [] :
+      [kind === "repeated" ? "2026-01-01T20:00:00+00:00" : "2026-01-01T10:00:00+00:00"])];
+    for (const dosage of [native, courseToR5(native), courseToR6(native)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual(expectedDue);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: kind === "repeated" ? 3 : 2, unit: "tab", quantityKind: "maximum" });
+      const retained = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(retained.amounts?.[0].range).toMatchObject({ low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } });
+      expect(retained.schedule?.recurrence?.count).toBe(1);
+      expect(retained.limits?.[0]).toMatchObject({ scope: "period", amount: { value: 3, unit: "tab" }, period: { value: 24, unit: "h" } });
+      expect(retained.text).toBe(ranged.text);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+});
+
+
+describe("review d41 selected calendar and successor owners", () => {
+  const query = { from: "2026-01-01T00:00:00Z", orderedAt: "2026-01-01T09:00:00Z", timeZone: "UTC", limit: 4 };
+  const note = { url: "urn:clinic:d41-current-course-note", valueString: "retain current schedule annotations" };
+  const member = (recurrence: NonNullable<CanonicalAdministration["schedule"]>["recurrence"], value = 1): CanonicalAdministration => ({
+    kind: "administration", text: "Current prescribed tablet schedule", amounts: [{ quantity: { value, unit: "tab" } }],
+    schedule: { recurrence }
+  });
+  const course = (administration: CanonicalAdministration): CanonicalCourse => ({ kind: "course", stages: [{ administrations: [administration] }] });
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const forms = (native: CanonicalCourse) => {
+    const r6 = courseToR6(native);
+    r6.extension = [...(r6.extension ?? []), note];
+    return [native, fresh(toFhirR5Dosages(r6)), fresh(r6)] as const;
+  };
+  const retainedNote = (dosage: CanonicalCourse | FhirDosage[] | FhirR6DosageInstruction, native: CanonicalCourse) => {
+    if (dosage !== native) expect(projectCanonicalCourse(importCanonicalCourse(dosage)).fhirNext.extension).toContainEqual(note);
+  };
+
+  it.each(["recurring", "exact one", "upper one"] as const)("lets a month-day selector place its %s allowance", kind => {
+    const repeat = { monthDays: [15], ...(kind === "exact one" ? { count: 1 } : kind === "upper one" ? { countMax: 1 } : {}) };
+    const native = course(member(repeat));
+    const expected = (kind === "recurring" ? ["2026-01-15", "2026-02-15", "2026-03-15", "2026-04-15"] : ["2026-01-15"])
+      .map(day => day + "T09:00:00+00:00");
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 7, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 0, unit: "tab" });
+      expect(calculateTotalUnits({ dosage, ...query, from: "2026-01-15T09:00:00Z", durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
+      expect(calculateTotalUnits({ dosage, ...query, from: "2026-02-01T00:00:00Z", durationValue: 28, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: kind === "recurring" ? 1 : 0, unit: "tab" });
+      const retained = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(retained.schedule?.recurrence).toMatchObject(repeat);
+      expect(retained.schedule?.recurrence?.period).toBeUndefined();
+      expect(retained.schedule?.recurrence?.periodUnit).toBeUndefined();
+      expect(retained.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(retained.text).toBe(native.stages[0].administrations[0].text);
+      retainedNote(dosage, native);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("keeps the existing weekday fallback and nonpositional one-dose allowances", () => {
+    for (const dosage of forms(course(member({ dayOfWeek: [FhirDayOfWeek.Monday] }))))
+      expect(nextDueDoses(dosage, { ...query, limit: 3 })).toEqual([
+        "2026-01-05T09:00:00+00:00", "2026-01-12T09:00:00+00:00", "2026-01-19T09:00:00+00:00"
+      ]);
+    for (const exact of [false, true]) for (const dosage of forms(course(member(exact ? { count: 1 } : { countMax: 1 })))) {
+      expect(nextDueDoses(dosage, query)).toEqual(exact ? ["2026-01-01T09:00:00+00:00"] : []);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 7, durationUnit: Unit.Day })).toMatchObject({ totalUnits: 1, unit: "tab" });
+    }
+  });
+
+  it.each([false, true])("retains an authored monthly period beside a month day, clocked=%s", clocked => {
+    const native = course(member({ monthDays: [15], period: 2, periodUnit: Unit.Month,
+      ...(clocked ? { clocks: ["08:00:00"] } : {}) }));
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...query, limit: 3 })).toEqual(["2026-01-15", "2026-03-15", "2026-05-15"]
+        .map(day => day + (clocked ? "T08:00:00+00:00" : "T09:00:00+00:00")));
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.recurrence)
+        .toMatchObject({ monthDays: [15], period: 2, periodUnit: Unit.Month });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each([false, true])("distinguishes an explicit unresolved later offset from an unstated cutover (%s)", unresolved => {
+    const next = member({ frequency: 1, period: 1, periodUnit: Unit.Day }, 2);
+    if (unresolved) next.phaseStart = { anchor: "unresolved", description: "Unresolved signed transition" };
+    const native: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [member({ frequency: 1, period: 1, periodUnit: Unit.Day })] }, { administrations: [next] }
+    ] };
+    const prefix = ["2026-01-01", "2026-01-02", "2026-01-03"].map(day => day + "T09:00:00+00:00");
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      if (unresolved) {
+        expect(() => nextDueDoses(dosage, { ...query, limit: 3 })).toThrow(/treatment-start offset/u);
+        expect(() => calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: Unit.Day }))
+          .toThrow(/treatment-start offset/u);
+      } else {
+        expect(nextDueDoses(dosage, { ...query, limit: 3 })).toEqual(prefix);
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: 3, unit: "tab", explanation: "A stage without a stated cutover was continued through the requested calculation horizon." });
+      }
+      const retained = importCanonicalCourse(dosage).stages[1].administrations[0];
+      if (unresolved) {
+        expect(retained.phaseStart).toMatchObject(next.phaseStart!);
+        expect(retained.phaseStart?.displacement).toBeUndefined();
+        expect(retained.phaseStart?.displacementRange).toBeUndefined();
+      } else expect(retained.phaseStart).toBeUndefined();
+      expect(retained.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      retainedNote(dosage, native);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    const selected: CanonicalCourse = { kind: "course", stages: [native.stages[0]] };
+    for (const dosage of forms(selected)) {
+      expect(nextDueDoses(dosage, { ...query, limit: 3 })).toEqual(prefix);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "tab" });
+    }
+  });
+
+  it.each(["none", "standard", "systemless", "aggregate"] as const)("keeps a finite elapsed successor's full duration with %s coding", coding => {
+    const next = member({ frequency: coding === "aggregate" ? 6 : 1, period: coding === "aggregate" ? 1 : 4,
+      periodUnit: coding === "aggregate" ? Unit.Day : Unit.Hour, courseLength: { value: 8, unit: "h" } });
+    if (coding !== "none") next.schedule!.code = { coding: [{ code: "Q4H",
+      ...(coding === "systemless" ? {} : { system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation" }) }] };
+    const native: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [member({ count: 1, clocks: ["08:00:00"] })] }, { administrations: [next] }
+    ] };
+    const options = { ...query, orderedAt: "2026-01-01T00:00:00Z" };
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(["08", "12", "16"].map(hour => "2026-01-01T" + hour + ":00:00+00:00"));
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "tab" });
+      const retained = importCanonicalCourse(dosage).stages[1].administrations[0];
+      expect(retained.schedule?.code).toEqual(next.schedule?.code);
+      expect(retained.schedule?.recurrence).toMatchObject(next.schedule!.recurrence!);
+      retainedNote(dosage, native);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each([0, 120])("keeps %s minutes on a compiled explicit timestamp", delayMinutes => {
+    const source = "One tablet at the prescribed dated event, retaining its elapsed displacement";
+    const administration: CanonicalAdministration = { kind: "administration", delayMinutes, text: source,
+      amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { explicitEvents: ["2027-01-07T23:00:00Z"] } };
+    const beforeMember = JSON.stringify(administration);
+    const native = courseFromAdministrations([administration], source);
+    expect(native.stages[0].start).toBeUndefined();
+    expect(native.stages[0].administrations[0].delayMinutes).toBe(delayMinutes);
+    const options = { from: "2027-01-07T00:00:00Z", orderedAt: "2027-01-01T09:00:00Z", timeZone: "UTC", limit: 3 };
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual([delayMinutes ? "2027-01-08T01:00:00+00:00" : "2027-01-07T23:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: delayMinutes ? 0 : 1, unit: "tab" });
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0]).toMatchObject({ delayMinutes,
+        schedule: { explicitEvents: ["2027-01-07T23:00:00Z"] } });
+      retainedNote(dosage, native);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    expect(JSON.stringify(administration)).toBe(beforeMember);
+  });
+  it.each([
+    [1, ["09:00:00"], ["01T09", "08T09", "15T09", "22T09", "29T09", "2026-02-05T09"]],
+    [2, ["09:00:00"], ["01T09", "05T09", "08T09", "12T09", "15T09", "19T09"]],
+    [3, ["09:00:00"], ["01T09", "05T09", "08T09", "12T09", "15T09", "19T09"]],
+    [1, ["09:00:00", "20:00:00"], ["01T09", "08T09", "15T09", "22T09", "29T09", "2026-02-05T09"]],
+    [2, ["09:00:00", "20:00:00"], ["01T09", "01T20", "08T09", "08T20", "15T09", "15T20"]],
+    [3, ["09:00:00", "20:00:00"], ["01T09", "01T20", "05T09", "08T09", "08T20", "12T09"]]
+  ] as const)("spends %s weekly administrations across the selected clocks %j", (frequency, clocks, points) => {
+    const repeat = { frequency, period: 1, periodUnit: Unit.Week,
+      dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Thursday], clocks: [...clocks] };
+    const native = course(member(repeat));
+    const options = { ...query, orderedAt: "2026-01-01T00:00:00Z", limit: 6 };
+    const expected = points.map(point => (point.length > 6 ? point : "2026-01-" + point) + ":00:00+00:00");
+    const late = "2026-01-03T00:00:00Z";
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: Math.min(frequency, clocks.length * 2), unit: "tab" });
+      expect(nextDueDoses(dosage, { ...options, from: late, limit: expected.filter(at => at > late).length }))
+        .toEqual(expected.filter(at => at > late));
+      expect(calculateTotalUnits({ dosage, ...options, from: late, durationValue: 5, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: Math.max(0, Math.min(frequency, clocks.length * 2) - clocks.length), unit: "tab" });
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.recurrence).toMatchObject(repeat);
+      retainedNote(dosage, native);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("retains the unclocked weekly allowance and the no-frequency clock opportunities", () => {
+    const options = { ...query, orderedAt: "2026-01-01T00:00:00Z", limit: 3 };
+    for (const clocks of [undefined, ["09:00:00"]]) {
+      const repeat = { period: 1, periodUnit: Unit.Week, dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Thursday],
+        ...(clocks ? { clocks } : { frequency: 1 }) };
+      for (const dosage of forms(course(member(repeat)))) {
+        expect(nextDueDoses(dosage, options)).toEqual((clocks ? ["01", "05", "08"] : ["01", "08", "15"])
+          .map(day => "2026-01-" + day + (clocks ? "T09:00:00+00:00" : "T00:00:00+00:00")));
+        expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: clocks ? 2 : 1, unit: "tab" });
+      }
+    }
+  });
+
+  it.each([false, true])("opens a finite weekly successor after its predecessor before spending allowance (exclusion %s)", excluded => {
+    const repeat = { frequency: 1, period: 1, periodUnit: Unit.Week,
+      dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Thursday], clocks: ["09:00:00"],
+      courseLength: { value: 14, unit: "d" } };
+    const successor = { ...member(repeat, 2), ...(excluded ? { excludedWeekdays: [FhirDayOfWeek.Saturday] } : {}) };
+    const native: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [member({ count: 1, clocks: ["09:00:00"] })] },
+      { administrations: [successor] }
+    ] };
+    const options = { ...query, orderedAt: "2026-01-01T00:00:00Z", limit: 5 };
+    const expected = ["01", "05", "12"].map(day => "2026-01-" + day + "T09:00:00+00:00");
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "tab", quantityKind: "scheduled" });
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 21, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 5, unit: "tab", quantityKind: "scheduled" });
+      expect(nextDueDoses(dosage, { ...options, from: "2026-01-06T00:00:00Z" })).toEqual(expected.slice(2));
+      expect(calculateTotalUnits({ dosage, ...options, from: "2026-01-06T00:00:00Z", durationValue: 14, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      const retained = importCanonicalCourse(dosage).stages[1].administrations[0];
+      expect(retained.schedule?.recurrence).toMatchObject(repeat);
+      expect(retained.excludedWeekdays ?? []).toEqual(excluded ? [FhirDayOfWeek.Saturday] : []);
+      expect(retained.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(retained.text).toBe(successor.text);
+      retainedNote(dosage, native);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each([false, true])("retains the clockless successor's predecessor-based week and duration after opening (exclusion %s)", excluded => {
+    const repeat = { frequency: 1, period: 1, periodUnit: Unit.Week,
+      dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Thursday], courseLength: { value: 14, unit: "d" } };
+    const successor = { ...member(repeat, 2), ...(excluded ? { excludedWeekdays: [FhirDayOfWeek.Saturday] } : {}) };
+    const native: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [member({ count: 1, clocks: ["08:00:00"] })] },
+      { administrations: [successor] }
+    ] };
+    const options = { ...query, orderedAt: "2026-01-01T00:00:00Z", limit: 5 };
+    // Clockless cadence and the fourteen-day duration retain the predecessor's
+    // Jan 1 origin. Only the first eligibility floor is exclusive of its dose.
+    const expected = ["01", "05", "08"].map(day => "2026-01-" + day + "T08:00:00+00:00");
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "tab", quantityKind: "scheduled" });
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 21, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 5, unit: "tab", quantityKind: "scheduled" });
+      expect(nextDueDoses(dosage, { ...options, from: "2026-01-06T00:00:00Z" })).toEqual(expected.slice(2));
+      expect(calculateTotalUnits({ dosage, ...options, from: "2026-01-06T00:00:00Z", durationValue: 14, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      expect(nextDueDoses(dosage, { ...options, from: "2026-01-09T00:00:00Z" })).toEqual([]);
+      const retained = importCanonicalCourse(dosage).stages[1].administrations[0];
+      expect(retained.schedule?.recurrence).toMatchObject(repeat);
+      expect(retained.schedule?.recurrence?.clocks).toBeUndefined();
+      expect(retained.excludedWeekdays ?? []).toEqual(excluded ? [FhirDayOfWeek.Saturday] : []);
+      expect(retained.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(retained.text).toBe(successor.text);
+      retainedNote(dosage, native);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("retains a prior-day meal anchor when the successor's actual opening is later", () => {
+    const repeat = { frequency: 1, period: 1, periodUnit: Unit.Day,
+      anchors: [EventTiming["After Dinner"]], courseLength: { value: 2, unit: "d" } };
+    const successor = { ...member(repeat, 2), delayMinutes: -120 };
+    const native: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [member({ count: 1, clocks: ["23:30:00"] })] },
+      { administrations: [successor] }
+    ] };
+    const options = { ...query, orderedAt: "2026-01-01T00:00:00Z", limit: 5,
+      eventClock: { CV: "23:45" }, mealOffsets: { PCV: 180 } };
+    // Dinner +3h belongs to the previous civil anchor day. The member's -2h
+    // displacement makes the actual next dose 00:45, after the 23:30 loading.
+    const expected = ["2026-01-01T23:30:00+00:00", "2026-01-02T00:45:00+00:00", "2026-01-03T00:45:00+00:00"];
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 5, unit: "tab", quantityKind: "scheduled" });
+      expect(nextDueDoses(dosage, { ...options, from: "2026-01-02T01:00:00Z" })).toEqual(expected.slice(2));
+      expect(calculateTotalUnits({ dosage, ...options, from: "2026-01-02T01:00:00Z", durationValue: 2, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      const retained = importCanonicalCourse(dosage).stages[1].administrations[0];
+      expect(retained).toMatchObject({ delayMinutes: -120, schedule: { recurrence: repeat } });
+      retainedNote(dosage, native);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("spends weekly slots only after a resolved timestamp opening", () => {
+    const repeat = { frequency: 1, period: 1, periodUnit: Unit.Week, count: 3,
+      dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Thursday], clocks: ["09:00:00"],
+      calendarWindow: { start: "2026-01-01T12:00:00Z" } };
+    const native = course(member(repeat));
+    const options = { ...query, orderedAt: "2025-12-31T00:00:00Z", limit: 4 };
+    const expected = ["05", "08", "15"].map(day => "2026-01-" + day + "T09:00:00+00:00");
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
+      expect(nextDueDoses(dosage, { ...options, from: "2026-01-06T00:00:00Z" })).toEqual(expected.slice(1));
+      expect(calculateTotalUnits({ dosage, ...options, from: "2026-01-06T00:00:00Z", durationValue: 2, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 0, unit: "tab" });
+      expect(nextDueDoses(dosage, { ...options, from: "2026-01-10T00:00:00Z" })).toEqual(expected.slice(2));
+      expect(calculateTotalUnits({ dosage, ...options, from: "2026-01-10T00:00:00Z", durationValue: 14, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.recurrence).toMatchObject(repeat);
+      retainedNote(dosage, native);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each([
+    ["Q48H", "every 48 hours", "48", { period: 48, periodUnit: FhirPeriodUnit.Hour }],
+    ["Q90MIN", "every 90 minutes", "90", { period: 90, periodUnit: FhirPeriodUnit.Minute }],
+    ["Q0.5H", "every 30 minutes", "30", { period: 30, periodUnit: FhirPeriodUnit.Minute }],
+    ["Q0.5-1H", "every 30 to 60 minutes", "30 ถึง 60", { period: 30, periodMax: 60, periodUnit: FhirPeriodUnit.Minute }]
+  ] as const)("renders existing compact interval code %s through its lexical cadence", (code, english, thaiNumber, repeat) => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ code, ...(code === "Q48H" ? {} : {
+        system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation" }) }] } } };
+    const native = importCanonicalCourse(row);
+    for (const dosage of forms(native)) {
+      const before = JSON.stringify(dosage);
+      const englishText = formatSig(dosage, "long", { locale: "en" });
+      expect(englishText).toContain(english);
+      expect(englishText.split(code)).toHaveLength(2);
+      const thai = formatSig(dosage, "long", { locale: "th" });
+      expect(thai).toContain(thaiNumber);
+      expect(thai).toContain(code === "Q48H" ? "ชั่วโมง" : "นาที");
+      expect(thai.split(code)).toHaveLength(2);
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.code).toEqual(row.timing?.code);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    expect(parseSig("1 tab " + code).fhir.timing?.repeat).toMatchObject(repeat);
+  });
+
+  it("keeps compact range grammar and foreign timing codes on their existing owners", () => {
+    expect(parseSig("1 tab q0.5-1h").fhir.timing?.repeat)
+      .toMatchObject({ period: 30, periodMax: 60, periodUnit: FhirPeriodUnit.Minute });
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system: "urn:clinic:own-cadence", code: "Q48H" }] } } };
+    const before = JSON.stringify(row);
+    expect(formatSig(row, "long", { locale: "en" })).not.toContain("every 48 hours");
+    expect(importCanonicalCourse(row).stages[0].administrations[0].schedule?.code).toEqual(row.timing?.code);
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it.each(["missing", "unresolved", "unequal", "zero", "day-zero", "equal"] as const)(
+    "resolves the selected %s boundary before an open or finite prefix satisfies the query", kind => {
+      const phaseStart: NonNullable<CanonicalAdministration["phaseStart"]> = kind === "unresolved"
+        ? { anchor: "unresolved", description: "Retained unknown transition" }
+        : kind === "day-zero" ? { anchor: "treatment-day-start" }
+        : kind === "equal" || kind === "unequal" ? { anchor: "treatment-start",
+          displacementRange: { low: { value: 2, unit: "d" }, high: { value: kind === "equal" ? 2 : 3, unit: "d" } } }
+        : { anchor: "treatment-start", displacement: { unit: "d", ...(kind === "zero" ? { value: 0 } : {}) } };
+      const unresolved = kind === "missing" || kind === "unresolved" || kind === "unequal";
+      const dates = ["01", "02", "03", "04", "05"].map(day => "2026-01-" + day + "T09:00:00+00:00");
+      for (const finite of [false, true]) {
+        const first = member({ frequency: 1, period: 1, periodUnit: Unit.Day, ...(finite ? { count: 2 } : {}) });
+        const next = { ...member({ frequency: 1, period: 1, periodUnit: Unit.Day }, 2), phaseStart };
+        const native: CanonicalCourse = { kind: "course", stages: [{ administrations: [first] }, { administrations: [next] }] };
+        for (const dosage of forms(native)) {
+          const before = JSON.stringify(dosage);
+          for (const limit of [1, 3]) {
+            if (unresolved) expect(() => nextDueDoses(dosage, { ...query, limit }))
+              .toThrow(kind === "unequal" ? /range endpoints must resolve to the same treatment-start offset/u : /requires a treatment-start offset/u);
+            else expect(nextDueDoses(dosage, { ...query, limit })).toEqual(dates.slice(0, limit));
+          }
+          if (unresolved) expect(() => calculateTotalUnits({ dosage, ...query, durationValue: 5, durationUnit: Unit.Day }))
+            .toThrow(kind === "unequal" ? /range endpoints must resolve to the same treatment-start offset/u : /requires a treatment-start offset/u);
+          else expect(calculateTotalUnits({ dosage, ...query, durationValue: 5, durationUnit: Unit.Day }))
+            .toMatchObject({ totalUnits: finite ? 8 : 5, unit: "tab", quantityKind: "scheduled" });
+          if (finite && kind === "equal") for (const [day, amount] of [["01", 1], ["02", 1], ["03", 2], ["04", 2], ["05", 2]] as const) {
+            expect(calculateTotalUnits({ dosage, ...query, from: "2026-01-" + day + "T00:00:00Z",
+              durationValue: 1, durationUnit: Unit.Day })).toMatchObject({ totalUnits: amount, unit: "tab" });
+          }
+          const retained = importCanonicalCourse(dosage).stages[1].administrations[0];
+          expect(retained.phaseStart).toMatchObject(phaseStart);
+          if (kind === "missing") expect(retained.phaseStart?.displacement?.value).toBeUndefined();
+          expect(retained.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+          retainedNote(dosage, native);
+          expect(JSON.stringify(dosage)).toBe(before);
+        }
+        for (const dosage of forms(course(first))) {
+          expect(nextDueDoses(dosage, { ...query, limit: 3 })).toEqual(dates.slice(0, finite ? 2 : 3));
+          expect(calculateTotalUnits({ dosage, ...query, durationValue: 5, durationUnit: Unit.Day }))
+            .toMatchObject({ totalUnits: finite ? 2 : 5, unit: "tab" });
+        }
+      }
+    });
+
+});
+
+
+describe("review125 calendar timing codes and nominal event weekdays", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const views = (course: CanonicalCourse) => {
+    const projected = projectCanonicalCourse(course);
+    return [course, fresh(projected.fhir), fresh(projected.fhirNext)];
+  };
+  const note = { url: "https://clinic.example/current-timing-note", valueString: "retain this annotation" };
+  const system = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+  const query = { orderedAt: "2026-01-05T00:00:00Z", from: "2026-01-05T00:00:00Z", timeZone: "UTC" };
+
+  it.each([
+    ["WK", Unit.Week, 4, ["2026-01-05", "2026-01-12", "2026-01-19", "2026-01-26"]],
+    ["MO", Unit.Month, 3, ["2026-01-05", "2026-02-05", "2026-03-05"]],
+  ] as const)("executes standard %s at its configured clinic clock without changing the code-only input", (code, unit, count, dates) => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system, code, id: "current-code", extension: [note] }] } } };
+    const native = importCanonicalCourse(row), original = fresh(row);
+    const options = { ...query, frequencyDefaults: { byCode: { [code]: ["10:15:00"] } } };
+    for (const dosage of views(native)) {
+      const before = fresh(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: count }))
+        .toEqual(dates.map(date => date + "T10:15:00+00:00"));
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: count, durationUnit: unit }))
+        .toMatchObject({ totalUnits: count, unit: "tab", quantityKind: "scheduled" });
+      const current = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(current.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(current.schedule?.code).toEqual(row.timing!.code);
+      expect(current.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(current.schedule?.recurrence?.period).toBeUndefined();
+      expect(current.schedule?.recurrence?.periodUnit).toBeUndefined();
+      expect(dosage).toEqual(before);
+    }
+    expect(row).toEqual(original);
+  });
+
+  it("keeps authored positions and complete cadence authoritative over a calendar timing code", () => {
+    const base: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system, code: "MO", extension: [note] }] } } };
+    const cases: { row: FhirDosage; expected: string[] }[] = [
+      { row: { ...base, timing: { ...base.timing, event: ["2026-01-06T18:00:00Z"] } },
+        expected: ["2026-01-06T18:00:00+00:00"] },
+      { row: { ...base, timing: { ...base.timing, repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["18:00:00"] } } },
+        expected: ["2026-01-05T18:00:00+00:00", "2026-01-06T18:00:00+00:00"] },
+    ];
+    for (const { row, expected } of cases) for (const dosage of views(importCanonicalCourse(row))) {
+      const before = fresh(dosage), options = { ...query, frequencyDefaults: { byCode: { MO: ["10:15:00"] } } };
+      expect(nextDueDoses(dosage, { ...options, limit: expected.length })).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 2, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: expected.length, unit: "tab" });
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.code).toEqual(row.timing!.code);
+      expect(dosage).toEqual(before);
+    }
+    const foreign: FhirDosage = { ...base, timing: { code: { coding: [{ system: "https://clinic.example/private", code: "WK" }] } } };
+    for (const dosage of views(importCanonicalCourse(foreign))) {
+      const before = fresh(dosage), options = { ...query, frequencyDefaults: { byCode: { WK: ["10:15:00"] } } };
+      expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([]);
+      expect(() => calculateTotalUnits({ dosage, ...options, durationValue: 2, durationUnit: Unit.Week }))
+        .toThrow(expect.objectContaining({ code: "timing-required" }));
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.code).toEqual(foreign.timing!.code);
+      expect(dosage).toEqual(before);
+    }
+  });
+
+  it("keeps a shifted partial event unresolved when its nominal weekday can fall in the query window", () => {
+    const member = (event: string, offset: number): CanonicalCourse => ({ kind: "course", stages: [{ administrations: [{
+      kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab", extension: [note] } }],
+      schedule: { explicitEvents: [event], recurrence: { dayOfWeek: [FhirDayOfWeek.Monday],
+        anchors: [EventTiming["Before Sleep"]], offset } },
+    }] }] });
+    const options = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-06T23:00:00Z",
+      timeZone: "UTC", eventClock: { HS: "00:30" } };
+    for (const event of ["2026-12", "2026-12-07"]) for (const dosage of views(member(event, 60))) {
+      const before = fresh(dosage), current = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(current.schedule?.explicitEvents).toEqual([event]);
+      expect(current.schedule?.recurrence).toMatchObject({ dayOfWeek: [FhirDayOfWeek.Monday],
+        anchors: [EventTiming["Before Sleep"]], offset: 60 });
+      expect(current.amounts?.[0].quantity?.extension).toEqual([note]);
+      expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual(event === "2026-12" ? [] : ["2026-12-06T23:30:00+00:00"]);
+      if (event === "2026-12") expect(() => calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Hour }))
+        .toThrow(expect.objectContaining({ code: "timing-required" }));
+      else expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Hour }))
+        .toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: "scheduled" });
+      expect(dosage).toEqual(before);
+    }
+    // With no lead, Monday's 00:30 cannot occur inside Sunday 23:00–24:00.
+    for (const dosage of views(member("2026-12", 0))) {
+      const before = fresh(dosage);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Hour }))
+        .toMatchObject({ totalUnits: 0, unit: "tab", quantityKind: "scheduled" });
+      expect(dosage).toEqual(before);
+    }
+  });
+});
+
+
+describe("RelativeTime exact unitless zero boundaries", () => {
+  const contextCode = { coding: [{
+    system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+  }] };
+  const day = { unit: "day", code: "d", system: "http://unitsofmeasure.org" };
+  const note = { url: "https://example.org/current-boundary-note", valueString: "Retain boundary source" };
+  const source = "Take 2 tablets daily at 08:00; start and stop relative to treatment start.";
+  const query = { orderedAt: "2026-11-21T12:00:00Z", from: "2026-11-21T12:00:00Z", timeZone: "UTC", limit: 5 };
+  const fixture = (offsetDuration: FhirR6RelativeTime["offsetDuration"]): FhirR6DosageInstruction => ({
+    renderedInstruction: source,
+    step: [{ start: { contextCode, ...(offsetDuration ? { offsetDuration } : {}), extension: [note] },
+      end: { contextCode, offsetDuration: { ...day, value: 2 } },
+      component: [{ timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00"] } },
+        doseAndRate: [{ doseQuantity: { value: 2, unit: "tab", extension: [note] } }] }],
+    }],
+  });
+  const cases: { label: string; offset: FhirR6RelativeTime["offsetDuration"]; error?: RegExp }[] = [
+    { label: "unitless zero", offset: { value: 0 } },
+    { label: "coded zero days", offset: { ...day, value: 0 } },
+    { label: "absent offset", offset: undefined, error: /requires a treatment-start offset/u },
+    { label: "missing magnitude", offset: day, error: /requires a treatment-start offset/u },
+    { label: "positive unitless offset", offset: { value: 1 }, error: /Unsupported R6 treatment-start time unit/u },
+  ];
+
+  it.each(cases)("executes only an exact known boundary: $label", ({ offset, error }) => {
+    const current = fixture(offset), original = JSON.stringify(current);
+    const native = importCanonicalCourse(current), projected = projectCanonicalCourse(native);
+    const forms = [current, native, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))];
+    for (const dosage of forms) {
+      const before = JSON.stringify(dosage);
+      if (error) {
+        expect(() => nextDueDoses(dosage, query)).toThrow(error);
+        expect(() => calculateTotalUnits({ dosage, ...query, durationValue: 4, durationUnit: Unit.Day })).toThrow(error);
+      } else {
+        expect(nextDueDoses(dosage, query)).toEqual([
+          "2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00",
+        ]);
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 4, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: 4, unit: "tab", quantityKind: "scheduled" });
+        expect(formatSig(dosage, "long", { locale: "en" })).toContain("From treatment start until 2 days after treatment start");
+        expect(formatSig(dosage, "long", { locale: "th" })).toContain("ตั้งแต่เริ่มการรักษา");
+      }
+      const retained = projectCanonicalCourse(importCanonicalCourse(dosage)).fhirNext;
+      expect(retained.renderedInstruction).toBe(source);
+      expect(retained.step![0].start?.offsetDuration).toEqual(offset);
+      expect(retained.step![0].start?.extension).toEqual([note]);
+      expect(retained.step![0].end).toEqual(current.step![0].end);
+      expect(retained.step![0].component[0].doseAndRate![0].doseQuantity)
+        .toEqual(current.step![0].component[0].doseAndRate![0].doseQuantity);
+      expect(retained.step![0].component[0].timing?.repeat).toEqual(current.step![0].component[0].timing?.repeat);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    expect(JSON.stringify(current)).toBe(original);
+  });
 });

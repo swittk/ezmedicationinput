@@ -1,7 +1,10 @@
 import {
   FhirExtension,
-  FhirPrimitiveElement
+  FhirPrimitiveElement,
+  FhirR6PrimitiveElement,
+  FhirR6Extension
 } from "./types";
+import { quantityAnnotationExtensions } from "./fhir-quantity-operator";
 
 export const FHIR_TRANSLATION_EXTENSION_URL =
   "http://hl7.org/fhir/StructureDefinition/translation";
@@ -40,54 +43,21 @@ export function mergeI18nRecords(
   return Object.keys(merged).length ? merged : undefined;
 }
 
-export function cloneExtension(extension: FhirExtension): FhirExtension {
-  return {
-    url: extension.url,
-    extension: extension.extension?.map(cloneExtension),
-    valueCode: extension.valueCode,
-    valueString: extension.valueString,
-    valueCoding: extension.valueCoding
-      ? {
-        system: extension.valueCoding.system,
-        code: extension.valueCoding.code,
-        display: extension.valueCoding.display,
-        _display: clonePrimitiveElement(extension.valueCoding._display),
-        i18n: cloneI18nRecord(extension.valueCoding.i18n),
-        extension: extension.valueCoding.extension?.map(cloneExtension)
-      }
-      : undefined,
-    valueCodeableConcept: extension.valueCodeableConcept
-      ? {
-        text: extension.valueCodeableConcept.text,
-        _text: clonePrimitiveElement(extension.valueCodeableConcept._text),
-        coding: extension.valueCodeableConcept.coding?.map((coding) => ({
-          system: coding.system,
-          code: coding.code,
-          display: coding.display,
-          _display: clonePrimitiveElement(coding._display),
-          i18n: cloneI18nRecord(coding.i18n),
-          extension: coding.extension?.map(cloneExtension)
-        })),
-        extension: extension.valueCodeableConcept.extension?.map(cloneExtension)
-      }
-      : undefined
-  };
-}
-
 export function cloneExtensions(
-  extensions: FhirExtension[] | undefined
+  extensions: FhirR6Extension[] | undefined
 ): FhirExtension[] | undefined {
-  return extensions?.length ? extensions.map(cloneExtension) : undefined;
+  return extensions?.length
+    ? quantityAnnotationExtensions(extensions, "r5") as FhirExtension[] : undefined;
 }
 
 export function clonePrimitiveElement(
-  element: FhirPrimitiveElement | undefined
+  element: FhirR6PrimitiveElement | undefined
 ): FhirPrimitiveElement | undefined {
-  if (!element?.extension?.length) {
-    return undefined;
-  }
+  if (!element) return undefined;
+  const { extension, ...metadata } = element;
   return {
-    extension: element.extension.map(cloneExtension)
+    ...metadata,
+    ...(extension ? { extension: cloneExtensions(extension) } : {})
   };
 }
 
@@ -116,7 +86,7 @@ export function buildTranslationPrimitiveElement(
 
   for (const extension of baseExtensions) {
     if (extension.url !== FHIR_TRANSLATION_EXTENSION_URL) {
-      nextExtensions.push(cloneExtension(extension));
+      nextExtensions.push(extension);
     }
   }
 
@@ -131,49 +101,42 @@ export function buildTranslationPrimitiveElement(
     }
   }
 
-  if (!nextExtensions.length) {
-    return undefined;
-  }
-
-  return {
-    extension: nextExtensions
-  };
+  const { extension: _extensions, ...metadata } = base ?? {};
+  if (!nextExtensions.length) return Object.keys(metadata).length ? metadata : undefined;
+  return { ...metadata, extension: nextExtensions };
 }
 
 export function mergeTranslationPrimitiveElement(
   base: FhirPrimitiveElement | undefined,
   translations: Record<string, string> | undefined
 ): FhirPrimitiveElement | undefined {
-  const nextExtensions = base?.extension?.map(cloneExtension) ?? [];
-  const existingTranslationLocales = new Set<string>();
-
-  for (const extension of nextExtensions) {
-    if (extension.url !== FHIR_TRANSLATION_EXTENSION_URL) {
-      continue;
+  const supplied = mergeI18nRecords(translations), seen = new Set<string>();
+  const selected = getPrimitiveTranslations(base);
+  const nextExtensions: FhirExtension[] = [];
+  for (const extension of base?.extension ?? []) {
+    let current = extension;
+    if (extension.url === FHIR_TRANSLATION_EXTENSION_URL) {
+      const { locale, content } = getTranslationParts(extension);
+      if (locale && content) {
+        seen.add(locale);
+        const replacement = supplied?.[locale];
+        // Re-encoding the selected display does not replace other authored
+        // variants in that locale. A different supplied translation does.
+        if (replacement && replacement !== selected?.[locale] && replacement !== content)
+          current = { ...extension, extension: extension.extension?.map(part =>
+            part.url === TRANSLATION_CONTENT_EXTENSION_URL
+              ? { ...part, [part.valueMarkdown !== undefined ? "valueMarkdown" : "valueString"]: replacement } : part) };
+      }
     }
-    const { locale, content } = getTranslationParts(extension);
-    if (locale && content) {
-      existingTranslationLocales.add(locale);
-    }
+    nextExtensions.push(current);
   }
-
-  const additions = buildTranslationPrimitiveElement(translations)?.extension ?? [];
-  for (const extension of additions) {
-    const { locale } = getTranslationParts(extension);
-    if (locale && existingTranslationLocales.has(locale)) {
-      continue;
-    }
-    if (locale) {
-      existingTranslationLocales.add(locale);
-    }
-    nextExtensions.push(extension);
-  }
-
-  return nextExtensions.length ? { extension: nextExtensions } : undefined;
+  for (const locale in supplied)
+    if (!seen.has(locale)) nextExtensions.push(buildTranslationExtension(locale, supplied[locale]));
+  return nextExtensions.length ? { ...base, extension: nextExtensions } : base ? { ...base } : undefined;
 }
 
 function getTranslationParts(
-  extension: FhirExtension
+  extension: FhirR6Extension
 ): { locale?: string; content?: string } {
   const parts = extension.extension ?? [];
   let locale: string | undefined;
@@ -185,7 +148,7 @@ function getTranslationParts(
         locale = normalizeLocaleKey(part.valueCode);
         break;
       case TRANSLATION_CONTENT_EXTENSION_URL:
-        content = part.valueString?.trim() || undefined;
+        content = (part.valueString ?? part.valueMarkdown)?.trim() || undefined;
         break;
       default:
         break;
@@ -196,7 +159,7 @@ function getTranslationParts(
 }
 
 export function getPrimitiveTranslation(
-  element: FhirPrimitiveElement | undefined,
+  element: FhirR6PrimitiveElement | undefined,
   locale: string | undefined
 ): string | undefined {
   const targetLocale = normalizeLocaleKey(locale);
@@ -230,7 +193,7 @@ export function getPrimitiveTranslation(
 }
 
 export function getPrimitiveTranslations(
-  element: FhirPrimitiveElement | undefined
+  element: FhirR6PrimitiveElement | undefined
 ): Record<string, string> | undefined {
   if (!element?.extension?.length) {
     return undefined;

@@ -1,8 +1,12 @@
 import source from "./instruction-action-terminology.json";
-import { localizedConfig } from "./localization";
+import { cloneLocaleAliases, flattenLocaleAliases, localizedConfig } from "./localization";
+import { shouldJoinAdjacentSourceTokens } from "./locale-detection";
+import { SNOMED_SYSTEM } from "./snomed";
 import {
   AdviceArgument,
+  CanonicalMethodExpr,
   FhirCoding,
+  FhirR6Coding,
   MedicationInstructionActionDefinition,
   MedicationInstructionActionInput,
   ParseOptions
@@ -26,56 +30,63 @@ export interface MedicationInstructionActionCodeSystem {
   }>;
 }
 
-interface ActionSource {
-  code: string;
-  semanticClass: string;
-  display: string;
-  i18n?: Record<string, string>;
-  roundtripI18n?: Record<string, string>;
-  aliases?: string[];
-  directiveOnlyAliases?: string[];
-  sequenceAliases?: string[];
-  localeAliases?: Record<string, string[]>;
-  separableAliases?: Array<{ lead: string; particle: string }>;
-  procedural?: boolean;
-  argumentParser?: MedicationInstructionActionDefinition["argumentParser"];
-  realizer?: MedicationInstructionActionDefinition["realizer"];
-  argumentParserConfig?: MedicationInstructionActionDefinition["argumentParserConfig"];
-  realizerConfig?: MedicationInstructionActionDefinition["realizerConfig"];
-  continuationLicenses?: MedicationInstructionActionDefinition["continuationLicenses"];
-  continuationAfterRelations?: MedicationInstructionActionDefinition["continuationAfterRelations"];
-  administrationDurationIntroducers?: MedicationInstructionActionDefinition["administrationDurationIntroducers"];
-  preferredRelationSemanticClasses?: MedicationInstructionActionDefinition["preferredRelationSemanticClasses"];
-  contextualCodings?: MedicationInstructionActionDefinition["contextualCodings"];
-  contextualSemanticComponents?: MedicationInstructionActionDefinition["contextualSemanticComponents"];
-  administrationMethod?: FhirCoding;
-  verbRouteHint?: MedicationInstructionActionDefinition["verbRouteHint"];
-  methodRouteOverride?: MedicationInstructionActionDefinition["methodRouteOverride"];
-  suppressMethodRouteHint?: boolean;
-  applicationVerb?: boolean;
-  primaryAdministrationHead?: boolean;
-  supportVerb?: boolean;
-  safetyScopeTarget?: boolean;
-  acceptsAmount?: boolean;
-  definesDose?: boolean;
-  coding?: FhirCoding;
-  externalCodings?: FhirCoding[];
-  semanticComponents?: MedicationInstructionActionDefinition["semanticComponents"];
-}
+type ActionSource = MedicationInstructionActionDefinition;
 
 const DEFAULT_ACTIONS = (source.actions as ActionSource[]).map(normalizeDefinition);
 const DEFAULT_BY_CODE = new Map<string, MedicationInstructionActionDefinition>();
 const DEFAULT_BY_ALIAS = new Map<string, MedicationInstructionActionDefinition>();
+const DEFAULT_SEPARABLE_BY_LEAD = new Map<string, Map<string, MedicationInstructionActionDefinition>>();
 const DEFAULT_SPAN_BY_LEAD = new Map<string, number>();
+const DEFAULT_BY_METHOD = new Map<string, Map<string, MedicationInstructionActionDefinition>>();
+
+function sameMethodCoding(left: FhirR6Coding | undefined, right: FhirR6Coding): boolean {
+  return Boolean(left?.code && left.code === right.code &&
+    (left.system ?? SNOMED_SYSTEM) === (right.system ?? SNOMED_SYSTEM));
+}
+
+/** A shared generic method chooses its canonical action, not a specialized
+ * action that merely uses that method (Apply rather than Reapply, for example).
+ * Ranking runs only while the existing default vocabulary index is built. */
+function methodActionRank(definition: MedicationInstructionActionDefinition, coding: FhirCoding): number {
+  const exactName = definition.administrationMethod?.display?.toLowerCase() === definition.display.toLowerCase();
+  const ownCoding = sameMethodCoding(definition.coding, coding) ||
+    definition.externalCodings?.some(value => sameMethodCoding(value, coding));
+  return (exactName ? 2 : 0) + (ownCoding ? 1 : 0);
+}
+
+function indexMethodCoding(coding: FhirCoding | undefined, definition: MedicationInstructionActionDefinition): void {
+  if (!coding?.code) return;
+  const system = coding.system ?? SNOMED_SYSTEM;
+  let byCode = DEFAULT_BY_METHOD.get(system);
+  if (!byCode) DEFAULT_BY_METHOD.set(system, (byCode = new Map()));
+  const current = byCode.get(coding.code);
+  if (!current || methodActionRank(definition, coding) > methodActionRank(current, coding))
+    byCode.set(coding.code, definition);
+}
+
+let defaultActionSurfaceLength = 0;
 
 for (const definition of DEFAULT_ACTIONS) {
   DEFAULT_BY_CODE.set(definition.code, definition);
+  for (const alias of definition.separableAliases ?? []) {
+    const lead = normalizeActionSurface(alias.lead);
+    const particle = normalizeActionSurface(alias.particle);
+    let particles = DEFAULT_SEPARABLE_BY_LEAD.get(lead);
+    if (!particles) DEFAULT_SEPARABLE_BY_LEAD.set(lead, (particles = new Map()));
+    if (!particles.has(particle)) particles.set(particle, definition);
+  }
+  if (definition.administrationMethod) {
+    indexMethodCoding(definition.administrationMethod, definition);
+    indexMethodCoding(definition.coding, definition);
+    for (const coding of definition.externalCodings ?? []) indexMethodCoding(coding, definition);
+  }
   const aliases = [
     definition.code, definition.display, ...(definition.aliases ?? []),
     ...flattenLocaleAliases(definition.localeAliases)
   ];
   for (const alias of aliases) {
     const normalized = normalizeActionSurface(alias);
+    defaultActionSurfaceLength = Math.max(defaultActionSurfaceLength, normalized.length);
     if (normalized && !DEFAULT_BY_ALIAS.has(normalized)) {
       DEFAULT_BY_ALIAS.set(normalized, definition);
       const words = normalized.split(" ");
@@ -110,43 +121,28 @@ export function medicationInstructionActionSpanLimit(lead: string, options?: Par
 
 export function normalizeActionSurface(value: string): string {
   return value
-    .trim()
     .toLowerCase()
-    .replace(/[{}]/g, " ")
-    .replace(/\s+/g, " ")
+    .replace(/[{}\s]+/g, " ")
     .trim();
 }
 
-function cloneLocaleAliases(
-  aliases: Record<string, string[]> | undefined
-): Record<string, string[]> | undefined {
-  if (!aliases) return undefined;
-  const cloned: Record<string, string[]> = {};
-  for (const locale of Object.keys(aliases)) {
-    const values = aliases[locale];
-    if (values?.length) cloned[locale] = [...values];
-  }
-  return Object.keys(cloned).length ? cloned : undefined;
-}
-
-function flattenLocaleAliases(aliases: Record<string, string[]> | undefined): string[] {
-  const values: string[] = [];
-  for (const locale of Object.keys(aliases ?? {})) values.push(...(aliases?.[locale] ?? []));
-  return values;
-}
-
 function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
-  return coding
-    ? {
-      system: coding.system,
-      version: coding.version,
-      code: coding.code,
-      display: coding.display,
-      extension: coding.extension?.map((extension) => ({ ...extension })),
-      _display: coding._display ? { ...coding._display } : undefined,
-      i18n: coding.i18n ? { ...coding.i18n } : undefined
+  if (!coding) return undefined;
+  const source = coding as FhirCoding & Record<string, unknown>;
+  const result: FhirCoding & Record<string, unknown> = {}, fields: Record<string, unknown> = result;
+  for (const key in source) {
+    const value = source[key];
+    switch (key) {
+      case "extension": break;
+      case "_system": case "_version": case "_code": case "_display": case "_userSelected": case "i18n":
+        fields[key] = value ? { ...(value as object) } : value;
+        break;
+      default: result[key] = value; break;
     }
-    : undefined;
+  }
+  const extensions = coding.extension;
+  if (extensions !== undefined) result.extension = extensions.map(extension => ({ ...extension }));
+  return result;
 }
 
 /** Preserve coded constituents separately from equivalent whole-action codings. */
@@ -261,51 +257,6 @@ function cloneContinuationLicenses(
   }));
 }
 
-function cloneDefinition(
-  definition: MedicationInstructionActionDefinition
-): MedicationInstructionActionDefinition {
-  return {
-    code: definition.code,
-    semanticClass: definition.semanticClass,
-    display: definition.display,
-    i18n: definition.i18n ? { ...definition.i18n } : undefined,
-    roundtripI18n: definition.roundtripI18n ? { ...definition.roundtripI18n } : undefined,
-    aliases: definition.aliases ? [...definition.aliases] : undefined,
-    directiveOnlyAliases: definition.directiveOnlyAliases ? [...definition.directiveOnlyAliases] : undefined,
-    sequenceAliases: definition.sequenceAliases ? [...definition.sequenceAliases] : undefined,
-    localeAliases: cloneLocaleAliases(definition.localeAliases),
-    separableAliases: definition.separableAliases?.map((alias) => ({ ...alias })),
-    procedural: definition.procedural,
-    argumentParser: definition.argumentParser,
-    realizer: definition.realizer,
-    argumentParserConfig: definition.argumentParserConfig ? {
-      ...definition.argumentParserConfig,
-      primaryConcepts: definition.argumentParserConfig.primaryConcepts ? [...definition.argumentParserConfig.primaryConcepts] : undefined,
-      secondaryConcepts: definition.argumentParserConfig.secondaryConcepts ? [...definition.argumentParserConfig.secondaryConcepts] : undefined
-    } : undefined,
-    realizerConfig: cloneMedicationInstructionActionRealizerConfig(definition.realizerConfig),
-    continuationLicenses: cloneContinuationLicenses(definition.continuationLicenses),
-    continuationAfterRelations: definition.continuationAfterRelations ? [...definition.continuationAfterRelations] : undefined,
-    administrationDurationIntroducers: definition.administrationDurationIntroducers ? [...definition.administrationDurationIntroducers] : undefined,
-    preferredRelationSemanticClasses: definition.preferredRelationSemanticClasses ? [...definition.preferredRelationSemanticClasses] : undefined,
-    contextualCodings: cloneContextualCodings(definition.contextualCodings),
-    contextualSemanticComponents: cloneContextualSemanticComponents(definition.contextualSemanticComponents),
-    administrationMethod: cloneCoding(definition.administrationMethod),
-    verbRouteHint: definition.verbRouteHint,
-    methodRouteOverride: definition.methodRouteOverride,
-    suppressMethodRouteHint: definition.suppressMethodRouteHint,
-    applicationVerb: definition.applicationVerb,
-    primaryAdministrationHead: definition.primaryAdministrationHead,
-    supportVerb: definition.supportVerb,
-    safetyScopeTarget: definition.safetyScopeTarget,
-    acceptsAmount: definition.acceptsAmount,
-    definesDose: definition.definesDose,
-    coding: cloneCoding(definition.coding),
-    externalCodings: definition.externalCodings?.map((coding) => cloneCoding(coding)!),
-    semanticComponents: cloneMedicationInstructionActionSemanticComponents(definition.semanticComponents)
-  };
-}
-
 function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstructionActionDefinition {
   return {
     code: sourceDefinition.code,
@@ -319,6 +270,8 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     localeAliases: cloneLocaleAliases(sourceDefinition.localeAliases),
     separableAliases: sourceDefinition.separableAliases?.map((alias) => ({ ...alias })),
     procedural: sourceDefinition.procedural,
+    adviceClauseHead: sourceDefinition.adviceClauseHead,
+    defaultForce: sourceDefinition.defaultForce,
     argumentParser: sourceDefinition.argumentParser,
     realizer: sourceDefinition.realizer,
     argumentParserConfig: sourceDefinition.argumentParserConfig ? {
@@ -327,6 +280,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
       secondaryConcepts: sourceDefinition.argumentParserConfig.secondaryConcepts ? [...sourceDefinition.argumentParserConfig.secondaryConcepts] : undefined
     } : undefined,
     realizerConfig: cloneMedicationInstructionActionRealizerConfig(sourceDefinition.realizerConfig),
+    methodBoundMannerConcepts: sourceDefinition.methodBoundMannerConcepts ? [...sourceDefinition.methodBoundMannerConcepts] : undefined,
     continuationLicenses: cloneContinuationLicenses(sourceDefinition.continuationLicenses),
     continuationAfterRelations: sourceDefinition.continuationAfterRelations ? [...sourceDefinition.continuationAfterRelations] : undefined,
     administrationDurationIntroducers: sourceDefinition.administrationDurationIntroducers ? [...sourceDefinition.administrationDurationIntroducers] : undefined,
@@ -367,6 +321,8 @@ function normalizeCustomDefinition(
     localeAliases: cloneLocaleAliases(input.localeAliases),
     separableAliases: input.separableAliases?.map((alias) => ({ ...alias })),
     procedural: input.procedural ?? true,
+    adviceClauseHead: input.adviceClauseHead,
+    defaultForce: input.defaultForce,
     argumentParser: input.argumentParser,
     realizer: input.realizer,
     argumentParserConfig: input.argumentParserConfig ? {
@@ -375,6 +331,7 @@ function normalizeCustomDefinition(
       secondaryConcepts: input.argumentParserConfig.secondaryConcepts ? [...input.argumentParserConfig.secondaryConcepts] : undefined
     } : undefined,
     realizerConfig: cloneMedicationInstructionActionRealizerConfig(input.realizerConfig),
+    methodBoundMannerConcepts: input.methodBoundMannerConcepts ? [...input.methodBoundMannerConcepts] : undefined,
     continuationLicenses: cloneContinuationLicenses(input.continuationLicenses),
     continuationAfterRelations: input.continuationAfterRelations ? [...input.continuationAfterRelations] : undefined,
     administrationDurationIntroducers: input.administrationDurationIntroducers ? [...input.administrationDurationIntroducers] : undefined,
@@ -397,24 +354,16 @@ function normalizeCustomDefinition(
   };
 }
 
-function customDefinitionForSurface(
-  surface: string,
-  options?: ParseOptions
-): MedicationInstructionActionDefinition | undefined {
-  const map = options?.instructionActionMap;
-  if (!map) return undefined;
-  const target = normalizeActionSurface(surface);
-  for (const configuredSurface of Object.keys(map)) {
-    const input = map[configuredSurface];
-    const candidates = [
-      configuredSurface, input.code ?? "", ...(input.aliases ?? []),
-      ...flattenLocaleAliases(input.localeAliases)
-    ];
-    if (candidates.some((candidate) => normalizeActionSurface(candidate) === target)) {
-      return normalizeCustomDefinition(configuredSurface, input);
-    }
-  }
-  return undefined;
+function customDefinitionMatchesSurface(
+  surface: string, input: MedicationInstructionActionInput, normalized: string
+): boolean {
+  if (normalizeActionSurface(surface) === normalized) return true;
+  for (const alias of input.aliases ?? [])
+    if (normalizeActionSurface(alias) === normalized) return true;
+  for (const locale of Object.keys(input.localeAliases ?? {}))
+    for (const alias of input.localeAliases![locale])
+      if (normalizeActionSurface(alias) === normalized) return true;
+  return false;
 }
 
 export function resolveMedicationInstructionSequenceAction(
@@ -433,7 +382,7 @@ export function resolveMedicationInstructionSequenceAction(
   }
   for (const definition of DEFAULT_ACTIONS) {
     if ((definition.sequenceAliases ?? []).some((alias) => normalizeActionSurface(alias) === target)) {
-      return cloneDefinition(definition);
+      return definition;
     }
   }
   return undefined;
@@ -445,24 +394,21 @@ export function resolveMedicationInstructionSeparableAction(
   options?: ParseOptions
 ): MedicationInstructionActionDefinition | undefined {
   const normalizedLead = normalizeActionSurface(lead);
-  const normalizedParticle = normalizeActionSurface(particle);
   const map = options?.instructionActionMap;
+  const builtin = DEFAULT_SEPARABLE_BY_LEAD.get(normalizedLead);
+  if (!map && !builtin) return undefined;
+  const normalizedParticle = normalizeActionSurface(particle);
   if (map) {
     for (const surface of Object.keys(map)) {
-      const definition = normalizeCustomDefinition(surface, map[surface]);
-      if (definition.separableAliases?.some((alias) =>
-        normalizeActionSurface(alias.lead) === normalizedLead &&
-        normalizeActionSurface(alias.particle) === normalizedParticle
-      )) return definition;
+      const input = map[surface];
+      for (const alias of input.separableAliases ?? []) {
+        if (normalizeActionSurface(alias.lead) === normalizedLead &&
+            normalizeActionSurface(alias.particle) === normalizedParticle)
+          return normalizeCustomDefinition(surface, input);
+      }
     }
   }
-  for (const definition of DEFAULT_ACTIONS) {
-    if (definition.separableAliases?.some((alias) =>
-      normalizeActionSurface(alias.lead) === normalizedLead &&
-      normalizeActionSurface(alias.particle) === normalizedParticle
-    )) return cloneDefinition(definition);
-  }
-  return undefined;
+  return builtin?.get(normalizedParticle);
 }
 
 export function medicationInstructionActionIsSafetyScopeTarget(
@@ -472,28 +418,206 @@ export function medicationInstructionActionIsSafetyScopeTarget(
   return resolveMedicationInstructionAction(surface, options)?.safetyScopeTarget === true;
 }
 
+/* Dictionary definitions are immutable by caller contract. Lexical source
+ * surfaces do not implicitly include saved predicate codes. The semantic
+ * proposal boundary explicitly opts into its declared surface/code contract.
+ * Explicit frame construction copies only the fields it later edits. */
 export function resolveMedicationInstructionAction(
   surface: string,
+  options?: ParseOptions,
+  includeCode = false
+): MedicationInstructionActionDefinition | undefined {
+  const target = normalizeActionSurface(surface);
+  const builtin = DEFAULT_BY_ALIAS.get(target);
+  const map = options?.instructionActionMap;
+  let exactCode: string | undefined, codeFallback: string | undefined;
+  if (map) {
+    // A proposal may name either a surface or a saved code. Surfaces keep
+    // their lexical meaning across the complete vocabulary; a code match
+    // is only a fallback. Both custom candidates share this one map walk.
+    for (const configuredSurface of Object.keys(map)) {
+      const input = map[configuredSurface];
+      if (customDefinitionMatchesSurface(configuredSurface, input, target))
+        return normalizeCustomDefinition(configuredSurface, input);
+      if (includeCode && !builtin) {
+        const code = input.code?.trim() || normalizeActionSurface(configuredSurface).replace(/\s+/g, "-");
+        if (code === surface.trim()) exactCode ??= configuredSurface;
+        else if (normalizeActionSurface(code) === target) codeFallback ??= configuredSurface;
+      }
+    }
+  }
+  const savedCode = exactCode ?? codeFallback;
+  return builtin ?? (savedCode !== undefined ? normalizeCustomDefinition(savedCode, map![savedCode]) : undefined);
+}
+
+/** The package lookup accepts saved codes as well as registered surfaces.
+ * Internal lexical callers retain the surface-only default above. */
+export function resolveMedicationInstructionActionWithCodeFallback(
+  surface: string,
+  options?: ParseOptions,
+  includeCode = true
+): MedicationInstructionActionDefinition | undefined {
+  return resolveMedicationInstructionAction(surface, options, includeCode);
+}
+
+/** Resolve a declared administration method by exact code identity. Known
+ * codings own the verb even when an external edit leaves stale display text.
+ * Unknown identities return undefined for the caller's existing text fallback. */
+export function resolveMedicationInstructionActionByMethod(
+  coding: FhirR6Coding | undefined,
   options?: ParseOptions
 ): MedicationInstructionActionDefinition | undefined {
-  const custom = customDefinitionForSurface(surface, options);
-  if (custom) return custom;
-  const definition = DEFAULT_BY_ALIAS.get(normalizeActionSurface(surface));
-  return definition ? cloneDefinition(definition) : undefined;
+  if (!coding?.code) return undefined;
+  const customMap = options?.instructionActionMap;
+  if (customMap) {
+    const display = coding.display ? normalizeActionSurface(coding.display) : undefined;
+    let fallback: string | undefined, external: string | undefined, externalFallback: string | undefined;
+    // An explicit method keeps precedence over an external mapping. Within
+    // each group prefer a matching display, then the first exact code match.
+    for (const surface of Object.keys(customMap)) {
+      const input = customMap[surface];
+      const method = sameMethodCoding(input.administrationMethod, coding) || sameMethodCoding(input.coding, coding);
+      if (!method && !input.externalCodings?.some(item => sameMethodCoding(item, coding))) continue;
+      const matchesDisplay = !display || input.display && normalizeActionSurface(input.display) === display ||
+        customDefinitionMatchesSurface(surface, input, display);
+      if (method) {
+        if (matchesDisplay) return normalizeCustomDefinition(surface, input);
+        fallback ??= surface;
+      } else {
+        if (matchesDisplay) external ??= surface;
+        externalFallback ??= surface;
+      }
+    }
+    const selected = fallback ?? external ?? externalFallback;
+    if (selected !== undefined) return normalizeCustomDefinition(selected, customMap[selected]);
+  }
+  return DEFAULT_BY_METHOD.get(coding.system ?? SNOMED_SYSTEM)?.get(coding.code);
+}
+
+/** A translated coding can precede the known method in a CodeableConcept.
+ * Select its recognized identity in one pass and retain the first code as
+ * the fallback for wholly unfamiliar concepts. A display-only Coding remains
+ * a text fallback when no identity is supplied. The source array is untouched. */
+export function selectMedicationInstructionMethodCoding<TCoding extends FhirR6Coding>(
+  codings: readonly TCoding[] | undefined,
+  options?: ParseOptions
+): TCoding | undefined {
+  if (!codings?.length) return undefined;
+  if (codings.length === 1) return codings[0].code || codings[0].display ? codings[0] : undefined;
+  let fallback: TCoding | undefined;
+  let displayFallback: TCoding | undefined;
+  let recognized: TCoding | undefined;
+  for (const coding of codings) {
+    if (!coding.code) {
+      if (!displayFallback && coding.display) displayFallback = coding;
+      continue;
+    }
+    if (!fallback) fallback = coding;
+    const action = resolveMedicationInstructionActionByMethod(coding, options);
+    if (action) {
+      if (!options?.instructionActionMap || action !== getMedicationInstructionAction(action.code)) return coding;
+      recognized ??= coding;
+    }
+  }
+  return recognized ?? fallback ?? displayFallback;
+}
+
+/** Keep compatible authored verbs (Drink and Swallow share a method), while
+ * a recognized edited code replaces an incompatible retained verb. */
+export function resolveMedicationInstructionActionForMethod(
+  method: (Omit<CanonicalMethodExpr, "coding"> & { coding?: FhirR6Coding }) | undefined,
+  options?: ParseOptions,
+  // Identity comparison may inspect a declared head without replacing its qualified label.
+  includeQualifiedHead = false
+): MedicationInstructionActionDefinition | undefined {
+  if (!method) return undefined;
+  let authored = method.text ? resolveMedicationInstructionAction(method.text, options) : undefined;
+  const coding = method.coding;
+  let coded: MedicationInstructionActionDefinition | undefined;
+  let qualified = false;
+  if (!authored && method.text?.trim() && method.text.trim() !== coding?.code) {
+    coded = resolveMedicationInstructionActionByMethod(coding, options);
+    if (!coded) return undefined;
+    // Resolve only a declared lexical head, bounded by the existing vocabulary.
+    // Compatible qualified text remains whole; unfamiliar text stays source.
+    const surface = normalizeActionSurface(method.text);
+    // An exact configured display is a coded label, not a qualified phrase or
+    // a new parser alias. Keep its selected identity for locale realization.
+    if (surface === normalizeActionSurface(coded.display)) return coded;
+    let end = surface.indexOf(" ");
+    // Joined scripts use the registered locale boundary policy and the same
+    // declared aliases. No language literals or second action vocabulary.
+    if (shouldJoinAdjacentSourceTokens(surface, surface)) {
+      let surfaceLimit = defaultActionSurfaceLength;
+      const custom = options?.instructionActionMap;
+      if (custom) for (const key of Object.keys(custom)) {
+        const input = custom[key];
+        for (const alias of [key, input.code ?? "", ...(input.aliases ?? []),
+          ...flattenLocaleAliases(input.localeAliases)])
+          surfaceLimit = Math.max(surfaceLimit, normalizeActionSurface(alias).length);
+      }
+      // A suffix cannot introduce a longer lexical action than the declared
+      // vocabulary. Bound prefix lookups even for arbitrarily long source text.
+      const wordEnd = Math.min((end < 0 ? surface.length : end) - 1, surfaceLimit);
+      for (let boundary = 1; boundary <= wordEnd; boundary++) {
+        const prefix = surface.slice(0, boundary);
+        const head = resolveMedicationInstructionAction(prefix, options);
+        if (head && shouldJoinAdjacentSourceTokens(prefix, surface.slice(boundary))) authored = head;
+      }
+    }
+    const limit = medicationInstructionActionSpanLimit(surface.slice(0, end < 0 ? surface.length : end), options);
+    for (let count = 0; count < limit && end >= 0; count++) {
+      const head = resolveMedicationInstructionAction(surface.slice(0, end), options);
+      if (head) authored = head;
+      end = surface.indexOf(" ", end + 1);
+    }
+    if (!authored) return undefined;
+    qualified = true;
+  }
+  if (authored && (!coding?.code || sameMethodCoding(authored.administrationMethod, coding) ||
+      sameMethodCoding(authored.coding, coding) ||
+      authored.externalCodings?.some(value => sameMethodCoding(value, coding))))
+    return qualified && !includeQualifiedHead ? undefined : authored;
+  return coded ?? resolveMedicationInstructionActionByMethod(coding, options) ??
+    (qualified && !includeQualifiedHead ? undefined : authored);
 }
 
 export function getMedicationInstructionAction(
-  code: string
+  code: string,
+  options?: ParseOptions
 ): MedicationInstructionActionDefinition | undefined {
-  const definition = DEFAULT_BY_CODE.get(code);
-  return definition ? cloneDefinition(definition) : undefined;
+  const map = options?.instructionActionMap;
+  if (map) for (const surface of Object.keys(map)) {
+    const input = map[surface];
+    const identity = input.code?.trim() || normalizeActionSurface(surface).replace(/\s+/g, "-");
+    if (identity === code) return normalizeCustomDefinition(surface, input);
+  }
+  return DEFAULT_BY_CODE.get(code);
 }
 
 export function listMedicationInstructionActions(): MedicationInstructionActionDefinition[] {
-  return DEFAULT_ACTIONS.map(cloneDefinition);
+  return DEFAULT_ACTIONS;
 }
 
+/** A CodeSystem snapshot is a public value, not mutable global schema.
+ * Build it with one definition walk and one language-key walk per published
+ * action; avoid filter→map and map→filter pipelines on every public call. */
 export function buildMedicationInstructionActionCodeSystem(): MedicationInstructionActionCodeSystem {
+  const concepts: MedicationInstructionActionCodeSystem["concept"] = [];
+  for (const definition of DEFAULT_ACTIONS) {
+    // A local action remains part of the published CodeSystem even when
+    // extra NLM/HL7/SNOMED codings are provided for the same instruction.
+    if (definition.coding?.system !== MEDICATION_INSTRUCTION_ACTION_SYSTEM &&
+        (definition.coding || definition.externalCodings?.length)) continue;
+    const designations: NonNullable<MedicationInstructionActionCodeSystem["concept"]>[number]["designation"] = [];
+    const translations = definition.i18n;
+    if (translations) for (const language in translations) {
+      if (!Object.prototype.hasOwnProperty.call(translations, language)) continue;
+      const value = translations[language];
+      if (value) designations.push({ language, value });
+    }
+    concepts.push({ code: definition.code, display: definition.display, designation: designations });
+  }
   return {
     resourceType: "CodeSystem",
     url: MEDICATION_INSTRUCTION_ACTION_SYSTEM,
@@ -503,19 +627,7 @@ export function buildMedicationInstructionActionCodeSystem(): MedicationInstruct
     experimental: false,
     caseSensitive: true,
     content: "complete",
-    concept: DEFAULT_ACTIONS.filter((definition) =>
-      // A local action remains part of the published CodeSystem even when
-      // extra NLM/HL7/SNOMED codings are provided for the same instruction.
-      definition.coding?.system === MEDICATION_INSTRUCTION_ACTION_SYSTEM ||
-      (!definition.coding && !definition.externalCodings?.length)
-    ).map((definition) => ({
-      code: definition.code,
-      display: definition.display,
-      designation: Object.keys(definition.i18n ?? {}).map((language) => ({
-        language,
-        value: definition.i18n?.[language] ?? ""
-      })).filter((designation) => designation.value.length > 0)
-    }))
+    concept: concepts
   };
 }
 

@@ -1,6 +1,9 @@
+import { convertQuantityValue } from "../src/utils/units";
+import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../src/instruction-graph-fhir";
+import { formatSig, importCanonicalCourse, projectCanonicalCourse, toDosageDetails, toFhirR5Dosages, type FhirDosage, type FhirExtension, FhirPeriodUnit, EventTiming, RouteCode, calculateTotalUnits, nextDueDoses, buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/index";
 import { describe, expect, it } from "vitest";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
-import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir } from "../src/fhir";
+import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_OFFSET_EXACT_EXTENSION_URL, getExactTimingOffsetMinutes } from "../src/fhir";
 import { ParserState } from "../src/parser-state";
 import { applySiteCoding } from "../src/site-coding";
 import { applyPrnReasonCoding } from "../src/prn-reason-coding";
@@ -438,7 +441,7 @@ describe("FHIR parser-state import", () => {
       system: "http://snomed.info/sct",
       code: "418693002",
       display: "Swallowed whole, not chewed (qualifier value)",
-      i18n: { th: "กลืนทั้งเม็ด; ห้ามเคี้ยวหรือบด" }
+      i18n: { th: "กลืนทั้งเม็ด; ห้ามเคี้ยว" }
     });
   });
 
@@ -573,4 +576,236 @@ describe("FHIR parser-state import", () => {
     expect(state.asNeededReasonTriggerPhase).toBe("onset");
   });
 
+});
+
+
+describe("review814 authored coded advice in Thai", () => {
+  it("keeps the complete authored prohibition beyond a narrower code label", () => {
+    const source = "Swallow whole; do not crush or chew";
+    const row: FhirDosage = { additionalInstruction: [{ text: source,
+      coding: [{ system: "http://snomed.info/sct", code: "418693002", display: "Swallowed whole, not chewed (qualifier value)" }],
+      extension: [{ url: "urn:clinic:advice-note", valueString: "whole source required" }]
+    }] };
+    const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+    for (const input of [importCanonicalCourse([row]), JSON.parse(JSON.stringify([row])), JSON.parse(JSON.stringify(r6))]) {
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(source + ".");
+      const advice = projectCanonicalCourse(importCanonicalCourse(input)).fhir[0].additionalInstruction![0];
+      expect(advice.text).toBe(source);
+      expect(advice.coding).toEqual(row.additionalInstruction![0].coding);
+      expect(advice.extension).toContainEqual(row.additionalInstruction![0].extension![0]);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it("retains code-only Thai wording and an independently supplied complete Thai translation", () => {
+    const coding = [{ system: "http://snomed.info/sct", code: "418693002" }];
+    const stock: FhirDosage = { additionalInstruction: [{ coding }] };
+    const selected: FhirDosage = { additionalInstruction: [{ coding,
+      text: "Swallow whole; do not crush or chew",
+      _text: translationPrimitive("th", "กลืนทั้งเม็ด ห้ามบดหรือเคี้ยว")
+    }] };
+    for (const [row, expected] of [[stock, "กลืนทั้งเม็ด; ห้ามเคี้ยว."], [selected, "กลืนทั้งเม็ด ห้ามบดหรือเคี้ยว."]] as const) {
+      const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+      for (const input of [row, JSON.parse(JSON.stringify(r6)), JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))])
+        expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(expected);
+      expect(JSON.stringify(row)).toBe(before);
+    }
+  });
+});
+
+describe("current FHIR timing, route, quantity and coverage ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const ucum = "http://unitsofmeasure.org";
+
+  it.each([false, true])("prefers the explicit route terminology in either coding order (%s)", reversed => {
+    const legacy = { code: "26643006", display: "Legacy route", id: "legacy-coding" };
+    const explicit = { system: "http://snomed.info/sct", code: "54485002", id: "explicit-ophthalmic" };
+    const route = { coding: reversed ? [explicit, legacy] : [legacy, explicit],
+      extension: [{ url: "urn:clinic:route-note", valueString: "Keep both codings" }] };
+    const row: FhirDosage = { text: "Instill one drop by the supplied ophthalmic route.", route,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }] };
+    const before = fresh(row);
+    expect(canonicalFromFhir(row).route?.code).toBe(RouteCode["Ophthalmic route"]);
+    expect(parserStateFromFhir(row).primaryClause.route?.code).toBe(RouteCode["Ophthalmic route"]);
+    const native = importCanonicalCourse(row), projected = projectCanonicalCourse(native);
+    for (const input of [native, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      const current = projectCanonicalCourse(importCanonicalCourse(input));
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("ophthalmic");
+      expect(current.fhir[0].route).toEqual(route);
+      expect(current.fhirNext.step[0].component[0].route).toEqual(route);
+    }
+    expect(canonicalFromFhir({ route: { coding: [legacy] } }).route?.code).toBe(RouteCode["Oral route"]);
+    expect(row).toEqual(before);
+  });
+
+  it.each([EventTiming.Meal, EventTiming.Breakfast, EventTiming.Lunch, EventTiming.Dinner])(
+    "keeps a thirty-minute %s offset in the typed extension when R5 forbids the core slot", event => {
+      const clause = { ...canonicalFromFhir({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }),
+        schedule: { when: [event], offset: 30 } };
+      const before = fresh(clause), row = canonicalToFhir(clause);
+      expect(row.timing?.repeat?.when).toEqual([event]);
+      expect(row.timing?.repeat?.offset).toBeUndefined();
+      expect(row.timing?.repeat?.extension).toContainEqual({ url: TIMING_OFFSET_EXACT_EXTENSION_URL, valueInteger: 30 });
+      expect(getExactTimingOffsetMinutes(row.timing?.repeat)).toBe(30);
+      expect(canonicalFromFhir(fresh(row)).schedule).toMatchObject({ when: [event], offset: 30 });
+      expect(clause).toEqual(before);
+    }
+  );
+
+  it("keeps a permitted before-breakfast offset in the core slot", () => {
+    const clause = { ...canonicalFromFhir({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }),
+      schedule: { when: [EventTiming["Before Breakfast"]], offset: 30 } };
+    const row = canonicalToFhir(clause);
+    expect(row.timing?.repeat).toMatchObject({ when: [EventTiming["Before Breakfast"]], offset: 30 });
+    expect(row.timing?.repeat?.extension?.some(value => value.url === TIMING_OFFSET_EXACT_EXTENSION_URL)).not.toBe(true);
+  });
+
+  it.each([undefined, 20])("retains a thirty-minute upper duration with lower value %s", duration => {
+    const absent = { id: "unknown-lower-duration", extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+    }] };
+    const repeat = { durationMax: 30, durationUnit: FhirPeriodUnit.Minute,
+      ...(duration === undefined ? { _duration: absent } : { duration }) };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }], timing: { repeat } };
+    const before = fresh(row);
+    for (const clause of [canonicalFromFhir(row)]) {
+      expect(clause.schedule?.administrationDuration).toBe(duration);
+      expect(clause.schedule?.administrationDurationMax).toBe(30);
+      expect(clause.schedule?.administrationDurationUnit).toBe(FhirPeriodUnit.Minute);
+    }
+    const projected = projectCanonicalCourse(importCanonicalCourse(row));
+    expect(projected.fhir[0].timing?.repeat).toEqual(repeat);
+    expect(projected.fhirNext.step[0].component[0].timing?.repeat).toEqual(repeat);
+    expect(row).toEqual(before);
+  });
+
+  it("applies a tablet ceiling to an annotation-only UCUM presentation", () => {
+    const dose = { value: 1, unit: "tablet", system: ucum, code: "{tbl}", _code: { id: "authored-tablet-code" } };
+    const cap = { numerator: { value: 2, unit: "tablets", id: "authored-ceiling" },
+      denominator: { value: 48, unit: "h", system: ucum, code: "h" } };
+    const input: FhirDosage = { text: "Take one tablet at 08:00 and 20:00, maximum two tablets in 48 hours.",
+      doseAndRate: [{ doseQuantity: dose }], maxDosePerPeriod: [cap],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00", "20:00:00"] } } };
+    const before = fresh(input), native = importCanonicalCourse(input), projected = projectCanonicalCourse(native);
+    const query = { from: "2026-01-01T00:00:00Z", orderedAt: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+    for (const value of [native, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      expect(nextDueDoses(value, { ...query, limit: 3 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00", "2026-01-03T08:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: value, ...query, durationValue: 2, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      const current = projectCanonicalCourse(importCanonicalCourse(value));
+      expect(current.fhir[0].doseAndRate![0].doseQuantity).toEqual(dose);
+      expect(current.fhir[0].maxDosePerPeriod).toEqual([cap]);
+      expect(current.fhirNext.step[0].component[0].doseAndRate![0].doseQuantity).toEqual(dose);
+    }
+    expect(input).toEqual(before);
+  });
+
+  it("keeps substantive UCUM identity and unlabeled count annotations separate from presentation labels", () => {
+    const substantive = { value: 1, unit: "mL", system: ucum, code: "ML{solution}" };
+    const unlabeled = { value: 1, system: ucum, code: "{tbl}" };
+    const before = fresh([substantive, unlabeled]);
+    expect(convertQuantityValue(1, substantive, { unit: "mL" })).toBeNull();
+    expect(convertQuantityValue(1, unlabeled, { unit: "tablets" })).toBeNull();
+    expect([substantive, unlabeled]).toEqual(before);
+  });
+
+  it.each([undefined, 0])("retains supplied coverage with ratio %s without inventing a value", ratio => {
+    const source = "Follow the supplied plan.";
+    const coverage: FhirExtension = { url: "coverage", id: "coverage-source", extension: [
+      { url: "understoodCharacters", valueInteger: 0 },
+      { url: "opaqueCharacters", valueInteger: source.length },
+      { url: "ratio", ...(ratio === undefined ? {} : { valueDecimal: ratio }),
+        _valueDecimal: { id: "ratio-note", extension: [{ url: "urn:clinic:coverage-note", valueString: "Retain" }] } },
+      { url: "complete", valueBoolean: false }
+    ] };
+    const input: FhirExtension = { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: [
+      { url: "sourceText", valueString: source },
+      { url: "opaque", extension: [
+        { url: "start", valueInteger: 0 }, { url: "end", valueInteger: source.length },
+        { url: "text", valueString: source }
+      ] },
+      coverage
+    ] };
+    const before = fresh(input), graph = parseInstructionGraphExtension([input])!;
+    expect(graph.sourceText).toBe(source);
+    expect(graph.opaqueSpans).toEqual([{ start: 0, end: source.length, text: source }]);
+    if (ratio === undefined) expect(graph.coverage).toBeUndefined();
+    else expect(graph.coverage).toMatchObject({ ratio: 0, complete: false, understoodCharacters: 0, opaqueCharacters: source.length });
+    const output = buildInstructionGraphExtension(graph)!;
+    expect(output.extension?.filter(value => value.url === "coverage")).toEqual([coverage]);
+    expect(input).toEqual(before);
+  });
+});
+
+
+describe("current FHIR exact-offset projection", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const amount = { value: 1, unit: "g", id: "authored-dose" };
+  const extension = { url: TIMING_OFFSET_EXACT_EXTENSION_URL, valueInteger: 30,
+    id: "authored-offset", _valueInteger: { id: "offset-value-note" } };
+  it.each([
+    { when: [EventTiming.Meal] }, { when: [EventTiming.Breakfast] },
+    { when: [EventTiming.Lunch] }, { when: [EventTiming.Dinner] },
+    { when: [EventTiming["Before Breakfast"], EventTiming.Meal] }
+  ])("keeps a supplied extension without inventing a forbidden $when core offset", ({ when }) => {
+    const repeat = { when, _when: when.map(() => ({ id: "anchor-note" })),
+      extension: [extension, { url: "urn:clinic:timing-note", valueString: "Retain" }] };
+    const component = { id: "current-component", doseAndRate: [{ doseQuantity: amount }],
+      timing: { id: "current-timing", repeat } };
+    for (const input of [component, { step: [{ component: [component] }] }]) {
+      const original = fresh(input), native = importCanonicalCourse(input);
+      expect(native.stages[0].administrations[0].schedule?.recurrence?.offset).toBe(30);
+      const first = projectCanonicalCourse(native);
+      for (const value of [native, fresh(first.fhir), fresh(first.fhirNext)]) {
+        const current = projectCanonicalCourse(importCanonicalCourse(value));
+        expect(current.fhir[0].timing?.repeat).toEqual(repeat);
+        expect(current.fhirNext.step[0].component[0].timing?.repeat).toEqual(repeat);
+        expect(current.fhir[0].doseAndRate?.[0].doseQuantity).toEqual(amount);
+      }
+      expect(input).toEqual(original);
+    }
+  });
+  it.each([0, 30, 0.5])("preserves the exact permitted-event offset %s through both writers", offset => {
+    const marker = { url: TIMING_OFFSET_EXACT_EXTENSION_URL,
+      ...(Number.isInteger(offset) ? { valueInteger: offset } : { valueDecimal: offset }), id: "exact-value" };
+    const repeat = { when: [EventTiming["Before Breakfast"]], extension: [marker] };
+    const component = { doseAndRate: [{ doseQuantity: amount }], timing: { repeat } };
+    for (const input of [component, { step: [{ component: [component] }] }]) {
+      const original = fresh(input), projected = projectCanonicalCourse(importCanonicalCourse(input));
+      for (const row of [projected.fhir[0], projected.fhirNext.step[0].component[0]]) {
+        expect(getExactTimingOffsetMinutes(row.timing?.repeat)).toBe(offset);
+        expect(row.timing?.repeat?.offset).toBe(offset >= 0 && Number.isInteger(offset) ? offset : undefined);
+        expect(row.timing?.repeat?.extension).toContainEqual(marker);
+      }
+      expect(input).toEqual(original);
+    }
+  });
+  it.each([false, true])("retains primitive-only when slots with a usable anchor %s", usable => {
+    const when = usable ? [null, EventTiming["Before Breakfast"]] : [null];
+    const repeat = { when, _when: when.map((_, index) => index ? null : { id: "unknown-event", extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+    }] }), extension: [extension] };
+    const component = { doseAndRate: [{ doseQuantity: amount }], timing: { repeat } };
+    const input = { step: [{ component: [component] }] }, original = fresh(input);
+    const projected = projectCanonicalCourse(importCanonicalCourse(input));
+    for (const row of [projected.fhir[0], projected.fhirNext.step[0].component[0]]) {
+      expect(row.timing?.repeat?.when).toEqual(when);
+      expect(row.timing?.repeat?._when).toEqual(repeat._when);
+      expect(row.timing?.repeat?.extension).toContainEqual(extension);
+      expect(row.timing?.repeat?.offset).toBe(usable ? 30 : undefined);
+    }
+    expect(input).toEqual(original);
+  });
+  it("does not invent a core when anchor for an independently supplied exact offset", () => {
+    const repeat = { extension: [extension], id: "unanchored-repeat" };
+    const component = { doseAndRate: [{ doseQuantity: amount }], timing: { repeat } };
+    for (const input of [component, { step: [{ component: [component] }] }]) {
+      const original = fresh(input), projected = projectCanonicalCourse(importCanonicalCourse(input));
+      expect(projected.fhir[0].timing?.repeat).toEqual(repeat);
+      expect(projected.fhirNext.step[0].component[0].timing?.repeat).toEqual(repeat);
+      expect(input).toEqual(original);
+    }
+  });
 });

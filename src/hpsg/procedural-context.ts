@@ -1,23 +1,25 @@
 import {
-  parseInstructionActions, isSupplementalHydrationInstruction
+  parseInstructionActions, isSupplementalHydrationInstruction, frameActionDefinition, actionMatchAt
 } from "../instruction-graph";
 import { AdviceArgumentRole, AdvicePolarity, EventTiming, type AdviceFrame } from "../types";
 import { EVENT_TIMING_TOKENS } from "../maps";
-import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
 import { ACTION_SEQUENCE_RELATION_SURFACES, relationHasGrammarFeature, relationHasSemanticClass, resolveActionRelationSurface } from "../relation-terminology";
 import { medicationGuardForContext, normalizeTokenLower, parseClockToken, type HpsgClauseContext } from "./rule-context";
+import { guardHasMeasurement } from "./constructions";
 import { LexKind } from "../lexer/token-types";
 import { MEAL_TIMING_BY_RELATION } from "./lexical-classes";
-import { explicitDoseLexicalEnd } from "./rules/core-rules";
+import { explicitDoseLexicalEnd, contextualDoseLexicalEnd } from "./rules/core-rules";
 
 const PROCEDURAL_FRAME_CACHE = new WeakMap<object, AdviceFrame[]>();
 
 /**
  * Parse procedural semantics once per ParserState and share the result across
- * HPSG lexical constructions. Keeping this cache at the HPSG context layer
- * avoids each rule family independently running the instruction parser.
+ * HPSG lexical constructions and graph finalization. Keeping this cache in
+ * the HPSG context avoids independently parsing the same action program.
  */
-export function getProceduralFrames(context: HpsgClauseContext): AdviceFrame[] {
+export function getProceduralFrames(
+  context: Pick<HpsgClauseContext, "state" | "options">
+): AdviceFrame[] {
   const cached = PROCEDURAL_FRAME_CACHE.get(context.state);
   if (cached) return cached;
   const frames = parseInstructionActions(context.state.input, 0, context.options);
@@ -70,21 +72,48 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
     const relation = resolveActionRelationSurface(token.canonical ?? token.lower);
     if (!relationHasGrammarFeature(relation, "conditionalTail")) continue;
     frames ??= getProceduralFrames(context);
-    const frame = frames.find(candidate => candidate.span.start >= token.sourceEnd &&
+    let frame: AdviceFrame | undefined;
+    let postfix = false;
+    for (const candidate of frames) {
+      if (candidate.span.end > token.sourceStart ||
+          context.state.input.slice(candidate.span.end, token.sourceStart).trim()) continue;
+      const definition = frameActionDefinition(candidate, context.options);
+      if (candidate.polarity !== AdvicePolarity.Negate &&
+          !definition?.adviceClauseHead &&
+          !(definition?.procedural && !definition.primaryAdministrationHead)) continue;
+      if (!frame || candidate.span.end > frame.span.end) {
+        frame = candidate;
+        postfix = true;
+      }
+    }
+    frame ??= frames.find(candidate => candidate.span.start >= token.sourceEnd &&
       !context.tokens.some(boundary => boundary.sourceStart >= token.sourceEnd &&
         boundary.sourceEnd <= candidate.span.start && /^[;.!?]$/u.test(boundary.original)));
     if (!frame) continue;
     // A registered action word inside the typed predicate is not its consequent.
     const guard = medicationGuardForContext(context);
-    if (guard && guard.start === token.sourceStart && frame.span.start < guard.end) continue;
-    const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
-    const procedural = definition?.procedural && !definition.primaryAdministrationHead;
-    const undosedAction = definition && frame.args.length > 0 && !frame.args.some(argument =>
-      argument.role === AdviceArgumentRole.Amount || argument.role === AdviceArgumentRole.Site);
+    if (guard && guard.start === token.sourceStart &&
+          guard.start <= frame.span.start && frame.span.start < guard.end) continue;
+    const definition = frameActionDefinition(frame, context.options);
+    const procedural = frame.polarity === AdvicePolarity.Negate || definition?.adviceClauseHead ||
+      definition?.procedural && !definition.primaryAdministrationHead;
+    // A registered rate administration owns its duration even when the action
+    // graph has no scalar Amount daughter. The rate quantity is selected by HPSG.
+    const undosedAction = definition && !definition.administrationDurationIntroducers?.length &&
+      frame.args.length > 0 && !frame.args.some(argument =>
+        argument.role === AdviceArgumentRole.Amount || argument.role === AdviceArgumentRole.Site);
     if (undosedAction && !procedural) {
       // A dose nominal can precede its verb in a fronted conditional. It is
       // still an administration daughter, not part of the condition/advice.
       const headIndex = context.tokens.findIndex(candidate => candidate.sourceStart >= frame.span.start);
+      const head = definition?.primaryAdministrationHead || definition?.definesDose && definition.administrationMethod
+        ? actionMatchAt(context.tokens, headIndex, context.options) : undefined;
+      const doseEnd = head && contextualDoseLexicalEnd(context.tokens, headIndex + head.length, context.options);
+      if (doseEnd !== undefined && context.tokens[doseEnd - 1].sourceEnd <= frame.span.end) continue;
+      // The complete measurement guard owns its selected administration head,
+      // including an omitted amount handled by the existing dose-default policy.
+      if (head && guard?.start === token.sourceStart && guardHasMeasurement(guard.condition) &&
+          guard.end === frame.span.start) continue;
       let clauseStart = 0;
       for (const boundary of context.tokens) {
         if (boundary.sourceEnd > frame.span.start) break;
@@ -107,7 +136,7 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
       if (hasFrontedDose) continue;
     }
     if (procedural || undosedAction) {
-      owners.set(token.index, proceduralInstructionProgram(context, frames.indexOf(frame), frames));
+      owners.set(token.index, postfix ? [frame] : proceduralInstructionProgram(context, frames.indexOf(frame), frames));
     }
   }
   return owners;
@@ -124,8 +153,12 @@ export function conditionalAdviceOwnerAt(context: HpsgClauseContext, index: numb
 
 /** Whether this existing action daughter is governed as conditional advice. */
 export function isConditionalAdviceFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
-  if (frame.args.some(argument => argument.role === AdviceArgumentRole.Amount ||
-      argument.role === AdviceArgumentRole.Site)) return false;
+  if (frame.polarity !== AdvicePolarity.Negate &&
+      frame.args.some(argument => argument.role === AdviceArgumentRole.Amount)) return false;
+  // A selected procedure's Site is its target, not a newly quantified
+  // administration. Keep the conditional owner already selected above.
+  if (frame.args.some(argument => argument.role === AdviceArgumentRole.Site) &&
+      !frameActionDefinition(frame, context.options)?.procedural) return false;
   for (const program of conditionalAdviceOwners(context).values()) if (program.indexOf(frame) >= 0) return true;
   return false;
 }
@@ -181,7 +214,7 @@ function isFixedClockMealCounsel(
   return context.tokens.some((token, index) => token.sourceEnd <= boundary && isClock(index) &&
     !frames.some(owner => {
       if (owner.span.start > token.sourceStart || owner.span.end < token.sourceEnd) return false;
-      const definition = resolveMedicationInstructionAction(owner.predicate.lemma, context.options);
+      const definition = frameActionDefinition(owner, context.options);
       return definition?.procedural && !definition.primaryAdministrationHead;
     }));
 }
@@ -194,11 +227,12 @@ export function sourceRangeAttachmentClass(
   end: number
 ): HpsgAttachmentClass {
   const frames = getProceduralFrames(context);
-  const enclosing = frames
-    .filter((frame) => frame.span.start <= start && end <= frame.span.end)
-    .sort((left, right) =>
-      (left.span.end - left.span.start) - (right.span.end - right.span.start)
-    )[0];
+  let enclosing: AdviceFrame | undefined;
+  for (const frame of frames) {
+    if (frame.span.start > start || end > frame.span.end) continue;
+    if (!enclosing || frame.span.end - frame.span.start < enclosing.span.end - enclosing.span.start)
+      enclosing = frame;
+  }
   if (!enclosing) {
     // A bare cadence such as "daily" scopes the medication, even when a
     // preceding auxiliary covering step is locally procedural. Only an
@@ -221,9 +255,7 @@ export function sourceRangeAttachmentClass(
       if (!nearest || frame.span.end > nearest.span.end) nearest = frame;
     }
     if (nearest) {
-      const definition = resolveMedicationInstructionAction(
-        nearest.predicate.lemma, context.options
-      );
+      const definition = frameActionDefinition(nearest, context.options);
       if (nearest.polarity === AdvicePolarity.Negate ||
           (definition?.procedural && !definition.primaryAdministrationHead)) {
         return "procedure";
@@ -233,7 +265,16 @@ export function sourceRangeAttachmentClass(
   }
   if (enclosing.polarity === AdvicePolarity.Negate || isConditionalAdviceFrame(context, enclosing) ||
       isFixedClockMealCounsel(context, enclosing, frames)) return "procedure";
-  const definition = resolveMedicationInstructionAction(enclosing.predicate.lemma, context.options);
+  const definition = frameActionDefinition(enclosing, context.options);
+  // A selected medication continuation keeps its registered Time daughter
+  // available to ordinary HPSG event/clock composition. The complete course
+  // valence already proves the target and Duration; a MealState is not Time.
+  if (definition?.semanticClass === "course" && !enclosing.modality &&
+      enclosing.args.some(arg => arg.role === AdviceArgumentRole.Duration && arg.quantity && arg.span &&
+        arg.span.end <= start) &&
+      enclosing.args.some(arg => arg.role === AdviceArgumentRole.Time && arg.span &&
+        start <= arg.span.start && end === arg.span.end)) return "administration";
+  if (definition?.adviceClauseHead) return "procedure";
   if (definition?.semanticClass === "administration_pattern") return "administration";
   if (definition && !definition.procedural &&
       !isSupplementalHydrationInstruction(enclosing)) return "administration";
@@ -243,7 +284,7 @@ export function sourceRangeAttachmentClass(
     if (frame === enclosing || frame.span.start >= enclosing.span.start || frame.polarity === AdvicePolarity.Negate) {
       return false;
     }
-    const priorDefinition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+    const priorDefinition = frameActionDefinition(frame, context.options);
     return Boolean(
       priorDefinition && (
         !priorDefinition.procedural ||
@@ -258,17 +299,31 @@ export function sourceRangeAttachmentClass(
     enclosing.args.some((arg) => arg.role === AdviceArgumentRole.Activity);
   if (localActivityRelation) return "procedure";
 
+  if (definition?.semanticClass === "cleanse") {
+    // An undosed preparation keeps its own site when the following quantified
+    // administration explicitly supplies another site. Otherwise the existing
+    // standalone/shared-site interpretation remains available.
+    if (!enclosing.args.some(arg => arg.quantity)) {
+      for (const following of frames) {
+        if (following.span.start < enclosing.span.end || following.polarity === AdvicePolarity.Negate ||
+            !following.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
+            !following.args.some(arg => arg.role === AdviceArgumentRole.Site)) continue;
+        const followingDefinition = frameActionDefinition(following, context.options);
+        if (followingDefinition && !followingDefinition.procedural) return "procedure";
+      }
+    }
+  }
   if (definition?.primaryAdministrationHead && definition.semanticClass === "cleanse") {
     const priorFrames = getProceduralFrames(context)
       .filter((frame) => frame.span.end <= enclosing.span.start && frame.polarity !== AdvicePolarity.Negate)
       .sort((left, right) => left.span.end - right.span.end);
     const retention = priorFrames.slice().reverse().find((frame) =>
-      resolveMedicationInstructionAction(frame.predicate.lemma, context.options)?.semanticClass === "retain"
+      frameActionDefinition(frame, context.options)?.semanticClass === "retain"
     );
     if (retention) {
       const administrationBeforeRetention = priorFrames.some((frame) => {
         if (frame.span.end > retention.span.start) return false;
-        const priorDefinition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+        const priorDefinition = frameActionDefinition(frame, context.options);
         return Boolean(priorDefinition && (
           !priorDefinition.procedural || priorDefinition.primaryAdministrationHead
         ));

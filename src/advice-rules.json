@@ -458,11 +458,14 @@
         }
       ],
       "matcher": {
-        "argConcept": {
-          "conceptIds": [
-            "empty_stomach"
-          ],
-          "role": "meal_state"
+        "frame": {
+          "polarity": "affirm",
+          "argConcepts": [
+            {
+              "role": "meal_state",
+              "conceptIds": ["empty_stomach"]
+            }
+          ]
         }
       }
     },
@@ -609,9 +612,27 @@
           {
             "frame": {
               "predicateLemmas": [
-                "avoid",
+                "avoid"
+              ],
+              "polarity": "affirm",
+              "relations": null,
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "alcohol"
+                  ],
+                  "role": "substance"
+                }
+              ]
+            }
+          },
+          {
+            "frame": {
+              "predicateLemmas": [
                 "drink"
               ],
+              "polarity": "negate",
+              "relations": null,
               "argConcepts": [
                 {
                   "conceptIds": [
@@ -677,6 +698,7 @@
               "predicateLemmas": [
                 "cause"
               ],
+              "polarity": "affirm",
               "argConcepts": [
                 {
                   "conceptIds": [
@@ -714,12 +736,13 @@
       "definition": {
         "code": "418954008",
         "display": "Warning. May cause drowsiness. If affected do not drive or operate machinery (qualifier value)",
-        "text": "May cause drowsiness; do not drive if affected",
+        "text": "May cause drowsiness; if affected, do not drive or operate machinery",
         "thai": "อาจทำให้ง่วงซึม; ห้ามขับขี่ยานพาหนะหรือทำงานกับเครื่องจักรหากมีอาการ"
       },
       "frames": [
         {
           "force": "warning",
+          "modality": "may",
           "predicate": {
             "lemma": "cause",
             "semanticClass": "effect"
@@ -739,7 +762,14 @@
             "lemma": "drive",
             "semanticClass": "activity"
           },
-          "args": []
+          "relation": "if",
+          "args": [
+            {
+              "role": "object",
+              "text": "or operate machinery"
+            },
+            { "role": "free", "text": "affected" }
+          ]
         }
       ],
       "matcher": {
@@ -749,13 +779,15 @@
               "predicateLemmas": [
                 "cause"
               ],
+              "polarity": "affirm",
               "argConcepts": [
                 {
                   "conceptIds": [
                     "drowsiness"
                   ]
                 }
-              ]
+              ],
+              "modality": "may"
             }
           },
           {
@@ -763,7 +795,25 @@
               "predicateLemmas": [
                 "drive"
               ],
-              "polarity": "negate"
+              "polarity": "negate",
+              "relations": [
+                "if"
+              ],
+              "argLiterals": [
+                {
+                  "roles": [
+                    "free",
+                    "object"
+                  ],
+                  "value": "affected"
+                },
+                {
+                  "roles": [
+                    "object"
+                  ],
+                  "value": "or operate machinery"
+                }
+              ]
             }
           }
         ]
@@ -774,12 +824,13 @@
       "definition": {
         "code": "418914006",
         "display": "Warning. May cause drowsiness. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)",
-        "text": "May cause drowsiness; avoid driving or alcohol",
-        "thai": "อาจทำให้ง่วงซึม; หลีกเลี่ยงการขับขี่ยานพาหนะหรือดื่มแอลกอฮอล์"
+        "text": "May cause drowsiness; if affected, do not drive or operate machinery; avoid alcohol",
+        "thai": "อาจทำให้ง่วงซึม; ห้ามขับขี่ยานพาหนะหรือทำงานกับเครื่องจักรหากมีอาการ; หลีกเลี่ยงเครื่องดื่มแอลกอฮอล์"
       },
       "frames": [
         {
           "force": "warning",
+          "modality": "may",
           "predicate": {
             "lemma": "cause",
             "semanticClass": "effect"
@@ -799,7 +850,14 @@
             "lemma": "drive",
             "semanticClass": "activity"
           },
-          "args": []
+          "relation": "if",
+          "args": [
+            {
+              "role": "object",
+              "text": "or operate machinery"
+            },
+            { "role": "free", "text": "affected" }
+          ]
         },
         {
           "force": "warning",
@@ -823,13 +881,15 @@
               "predicateLemmas": [
                 "cause"
               ],
+              "polarity": "affirm",
               "argConcepts": [
                 {
                   "conceptIds": [
                     "drowsiness"
                   ]
                 }
-              ]
+              ],
+              "modality": "may"
             }
           },
           {
@@ -837,15 +897,42 @@
               "predicateLemmas": [
                 "drive"
               ],
-              "polarity": "negate"
+              "polarity": "negate",
+              "relations": [
+                "if"
+              ],
+              "argLiterals": [
+                {
+                  "roles": [
+                    "free",
+                    "object"
+                  ],
+                  "value": "affected"
+                },
+                {
+                  "roles": [
+                    "object"
+                  ],
+                  "value": "or operate machinery"
+                }
+              ]
             }
           },
           {
-            "argConcept": {
-              "conceptIds": [
-                "alcohol"
+            "frame": {
+              "predicateLemmas": [
+                "avoid"
               ],
-              "role": "substance"
+              "argConcepts": [
+                {
+                  "conceptIds": [
+                    "alcohol"
+                  ],
+                  "role": "substance"
+                }
+              ],
+              "polarity": "affirm",
+              "relations": null
             }
           }
         ]
@@ -856,8 +943,8 @@
       "definition": {
         "code": "418071006",
         "display": "Warning. Causes drowsiness which may continue the next day. If affected do not drive or operate machinery. Avoid alcoholic drink (qualifier value)",
-        "text": "May cause next-day drowsiness; avoid driving or alcohol",
-        "thai": "อาจทำให้ง่วงซึมในวันถัดมา; หลีกเลี่ยงการขับขี่ยานพาหนะหรือดื่มแอลกอฮอล์"
+        "text": "Causes drowsiness which may continue the next day; if affected, do not drive or operate machinery; avoid alcohol",
+        "thai": "ทำให้ง่วงซึมซึ่งอาจต่อเนื่องถึงวันถัดมา; ห้ามขับขี่ยานพาหนะหรือทำงานกับเครื่องจักรหากมีอาการ; หลีกเลี่ยงเครื่องดื่มแอลกอฮอล์"
       },
       "frames": [
         {
@@ -878,12 +965,44 @@
               "conceptId": "next_day"
             }
           ]
+        },
+        {
+          "force": "warning",
+          "polarity": "negate",
+          "predicate": {
+            "lemma": "drive",
+            "semanticClass": "activity"
+          },
+          "relation": "if",
+          "args": [
+            {
+              "role": "object",
+              "text": "or operate machinery"
+            },
+            { "role": "free", "text": "affected" }
+          ]
+        },
+        {
+          "force": "warning",
+          "predicate": {
+            "lemma": "avoid",
+            "semanticClass": "avoidance"
+          },
+          "args": [
+            {
+              "role": "substance",
+              "text": "alcohol",
+              "conceptId": "alcohol"
+            }
+          ]
         }
       ],
       "matcher": {
         "allOf": [
           {
             "frame": {
+              "polarity": "affirm",
+              "modality": null,
               "predicateLemmas": [
                 "cause"
               ],
@@ -892,24 +1011,99 @@
                   "conceptIds": [
                     "drowsiness"
                   ]
+                },
+                {
+                  "conceptIds": [
+                    "next_day"
+                  ],
+                  "role": "time"
                 }
               ]
             }
           },
           {
-            "argConcept": {
-              "conceptIds": [
-                "next_day"
-              ],
-              "role": "time"
-            }
+            "anyOf": [
+              {
+                "frame": {
+                  "predicateLemmas": [
+                    "avoid"
+                  ],
+                  "polarity": "affirm",
+                  "relations": null,
+                  "argConcepts": [
+                    {
+                      "conceptIds": [
+                        "alcohol"
+                      ],
+                      "role": "substance"
+                    }
+                  ]
+                }
+              },
+              {
+                "frame": {
+                  "predicateLemmas": [
+                    "drink"
+                  ],
+                  "polarity": "negate",
+                  "relations": null,
+                  "argConcepts": [
+                    {
+                      "conceptIds": [
+                        "alcohol"
+                      ],
+                      "role": "substance"
+                    }
+                  ]
+                }
+              },
+              {
+                "frame": {
+                  "predicateLemmas": [
+                    "take",
+                    "use",
+                    "administer"
+                  ],
+                  "relations": [
+                    "with"
+                  ],
+                  "polarity": "negate",
+                  "argConcepts": [
+                    {
+                      "conceptIds": [
+                        "alcohol"
+                      ],
+                      "role": "substance"
+                    }
+                  ]
+                }
+              }
+            ]
           },
           {
-            "argConcept": {
-              "conceptIds": [
-                "alcohol"
+            "frame": {
+              "predicateLemmas": [
+                "drive"
               ],
-              "role": "substance"
+              "polarity": "negate",
+              "relations": [
+                "if"
+              ],
+              "argLiterals": [
+                {
+                  "roles": [
+                    "free",
+                    "object"
+                  ],
+                  "value": "affected"
+                },
+                {
+                  "roles": [
+                    "object"
+                  ],
+                  "value": "or operate machinery"
+                }
+              ]
             }
           }
         ]
@@ -1036,8 +1230,8 @@
       "definition": {
         "code": "418693002",
         "display": "Swallowed whole, not chewed (qualifier value)",
-        "text": "Swallow whole; do not crush or chew",
-        "thai": "กลืนทั้งเม็ด; ห้ามเคี้ยวหรือบด"
+        "text": "Swallow whole; do not chew",
+        "thai": "กลืนทั้งเม็ด; ห้ามเคี้ยว"
       },
       "frames": [
         {
@@ -1050,15 +1244,6 @@
           "args": [
             { "role": "manner", "text": "whole", "conceptId": "whole" }
           ]
-        },
-        {
-          "force": "instruction",
-          "polarity": "negate",
-          "predicate": {
-            "lemma": "crush",
-            "semanticClass": "manipulate"
-          },
-          "args": []
         },
         {
           "force": "instruction",

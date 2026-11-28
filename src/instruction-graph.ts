@@ -1,8 +1,19 @@
-import { courseContinuationDurationAt } from "./hpsg/lexical-classes";
+import { equalStructuredValues } from "./stable-structure";
+import { getAdviceLocaleAdapter } from "./advice-locale-adapter";
+import { objectValues } from "./utils/object";
+import { courseContinuationDurationAt, doseComparatorNumberAt, DOSE_COMPARATOR_PREFIXES } from "./hpsg/lexical-classes";
 import { composeCoordinatedActionDirective, composePreposedContactTheme, licensesPreposedContactTheme } from "./hpsg/constructions";
 import {
+  composedCodedAdviceActions,
+  buildAdditionalInstructionFramesFromCoding,
   resolveAdviceMannerModifier,
+  resolveAdviceNominalArgument,
+  resolveCompoundAdviceNominalEndingAt,
   matchComposedAdviceCodings,
+  preservesAdviceFrameFacts,
+  preservesAdviceArgumentFacts,
+  preservesAdviceCodings,
+  preservesAdviceComponents,
   adviceCodingNeedsComposedScope
 } from "./advice";
 import {
@@ -17,13 +28,21 @@ import {
 } from "./body-site-context-terminology";
 import { lexInput } from "./lexer/lex";
 import { normalizeUnit } from "./unit-lexicon";
-import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS, TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
+import { DAY_OF_WEEK_TOKENS, EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS, TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
 import { resolveEventTimingExpression } from "./event-timing-expression";
+import { maximumDosePerPeriodAt, parseClockToken } from "./hpsg/rule-context";
 import { resolveSymptomDefinition } from "./symptom-terminology";
-import { baseLanguageTag, composeLocalizedRecords, localizedConfig, localizedValue } from "./localization";
-import { inferMedicationLocale, shouldJoinAdjacentSourceTokens } from "./locale-detection";
+import { baseLanguageTag, composeLocalizedRecords, localizedConfig, localizedValue, quantityComparatorText } from "./localization";
+import { inferMedicationLocale, shouldJoinAdjacentSourceTokens, withMedicationSourceI18n } from "./locale-detection";
 import {
   getInstructionActionLocaleAdapter,
+  instructionArgumentNeedsAuthoredDirections,
+  instructionSiteRelation,
+  instructionFrameSiteRelation,
+  instructionFrameRelationOwnsTemporalArgument,
+  instructionActionDefinitionForRealization,
+  quantityOnlyInstructionArgument,
+  realizeTimeArgument,
   InstructionActionRealizationInput
 } from "./instruction-action-locale-adapter";
 import { joinLocalizedTokens, localeRealizationProfile, localizedTimeArgument, renderLocaleTemplate } from "./locale-realization";
@@ -50,7 +69,7 @@ import {
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   AS_NEEDED_LEAD_PHRASES,
   COMPOUND_DOSE_UNITS,
-  DOSE_NUMBER_WORDS,
+  DOSE_NUMBER_WORDS, DOSE_UNIT_CONNECTORS,
   DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES,
   SUPPLEMENTAL_DOSE_MODIFIERS,
   DURATION_LEAD_TOKENS,
@@ -60,6 +79,8 @@ import {
   EVENT_OFFSET_FRACTIONS,
   INSTRUCTION_DURATION_APPROXIMATION_LEADS,
   INSTRUCTION_START_WORDS,
+  INSTRUCTION_NOMINAL_ARTICLES,
+  MEDICATION_OBJECT_FILLERS, MEDICATION_OBJECT_MODIFIERS,
   INSTRUCTION_DURATION_UNITS,
   INSTRUCTION_QUANTITY_UNIT_LABELS,
   MEAL_TIMING_BY_RELATION,
@@ -70,8 +91,9 @@ import {
   SITE_RELATIVE_MARKERS,
   methodAuxiliaryVerbsForLocale
 } from "./hpsg/lexical-classes";
-import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, FREQUENCY_SIMPLE_WORDS } from "./hpsg/timing-lexicon";
+import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, FREQUENCY_SIMPLE_WORDS, followingCourseDurationHeaderAt, mapIntervalUnit } from "./hpsg/timing-lexicon";
 import {
+  cloneMedicationInstructionConceptComponents,
   medicationInstructionConceptCodings,
   resolveMedicationInstructionConcept,
   getMedicationInstructionConcept
@@ -85,6 +107,8 @@ import {
   medicationInstructionActionLocaleRealizerConfig,
   normalizeActionSurface,
   resolveMedicationInstructionAction,
+  resolveMedicationInstructionActionByMethod,
+  resolveMedicationInstructionActionForMethod,
   resolveMedicationInstructionSequenceAction,
   resolveMedicationInstructionSeparableAction,
   medicationInstructionActionSpanLimit
@@ -106,6 +130,8 @@ import {
   CanonicalSourceSpan,
   EventTiming,
   FhirCoding,
+  FhirCodeableConcept,
+  MedicationCondition,
   MedicationInstructionActionArgumentParser,
   MedicationInstructionActionDefinition,
   MedicationInstructionActionRealizer,
@@ -129,7 +155,12 @@ const ACTION_ROUTE_TAIL_SURFACES = new Set([
 ]);
 
 function key(part: Lexeme | undefined): string {
-  return part ? (part.canonical ?? part.lower).replace(/^\.+|\.+$/g, "") : "";
+  if (!part) return "";
+  const lower = part.canonical ?? part.lower;
+  let start = 0, end = lower.length;
+  while (lower.charCodeAt(start) === 46) start++;
+  while (end > start && lower.charCodeAt(end - 1) === 46) end--;
+  return start === 0 && end === lower.length ? lower : lower.slice(start, end);
 }
 
 interface ActionMatch {
@@ -149,31 +180,42 @@ function resultativeLeadAt(
   return resolveMedicationInstructionConcept(key(next), options)?.role === AdviceArgumentRole.Result;
 }
 
+function actionAtDirectiveBoundary(parts: Lexeme[], index: number): boolean {
+  const previous = parts[index - 1];
+  return !previous || /^[,;.!?:]$/u.test(previous.original) ||
+    ACTION_SEQUENCE_MARKERS.has(key(previous)) || ACTION_COORDINATION_CONNECTORS.has(key(previous));
+}
+
 function actionAtIsGovernedByDirective(parts: Lexeme[], index: number): boolean {
   return ACTION_DIRECTIVE_PREFIXES.some((prefix) => {
     const start = index - prefix.parts.length;
     if (start < 0) return false;
-    return prefix.parts.every((part, offset) => key(parts[start + offset]) === part);
+    if (!prefix.parts.every((part, offset) => key(parts[start + offset]) === part)) return false;
+    return prefix.force !== AdviceForce.Warning || prefix.polarity === AdvicePolarity.Negate ||
+      actionAtDirectiveBoundary(parts, start);
   });
 }
 
 function actionPhraseCandidates(parts: Lexeme[], index: number, length: number): string[] {
-  const slice = parts.slice(index, index + length);
-  if (slice.length !== length) return [];
-  const canonical = slice.map((part) => key(part)).filter(Boolean);
-  if (canonical.length !== length) return [];
-  const candidates = new Set<string>();
-  candidates.add(canonical.join(" "));
-  candidates.add(slice.map((part) => part.original).join(" "));
+  if (index + length > parts.length) return [];
+  let canonical = "", spaced = "", contiguousText = "";
   let contiguous = true;
-  for (let offset = 1; offset < slice.length; offset += 1) {
-    if (slice[offset - 1].sourceEnd !== slice[offset].sourceStart) {
-      contiguous = false;
-      break;
-    }
+  for (let offset = 0; offset < length; offset += 1) {
+    const part = parts[index + offset];
+    const normalized = key(part);
+    if (!normalized) return [];
+    const separator = offset ? " " : "";
+    canonical += separator + normalized;
+    spaced += separator + part.original;
+    if (offset && parts[index + offset - 1].sourceEnd !== part.sourceStart) contiguous = false;
+    if (contiguous) contiguousText += part.original;
   }
-  if (contiguous) candidates.add(slice.map((part) => part.original).join(""));
-  return Array.from(candidates).filter((candidate) => candidate.trim().length > 0);
+  const candidates: string[] = [];
+  if (canonical.trim()) candidates.push(canonical);
+  if (spaced !== canonical && spaced.trim()) candidates.push(spaced);
+  if (contiguous && contiguousText !== canonical && contiguousText !== spaced && contiguousText.trim())
+    candidates.push(contiguousText);
+  return candidates;
 }
 
 function actionCandidateIsAnchoredSiteModifier(
@@ -217,7 +259,7 @@ function actionCandidateIsPerPeriodGrammar(parts: Lexeme[], index: number): bool
   );
 }
 
-function actionMatchAt(
+export function actionMatchAt(
   parts: Lexeme[],
   index: number,
   options?: ParseOptions
@@ -232,7 +274,7 @@ function actionMatchAt(
   ) {
     return undefined;
   }
-  const previous = parts.slice(index - 1, index)[0];
+  const previous = parts[index - 1];
   const governingRelation = previous ? resolveActionRelationSurface(key(previous)) : undefined;
   const maxSpan = Math.min(medicationInstructionActionSpanLimit(key(current), options), parts.length - index);
   for (let length = maxSpan; length >= 1; length -= 1) {
@@ -242,11 +284,8 @@ function actionMatchAt(
           resolveMedicationInstructionAction(candidate, options)
         : resolveMedicationInstructionAction(candidate, options);
       if (definition) {
-        if ((definition.directiveOnlyAliases?.indexOf(normalizeActionSurface(candidate)) ?? -1) >= 0 && previous &&
-            !/^[,;.!?:]$/u.test(key(previous)) &&
-            !ACTION_SEQUENCE_MARKERS.has(key(previous)) &&
-            !ACTION_COORDINATION_CONNECTORS.has(key(previous)) &&
-            !actionAtIsGovernedByDirective(parts, index)) continue;
+        if ((definition.directiveOnlyAliases?.indexOf(normalizeActionSurface(candidate)) ?? -1) >= 0 &&
+            !actionAtDirectiveBoundary(parts, index) && !actionAtIsGovernedByDirective(parts, index)) continue;
         // A recognized nominal owns its modifier, even when the modifier is
         // also a verb: "contact lenses" is an object, "open wounds" a site,
         // and "double vision" is diplopia, not an instruction to double a dose.
@@ -323,15 +362,13 @@ function codingFromSite(text: string, options?: ParseOptions): AdviceArgument | 
     conceptId: resolved.canonical,
     coding: resolved.coding,
     codings: resolved.coding ? [resolved.coding] : undefined,
-    i18n: {
+    ...(resolved.definition?.administrationTargetCount !== undefined
+      ? { administrationTargetCount: resolved.definition.administrationTargetCount } : {}),
+    i18n: withMedicationSourceI18n(text, {
       en: resolved.englishObjectText,
       ...(resolved.definition?.i18n ?? {}),
-      ...(resolved.siteI18n ?? {}),
-      ...(() => {
-        const sourceLocale = inferMedicationLocale(text, "en");
-        return sourceLocale === "en" ? {} : { [sourceLocale]: text };
-      })()
-    }
+      ...(resolved.siteI18n ?? {})
+    })
   };
 }
 
@@ -349,7 +386,7 @@ function internalArgument(
     text: sourceText,
     normalized: definition.display,
     conceptId: definition.code,
-    ...(definition.components?.length ? { components: definition.components } : {}),
+    ...(definition.components?.length ? { components: cloneMedicationInstructionConceptComponents(definition.components) } : {}),
     coding: preferredCoding,
     codings,
     i18n: { en: definition.display, ...(definition.i18n ?? {}) }
@@ -384,24 +421,72 @@ function trimActionRange(input: string, range: TextRange, offset: number): TextR
   return { start, end };
 }
 
-function timeArgumentFromParts(
+function clockArgumentFromParts(
   parts: Lexeme[],
   start: number,
   endExclusive: number,
   input: string
 ): AdviceArgument | undefined {
+  // The same bounded clock grammar supplies HPSG schedules and a complete
+  // temporal action daughter. Do not turn a clock into an opaque Object.
+  ({ start, endExclusive } = semanticArgumentBounds(parts, start, endExclusive));
+  if (start < endExclusive && endExclusive - start <= 2) {
+    const clock = parseClockToken(parts[start], start + 1 < endExclusive ? parts[start + 1] : undefined);
+    if (clock && clock.tokens.length === endExclusive - start) return {
+      role: AdviceArgumentRole.Time,
+      text: trimSemanticText(sourceFor(parts, start, endExclusive, input)),
+      normalized: clock.value
+    };
+  }
+  return undefined;
+}
+
+function timeArgumentFromParts(
+  parts: Lexeme[], start: number, endExclusive: number, input: string, complete = false, options?: ParseOptions,
+  nominalComplement = false
+): AdviceArgument | undefined {
+  ({ start, endExclusive } = semanticArgumentBounds(parts, start, endExclusive));
+  const clock = clockArgumentFromParts(parts, start, endExclusive, input);
+  if (clock) return clock;
   const canonicalParts = parts.slice(start, endExclusive).map((part) => key(part));
+  // A coordinated nominal must consume its complete daughter; the bounded
+  // single-complement path retains its existing event search.
+  let first = 0;
+  while (EVENT_ARTICLE_TOKENS.has(canonicalParts[first])) first++;
+  const weekday = canonicalParts.length - first === 1
+    ? DAY_OF_WEEK_TOKENS[canonicalParts[first].replace(/[.]/g, "")] : undefined;
+  if (weekday) return {
+    role: AdviceArgumentRole.Time,
+    text: trimSemanticText(sourceFor(parts, start, endExclusive, input)),
+    normalized: weekday
+  };
   let event: EventTiming | undefined;
-  for (let index = 0; index < canonicalParts.length; index += 1) {
+  for (let index = first; index < canonicalParts.length; index += 1) {
     const candidate = resolveEventTimingExpression(canonicalParts, index);
-    if (candidate) {
+    if (candidate && (!complete || index + candidate.length === canonicalParts.length)) {
+      // A contained generic event cannot replace the complete declared nominal.
+      if (index > first) {
+        const nominal = resolveCompoundAdviceNominalEndingAt(parts, endExclusive);
+        if (nominal?.argument.role === AdviceArgumentRole.MealState) {
+          let nominalStart = start;
+          while (nominalStart < nominal.start && INSTRUCTION_NOMINAL_ARTICLES.has(key(parts[nominalStart]))) nominalStart++;
+          if (nominal.start === nominalStart) return undefined;
+        }
+      }
       event = candidate.timing;
       break;
     }
+    if (complete) break;
   }
   if (!event) return undefined;
   const text = trimSemanticText(sourceFor(parts, start, endExclusive, input));
   if (!text) return undefined;
+  // Site-relation valence keeps its existing single nominal complement;
+  // event adjuncts and coordinated daughters retain canonical EventTiming.
+  if (nominalComplement) {
+    const nominal = internalArgument(canonicalParts.slice(first).join(" "), text, options);
+    if (nominal?.role === AdviceArgumentRole.Time) return nominal;
+  }
   return {
     role: AdviceArgumentRole.Time,
     text,
@@ -533,6 +618,8 @@ function argumentFromParts(
   }
   const coordinated = coordinatedTypedArgumentFromParts(parts, start, endExclusive, input, options);
   if (coordinated) return coordinated;
+  const adviceNominal = resolveAdviceNominalArgument(canonical, text);
+  if (adviceNominal) return adviceNominal;
   const allPartsCanonical = parts
     .slice(start, endExclusive)
     .every((part) => Boolean(part.canonical));
@@ -541,6 +628,72 @@ function argumentFromParts(
     text,
     normalized: allPartsCanonical && canonical ? canonical : text.toLowerCase()
   };
+}
+
+function argumentCoordinationMembers(parts: Lexeme[], start: number, endExclusive: number):
+  Array<{ start: number; end: number; connector: string }> {
+  const members: Array<{ start: number; end: number; connector: string }> = [];
+  let memberStart = start, connector = "";
+  for (let index = start; index < endExclusive; index++) {
+    const token = key(parts[index]);
+    if (token !== "," && !ACTION_COORDINATION_CONNECTORS.has(token)) continue;
+    if (index > memberStart) members.push({ start: memberStart, end: index, connector });
+    connector = token;
+    memberStart = index + 1;
+  }
+  if (memberStart < endExclusive) members.push({ start: memberStart, end: endExclusive, connector });
+  return members;
+}
+
+function timeArgumentsFromParts(
+  parts: Lexeme[], start: number, endExclusive: number, input: string,
+  offset: number, relation: AdviceRelation | undefined, singleEnd = endExclusive, options?: ParseOptions,
+  nominalComplement = false, complete = false
+): AdviceArgument[] | undefined {
+  const members = argumentCoordinationMembers(parts, start, endExclusive);
+  const alternative = members.some(member => coordinationConnectorKind(member.connector) === "disjunction");
+  // Temporal activity relations already retain a complete opaque choice.
+  if (alternative && relationHasGrammarFeature(relation, "activityFallback")) return undefined;
+  if (members.length > 1) {
+    const times: AdviceArgument[] = [];
+    let inheritedRelation = relation;
+    for (const member of members) {
+      let begin = member.start;
+      const overt = resolveActionRelationSurfaceByGrammarFeature(key(parts[begin]), "timeComplement");
+      if (overt) { inheritedRelation = overt; begin++; }
+      const bounds = semanticArgumentBounds(parts, begin, member.end);
+      const time = timeArgumentFromParts(parts, bounds.start, bounds.endExclusive, input, true, options);
+      if (!time) {
+        // A later independently marked complement belongs to the caller's
+        // next relation, not to this already complete temporal conjunction.
+        return !alternative && member.start >= singleEnd && times.length ? times : undefined;
+      }
+      times.push({ ...time, relation: inheritedRelation,
+        span: { start: offset + parts[bounds.start].sourceStart,
+          end: offset + parts[bounds.endExclusive - 1].sourceEnd } });
+    }
+    // A licensed choice is one complete temporal complement, never a list
+    // of conjunctive event obligations. Keep its original connective.
+    if (alternative) {
+      const bounds = semanticArgumentBounds(parts, start, endExclusive);
+      const complete = argumentFromParts(parts, bounds.start, bounds.endExclusive,
+        input, AdviceArgumentRole.Time, options);
+      return complete ? [{ ...complete, role: AdviceArgumentRole.Time, relation,
+        span: { start: offset + parts[bounds.start].sourceStart,
+          end: offset + parts[bounds.endExclusive - 1].sourceEnd } }] : undefined;
+    }
+    // Every daughter in this relation scope was consumed completely.
+    return times;
+  }
+  const member = members[0];
+  if (!member) return undefined;
+  const bounds = semanticArgumentBounds(parts, member.start, Math.min(member.end, singleEnd));
+  const single = timeArgumentFromParts(parts, bounds.start, bounds.endExclusive,
+    input, complete, options, nominalComplement);
+  return single ? [{ ...single, relation, span: {
+    start: offset + parts[bounds.start].sourceStart,
+    end: offset + parts[bounds.endExclusive - 1].sourceEnd
+  } }] : undefined;
 }
 
 function coordinatedTypedArgumentFromParts(
@@ -552,21 +705,7 @@ function coordinatedTypedArgumentFromParts(
 ): AdviceArgument | undefined {
   // A typed coordination is a list of nominal daughters, not a series of
   // new imperatives. Commas and the final and/or preserve their own scope.
-  const members: Array<{ start: number; end: number; connector: string }> = [];
-  let memberStart = start;
-  let connector = "";
-  for (let index = start; index < endExclusive; index += 1) {
-    const token = key(parts[index]);
-    if (token !== "," && token !== "and" && token !== "or") continue;
-    if (index > memberStart) {
-      members.push({ start: memberStart, end: index, connector });
-    }
-    connector = token;
-    memberStart = index + 1;
-  }
-  if (memberStart < endExclusive) members.push({
-    start: memberStart, end: endExclusive, connector
-  });
+  const members = argumentCoordinationMembers(parts, start, endExclusive);
   // Thai may juxtapose two complete substance nouns without a conjunction.
   // License that construction only with adjacent source characters AND typed
   // substance atoms; arbitrary Thai compounds must stay opaque.
@@ -627,7 +766,8 @@ function coordinatedTypedArgumentFromParts(
 function pushArgument(args: AdviceArgument[], argument: AdviceArgument | undefined): void {
   if (!argument) return;
   if (!args.some((candidate) =>
-    candidate.role === argument.role && candidate.text === argument.text && candidate.conceptId === argument.conceptId
+    candidate.role === argument.role && candidate.text === argument.text && candidate.conceptId === argument.conceptId &&
+    candidate.relation === argument.relation
   )) args.push(argument);
 }
 
@@ -671,8 +811,14 @@ function actionArgumentRelation(
 
 function relationIndex(parts: Lexeme[], start: number, endExclusive: number): number {
   for (let index = start; index < endExclusive; index += 1) {
+    const lower = key(parts[index]);
+    // AT in "at most 2 tablets" belongs to the amount, not the location.
+    // Reuse the bounded quantity lexeme inside this existing relation walk.
+    const quantity = DOSE_COMPARATOR_PREFIXES.has(lower)
+      ? doseComparatorNumberAt(parts, index, endExclusive, lower) : undefined;
+    if (quantity) { index = quantity.numericIndex; continue; }
     if (
-      Boolean(actionArgumentRelation(key(parts.slice(index, index + 1)[0]))) &&
+      Boolean(actionArgumentRelation(lower)) &&
       !tokenBelongsToBodySiteRelationPhrase(parts, index, start, endExclusive)
     ) return index;
   }
@@ -747,9 +893,11 @@ function instructionQuantityUnitAt(
   options?: ParseOptions
 ): InstructionQuantityUnitMatch | undefined {
   const maxSpan = Math.min(3, endExclusive - start);
+  const attachedHyphen = parts[start - 1]?.kind === "NUMBER" &&
+    parts[start - 1].sourceEnd === parts[start]?.sourceStart && key(parts[start]).startsWith("-");
   for (let span = maxSpan; span >= 1; span -= 1) {
-    const candidate = parts.slice(start, start + span).map((part) => key(part)).join(" ");
-    const unit = normalizeUnit(candidate, options);
+    const surface = parts.slice(start, start + span).map((part) => key(part)).join(" ");
+    const unit = normalizeUnit(attachedHyphen ? surface.slice(1) : surface, options);
     if (unit) return { unit, endExclusive: start + span };
   }
   const head = key(parts[start]);
@@ -771,27 +919,39 @@ function parseQuantityArgument(
   endExclusive: number,
   input: string,
   offset: number,
-  options?: ParseOptions
+  options?: ParseOptions,
+  numberEndExclusive = endExclusive
 ): AdviceArgument | undefined {
-  for (let index = start; index + 1 < endExclusive; index += 1) {
+  for (let index = start; index < numberEndExclusive; index += 1) {
     const valueToken = parts[index];
     if (!valueToken) continue;
-    const modifier = parts[index + 1];
-    const unitStart = modifier && SUPPLEMENTAL_DOSE_MODIFIERS.has(key(modifier))
-      ? index + 2 : index + 1;
-    const unitMatch = instructionQuantityUnitAt(parts, unitStart, endExclusive, options);
-    if (!unitMatch) continue;
+    // Reuse the same bounded qualifier lexeme as scalar/infusion HPSG.
+    // The graph keeps the original source span, not an exact-dose rewrite.
+    const qualified = valueToken.kind === "NUMBER" ? undefined :
+      doseComparatorNumberAt(parts, index, numberEndExclusive, key(valueToken));
+    const numberIndex = qualified?.numericIndex ?? index;
+    const modifier = parts[numberIndex + 1];
+    let unitStart = modifier && SUPPLEMENTAL_DOSE_MODIFIERS.has(key(modifier))
+      ? numberIndex + 2 : numberIndex + 1;
+    // Qualified fractions own their bounded partitive/article before the unit.
+    if (qualified) for (let count = 0; count < 2 && unitStart < numberEndExclusive &&
+        DOSE_UNIT_CONNECTORS.has(key(parts[unitStart])); count++) unitStart++;
+    const compactUnit = qualified?.rawUnit ? normalizeUnit(qualified.rawUnit, options) : undefined;
+    const unitMatch = qualified?.rawUnit
+      ? compactUnit ? { unit: compactUnit, endExclusive: numberIndex + 1 } : undefined
+      : instructionQuantityUnitAt(parts, unitStart, endExclusive, options);
+    if (!unitMatch || unitMatch.endExclusive > numberEndExclusive) continue;
     const unitToken = parts[unitMatch.endExclusive - 1];
     if (!unitToken) continue;
     const unit = unitMatch.unit;
     const wordValue = INSTRUCTION_NUMBER_WORDS[key(valueToken)];
-    if ((valueToken.kind === "NUMBER" && valueToken.value !== undefined) || wordValue !== undefined) {
-      const value = valueToken.kind === "NUMBER" ? valueToken.value : wordValue;
+    if (qualified || (valueToken.kind === "NUMBER" && valueToken.value !== undefined) || wordValue !== undefined) {
+      const value = qualified?.value ?? (valueToken.kind === "NUMBER" ? valueToken.value : wordValue);
       return {
         role: AdviceArgumentRole.Amount,
         text: sourceFor(parts, index, unitMatch.endExclusive, input),
         normalized: unit,
-        quantity: { value, unit },
+        quantity: { value, unit, ...(qualified ? { comparator: qualified.comparator } : {}) },
         span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
       };
     }
@@ -831,7 +991,19 @@ function durationArgumentAt(
     quantity: { value: compact.value, unit: compactUnit },
     span: { start: offset + compactToken.sourceStart, end: offset + compactToken.sourceEnd }
   };
-  let cursor = start;
+  const following = followingCourseDurationHeaderAt(parts, start);
+  if (following && following.tokenEnd > endExclusive) return undefined;
+  if (following?.implicitSingle) {
+    const unit = mapIntervalUnit(key(parts[following.valueIndex]));
+    if (!unit) return undefined;
+    return { role: AdviceArgumentRole.Duration,
+      text: sourceFor(parts, start, following.tokenEnd, input), normalized: `1 ${unit}`,
+      quantity: { value: 1, unit }, span: {
+        start: offset + parts[start].sourceStart,
+        end: offset + parts[following.tokenEnd - 1].sourceEnd
+      } };
+  }
+  let cursor = following?.valueIndex ?? start;
   // A licensed duration lead belongs to the same source-backed constituent
   // as its numeric daughter. Keeping `for` with article, word-number, and
   // numeric quantities prevents regimen timing from reclaiming only part of
@@ -864,14 +1036,14 @@ function durationArgumentAt(
       span: { start: offset + parts[start].sourceStart, end: offset + rangeUnitToken.sourceEnd }
     };
   }
-  let unitIndex = cursor + 1;
+  let unitIndex = following ? following.tokenEnd - 1 : cursor + 1;
   const possibleArticle = parts[unitIndex];
   if (possibleArticle && EVENT_OFFSET_ARTICLES.has(key(possibleArticle))) {
     unitIndex += 1;
   }
   const unitToken = parts[unitIndex];
   if (!unitToken || unitIndex >= endExclusive) return undefined;
-  const unit = durationUnitFromKey(key(unitToken));
+  const unit = following ? mapIntervalUnit(key(unitToken)) : durationUnitFromKey(key(unitToken));
   if (!unit) return undefined;
 
   let quantity: AdviceArgument["quantity"] | undefined;
@@ -933,16 +1105,6 @@ function parseDurationArgument(
   return undefined;
 }
 
-function parseBareDurationArgument(
-  parts: Lexeme[],
-  start: number,
-  endExclusive: number,
-  input: string,
-  offset: number
-): AdviceArgument | undefined {
-  return durationArgumentAt(parts, start, endExclusive, input, offset);
-}
-
 function partIndexAfterAbsoluteSourceEnd(
   parts: Lexeme[],
   sourceEnd: number,
@@ -987,11 +1149,13 @@ interface ActionArgumentParseContext {
   relIndex: number;
   relationTargetEnd: number;
   conditionalTail: boolean;
+  relationTimes?: AdviceArgument[];
+  accompaniment?: AdviceArgument;
   amount?: AdviceArgument;
   duration?: AdviceArgument;
   separableParticleIndex?: number;
 }
-interface ParsedActionArguments { args: AdviceArgument[]; semanticEnd?: number; }
+interface ParsedActionArguments { args: AdviceArgument[]; semanticEnd?: number; tailRelationIndex?: number; }
 type ActionArgumentParser = (context: ActionArgumentParseContext) => ParsedActionArguments;
 function parsedArgs(...values: Array<AdviceArgument | undefined>): AdviceArgument[] {
   const args: AdviceArgument[] = [];
@@ -1005,6 +1169,11 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     parts, argumentStart, segmentEnd, input, options, relIndex
   );
   if (qualifiedSite) return { args: [qualifiedSite] };
+  // This valence owns one nominal complement. An unparsed negative tail must
+  // remain source-backed rather than inherit the recognized action's coverage.
+  const semanticEnd = relationTargetEnd < segmentEnd &&
+    actionArgumentRelation(key(parts[relationTargetEnd])) === AdviceRelation.Without
+      ? relationTargetEnd : undefined;
   let objectEnd = separableParticleIndex !== undefined
     ? separableParticleIndex
     : relIndex >= 0 ? relIndex : segmentEnd;
@@ -1018,7 +1187,10 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     const declared = internalArgument(surface, surface, options) ??
       internalArgument(canonical, surface, options);
     if (declared?.role === AdviceArgumentRole.Manner) {
-      finalManner = declared;
+      finalManner = { ...declared, span: {
+        start: offset + parts[start].sourceStart,
+        end: offset + parts[objectEnd - 1].sourceEnd
+      } };
       objectEnd = start;
       break;
     }
@@ -1030,14 +1202,21 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       text: surface,
       normalized: modifier.lemma,
       conceptId: modifier.lemma,
-      i18n: { en: modifier.lemma, ...(modifier.i18n ?? {}) }
+      i18n: { en: modifier.lemma, ...(modifier.i18n ?? {}) },
+      span: {
+        start: offset + parts[start].sourceStart,
+        end: offset + parts[objectEnd - 1].sourceEnd
+      }
     };
     objectEnd = start;
     break;
   }
-  const args = parsedArgs(argumentFromParts(
-    parts, argumentStart, objectEnd, input, undefined, options
-  ), finalManner);
+  const object = argumentFromParts(parts, argumentStart, objectEnd, input, undefined, options);
+  // The typed Amount already owns its exact source phrase and span. A second
+  // untyped copy must not turn a recognized qualified quantity into opaque text.
+  const amountOnly = object?.role === AdviceArgumentRole.Object && c.amount?.quantity &&
+    object.text === c.amount.text;
+  const args = parsedArgs(amountOnly ? undefined : object, finalManner);
   let typedLocalTime: AdviceArgument | undefined;
   for (let index = argumentStart; index < objectEnd; index += 1) {
     const candidate = internalArgument(key(parts[index]), parts[index].sourceText ?? parts[index].original, options);
@@ -1050,18 +1229,29 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   if (typedLocalTime && duration) pushArgument(args, duration);
   else if (relationHasGrammarFeature(relation, "includeDuration") && duration) pushArgument(args, duration);
   else if (relIndex >= 0 && !conditionalTail) {
-    const time = relationHasGrammarFeature(relation, "timeComplement")
-      ? timeArgumentFromParts(parts, relIndex + 1, relationTargetEnd, input) : undefined;
+    const times = c.relationTimes;
+    if (times) {
+      for (const time of times) pushArgument(args, time);
+      return { args, semanticEnd };
+    }
     const relationDuration = relationHasGrammarFeature(relation, "durationComplement")
       ? parseAnyDurationArgument(parts, relIndex + 1, relationTargetEnd, input, offset)
       : undefined;
     const fallbackRole = relationHasGrammarFeature(relation, "activityFallback")
       ? AdviceArgumentRole.Activity : undefined;
-    pushArgument(args, time ?? relationDuration ?? argumentFromParts(
+    const complement = relationDuration ?? argumentFromParts(
       parts, relIndex + 1, relationTargetEnd, input, fallbackRole, options
-    ));
+    );
+    const accompaniment = relationHasGrammarFeature(relation, "accompanimentComplement");
+    const accompanyingQuantity = !relationDuration && accompaniment
+      ? quantifiedEntityArgument(parts, relIndex + 1, relationTargetEnd, input, offset,
+          AdviceArgumentRole.Substance, options) : undefined;
+    const argument = accompanyingQuantity?.quantity ? accompanyingQuantity : complement;
+    if (argument && (accompaniment || argument.role === AdviceArgumentRole.Time &&
+        relationHasGrammarFeature(relation, "timeComplement"))) argument.relation = relation;
+    pushArgument(args, argument);
   }
-  return { args };
+  return { args, semanticEnd };
 };
 const CONTAINER_ACTIVITY_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { parts, argumentStart, segmentEnd, input, options, relIndex } = c;
@@ -1115,7 +1305,7 @@ const OBJECT_AMOUNT_MATERIAL_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   return { args };
 };
 const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
-  const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, amount } = c;
+  const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, relation, relationTargetEnd, amount } = c;
   const args = parsedArgs(amount);
   const amountEnd = amount?.span
     ? partIndexAfterAbsoluteSourceEnd(parts, amount.span.end, offset)
@@ -1130,18 +1320,71 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   if (materialStart < materialEnd) pushArgument(args, argumentFromParts(
     parts, materialStart, materialEnd, input, AdviceArgumentRole.Material, options
   ));
-  if (relIndex >= 0 && relIndex + 1 < segmentEnd) pushArgument(args, argumentFromParts(
-    parts, relIndex + 1, segmentEnd, input, AdviceArgumentRole.Destination, options
-  ));
-  return { args };
+  let targetIndex = c.conditionalTail ? -1 : relIndex;
+  let targetEnd = relationTargetEnd;
+  let targetRelation = relation;
+  let tailRelationIndex: number | undefined;
+  while (targetIndex >= 0 && targetIndex + 1 < targetEnd) {
+    let times = relationHasGrammarFeature(targetRelation, "timeComplement")
+      ? timeArgumentsFromParts(parts, targetIndex + 1, targetEnd, input, offset, targetRelation, targetEnd, options) : undefined;
+    let alternativeTime = false;
+    if (times) {
+      // The selected Time daughter licenses an overt relation after a
+      // disjunction as part of its complete source-backed alternative.
+      while (targetEnd < segmentEnd &&
+          coordinationConnectorKind(key(parts[targetEnd - 1])) === "disjunction" &&
+          relationHasGrammarFeature(actionArgumentRelation(key(parts[targetEnd])), "timeComplement")) {
+        alternativeTime = true;
+        const next = relationIndex(parts, targetEnd + 1, segmentEnd);
+        targetEnd = next >= 0 ? next : segmentEnd;
+      }
+      if (alternativeTime) times = undefined;
+    }
+    const temporal = alternativeTime || relationHasSemanticClass(targetRelation, "temporal");
+    if (temporal) tailRelationIndex = -1;
+    if (times) {
+      // Each bounded clock or event remains with this action while later
+      // complements retain their independent relation and quantity.
+      const bounds = semanticArgumentBounds(parts, targetIndex + 1, targetEnd);
+      const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
+      for (const time of times) pushArgument(args, { ...time, relation: time.relation ?? targetRelation,
+        span: time.span ?? (first && last ? { start: offset + first.sourceStart, end: offset + last.sourceEnd } : undefined) });
+    } else {
+      const role = !temporal ? AdviceArgumentRole.Destination
+        : targetRelation === AdviceRelation.Until ? AdviceArgumentRole.Result
+        : relationHasGrammarFeature(targetRelation, "activityFallback") ? AdviceArgumentRole.Activity : AdviceArgumentRole.Time;
+      const nominal = argumentFromParts(
+        parts, targetIndex + 1, targetEnd, input, role, options
+      );
+      const quantified = quantifiedEntityArgument(parts, targetIndex + 1, targetEnd, input, offset,
+        nominal?.role ?? AdviceArgumentRole.Destination, options);
+      const target = quantified?.quantity ? quantified : nominal;
+      // Each local complement owns its relation, independently of noun role:
+      // saline WITH water TO 100 mL retains both targets.
+      if (target) target.relation = targetRelation;
+      pushArgument(args, target);
+    }
+    if (targetEnd >= segmentEnd) break;
+    targetIndex = targetEnd;
+    targetRelation = actionArgumentRelation(key(parts[targetIndex]));
+    // Conditions still hand off immediately. A temporal daughter first gets
+    // its own relation-bounded clock probe at the top of this loop.
+    if (!targetRelation || relationHasGrammarFeature(targetRelation, "conditionalTail")) {
+      tailRelationIndex = targetIndex;
+      break;
+    }
+    const next = relationIndex(parts, targetIndex + 1, segmentEnd);
+    targetEnd = next >= 0 ? next : segmentEnd;
+  }
+  return { args, tailRelationIndex };
 };
 const AMOUNT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
-  const activity = c.relIndex >= 0 && relationHasGrammarFeature(c.relation, "activityFallback")
+  const activity = !c.relationTimes && c.relIndex >= 0 && relationHasGrammarFeature(c.relation, "activityFallback")
       ? argumentFromParts(
           c.parts, c.relIndex + 1, c.relationTargetEnd, c.input, AdviceArgumentRole.Activity, c.options
         )
       : undefined;
-  return { args: parsedArgs(c.amount, c.duration, activity) };
+  return { args: parsedArgs(c.amount, c.duration, c.accompaniment, activity, ...(c.relationTimes ?? [])) };
 };
 const OBJECT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, duration } = c;
@@ -1154,15 +1397,20 @@ const OBJECT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const localTime = relIndex >= argumentStart && relIndex + 1 < segmentEnd &&
     !duration && !c.conditionalTail &&
     relationHasGrammarFeature(c.relation, "timeComplement")
-      ? argumentFromParts(parts, relIndex + 1, segmentEnd, input, AdviceArgumentRole.Time, options)
+      ? argumentFromParts(parts, relIndex + 1, c.relationTargetEnd, input, AdviceArgumentRole.Time, options)
       : undefined;
-  return { args: parsedArgs(
-    objectEnd > argumentStart
-      ? argumentFromParts(parts, argumentStart, objectEnd, input, AdviceArgumentRole.Object, options)
-      : undefined,
-    duration,
-    localTime
-  ) };
+  let object = objectEnd > argumentStart
+    ? argumentFromParts(parts, argumentStart, objectEnd, input,
+      c.definition.argumentParser === "bare-duration" ? undefined : AdviceArgumentRole.Object, options)
+    : undefined;
+  if (object && c.definition.argumentParserConfig?.medicationConditionEffect) {
+    const measured = quantifiedEntityArgument(parts, argumentStart, objectEnd, input, offset,
+      AdviceArgumentRole.Object, options, object);
+    if (measured?.quantity && (measured.conceptId === "medication-dose" || measured.conceptId === "product")) {
+      object = measured;
+    }
+  }
+  return { args: parsedArgs(object, duration, localTime) };
 };
 function configuredConceptIndex(parts: Lexeme[], start: number, end: number,
   concepts: readonly string[] | undefined): number {
@@ -1179,7 +1427,8 @@ function quantifiedEntityArgument(
   input: string,
   offset: number,
   role: AdviceArgumentRole,
-  options?: ParseOptions
+  options?: ParseOptions,
+  selectedNominal?: AdviceArgument
 ): AdviceArgument | undefined {
   if (end <= start) return undefined;
   const quantity = parseQuantityArgument(parts, start, end, input, offset, options);
@@ -1188,13 +1437,15 @@ function quantifiedEntityArgument(
     const quantityStart = partIndexForAbsoluteSourceStart(parts, quantity.span.start, offset);
     const quantityEnd = partIndexAfterAbsoluteSourceEnd(parts, quantity.span.end, offset);
     if (quantityStart !== undefined && quantityStart > start) {
-      entity = argumentFromParts(parts, start, quantityStart, input, role, options);
+      const prefix = quantityStart === start + 1 ? key(parts[start]) : undefined;
+      const determinerOnly = prefix === "a" || prefix === "an" || prefix === "the";
+      if (!determinerOnly) entity = argumentFromParts(parts, start, quantityStart, input, role, options);
     }
     if (!entity && quantityEnd !== undefined && quantityEnd < end) {
       entity = argumentFromParts(parts, quantityEnd, end, input, role, options);
     }
   } else {
-    entity = argumentFromParts(parts, start, end, input, role, options);
+    entity = selectedNominal ?? argumentFromParts(parts, start, end, input, role, options);
   }
   const text = trimSemanticText(sourceFor(parts, start, end, input));
   if (!entity && !quantity) return undefined;
@@ -1205,10 +1456,8 @@ function quantifiedEntityArgument(
     normalized: quantity?.quantity?.unit ?? text.toLowerCase()
   };
   if (sourceEntityText) {
-    const sourceLocale = inferMedicationLocale(sourceEntityText, "en");
-    if (sourceLocale !== "en") {
-      result.i18n = { ...(result.i18n ?? {}), [sourceLocale]: sourceEntityText };
-    }
+    const i18n = withMedicationSourceI18n(sourceEntityText, result.i18n);
+    if (i18n !== result.i18n) result.i18n = i18n;
   }
   result.role = role;
   result.text = text;
@@ -1217,6 +1466,24 @@ function quantifiedEntityArgument(
   const last = parts[end - 1];
   if (first && last) result.span = { start: offset + first.sourceStart, end: offset + last.sourceEnd };
   return result;
+}
+
+/** A measured nominal owns its quantity; a bare quantity remains the head Amount. */
+function nominalAccompanimentArgument(
+  parts: Lexeme[], start: number, end: number, input: string, offset: number,
+  relation: AdviceRelation | undefined, options?: ParseOptions, duration?: AdviceArgument
+): AdviceArgument | undefined {
+  if (!relationHasSemanticClass(relation, "accompaniment")) return undefined;
+  const durationStart = duration?.span
+    ? partIndexForAbsoluteSourceStart(parts, duration.span.start, offset) : undefined;
+  // The selected duration is a separate daughter, not part of the material nominal.
+  if (durationStart !== undefined && start <= durationStart && durationStart < end) end = durationStart;
+  const nominal = argumentFromParts(parts, start, end, input, AdviceArgumentRole.Substance, options);
+  const companion = quantifiedEntityArgument(parts, start, end, input, offset,
+    nominal?.role ?? AdviceArgumentRole.Substance, options, nominal);
+  if (!companion || quantityOnlyInstructionArgument(companion)) return undefined;
+  companion.relation = relation;
+  return companion;
 }
 
 function trailingTimeArgument(
@@ -1237,18 +1504,8 @@ function trailingTimeArgument(
     if (declared?.role === AdviceArgumentRole.Time) {
       return { start: index, argument: declared };
     }
-    const event = resolveEventTimingExpression(canonical, 0);
-    if (!event || event.length !== canonical.length) continue;
-    const resolved = argumentFromParts(parts, index, end, input, AdviceArgumentRole.Time, options);
-    if (resolved?.conceptId) return { start: index, argument: resolved };
-    return {
-      start: index,
-      argument: {
-        role: AdviceArgumentRole.Time,
-        text: trimSemanticText(sourceFor(parts, index, end, input)),
-        normalized: event.timing
-      }
-    };
+    const time = timeArgumentFromParts(parts, index, end, input, true, options, true);
+    if (time) return { start: index, argument: time };
   }
   return undefined;
 }
@@ -1263,16 +1520,20 @@ const OBJECT_TIME_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     objectEnd > c.argumentStart
       ? argumentFromParts(c.parts, c.argumentStart, objectEnd, c.input, AdviceArgumentRole.Object, c.options)
       : undefined,
-    time?.argument
+    timeRelation ? { ...time.argument, relation: c.relation } : time?.argument
   ) };
 };
 
 const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { definition, parts, argumentStart, segmentEnd, input, offset, options, relIndex } = c;
+  const tailRelation = c.relationTargetEnd < segmentEnd
+    ? actionArgumentRelation(key(parts[c.relationTargetEnd])) : undefined;
   const materialEnd = c.relationTargetEnd < segmentEnd &&
-    relationHasSemanticClass(
-      actionArgumentRelation(key(parts[c.relationTargetEnd])), "temporal"
-    ) ? c.relationTargetEnd : segmentEnd;
+    (relationHasSemanticClass(tailRelation, "temporal") ||
+      relationHasGrammarFeature(tailRelation, "timeComplement") &&
+        timeArgumentsFromParts(parts, c.relationTargetEnd + 1, segmentEnd,
+          input, offset, tailRelation, segmentEnd, options))
+    ? c.relationTargetEnd : segmentEnd;
   const absolutePrimary = configuredConceptIndex(
     parts, argumentStart, materialEnd, definition.argumentParserConfig?.primaryConcepts);
   if (absolutePrimary < 0) {
@@ -1296,8 +1557,10 @@ const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       }
       const nominal = argumentFromParts(parts, relIndex + 1, materialEnd, input, undefined, options);
       const role = nominal?.conceptId ? nominal.role : AdviceArgumentRole.Material;
-      pushArgument(args, quantifiedEntityArgument(
-        parts, relIndex + 1, materialEnd, input, offset, role, options));
+      const companion = quantifiedEntityArgument(
+        parts, relIndex + 1, materialEnd, input, offset, role, options);
+      if (companion) companion.relation = c.relation;
+      pushArgument(args, companion);
       return { args };
     }
     return { args: parsedArgs(argumentFromParts(
@@ -1319,6 +1582,7 @@ const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const substanceStart = relIndex >= 0 && relIndex < absolutePrimary ? relIndex + 1 : absolutePrimary;
   const substance = quantifiedEntityArgument(
     parts, substanceStart, materialEnd, input, offset, AdviceArgumentRole.Substance, options);
+  if (substance && relIndex >= argumentStart) substance.relation = c.relation;
   if (substance?.conceptId === undefined) {
     const primary = argumentFromParts(
       parts, absolutePrimary, absolutePrimary + 1, input, AdviceArgumentRole.Substance, options);
@@ -1326,6 +1590,7 @@ const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       primary.text = substance?.text ?? primary.text;
       primary.quantity = substance?.quantity;
       primary.span = substance?.span ?? primary.span;
+      primary.relation = substance?.relation;
       pushArgument(args, primary);
     } else pushArgument(args, substance);
   } else pushArgument(args, substance);
@@ -1338,6 +1603,30 @@ const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   }
   return { args };
 };
+function medicationCourseTargetFromParts(
+  parts: Lexeme[], start: number, end: number, input: string, offset: number, options?: ParseOptions
+): AdviceArgument | undefined {
+  const bounds = semanticArgumentBounds(parts, start, end);
+  if (bounds.start >= bounds.endExclusive) return undefined;
+  const text = sourceFor(parts, bounds.start, bounds.endExclusive, input);
+  const complete = internalArgument(parts.slice(bounds.start, bounds.endExclusive).map(key).join(" "), text, options);
+  if (complete && (complete.conceptId === "product" || complete.conceptId === "medication-dose" ||
+      complete.conceptId === "medication-administration"))
+    return { ...complete, span: rangeFor(parts, bounds.start, bounds.endExclusive, offset) };
+  let cursor = bounds.start;
+  const administration = internalArgument(key(parts[cursor]), parts[cursor].original, options);
+  const activity = administration?.conceptId === "medication-administration" ? administration : undefined;
+  if (activity) cursor++;
+  while (cursor < bounds.endExclusive && (INSTRUCTION_NOMINAL_ARTICLES.has(key(parts[cursor])) ||
+      MEDICATION_OBJECT_MODIFIERS.has(key(parts[cursor])))) cursor++;
+  const canonical = parts.slice(cursor, bounds.endExclusive).map(key).join(" ");
+  let nominal = cursor < bounds.endExclusive ? internalArgument(canonical, text, options) : undefined;
+  if (!nominal && cursor + 1 === bounds.endExclusive && MEDICATION_OBJECT_FILLERS.has(canonical))
+    nominal = internalArgument("product", text, options);
+  if (nominal?.conceptId !== "product" && nominal?.conceptId !== "medication-dose") return undefined;
+  return { ...(activity ?? nominal), text, span: rangeFor(parts, bounds.start, bounds.endExclusive, offset) };
+}
+
 const RESULT_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { definition, parts, argumentStart, segmentEnd, input, options } = c;
   // A temporal result boundary is its own typed daughter. "Until finished"
@@ -1390,16 +1679,19 @@ const RESULT_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       return { args };
     }
   }
-  if (resultIndex < 0) return {
-    // A source-backed quantified duration is a different valence daughter
-    // from the outcome/result of a procedure. Do not relabel its elapsed
-    // time as an opaque "result", nor lose an already-composed duration.
-    args: c.duration?.quantity
-      ? [c.duration]
-      : parsedArgs(argumentFromParts(
-        parts, resultStart, segmentEnd, input, AdviceArgumentRole.Result, options
-      ))
-  };
+  if (resultIndex < 0) {
+    // A quantified Duration and an explicit medication target are separate
+    // valence daughters; neither is an opaque procedural Result.
+    const args = c.duration?.quantity ? [c.duration] : parsedArgs(argumentFromParts(
+      parts, resultStart, segmentEnd, input, AdviceArgumentRole.Result, options
+    ));
+    if (definition.semanticClass === "course" && c.duration?.span) {
+      const durationStart = partIndexForAbsoluteSourceStart(parts, c.duration.span.start, c.offset);
+      if (durationStart !== undefined && durationStart > argumentStart)
+        pushArgument(args, medicationCourseTargetFromParts(parts, argumentStart, durationStart, input, c.offset, options));
+    }
+    return { args };
+  }
   const part = parts[resultIndex];
   return { args: parsedArgs(internalArgument(key(part), part.sourceText ?? part.original, options)) };
 };
@@ -1439,13 +1731,27 @@ const SITE_RELATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   // daughter as wait/infusion rather than turning "one minute" into a substance.
   const elapsed = relIndex >= 0 && relIndex < semanticEnd &&
     DURATION_LEAD_TOKENS.has(key(parts[relIndex]))
-      ? durationArgumentAt(parts, relIndex, semanticEnd, input, c.offset)
+      ? c.duration
       : undefined;
   if (elapsed) pushArgument(args, elapsed);
-  else if (relIndex >= 0 && relIndex < semanticEnd) pushArgument(args, argumentFromParts(
-    parts, relIndex + 1, semanticEnd, input, preferredRinseRole(relation), options));
-  else pushArgument(args, argumentFromParts(
-    parts, argumentStart, semanticEnd, input, preferredRinseRole(relation), options));
+  else if (c.accompaniment) pushArgument(args, c.accompaniment);
+  else if (c.relationTimes) for (const time of c.relationTimes) pushArgument(args, time);
+  else if (relIndex >= 0 && relIndex < semanticEnd) {
+    const target = argumentFromParts(parts, relIndex + 1, Math.min(c.relationTargetEnd, semanticEnd),
+      input, preferredRinseRole(relation), options);
+    if (target?.role === AdviceArgumentRole.Site && relationHasSemanticClass(relation, "locative"))
+      target.relation = relation;
+    pushArgument(args, target);
+  }
+  else {
+    const durationStart = c.duration?.span
+      ? partIndexForAbsoluteSourceStart(parts, c.duration.span.start, c.offset) : undefined;
+    const nominalEnd = durationStart === undefined ? semanticEnd : Math.min(semanticEnd, durationStart);
+    pushArgument(args, argumentFromParts(
+      parts, argumentStart, nominalEnd, input, preferredRinseRole(relation), options));
+  }
+  // A material or time complement does not consume the selected elapsed duration.
+  if (!elapsed) pushArgument(args, c.duration);
   pushArgument(args, resultTail?.argument);
   return { args };
 };
@@ -1455,14 +1761,8 @@ const DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     c.parts, c.argumentStart, c.segmentEnd, c.input, undefined, c.options
   )) };
 };
-const BARE_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
-  const parsed = parseBareDurationArgument(c.parts, c.argumentStart, c.segmentEnd, c.input, c.offset) ?? c.duration;
-  return { args: parsedArgs(parsed, parsed ? undefined : argumentFromParts(
-    c.parts, c.argumentStart, c.segmentEnd, c.input, undefined, c.options
-  )) };
-};
 const DURATION_ACTIVITY_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
-  const duration = parseBareDurationArgument(c.parts, c.argumentStart, c.segmentEnd, c.input, c.offset) ?? c.duration;
+  const duration = c.duration;
   let localTime: AdviceArgument | undefined;
   const adjunctEnd = c.relIndex >= c.argumentStart ? c.relIndex : c.segmentEnd;
   for (let index = c.argumentStart; index < adjunctEnd; index += 1) {
@@ -1542,7 +1842,8 @@ const ACTION_ARGUMENT_PARSERS: Record<MedicationInstructionActionArgumentParser,
   site: SITE_ARGUMENT_PARSER,
   "site-relation": SITE_RELATION_ARGUMENT_PARSER,
   duration: DURATION_ARGUMENT_PARSER,
-  "bare-duration": BARE_DURATION_ARGUMENT_PARSER,
+  // A bare duration still retains its preceding typed target and local Time.
+  "bare-duration": OBJECT_DURATION_ARGUMENT_PARSER,
   "preposed-duration": PREPOSED_DURATION_ARGUMENT_PARSER,
   "duration-activity": DURATION_ACTIVITY_ARGUMENT_PARSER,
   activity: ACTIVITY_ARGUMENT_PARSER
@@ -1578,13 +1879,19 @@ function buildActionFrame(
   const nextRelationIndex = relIndex >= 0 && !conditionalTail
     ? relationIndex(parts, relIndex + 1, segmentEnd) : -1;
   const nextRelation = nextRelationIndex >= 0
-    ? resolveActionRelationSurface(
+    ? actionArgumentRelation(
         key(parts[nextRelationIndex]),
         definition.preferredRelationSemanticClasses
       )
     : undefined;
   const relationTargetEnd = nextRelationIndex >= 0 ? nextRelationIndex : segmentEnd;
   const secondaryConditionalTail = relationHasGrammarFeature(nextRelation, "conditionalTail");
+  // A clock after a material complement ends before its conditional daughter.
+  // Reuse the existing relation grammar, only on this time-complement path.
+  const clockTailIndex = nextRelationIndex >= 0 && relationHasGrammarFeature(nextRelation, "timeComplement")
+    ? relationIndex(parts, nextRelationIndex + 1, segmentEnd) : -1;
+  const clockConditionalTail = clockTailIndex >= 0 && relationHasGrammarFeature(
+    actionArgumentRelation(key(parts[clockTailIndex])), "conditionalTail");
   const relation = conditionalTail ? undefined : rawRelation;
   const secondaryActivityTarget = nextRelationIndex >= 0
     ? resolveMedicationInstructionAction(key(parts[nextRelationIndex + 1]), options)
@@ -1598,22 +1905,85 @@ function buildActionFrame(
     ? relIndex
     : secondaryConditionalTail && nextRelationIndex >= 0
       ? nextRelationIndex
-      : segmentEnd;
+      : clockConditionalTail ? clockTailIndex : segmentEnd;
   // A conditional daughter owns its own measurements and observation window.
   // They are not the preceding administration's amount or course duration.
-  const amount = definition.acceptsAmount
-    ? parseQuantityArgument(parts, argumentStart, semanticEnd, input, offset, options)
-    : undefined;
+  // Material/destination complements own their quantities independently of
+  // the head Amount. Temporal adjuncts permit a later medication amount in
+  // flexible word order; other valences may license postdestination amounts
+  // too, e.g. Pour into a cup 5 mL.
+  const directObjectValence = !definition.argumentParser || definition.argumentParser === "default";
+  // Resolve the typed event daughter once, before deciding which complement
+  // owns a quantity. WITH breakfast is temporal; WITH 200 mL water owns its
+  // own amount. The default argument parser reuses this same daughter.
   const duration = parseAnyDurationArgument(parts, argumentStart, semanticEnd, input, offset);
+  const nominalAccompanimentValence = definition.argumentParser === "amount-duration" ||
+    definition.argumentParser === "site-relation";
+  const relationTimes = (directObjectValence || nominalAccompanimentValence) &&
+    relIndex >= 0 && !conditionalTail && relationHasGrammarFeature(relation, "timeComplement")
+    ? timeArgumentsFromParts(parts, relIndex + 1, semanticEnd, input, offset, relation, relationTargetEnd, options,
+        definition.argumentParser === "site-relation") : undefined;
+  const accompaniment = nominalAccompanimentValence && !relationTimes && relIndex >= 0
+    ? nominalAccompanimentArgument(parts, relIndex + 1, relationTargetEnd, input, offset, relation, options, duration)
+    : undefined;
+  const headOwnsAmount = accompaniment !== undefined || directObjectValence && !relationTimes &&
+      relationHasGrammarFeature(relation, "accompanimentComplement") ||
+    (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
+      !relationHasSemanticClass(relation, "temporal");
+  let amountEnd = headOwnsAmount && relIndex >= argumentStart ? Math.min(relIndex, semanticEnd) : semanticEnd;
+  let laterAccompaniments: AdviceArgument[] | undefined;
+  // Retain each selected nominal accompaniment, including WITH ... WITHOUT
+  // ... . A leading Time does not transfer a later material quantity to the
+  // head; every complement keeps its own relation and source extent.
+  if (relIndex >= argumentStart && (nominalAccompanimentValence ||
+      !headOwnsAmount && definition.acceptsAmount && (relationTimes || relationHasSemanticClass(relation, "temporal")))) {
+    let index = nextRelationIndex, current = nextRelation;
+    while (index >= 0 && index < semanticEnd) {
+      const following = relationIndex(parts, index + 1, semanticEnd);
+      const complementEnd = following < 0 ? semanticEnd : following;
+      const nominal = nominalAccompanimentValence
+        ? nominalAccompanimentArgument(parts, index + 1, complementEnd, input, offset, current, options, duration)
+        : undefined;
+      const ownsQuantity = nominal !== undefined || (directObjectValence
+        ? relationHasGrammarFeature(current, "accompanimentComplement") &&
+          !timeArgumentFromParts(parts, index + 1, complementEnd, input, false, options)
+        : (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
+          !relationHasSemanticClass(current, "temporal"));
+      if (ownsQuantity) {
+        amountEnd = Math.min(amountEnd, index);
+        if (nominal) (laterAccompaniments ??= []).push(nominal);
+        else if (directObjectValence) {
+          const companion = quantifiedEntityArgument(parts, index + 1,
+            complementEnd, input, offset, AdviceArgumentRole.Substance, options);
+          if (companion) {
+            companion.relation = current;
+            (laterAccompaniments ??= []).push(companion);
+          }
+        }
+        if (!nominalAccompanimentValence) break;
+      }
+      index = following;
+      current = index >= 0 ? actionArgumentRelation(key(parts[index]),
+        definition.preferredRelationSemanticClasses) : undefined;
+    }
+  }
+  // Unit meaning can depend on the full typed action context (a measured
+  // topical line and its destination), while its numeric head stays local.
+  const amount = definition.acceptsAmount
+    ? parseQuantityArgument(parts, argumentStart, semanticEnd, input, offset, options, amountEnd)
+    : undefined;
 
   const argumentParser = ACTION_ARGUMENT_PARSERS[definition.argumentParser ?? "default"] ??
     DEFAULT_ACTION_ARGUMENT_PARSER;
   const parsed = argumentParser({
-    definition, parts, actionIndex, argumentStart, segmentEnd, input, offset, options,
-    relation, relIndex, relationTargetEnd, conditionalTail, amount, duration,
+    definition, parts, actionIndex, argumentStart,
+    segmentEnd: semanticEnd,
+    input, offset, options,
+    relation, relIndex, relationTargetEnd, conditionalTail, relationTimes, accompaniment, amount, duration,
     separableParticleIndex: actionMatch.separableParticleIndex
   });
   const args = parsed.args;
+  if (laterAccompaniments) for (const companion of laterAccompaniments) pushArgument(args, companion);
   // Orthogonal temporal-event daughters are arguments of the SAME composed
   // action, not a second medication administration. A material WITH/IN
   // relation remains the head's relation while BEFORE/AFTER is owned by the
@@ -1621,17 +1991,60 @@ function buildActionFrame(
   // Not every temporal/conditional connector licenses an Activity.
   // PRN WHEN is a condition daughter, never a "when symptoms" executable
   // activity that can duplicate medication dose and schedule realization.
-  const nextTemporal = nextRelationIndex >= 0 &&
-    relationHasSemanticClass(nextRelation, "temporal") &&
-    relationHasGrammarFeature(nextRelation, "activityFallback")
-      ? nextRelation : undefined;
-  if (nextTemporal && nextRelationIndex >= 0) {
-    const eventStart = nextRelationIndex + 1;
+  const courseTemporalIndex = definition.semanticClass === "course" && duration?.span && relIndex >= 0 &&
+    duration.span.end <= offset + parts[relIndex].sourceStart ? relIndex : nextRelationIndex;
+  const temporalIndex = parsed.tailRelationIndex ?? courseTemporalIndex;
+  const temporalRelation = temporalIndex === nextRelationIndex ? nextRelation
+    : actionArgumentRelation(key(parts[temporalIndex]), definition.preferredRelationSemanticClasses);
+  // A multi-complement valence can discover a condition after its second
+  // destination. End the action at that boundary so the existing graph
+  // relation owner keeps the condition and its complete source span.
+  if (temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "conditionalTail"))
+    semanticEnd = Math.min(semanticEnd, temporalIndex);
+  const nextTemporal = temporalIndex >= 0 &&
+    relationHasSemanticClass(temporalRelation, "temporal") &&
+    relationHasGrammarFeature(temporalRelation, "activityFallback")
+      ? temporalRelation : undefined;
+  // The shared time grammar licenses clock and event daughters after an
+  // earlier complement, including a material amount or procedure duration.
+  const nextTimes = relationTimes && relationTimes.length > 1 ? relationTimes
+    : temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "timeComplement")
+      ? timeArgumentsFromParts(parts, temporalIndex + 1, semanticEnd, input, offset, temporalRelation, semanticEnd, options,
+          false, definition.semanticClass === "course") : undefined;
+  const courseCompanion = !nextTimes && definition.semanticClass === "course" && temporalIndex >= 0
+    ? nominalAccompanimentArgument(parts, temporalIndex + 1, semanticEnd,
+        input, offset, temporalRelation, options, duration) ??
+      argumentFromParts(parts, temporalIndex + 1, semanticEnd, input,
+        temporalRelation === AdviceRelation.Until ? AdviceArgumentRole.Result
+          : nextTemporal ? AdviceArgumentRole.Activity : undefined, options) : undefined;
+  if (nextTimes) {
+    const bounds = semanticArgumentBounds(parts, temporalIndex + 1, semanticEnd);
+    const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
+    for (const time of nextTimes) pushArgument(args, { ...time, relation: time.relation ?? temporalRelation,
+      span: time.span ?? (first && last ? { start: offset + first.sourceStart, end: offset + last.sourceEnd } : undefined)
+    });
+  } else if (courseCompanion?.conceptId &&
+      (relationHasSemanticClass(temporalRelation, "accompaniment") ||
+        courseCompanion.role === AdviceArgumentRole.MealState &&
+          (relationHasSemanticClass(temporalRelation, "temporal") || relationHasSemanticClass(temporalRelation, "locative")))) {
+    pushArgument(args, { ...courseCompanion, relation: temporalRelation,
+      span: rangeFor(parts, temporalIndex + 1, semanticEnd, offset) });
+  } else if (temporalIndex >= 0 && temporalRelation === AdviceRelation.Until) {
+    const result = courseCompanion ?? argumentFromParts(parts, temporalIndex + 1, segmentEnd, input, AdviceArgumentRole.Result, options);
+    if (result) {
+      result.relation = temporalRelation;
+      if (definition.semanticClass === "course" && duration?.quantity)
+        result.span = rangeFor(parts, temporalIndex + 1, semanticEnd, offset);
+      pushArgument(args, result);
+    }
+  } else if (nextTemporal && temporalIndex >= 0) {
+    const eventStart = temporalIndex + 1;
     const sourceEvent = trimSemanticText(sourceFor(parts, eventStart, segmentEnd, input));
-    let event = argumentFromParts(
+    let event = courseCompanion ?? argumentFromParts(
       parts, eventStart, segmentEnd, input, AdviceArgumentRole.Activity, options
     );
-    if (event?.role !== AdviceArgumentRole.Activity || !event.conceptId) {
+    if ((event?.role !== AdviceArgumentRole.Activity && event?.role !== AdviceArgumentRole.Time) ||
+        !event.conceptId) {
       const target = resolveMedicationInstructionAction(key(parts[eventStart]), options);
       // Only an EXPLICIT declared event-activity concept licenses semantic
       // normalization. A method-coded verb is insufficient evidence:
@@ -1642,7 +2055,7 @@ function buildActionFrame(
         ? internalArgument(implicit, sourceEvent, options) : undefined;
       if (declared?.role === AdviceArgumentRole.Activity) {
         event = declared;
-      } else if (event?.role !== AdviceArgumentRole.Activity) {
+      } else if (event?.role !== AdviceArgumentRole.Activity && event?.role !== AdviceArgumentRole.Time) {
         event = undefined;
       }
     }
@@ -1661,6 +2074,19 @@ function buildActionFrame(
     pushArgument(args, argumentFromParts(
       parts, nextRelationIndex + 1, segmentEnd, input, AdviceArgumentRole.Activity, options
     ));
+  } else if (temporalIndex >= 0 &&
+      (definition.argumentParser === "object-duration" || definition.argumentParser === "bare-duration") &&
+      relationHasGrammarFeature(temporalRelation, "timeComplement")) {
+    // This valence already retains an opaque first Time complement. Preserve
+    // a later calendar nominal separately from its preceding typed site too.
+    const bounds = semanticArgumentBounds(parts, temporalIndex + 1, semanticEnd);
+    const time = argumentFromParts(parts, bounds.start, bounds.endExclusive, input, AdviceArgumentRole.Time, options);
+    if (time) {
+      time.relation = temporalRelation;
+      time.span = { start: offset + parts[bounds.start].sourceStart,
+        end: offset + parts[bounds.endExclusive - 1].sourceEnd };
+      pushArgument(args, time);
+    }
   }
   const materialAttached = args.some((arg) =>
     arg.role === AdviceArgumentRole.Substance || arg.role === AdviceArgumentRole.Material
@@ -1671,6 +2097,33 @@ function buildActionFrame(
     return undefined;
   }
   if (parsed.semanticEnd !== undefined) semanticEnd = parsed.semanticEnd;
+  // A medication-course head owns its complete Duration and any selected
+  // temporal companion. An unresolved activity cannot donate its duration
+  // to that medication merely because it follows the same lexical head.
+  if (definition.semanticClass === "course" && duration?.span) {
+    const bounds = semanticArgumentBounds(parts, argumentStart, semanticEnd);
+    const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
+    if (!first || !last) return undefined;
+    if (duration.span.start !== offset + first.sourceStart) {
+      const durationStart = partIndexForAbsoluteSourceStart(parts, duration.span.start, offset);
+      const prefix = durationStart === undefined ? undefined : semanticArgumentBounds(parts, argumentStart, durationStart);
+      if (!prefix || !args.some(arg => arg !== duration && arg.span?.start === offset + first.sourceStart &&
+          arg.span.end === offset + parts[prefix.endExclusive - 1].sourceEnd &&
+          (arg.conceptId === "product" || arg.conceptId === "medication-dose" ||
+            arg.conceptId === "medication-administration"))) return undefined;
+    }
+    if (duration.span.end !== offset + last.sourceEnd) {
+      const afterDuration = partIndexAfterAbsoluteSourceEnd(parts, duration.span.end, offset);
+      if (afterDuration === undefined) return undefined;
+      const tail = semanticArgumentBounds(parts, afterDuration, semanticEnd);
+      const completeTimes = nextTimes?.length && nextTimes[nextTimes.length - 1].span?.end === offset + last.sourceEnd;
+      const companionStart = parts[temporalIndex + 1];
+      const completeCompanion = courseCompanion?.conceptId && companionStart && args.some(arg =>
+        arg.conceptId === courseCompanion.conceptId && arg.relation === temporalRelation &&
+        arg.span?.start === offset + companionStart.sourceStart && arg.span?.end === offset + last.sourceEnd);
+      if (tail.start !== temporalIndex || !(completeTimes || completeCompanion)) return undefined;
+    }
+  }
   pushArgument(args, amount);
   // A registered relational compound can entail a second typed daughter
   // even when a language realizes both meanings as ONE lexical constituent.
@@ -1698,18 +2151,25 @@ function buildActionFrame(
     ...medicationInstructionActionCodings(definition),
     ...medicationInstructionActionContextualCodings(definition, args)
   ];
-  let span = trimActionRange(input, rangeFor(parts, segmentStart, semanticEnd, offset), offset);
+  const lexicalSpan = rangeFor(parts, segmentStart, semanticEnd, offset);
+  let span = trimActionRange(input, lexicalSpan, offset);
   const earliestArgumentStart = args.reduce((minimum, arg) =>
     arg.span ? Math.min(minimum, arg.span.start) : minimum, span.start);
   if (earliestArgumentStart < span.start) {
     span = trimActionRange(input, { start: earliestArgumentStart, end: span.end }, offset);
   }
+  // A selected quantity owns its whole terminal unit lexeme, including a
+  // declared abbreviation period. Do not trim the frame inside that token.
+  if (span.end < lexicalSpan.end &&
+      args.some(arg => arg.quantity && arg.span?.end === lexicalSpan.end)) {
+    span.end = lexicalSpan.end;
+  }
   const frame: AdviceFrame = {
-    force: polarity === AdvicePolarity.Negate
+    force: prefixed?.force ?? (polarity === AdvicePolarity.Negate
       ? AdviceForce.Warning
       : modality === AdviceModality.Should
         ? AdviceForce.Instruction
-        : AdviceForce.Sequence,
+        : definition.defaultForce ?? AdviceForce.Sequence),
     polarity,
     modality,
     predicate: {
@@ -1743,6 +2203,7 @@ interface PrefixedActionMatch {
   match: ActionMatch;
   polarity?: AdvicePolarity;
   modality?: AdviceModality;
+  force?: AdviceForce;
   preposedTheme?: { start: number; end: number };
 }
 
@@ -1773,6 +2234,7 @@ function prefixedActionAt(
       match,
       polarity: prefix.polarity,
       modality: prefix.modality,
+      force: prefix.force,
       ...(prefix.complement === "contact-clause"
         ? { preposedTheme: { start: complementStart, end: actionIndex } } : {})
     };
@@ -1891,8 +2353,10 @@ function actionCandidateBelongsToCurrentFrame(
   return false;
 }
 
+const ACTION_DIRECTIVE_BOUNDARY_PREFIXES = ACTION_DIRECTIVE_PREFIXES
+  .filter(prefix => prefix.force !== AdviceForce.Warning || prefix.polarity === AdvicePolarity.Negate);
 const ACTION_DIRECTIVE_BOUNDARIES = new Set(
-  ACTION_DIRECTIVE_PREFIXES.map((prefix) => prefix.parts[0])
+  ACTION_DIRECTIVE_BOUNDARY_PREFIXES.map(prefix => prefix.parts[0])
 );
 
 interface PreposedActionRelation {
@@ -1928,26 +2392,14 @@ function attachPreposedActionRelation(
 ): void {
   if (frame.relation !== undefined) return;
   frame.relation = attachment.relation;
-  const time = timeArgumentFromParts(
-    parts,
-    attachment.targetStart,
-    attachment.targetEnd,
-    sourceText
-  );
+  const times = timeArgumentsFromParts(parts, attachment.targetStart, attachment.targetEnd,
+    sourceText, baseOffset, attachment.relation, attachment.targetEnd, options);
   const fallbackRole = relationHasGrammarFeature(attachment.relation, "activityFallback")
     ? AdviceArgumentRole.Activity
     : undefined;
-  pushArgument(
-    frame.args,
-    time ?? argumentFromParts(
-      parts,
-      attachment.targetStart,
-      attachment.targetEnd,
-      sourceText,
-      fallbackRole,
-      options
-    )
-  );
+  if (times) for (const time of times) pushArgument(frame.args, time);
+  else pushArgument(frame.args, argumentFromParts(parts, attachment.targetStart,
+    attachment.targetEnd, sourceText, fallbackRole, options));
   const first = parts[attachment.relationIndex];
   if (!first) return;
   frame.span.start = baseOffset + first.sourceStart;
@@ -1975,7 +2427,7 @@ function actionTailStartsPhrase(parts: Lexeme[], index: number, phrases: Readonl
 
 function actionHasLocalRelationBefore(parts: Lexeme[], actionStart: number, index: number): boolean {
   for (let cursor = actionStart + 1; cursor < index; cursor += 1) {
-    if (Boolean(resolveActionRelationSurface(key(parts[cursor])))) return true;
+    if (Boolean(actionArgumentRelation(key(parts[cursor])))) return true;
   }
   return false;
 }
@@ -2060,6 +2512,11 @@ function actionTailIsRegimenModifier(
   const localAmountUnit = definition?.acceptsAmount && previousValue
     ? instructionQuantityUnitAt(parts, index, parts.length, options)
     : undefined;
+  // The complete typed maximum is a regimen adjunct after the preparation.
+  // A comparator without a period still belongs to its own amount/material.
+  if (!negatedAction && definition?.definesDose && previous &&
+      /^[,;:]$/u.test(previous.original.trim()) &&
+      maximumDosePerPeriodAt({ tokens: parts, options }, index)) return true;
   const timing = !localAmountUnit && Boolean(
     TIMING_ABBREVIATIONS[token] ||
     WORD_FREQUENCIES[token] ||
@@ -2086,6 +2543,13 @@ function actionTailIsRegimenModifier(
   // not license this boundary.
   for (let cursor = actionStart + 1; cursor < index - 1; cursor += 1) {
     const relation = resolveActionRelationSurface(key(parts[cursor]));
+    // A complete clock daughter also ends before a separate regimen cadence.
+    // Reuse the shared clock reader within this existing local-valence walk.
+    if (!negatedAction && relationHasGrammarFeature(relation, "timeComplement") &&
+        index - cursor <= 3) {
+      const clock = parseClockToken(parts[cursor + 1], cursor + 2 < index ? parts[cursor + 2] : undefined);
+      if (clock && clock.tokens.length === index - cursor - 1) return true;
+    }
     if (!relationHasGrammarFeature(relation, "accompanimentComplement")) continue;
     const complement = argumentFromParts(parts, cursor + 1, index, input, undefined, options);
     if (complement?.role === AdviceArgumentRole.Substance && complement.conceptId) {
@@ -2154,7 +2618,8 @@ function withinActionDirectiveScope(
     const end = baseOffset + part.sourceEnd;
     if (start < previousEnd || end > currentStart) continue;
     const surface = part.original.trim();
-    if (/^[;.!?:]$/u.test(surface) || ACTION_SEQUENCE_MARKERS.has(key(part))) return false;
+    if (/^[;.!?:]$/u.test(surface) || ACTION_SEQUENCE_MARKERS.has(key(part)) ||
+        relationHasGrammarFeature(resolveActionRelationSurface(key(part)), "conditionalTail")) return false;
   }
   return true;
 }
@@ -2195,6 +2660,10 @@ export function parseInstructionActions(
     const startingMatch = prefixed?.match ?? actionMatchAt(parts, actionStart, options);
     let end = parts.length;
     for (let index = actionStart + (startingMatch?.length ?? 1); index < parts.length; index += 1) {
+      if (/^[;.!?]$/u.test(parts[index].lower)) {
+        end = index;
+        break;
+      }
       const currentKey = key(parts.slice(index, index + 1)[0]);
       if (actionTailIsRegimenModifier(
         parts, actionStart, index, startingMatch?.definition, sourceText, options, negative
@@ -2219,6 +2688,7 @@ export function parseInstructionActions(
       }
       if (
         ACTION_DIRECTIVE_BOUNDARIES.has(currentKey) &&
+        ACTION_DIRECTIVE_BOUNDARY_PREFIXES.some(prefix => directivePrefixMatches(parts, index, prefix)) &&
         !prefixedActionAt(parts, index, options) &&
         !actionMatchAt(parts, index, options) &&
         !resultativeLeadAt(parts, index, options)
@@ -2335,12 +2805,21 @@ interface SemanticSourceSpan extends TextRange {
   kind: SemanticSourceKind;
 }
 
-function frameActionDefinition(
+export function frameActionDefinition(
   frame: AdviceFrame,
   options?: ParseOptions
 ): ActionDefinition | undefined {
-  return resolveMedicationInstructionAction(frame.predicate.lemma, options) ??
-    getMedicationInstructionAction(frame.predicate.lemma);
+  const definition = getMedicationInstructionAction(frame.predicate.lemma, options);
+  if (!options?.instructionActionMap) return definition;
+  // A stored code can collide with a different configured lexical surface.
+  // The frame's selected wording distinguishes definitions sharing that code.
+  const named = frame.predicate.display
+    ? resolveMedicationInstructionAction(frame.predicate.display, options) : undefined;
+  if (named?.code === frame.predicate.lemma) return named;
+  const selected = resolveMedicationInstructionActionForMethod({
+    text: frame.predicate.display, coding: frame.predicate.codings?.[0]
+  }, options);
+  return selected?.code === frame.predicate.lemma ? selected : definition;
 }
 
 /** A water-consumption counseling frame with a typed fluid substance is
@@ -2397,12 +2876,12 @@ function frameIsSecondaryAdministration(
  * graphical administration merely because its local manner is rich.
  * Compare typed argument roles and source ownership, never rendered text.
  */
-function mannerAlreadyOwnedByCodedAdvice(
+function codedAdviceOwningManner(
   frame: AdviceFrame,
   clause: CanonicalSigClause
-): boolean {
-  if (!frame.args.some((arg) => arg.role === AdviceArgumentRole.Manner)) return false;
-  const locallyCoded = clause.additionalInstructions?.some((instruction) =>
+): CanonicalAdditionalInstructionExpr | undefined {
+  if (!frame.args.some((arg) => arg.role === AdviceArgumentRole.Manner)) return undefined;
+  const locallyCoded = clause.additionalInstructions?.find((instruction) =>
     instruction.coding?.code && instruction.frames?.some((coded) =>
       coded.span.start >= frame.span.start &&
       coded.span.end <= frame.span.end &&
@@ -2413,16 +2892,17 @@ function mannerAlreadyOwnedByCodedAdvice(
       )
     )
   );
-  if (locallyCoded) return true;
+  if (locallyCoded) return locallyCoded;
   // A FHIR round-trip may reconstruct its standardized CodeableConcept
   // WITHOUT source spans or advice frames. The single existing structural
   // advice matcher proves whether the typed Manner itself entails that code.
   const matched = matchComposedAdviceCodings([frame]);
-  return matched.some((definition) =>
-    clause.additionalInstructions?.some((instruction) =>
-      codingEquivalent(instruction.coding, definition.coding)
-    )
-  );
+  for (const definition of matched) {
+    const owner = clause.additionalInstructions?.find((instruction) =>
+      codingEquivalent(instruction.coding, definition.coding));
+    if (owner) return owner;
+  }
+  return undefined;
 }
 
 function frameIsPrimaryAdministrationWithExtraMeaning(
@@ -2432,16 +2912,30 @@ function frameIsPrimaryAdministrationWithExtraMeaning(
 ): boolean {
   if (frame.polarity === AdvicePolarity.Negate || !clause.method) return false;
   const definition = frameActionDefinition(frame, options);
-  return Boolean(
-    definitionCanRepresentPrimaryAdministration(definition) &&
-    frameOverlapsPrimaryMethod(frame, clause) &&
-    (frame.modality !== undefined ||
-      actionAddsPrimaryObjectMeaning(frame, options) ||
-      // A clinical manner belongs to the SAME medication administration
-      // whose dose the HPSG chart already projected.
-      (frame.args.some((arg) => arg.role === AdviceArgumentRole.Manner) &&
-       !mannerAlreadyOwnedByCodedAdvice(frame, clause)))
-  );
+  if (!definitionCanRepresentPrimaryAdministration(definition) ||
+      !frameOverlapsPrimaryMethod(frame, clause)) return false;
+  if (frame.modality !== undefined || actionAddsPrimaryObjectMeaning(frame, options)) return true;
+  if (!frame.args.some((arg) => arg.role === AdviceArgumentRole.Manner)) return false;
+  const owner = codedAdviceOwningManner(frame, clause);
+  if (!owner) return true;
+  // The coded adjunct owns this selected Manner even when its redundant
+  // primary action is omitted. Carry only the argument's exact source,
+  // never the surrounding administration or an inter-action gap.
+  const spans: CanonicalSourceSpan[] = [];
+  for (const arg of frame.args) {
+    if (arg.role !== AdviceArgumentRole.Manner || !arg.span ||
+        owner.evidence?.some(evidence => evidence.spans.some(span =>
+          span.start <= arg.span!.start && arg.span!.end <= span.end))) continue;
+    spans.push({ ...arg.span, text: arg.text });
+  }
+  if (spans.length) {
+    const index = clause.additionalInstructions!.indexOf(owner);
+    clause.additionalInstructions![index] = { ...owner, evidence: [
+      ...(owner.evidence ?? []),
+      { rule: "instruction-graph.coded-manner", lexicalCategory: "instruction", spans }
+    ] };
+  }
+  return false;
 }
 
 
@@ -2589,7 +3083,7 @@ function doseSourceRange(clause: CanonicalSigClause): TextRange | undefined {
 function amountText(dose: CanonicalDoseExpr, source: string): string {
   if (source.trim()) return source.trim();
   if (dose.range) return `${dose.range.low ?? ""}-${dose.range.high ?? ""} ${dose.unit ?? ""}`.trim();
-  return `${dose.value ?? ""} ${dose.unit ?? ""}`.trim();
+  return `${dose.comparator ?? ""}${dose.value ?? ""} ${dose.unit ?? ""}`.trim();
 }
 
 function attachDoseToNearestAction(
@@ -2622,7 +3116,8 @@ function attachDoseToNearestAction(
     quantity: {
       value: clause.dose.value,
       range: clause.dose.range ? { ...clause.dose.range } : undefined,
-      unit: clause.dose.unit
+      unit: clause.dose.unit,
+      ...(clause.dose.comparator ? { comparator: clause.dose.comparator } : {})
     },
     span: range
   });
@@ -2630,7 +3125,7 @@ function attachDoseToNearestAction(
   best.sourceText = input.slice(best.span.start, best.span.end);
 }
 
-function relationFromSourceText(text: string): AdviceRelation | undefined {
+export function relationFromSourceText(text: string): AdviceRelation | undefined {
   const keys = lexInput(text).map((token) => key(token)).filter(Boolean);
   for (const candidate of keys) {
     const relation = resolveActionRelationSurfaceByGrammarFeature(candidate, "detectInActionGap");
@@ -2645,7 +3140,8 @@ function relationFromSourceText(text: string): AdviceRelation | undefined {
 function buildInstructionRelations(
   input: string,
   actions: AdviceFrame[],
-  opaqueSpans: CanonicalSourceSpan[]
+  opaqueSpans: CanonicalSourceSpan[],
+  primary?: CanonicalInstructionGraph["primaryAdministrationSpan"]
 ): CanonicalInstructionRelation[] {
   const relations: CanonicalInstructionRelation[] = [];
   for (let index = 1; index < actions.length; index += 1) {
@@ -2653,17 +3149,21 @@ function buildInstructionRelations(
     const current = actions[index];
     const gapStart = previous.span.end;
     const gapEnd = current.span.start;
+    // An omitted canonical administration is still an intervening semantic
+    // node; a connector across it cannot directly relate these two actions.
+    if (primary && gapStart < primary.end && primary.start < gapEnd) continue;
     const source = gapEnd > gapStart ? input.slice(gapStart, gapEnd) : "";
     const trimmed = source.trim();
     const explicitRelation = relationFromSourceText(source);
     const onlyStructuralGap = !trimmed || /^[,;:.()\-]+$/.test(trimmed);
     if (!explicitRelation && !onlyStructuralGap) continue;
     // Whitespace/punctuation can license an implicit procedural sequence, but it
-    // must not turn a following safety statement into a temporal "then".
+    // must not turn either independent safety statement into a temporal "then".
     // Warnings/cautions need an explicit sequence marker to acquire that edge.
     if (
       !explicitRelation &&
-      (current.force === AdviceForce.Warning || current.force === AdviceForce.Caution)
+      (current.force === AdviceForce.Warning || current.force === AdviceForce.Caution ||
+        previous.force === AdviceForce.Warning || previous.force === AdviceForce.Caution)
     ) continue;
     const directEventLink = explicitRelation && relationHasSemanticClass(explicitRelation, "temporal") &&
       resolveActionRelationSurface(trimmed.replace(/^[,;:.()\-\s]+|[,;:.()\-\s]+$/gu, "")) === explicitRelation;
@@ -2745,7 +3245,7 @@ function mergedSpanLength(spans: TextRange[]): number {
   return total + end - start;
 }
 
-function buildInstructionCoverage(
+export function buildInstructionCoverage(
   actions: AdviceFrame[],
   relations: CanonicalInstructionRelation[],
   opaqueSpans: CanonicalSourceSpan[]
@@ -2778,6 +3278,14 @@ function actionSemanticScore(frame: AdviceFrame): number {
   return score;
 }
 
+function sameArgumentQuantity(left: AdviceArgument, right: AdviceArgument): boolean {
+  return left.quantity?.value === right.quantity?.value &&
+    left.quantity?.unit === right.quantity?.unit &&
+    left.quantity?.comparator === right.quantity?.comparator &&
+    left.quantity?.range?.low === right.quantity?.range?.low &&
+    left.quantity?.range?.high === right.quantity?.range?.high;
+}
+
 function sourceBackedTimeExtension(
   existing: AdviceFrame,
   candidate: AdviceFrame
@@ -2800,10 +3308,7 @@ function sourceBackedTimeExtension(
     return candidate.args.some((next) =>
       next.role === arg.role &&
       normalizedInstructionSurface(next.text ?? next.normalized ?? "") === surface &&
-      next.quantity?.value === arg.quantity?.value &&
-      next.quantity?.unit === arg.quantity?.unit &&
-      next.quantity?.range?.low === arg.quantity?.range?.low &&
-      next.quantity?.range?.high === arg.quantity?.range?.high
+      sameArgumentQuantity(next, arg)
     );
   });
 }
@@ -2921,7 +3426,8 @@ function actionDominatedByCanonicalMethod(
 
 function pushActionIfUnique(
   target: AdviceFrame[],
-  frame: AdviceFrame
+  frame: AdviceFrame,
+  appendIfNew = true
 ): boolean {
   const existingIndex = target.findIndex((candidate) =>
     candidate.predicate.lemma === frame.predicate.lemma &&
@@ -2930,6 +3436,25 @@ function pushActionIfUnique(
   );
   if (existingIndex >= 0) {
     const existing = target[existingIndex];
+    // A selected modal head owns the complete action occurrence, including
+    // the qualifier before a richer lexical action recovered inside it.
+    const modal = frame.polarity !== existing.polarity ? undefined :
+      frame.modality !== undefined && existing.modality === undefined &&
+        frame.span.start <= existing.span.start && existing.span.end <= frame.span.end ? frame :
+      existing.modality !== undefined && frame.modality === undefined &&
+        existing.span.start <= frame.span.start && frame.span.end <= existing.span.end ? existing : undefined;
+    if (modal) {
+      const semantic = actionSemanticScore(frame) > actionSemanticScore(existing) ? frame : existing;
+      target[existingIndex] = { ...semantic, force: modal.force, modality: modal.modality,
+        span: modal.span, sourceText: modal.sourceText };
+      return false;
+    }
+    // A selected temporal daughter can extend or refine the recovered
+    // action. Other preliminary instruction frames keep their existing owner.
+    if (!appendIfNew && !frame.args.some(argument => argument.role === AdviceArgumentRole.Time &&
+        argument.span && !existing.args.some(prior => prior.role === AdviceArgumentRole.Time &&
+          prior.span?.start === argument.span!.start && prior.span?.end === argument.span!.end &&
+          prior.relation === argument.relation))) return false;
     // Source-local fragments can omit an earlier coordinated negator.
     // When a complete composed action owns the very same source range,
     // its explicit or inherited polarity wins over an unscoped fragment.
@@ -2949,6 +3474,7 @@ function pushActionIfUnique(
     ) target[existingIndex] = frame;
     return false;
   }
+  if (!appendIfNew) return false;
   target.push(frame);
   return true;
 }
@@ -2962,31 +3488,38 @@ function proceduralFramesFromSpan(
     .filter((frame) => frameIsProcedural(frame, options));
 }
 
+function uncoveredSourceRanges(range: TextRange, covered: readonly TextRange[]): TextRange[] {
+  let fragments: TextRange[] = [range];
+  for (const span of covered) {
+    const next: TextRange[] = [];
+    for (const fragment of fragments) {
+      if (span.end <= fragment.start || span.start >= fragment.end) {
+        next.push(fragment);
+        continue;
+      }
+      if (span.start > fragment.start) next.push({ start: fragment.start, end: span.start });
+      if (span.end < fragment.end) next.push({ start: span.end, end: fragment.end });
+    }
+    fragments = next;
+    if (!fragments.length) break;
+  }
+  return fragments;
+}
+
 function reconcileOpaqueWithActionCoverage(
   input: string,
   opaqueSpans: CanonicalSourceSpan[],
-  actions: AdviceFrame[]
+  actions: AdviceFrame[],
+  instructions: readonly CanonicalAdditionalInstructionExpr[] | undefined
 ): CanonicalSourceSpan[] {
   const result: CanonicalSourceSpan[] = [];
+  if (!opaqueSpans.length) return result;
+  const understood = actions.map(action => action.span);
+  for (const instruction of instructions ?? []) {
+    for (const evidence of instruction.evidence ?? []) understood.push(...evidence.spans);
+  }
   for (const opaque of opaqueSpans) {
-    let fragments: TextRange[] = [{ start: opaque.start, end: opaque.end }];
-    for (const action of actions) {
-      const next: TextRange[] = [];
-      for (const fragment of fragments) {
-        if (action.span.end <= fragment.start || action.span.start >= fragment.end) {
-          next.push(fragment);
-          continue;
-        }
-        if (action.span.start > fragment.start) {
-          next.push({ start: fragment.start, end: action.span.start });
-        }
-        if (action.span.end < fragment.end) {
-          next.push({ start: action.span.end, end: fragment.end });
-        }
-      }
-      fragments = next;
-      if (!fragments.length) break;
-    }
+    const fragments = uncoveredSourceRanges(opaque, understood);
     for (const fragment of fragments) {
       const trimmed = trimOpaqueSpan(input, fragment.start, fragment.end);
       if (trimmed) pushOpaqueSpan(result, trimmed);
@@ -3003,8 +3536,8 @@ function conditionRelationsFromHpsgScopes(
 ): CanonicalInstructionRelation[] {
   const result: CanonicalInstructionRelation[] = [];
   for (const scope of clause.instructionScopes ?? []) {
-    const target = actions.findIndex(action => scope.target.start <= action.span.start &&
-      action.span.end <= scope.target.end);
+    const target = actions.findIndex(action =>
+      action.span.start >= scope.target.start && action.span.end <= scope.target.end);
     if (target < 0) continue;
     result.push({
       kind: scope.kind,
@@ -3019,7 +3552,7 @@ function conditionRelationsFromHpsgScopes(
 export function refreshInstructionGraphDerivedState(
   graph: CanonicalInstructionGraph
 ): void {
-  const previousActions = graph.relations?.length ? graph.actions.slice() : undefined;
+  const previousActions = graph.relations?.length || graph.primaryOwnership ? graph.actions.slice() : undefined;
   graph.actions.sort((left, right) =>
     left.span.start - right.span.start || left.span.end - right.span.end
   );
@@ -3028,6 +3561,14 @@ export function refreshInstructionGraphDerivedState(
   }
   if (previousActions) {
     const indices = new Map(graph.actions.map((action, index) => [action, index] as const));
+    const ownership = graph.primaryOwnership;
+    if (ownership?.administrationActionIndex !== undefined)
+      ownership.administrationActionIndex = indices.get(previousActions[ownership.administrationActionIndex]);
+    if (ownership?.dose) {
+      const actionIndex = indices.get(previousActions[ownership.dose.actionIndex]);
+      if (actionIndex !== undefined) ownership.dose.actionIndex = actionIndex;
+      else delete ownership.dose;
+    }
     for (const relation of graph.relations ?? []) {
       const target = indices.get(previousActions[relation.toActionIndex]);
       if (target !== undefined) relation.toActionIndex = target;
@@ -3040,7 +3581,7 @@ export function refreshInstructionGraphDerivedState(
   const opaqueSpans = graph.opaqueSpans ?? [];
   opaqueSpans.sort((left, right) => left.start - right.start || left.end - right.end);
   graph.opaqueSpans = opaqueSpans.length ? opaqueSpans : undefined;
-  const derived = buildInstructionRelations(graph.sourceText, graph.actions, opaqueSpans);
+  const derived = buildInstructionRelations(graph.sourceText, graph.actions, opaqueSpans, graph.primaryAdministrationSpan);
   const preserved = (graph.relations ?? []).filter((relation) =>
     relationHasGrammarFeature(relation.kind, "conditionScope") && relation.fromActionIndex === undefined
   );
@@ -3079,23 +3620,24 @@ function promoteDoseFromDefiningAction(
   options?: ParseOptions
 ): void {
   if (clause.dose?.value !== undefined || clause.dose?.range) return;
-  const candidates = actions
-    .filter((action) => resolveMedicationInstructionAction(action.predicate.lemma, options)?.definesDose)
-    .map((action) => action.args.find((arg) => arg.role === AdviceArgumentRole.Amount && arg.quantity)?.quantity)
-    .filter((quantity): quantity is NonNullable<AdviceArgument["quantity"]> => Boolean(quantity));
-  if (!candidates.length) return;
-  const first = candidates[0];
-  const same = candidates.every((candidate) =>
-    candidate.value === first.value &&
-    candidate.unit === first.unit &&
-    candidate.range?.low === first.range?.low &&
-    candidate.range?.high === first.range?.high
-  );
-  if (!same) return;
+  let first: AdviceArgument["quantity"];
+  for (const action of actions) {
+    if (action.polarity === AdvicePolarity.Negate ||
+        !frameActionDefinition(action, options)?.definesDose) continue;
+    const quantity = action.args.find(arg =>
+      arg.role === AdviceArgumentRole.Amount && arg.quantity)?.quantity;
+    if (!quantity) continue;
+    if (!first) first = quantity;
+    else if (quantity.value !== first.value || quantity.unit !== first.unit ||
+        quantity.comparator !== first.comparator ||
+        quantity.range?.low !== first.range?.low || quantity.range?.high !== first.range?.high) return;
+  }
+  if (!first) return;
   clause.dose = {
     value: first.value,
     range: first.range ? { ...first.range } : undefined,
-    unit: first.unit
+    unit: first.unit,
+    ...(first.comparator ? { comparator: first.comparator } : {})
   };
 }
 
@@ -3103,10 +3645,19 @@ function canonicalPrimaryAdministrationSpan(
   clause: CanonicalSigClause,
   frames: readonly AdviceFrame[]
 ): TextRange | undefined {
-  const semantic = frames
-    .filter((frame) => frame.polarity !== AdvicePolarity.Negate && actionMatchesCanonicalMethod(frame, clause))
-    .slice()
-    .sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end)[0];
+  let methodSpan: TextRange | undefined;
+  let methodSpanCount = 0;
+  for (const evidence of clause.evidence) if (evidence.lexicalCategory === "method") {
+    for (const span of evidence.spans) { methodSpan = span; methodSpanCount++; }
+  }
+  let semantic: AdviceFrame | undefined;
+  for (const frame of frames) {
+    if (frame.polarity === AdvicePolarity.Negate || !actionMatchesCanonicalMethod(frame, clause) ||
+        methodSpanCount === 1 && methodSpan &&
+        !(frame.span.start <= methodSpan.start && methodSpan.end <= frame.span.end)) continue;
+    if (!semantic || frame.span.start < semantic.span.start ||
+        frame.span.start === semantic.span.start && frame.span.end < semantic.span.end) semantic = frame;
+  }
   if (semantic) {
     let best: TextRange | undefined;
     for (const evidence of clause.evidence) {
@@ -3131,6 +3682,45 @@ function canonicalPrimaryAdministrationSpan(
   return undefined;
 }
 
+/** Record the owner after HPSG/action promotion established the live dose. */
+function doseDefiningPrimarySpan(
+  clause: CanonicalSigClause,
+  frames: readonly AdviceFrame[],
+  options?: Pick<ParseOptions, "instructionActionMap">
+): TextRange | undefined {
+  // A standalone dose-defining preparation can supply the HPSG dose without
+  // a method head. Record that existing owner while the live dose proves
+  // the relationship; imported spanless graphs must not infer a deletion.
+  if (!clause.dose) return undefined;
+  let doseOwner: AdviceFrame | undefined;
+  for (const frame of frames) {
+    if (frame.polarity === AdvicePolarity.Negate ||
+        !frameActionDefinition(frame, options)?.definesDose ||
+        !frame.args.some(arg => arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, clause.dose))) continue;
+    if (doseOwner) return undefined;
+    doseOwner = frame;
+  }
+  return doseOwner ? { start: doseOwner.span.start, end: doseOwner.span.end } : undefined;
+}
+
+/** The current indexed condition is part of coding evidence, while the original
+ * action objects and source spans remain untouched for graph projection. */
+function scopeAdviceCodingFrames(
+  frames: readonly AdviceFrame[],
+  relations: readonly CanonicalInstructionRelation[]
+): readonly AdviceFrame[] {
+  if (!relations.length) return frames;
+  const scoped = frames.slice();
+  for (const relation of relations) {
+    const frame = scoped[relation.toActionIndex];
+    const body = conditionRelationBody(relation.text ?? "", relation.kind);
+    scoped[relation.toActionIndex] = { ...frame, relation: relation.kind,
+      args: body ? [...frame.args, { role: AdviceArgumentRole.Free, text: body,
+        relation: relation.kind, span: relation.span }] : frame.args };
+  }
+  return scoped;
+}
+
 /**
  * HPSG-composed instruction meaning is the source of truth for structurally
  * scoped advice coding. Preliminary phrase-level coding can carry an
@@ -3139,10 +3729,17 @@ function canonicalPrimaryAdministrationSpan(
  */
 function reconcileComposedAdviceCoding(
   clause: CanonicalSigClause,
-  actionProgram: readonly AdviceFrame[]
+  actionProgram: AdviceFrame[],
+  input: string,
+  sourceLocale: string
 ): void {
   if (!actionProgram.length) return;
-  const proven = matchComposedAdviceCodings(actionProgram);
+  const relations = clause.instructionScopes?.length
+    ? conditionRelationsFromHpsgScopes(clause, input, actionProgram) : undefined;
+  const codingProgram = scopeAdviceCodingFrames(actionProgram, relations ?? []);
+  const scopedGraph: CanonicalInstructionGraph | undefined = relations?.length
+    ? { actions: actionProgram, relations, sourceText: input, sourceLocale } : undefined;
+  const proven = matchComposedAdviceCodings(codingProgram);
   const provenCodes = new Set(proven.map((definition) =>
     `${definition.coding?.system ?? SNOMED_SYSTEM}|${definition.coding?.code ?? ""}`
   ));
@@ -3166,10 +3763,72 @@ function reconcileComposedAdviceCoding(
     );
     if (supersededLocalParaphrase) return undefined;
     if (!coding?.code || !adviceCodingNeedsComposedScope(coding.system ?? SNOMED_SYSTEM, coding.code)) {
-      return instruction;
+      // The selected indexed action head and valence refine provisional advice
+      // frames here, before native projection. Imported current rows never run
+      // this composition step; their supplied facts retain their own authority.
+      let selected = instruction;
+      if (instruction.frames?.length) {
+        const frames: AdviceFrame[] = [];
+        for (const frame of instruction.frames) {
+          const semantic = actionProgram.find(candidate => {
+            if (candidate === frame) return true;
+            if (frame.modality !== undefined && candidate.predicate.lemma === frame.predicate.lemma &&
+                candidate.polarity === frame.polarity && candidate.modality === frame.modality &&
+                candidate.span.start === frame.span.start && candidate.span.end === frame.span.end)
+              return preservesAdviceFrameFacts(frame, candidate);
+            if (coding?.code || frame.predicate.display !== undefined || frame.predicate.realizer !== undefined ||
+                frame.predicate.realizerConfig !== undefined || frame.predicate.codings?.length ||
+                frame.predicate.i18n || frame.predicate.semanticComponents?.length ||
+                frame.span.end > candidate.span.end ||
+                !preservesAdviceFrameFacts(frame, candidate)) return false;
+            let selectedStart = frame.span.start;
+            if (candidate.span.start > selectedStart) {
+              const prefix = frame.sourceText.slice(0, candidate.span.start - selectedStart);
+              const consumed = leadingStructuralConnectorLength(prefix);
+              if (!consumed || prefix.slice(consumed).trim()) return false;
+              selectedStart = candidate.span.start;
+            }
+            const definition = frameActionDefinition(candidate);
+            if (!definition || !candidate.predicate.display) return false;
+            // A longer indexed head can supersede the legacy short predicate,
+            // but only the unique selected canonical occurrence may refine it.
+            if (actionProgram.some(other => other !== candidate && other.predicate.display &&
+                other.span.start <= selectedStart && frame.span.end <= other.span.end &&
+                other.predicate.semanticClass === frame.predicate.semanticClass &&
+                other.polarity === frame.polarity && (frame.modality === undefined || other.modality === frame.modality))) return false;
+            // The selected valence may divide a provisional nominal into Site,
+            // Material and Time; the shared fact owner has preserved its typed facts.
+            return true;
+          }) ?? frame;
+          if (frames.indexOf(semantic) < 0) frames.push(semantic);
+        }
+        if (frames.length !== instruction.frames.length || frames.some((frame, index) => frame !== instruction.frames![index])) {
+          selected = { ...instruction, frames };
+          const previous = instruction.frames.length === 1 ? instruction.frames[0] : undefined;
+          const refined = frames.length === 1 ? frames[0] : undefined;
+          if (previous && refined && previous.modality === undefined && refined.modality !== undefined &&
+              refined.span.start <= previous.span.start && previous.span.end <= refined.span.end) {
+            // The same selected native directive that supplies the newly owned
+            // modality also supplies its complete standard-field wording.
+            const source = refined.sourceText.trim();
+            if (source) selected.text = source.charAt(0).toUpperCase() + source.slice(1);
+          }
+        }
+      }
+      if (!coding?.code && selected.frames?.length) {
+        const definitions = matchComposedAdviceCodings(relations?.length
+          ? scopeAdviceCodingFrames(selected.frames, conditionRelationsFromHpsgScopes(clause, input, selected.frames))
+          : selected.frames);
+        const definition = definitions.length === 1 ? definitions[0] : undefined;
+        if (definition?.coding?.code) return {
+          ...selected,
+          text: definition.text ?? selected.text,
+          i18n: definition.i18n ? { ...selected.i18n, ...definition.i18n } : selected.i18n,
+          coding: { ...definition.coding, i18n: definition.i18n ? { ...definition.i18n } : undefined }
+        };
+      }
+      return selected;
     }
-    if (provenCodes.has(`${coding.system ?? SNOMED_SYSTEM}|${coding.code}`)) return instruction;
-
     // Preserve source and the correctly scoped predicate rather than retaining
     // the preliminary parser's misleading positive-coded paraphrase.
     const semantic = actionProgram.find((frame) =>
@@ -3179,16 +3838,32 @@ function reconcileComposedAdviceCoding(
         frame.predicate.lemma === candidate.predicate.lemma
       )
     );
+    const codingSemantic = semantic && codingProgram[actionProgram.indexOf(semantic)];
+    if (provenCodes.has(`${coding.system ?? SNOMED_SYSTEM}|${coding.code}`) &&
+        (!semantic || codingSemantic === semantic ||
+          composedCodedAdviceActions(codingProgram, coding).indexOf(codingSemantic!) >= 0)) return instruction;
     // A locally parsed clinical qualifier may have a complete typed
     // AdviceFrame even when it is NOT a standalone procedural graph action
     // (slowly, empty-stomach, drowsiness). Absence from the procedural graph
     // is not evidence that its original, structurally parsed coding was false.
     // Only a real overlapping composed action can supersede that candidate.
     if (!semantic) return instruction;
+    // An opaque nominal in a larger action cannot disprove the same local
+    // constituent's typed lexical coding. Only a changed/scoped meaning may
+    // replace it with the whole action and its independent medication amount.
+    const retainsTypedNominal = instruction.frames?.some(provisional => {
+      const argument = provisional.args.length === 1 ? provisional.args[0] : undefined;
+      return argument?.conceptId && argument.normalized && provisional.polarity === semantic.polarity &&
+        provisional.modality === semantic.modality && provisional.relation === codingSemantic!.relation &&
+        semantic.span.start <= provisional.span.start && provisional.span.end <= semantic.span.end &&
+        semantic.args.some(candidate => candidate.role === AdviceArgumentRole.Object &&
+          !candidate.conceptId && candidate.normalized === argument.normalized);
+    });
+    if (retainsTypedNominal) return instruction;
     return {
       ...instruction,
-      text: realizeInstructionAction(semantic, "en"),
-      i18n: { ...(instruction.i18n ?? {}), th: realizeInstructionAction(semantic, "th") },
+      text: realizeInstructionAction(semantic, "en", scopedGraph),
+      i18n: { ...(instruction.i18n ?? {}), th: realizeInstructionAction(semantic, "th", scopedGraph) },
       coding: undefined,
       frames: [semantic]
     };
@@ -3221,13 +3896,23 @@ export function buildInstructionGraph(
   input: string,
   clause: CanonicalSigClause,
   options?: ParseOptions,
-  semanticOwnershipRanges?: readonly TextRange[]
+  semanticOwnershipRanges?: readonly TextRange[],
+  proceduralFrames?: readonly AdviceFrame[]
 ): CanonicalInstructionGraph | undefined {
+  // Finalization owns the fields it extends and reorders; HPSG retains its frames.
+  const fullInputFrames = proceduralFrames
+    ? proceduralFrames.map(frame => ({ ...frame, args: frame.args.slice(), span: { ...frame.span } }))
+    : parseInstructionActions(input, 0, options);
+  for (const instruction of clause.additionalInstructions ?? []) {
+    for (const frame of instruction.frames ?? []) {
+      pushActionIfUnique(fullInputFrames, { ...frame, args: frame.args.slice(), span: { ...frame.span } }, false);
+    }
+  }
   const actions: AdviceFrame[] = [];
   const opaqueSpans: CanonicalSourceSpan[] = [];
-  const fullInputFrames = parseInstructionActions(input, 0, options);
-  reconcileComposedAdviceCoding(clause, fullInputFrames);
-  const primaryAdministrationSpan = canonicalPrimaryAdministrationSpan(clause, fullInputFrames);
+  const sourceLocale = baseLanguageTag(options?.locale) ?? inferMedicationLocale(input, "en");
+  reconcileComposedAdviceCoding(clause, fullInputFrames, input, sourceLocale);
+  let primaryAdministrationSpan = canonicalPrimaryAdministrationSpan(clause, fullInputFrames);
   // A source noun between the typed administration head and its matching
   // amount belongs to that primary action's object slot. It is still retained
   // verbatim by clause.rawText and graph.sourceText, but must not be promoted
@@ -3260,7 +3945,7 @@ export function buildInstructionGraph(
     };
   })();
   const temporalEndpoints = new Set<AdviceFrame>();
-  for (const relation of buildInstructionRelations(input, fullInputFrames, [])) {
+  for (const relation of buildInstructionRelations(input, fullInputFrames, [], primaryAdministrationSpan)) {
     if (relation.fromActionIndex === undefined || !relationHasSemanticClass(relation.kind, "temporal")) continue;
     temporalEndpoints.add(fullInputFrames[relation.fromActionIndex]);
     temporalEndpoints.add(fullInputFrames[relation.toActionIndex]);
@@ -3272,10 +3957,23 @@ export function buildInstructionGraph(
     }
     return false;
   };
+  // Fragment recovery can begin inside a selected action's negator or modal.
+  // The unique containing whole-input action already owns that source scope.
+  const selectedSourceAction = (fragment: AdviceFrame): AdviceFrame => {
+    let selected: AdviceFrame | undefined;
+    for (const candidate of fullInputFrames) {
+      if (candidate.predicate.lemma !== fragment.predicate.lemma ||
+          candidate.span.start > fragment.span.start || fragment.span.end > candidate.span.end) continue;
+      if (selected) return fragment;
+      selected = candidate;
+    }
+    return selected ?? fragment;
+  };
   for (const range of semanticSourceSpans(clause)) {
     const parsed = parseInstructionActions(input.slice(range.start, range.end), range.start, options);
     const accepted: AdviceFrame[] = [];
-    for (const frame of parsed) {
+    for (const recovered of parsed) {
+      const frame = selectedSourceAction(recovered);
       if (range.kind === "instruction" && !frameIsProcedural(frame, options)) {
         continue;
       }
@@ -3284,13 +3982,14 @@ export function buildInstructionGraph(
     for (const opaque of workflowOpaqueGaps(input, range, accepted)) {
       pushOpaqueSpan(opaqueSpans, opaque);
     }
-    if (
-      range.kind === "instruction" &&
-      accepted.length === 0 &&
-      actions.some((action) => action.span.start < range.end && range.start < action.span.end)
-    ) {
+    if (range.kind === "instruction" && accepted.length === 0) {
       const opaque = trimOpaqueSpan(input, range.start, range.end);
-      if (opaque) pushOpaqueSpan(opaqueSpans, opaque);
+      if (opaque && (
+        actions.some(action => action.span.start < range.end && range.start < action.span.end) ||
+        (clause.additionalInstructions ?? []).some(instruction =>
+          !instruction.coding?.code && !instruction.frames?.length &&
+          instruction.text?.trim().toLocaleLowerCase("en") === opaque.text.toLocaleLowerCase("en"))
+      )) pushOpaqueSpan(opaqueSpans, opaque);
     }
   }
   for (const span of clause.leftovers) {
@@ -3300,7 +3999,8 @@ export function buildInstructionGraph(
       continue;
     }
     const accepted: AdviceFrame[] = [];
-    for (const frame of proceduralFramesFromSpan(input, span, options)) {
+    for (const recovered of proceduralFramesFromSpan(input, span, options)) {
+      const frame = selectedSourceAction(recovered);
       if (pushActionIfUnique(actions, frame)) accepted.push(frame);
     }
     if (accepted.length) {
@@ -3330,6 +4030,14 @@ export function buildInstructionGraph(
     }
   }
   for (let index = actions.length - 1; index >= 0; index -= 1) {
+    // The closed HPSG antecedent owns its activities; only its separate
+    // consequent contributes commanded actions to the instruction graph.
+    if (clause.instructionScopes?.some(scope =>
+      scope.span.start <= actions[index].span.start && actions[index].span.end <= scope.span.end
+    )) {
+      actions.splice(index, 1);
+      continue;
+    }
     const definition = frameActionDefinition(actions[index], options);
     const participatesInProcedureSequence = Boolean(
       definition?.procedural &&
@@ -3363,6 +4071,7 @@ export function buildInstructionGraph(
   if (!actions.length && !opaqueSpans.length) return undefined;
   promoteDoseFromDefiningAction(clause, actions, options);
   attachDoseToNearestAction(actions, clause, input, options);
+  primaryAdministrationSpan ??= doseDefiningPrimarySpan(clause, actions, options);
   // HPSG evidence can own the entire ", but <instruction>" span while the
   // action frame correctly begins at the verb. Retain the closed-class
   // discourse daughter separately so graph realization does not turn
@@ -3381,44 +4090,149 @@ export function buildInstructionGraph(
       floor = Math.max(floor, action.span.end);
     }
   }
-  const reconciledOpaque = reconcileOpaqueWithActionCoverage(input, opaqueSpans, actions);
-  if (!clause.method && actions.length) {
-    const firstStart = Math.min(...actions.map((action) => action.span.start));
-    const lastEnd = Math.max(...actions.map((action) => action.span.end));
-    const exactProcedureText = input.slice(firstStart, lastEnd).trim();
-    if (exactProcedureText) clause.patientInstruction = exactProcedureText;
-  }
+  const reconciledOpaque = reconcileOpaqueWithActionCoverage(input, opaqueSpans, actions, clause.additionalInstructions);
   const graph: CanonicalInstructionGraph = {
     actions,
     primaryAdministrationSpan,
     opaqueSpans: reconciledOpaque.length ? reconciledOpaque : undefined,
     sourceText: input,
-    sourceLocale: baseLanguageTag(options?.locale) ?? inferMedicationLocale(input, "en")
+    sourceLocale
   };
   const hpsgConditionRelations = conditionRelationsFromHpsgScopes(clause, input, actions);
   graph.relations = hpsgConditionRelations.length ? hpsgConditionRelations : undefined;
   refreshInstructionGraphDerivedState(graph);
+  // Selected advice already owns its complete typed action occurrence. A
+  // separate patient-text projection is still needed for an unowned action
+  // or a related program; supplied patient instructions remain unchanged.
+  if (!clause.method && actions.some(action => !isInstructionGraphDisplayWarning(action) && (
+    graph.relations?.length || !(clause.additionalInstructions ?? []).some(instruction =>
+      instruction.frames?.some(frame => frame.span.start === action.span.start &&
+        frame.span.end === action.span.end && sameTypedWarning(frame, action)))
+  ))) {
+    let firstStart = Math.min(...actions.map((action) => action.span.start));
+    let lastEnd = Math.max(...actions.map((action) => action.span.end));
+    for (const opaque of reconciledOpaque) {
+      firstStart = Math.min(firstStart, opaque.start);
+      lastEnd = Math.max(lastEnd, opaque.end);
+    }
+    for (const relation of graph.relations ?? []) {
+      if (!relation.span) continue;
+      firstStart = Math.min(firstStart, relation.span.start);
+      lastEnd = Math.max(lastEnd, relation.span.end);
+    }
+    const exactProcedureText = input.slice(firstStart, lastEnd).trim();
+    if (exactProcedureText) clause.patientInstruction = exactProcedureText;
+  }
+  graph.primaryOwnership = inferPrimaryOwnership(graph, clause, options);
   return graph;
+}
+
+
+/** Select complete administration techniques from the already-composed clause
+ * and action program. Interchange only projects these selected codings. */
+export function instructionGraphAdministrationTechnique(
+  clause: CanonicalSigClause
+): { route?: FhirCodeableConcept; method?: FhirCodeableConcept } | undefined {
+  const graph = clause.instructionGraph;
+  const actions = graph?.actions;
+  if (!actions?.length) return undefined;
+  const unqualified = (action: AdviceFrame, index: number) =>
+    action.polarity !== AdvicePolarity.Negate && action.modality === undefined &&
+    !(action.relation && relationHasGrammarFeature(action.relation, "conditionScope")) &&
+    !graph?.relations?.some(relation => relation.toActionIndex === index &&
+      relationHasGrammarFeature(relation.kind, "conditionScope"));
+  const occlusiveTopical = clause.route?.code === "6064005" &&
+    clause.method?.coding?.code === "738991002" && actions.some((action, index) =>
+      action.predicate.lemma === "cover" && unqualified(action, index) &&
+      action.args.some(arg => arg.conceptId === "occlusive_dressing"));
+  if (occlusiveTopical) return {
+    route: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+      code: "OCDRESTA", display: "Occlusive dressing technique" }] },
+    method: { coding: [
+      { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+        code: "C38286", display: "Occlusive Dressing Technique" },
+      { system: SNOMED_SYSTEM, code: "447056002", display: "Occlusive dressing technique" }
+    ] }
+  };
+  // Preserve the existing ordered oral-rinse technique decision. A separately
+  // administered tablet or lotion does not acquire the rinse's route.
+  const swishIndex = actions.findIndex((action, index) =>
+    action.predicate.lemma === "swish" && unqualified(action, index));
+  const swishSpit = swishIndex >= 0 && !clause.route?.code && !clause.method?.coding?.code &&
+    !actions.some(action => action.predicate.lemma === "swallow" && action.polarity !== AdvicePolarity.Negate) &&
+    actions.some((action, index) => index > swishIndex && action.predicate.lemma === "spit" &&
+      unqualified(action, index));
+  const swishSwallow = swishIndex >= 0 && !swishSpit &&
+    clause.route?.code === "26643006" && clause.method?.coding?.code === "738995006" &&
+    clause.dose?.unit === "mL" &&
+    !actions.some(action => action.predicate.lemma === "spit" && action.polarity !== AdvicePolarity.Negate) &&
+    actions.some((action, index) => index > swishIndex && action.predicate.lemma === "swallow" &&
+      unqualified(action, index) && !action.args.some(arg =>
+        arg.conceptId === "medication-tablet" || arg.conceptId === "medication-capsule"));
+  if (!swishSpit && !swishSwallow) return undefined;
+  const techniqueCoding = {
+    system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+    code: swishSpit ? "SWISHSPIT" : "SWISHSWAL",
+    display: swishSpit ? "Swish and spit out, oromucosal" : "Swish and swallow, oromucosal"
+  };
+  return { route: { text: swishSpit ? "swish and spit, oromucosal" : techniqueCoding.display, coding: [
+    techniqueCoding,
+    { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+      code: swishSpit ? "C38302" : "C38303",
+      display: swishSpit ? "Swish and Spit Route of Administration" : "Swish and Swallow Route of Administration" }
+  ] } };
 }
 
 function translatedQuantity(
   quantity: NonNullable<AdviceArgument["quantity"]>,
   locale: string
 ): string {
-  const singular = quantity.value === 1 && !quantity.range;
+  // Amounts without any numeric bound remain editable facts, not an
+  // administration quantity. Realizers must fall back to source argument
+  // text, rather than producing 'at most mg' without a number.
+  if (quantity.value === undefined && quantity.range?.low === undefined &&
+      quantity.range?.high === undefined) return "";
+  const singular = quantity.range
+    ? quantity.range.low === undefined && quantity.range.high === 1 ||
+      quantity.range.high === undefined && quantity.range.low === 1
+    : quantity.value === 1;
   const labels = quantity.unit ? INSTRUCTION_QUANTITY_UNIT_LABELS.get(quantity.unit) : undefined;
   const localizedLabels = labels ? localizedConfig(labels.locales, locale, "en") : undefined;
   const unit = localizedLabels
     ? (singular ? localizedLabels.one : localizedLabels.other)
     : (quantity.unit ?? "");
+  const qualifier = quantityComparatorText(quantity.comparator, locale);
   if (quantity.range) {
-    return `${quantity.range.low ?? ""}-${quantity.range.high ?? ""} ${unit}`.trim();
+    const { low, high } = quantity.range;
+    if (low === undefined || high === undefined) {
+      const bound = quantityComparatorText(low === undefined ? "<=" : ">=", locale);
+      return `${qualifier}${bound}${low ?? high} ${unit}`.trim();
+    }
+    return `${qualifier}${low}-${high} ${unit}`.trim();
   }
-  return `${quantity.value ?? ""} ${unit}`.trim();
+  return `${qualifier}${quantity.value ?? ""} ${unit}`.trim();
 }
 
 function translatedArgument(arg: AdviceArgument, locale: string): string {
-  if (arg.quantity) return translatedQuantity(arg.quantity, locale);
+  // A comparator alone does not identify a numeric administration amount.
+  // Keep the original source argument for review instead of displaying
+  // a fabricated valueless "at most mg" quantity.
+  if (arg.quantity) {
+    if (arg.quantity.value !== undefined || arg.quantity.range?.low !== undefined ||
+        arg.quantity.range?.high !== undefined) {
+      const amount = translatedQuantity(arg.quantity, locale);
+      // A measured nominal keeps its entity; a bare quantity's normalized
+      // unit is already part of the amount realization.
+      const nominal = arg.normalized ?? localizedValue(arg.i18n, locale);
+      const entity = arg.role === AdviceArgumentRole.Destination || arg.role === AdviceArgumentRole.Substance ||
+        arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme ||
+        arg.role === AdviceArgumentRole.Material;
+      return entity && nominal && nominal !== arg.quantity.unit && !normalizeUnit(nominal)
+        ? joinLocalizedTokens(locale, [amount, translatedArgumentConcept(arg, locale)])
+        : amount;
+    }
+    return arg.text || arg.normalized || "";
+  }
   const looseQuantity = (arg.text ?? arg.normalized ?? "").trim().match(/^([0-9]+(?:\.[0-9]+)?)\s+(.+)$/u);
   if (looseQuantity) {
     const unit = normalizeUnit(looseQuantity[2]);
@@ -3475,32 +4289,93 @@ function hasUntranslatedThaiArgument(frame: AdviceFrame, locale: string): boolea
   });
 }
 
-function actionLabel(frame: AdviceFrame, locale: string, roundtripSafe = false): string {
-  const definition = getMedicationInstructionAction(frame.predicate.lemma);
-  return (roundtripSafe ? localizedValue(definition?.roundtripI18n, locale) : undefined) ??
-    localizedValue(frame.predicate.i18n, locale) ??
+function actionLabel(
+  frame: AdviceFrame, locale: string, definition: ActionDefinition | undefined, roundtripSafe = false
+): string {
+  const selectedLabel = localizedValue(frame.predicate.i18n, locale);
+  // Stock roundtrip wording may refine its normal label, but cannot replace
+  // a different translation already selected and retained in the frame.
+  return (roundtripSafe &&
+    (selectedLabel === undefined || selectedLabel === localizedValue(definition?.i18n, locale))
+    ? localizedValue(definition?.roundtripI18n, locale) : undefined) ??
+    selectedLabel ??
     localizedValue(definition?.i18n, locale) ??
     frame.predicate.display ??
     definition?.display ??
     frame.predicate.lemma;
 }
 
-type ActionRealizationContext = InstructionActionRealizationInput;
+type ActionRealizationContext = InstructionActionRealizationInput & { selectedTime?: AdviceArgument };
 
 type ActionRealizer = (context: ActionRealizationContext) => string;
-const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
-  const objectArgs = c.frame.args.filter((arg) =>
-    arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
-    arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance
-  );
-  const object = c.theme ?? c.site ?? c.substance;
-  const objectArg = objectArgs[0];
-  const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
-  const objectSource = normalizedInstructionSurface(objectArg?.text ?? "");
-  const amountSource = normalizedInstructionSurface(amountArg?.text ?? "");
-  const amount = objectSource && amountSource && objectSource.includes(amountSource)
-    ? undefined
-    : c.amount;
+function defaultActionArguments(frame: AdviceFrame) {
+  let explicitAccompaniment: AdviceArgument | undefined, unmarkedSubstances = 0;
+  let additionalAccompaniments: AdviceArgument[] | undefined;
+  for (const arg of frame.args) {
+    if (arg.role === AdviceArgumentRole.Substance && !arg.relation) unmarkedSubstances++;
+    if ((arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
+        arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance ||
+        arg.role === AdviceArgumentRole.Material || arg.role === AdviceArgumentRole.MealState) &&
+        relationHasSemanticClass(arg.relation, "accompaniment")) {
+      if (explicitAccompaniment) (additionalAccompaniments ??= []).push(arg);
+      else explicitAccompaniment = arg;
+    }
+  }
+  let objectArg: AdviceArgument | undefined;
+  let relationTargetArg = explicitAccompaniment;
+  let amountArg: AdviceArgument | undefined;
+  for (const arg of frame.args) {
+    if (arg.role === AdviceArgumentRole.Amount) amountArg ??= arg;
+    else if (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
+        arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance ||
+        arg.role === AdviceArgumentRole.MealState ||
+        arg.role === AdviceArgumentRole.Material && relationHasSemanticClass(arg.relation, "accompaniment")) {
+      // A WITH daughter remains an accompaniment when the medication object
+      // is implicit. A bare substance without that relation can be the object.
+      if (arg.role === AdviceArgumentRole.MealState &&
+            (relationHasGrammarFeature(arg.relation ?? frame.relation, "mealStateComplement") ||
+              relationHasSemanticClass(arg.relation ?? frame.relation, "temporal") ||
+              relationHasSemanticClass(arg.relation ?? frame.relation, "accompaniment")) ||
+          arg.relation && relationHasSemanticClass(arg.relation, "accompaniment") ||
+          !explicitAccompaniment && arg.role === AdviceArgumentRole.Substance &&
+            relationHasSemanticClass(frame.relation, "accompaniment") &&
+            (unmarkedSubstances < 2 || objectArg !== undefined))
+        relationTargetArg ??= arg;
+      else if (!objectArg || objectArg.role === AdviceArgumentRole.Site &&
+          relationHasSemanticClass(objectArg.relation ?? frame.relation, "locative") &&
+          (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object)) objectArg = arg;
+      else relationTargetArg ??= arg;
+    }
+  }
+  return { objectArg, relationTargetArg, amountArg, additionalAccompaniments };
+}
+
+function defaultActionAccompaniment(c: ActionRealizationContext, arg: AdviceArgument | undefined): string | undefined {
+  if (!arg) return undefined;
+  const relation = arg.relation ?? c.frame.relation;
+  const materialArgument = arg.role === AdviceArgumentRole.Substance ||
+    arg.role === AdviceArgumentRole.Material || arg.role === AdviceArgumentRole.MealState ||
+    // The explicit relation owns a nominal accompaniment independently of
+    // the medication object, including typed Object and Theme arguments.
+    ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme ||
+      arg.role === AdviceArgumentRole.Site) && relationHasSemanticClass(relation, "accompaniment"));
+  if (!materialArgument || !relation ||
+      !(relationHasSemanticClass(relation, "accompaniment") || relationHasSemanticClass(relation, "locative") ||
+        arg.role === AdviceArgumentRole.MealState && relationHasSemanticClass(relation, "temporal")))
+    return undefined;
+  const target = translatedArgument(arg, c.locale);
+  if (!target) return undefined;
+  const localized = localizeAdviceRelation(relation, c.locale, "complement") ?? relation;
+  return joinLocalizedTokens(c.locale, [localized, target]);
+}
+
+const DEFAULT_ACTION_REALIZER = (
+  c: ActionRealizationContext, selected = defaultActionArguments(c.frame)
+): string => {
+  const { objectArg, relationTargetArg, amountArg } = selected;
+  const object = !objectArg ? undefined : objectArg.role === AdviceArgumentRole.Site ? c.site
+    : objectArg.role === AdviceArgumentRole.Substance ? c.substance : c.theme;
+  const amount = c.amount;
   const profile = localeRealizationProfile(c.locale);
   const appendLocale = (base: string, value: string | undefined): string =>
     value ? `${base}${base ? profile.tokenSeparator : ""}${value}` : base;
@@ -3512,30 +4387,17 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
     return `${base}${base ? profile.quantitySeparator : ""}${phrase}`;
   };
 
-  const relationTargetArg = objectArgs.length > 1 ? objectArgs[1] : undefined;
-  const relationTarget = relationTargetArg ? translatedArgument(relationTargetArg, c.locale) : undefined;
-  const materialArgument = relationTargetArg && (
-    relationTargetArg.role === AdviceArgumentRole.Substance ||
-    relationTargetArg.role === AdviceArgumentRole.Material ||
-    // An uncoded but source-backed second Object remains the accompaniment
-    // of WITH (e.g. wipe excess with clean tissue). Treat its existing
-    // semantic relation as the licence; do not silently discard it.
-    (relationTargetArg.role === AdviceArgumentRole.Object &&
+  const activityRelation = c.activity &&
+    (relationHasGrammarFeature(c.frame.relation, "activityFallback") ||
       relationHasSemanticClass(c.frame.relation, "accompaniment"))
-  );
-  const withTarget = materialArgument && c.frame.relation &&
-    (relationHasSemanticClass(c.frame.relation, "accompaniment") ||
-      relationHasSemanticClass(c.frame.relation, "locative"))
-    ? relationTarget : undefined;
-  const activityRelation = c.activity && relationHasGrammarFeature(c.frame.relation, "activityFallback")
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
   const activityPhrase = activityRelation && c.activity
     ? joinLocalizedTokens(c.locale, [activityRelation, c.activity])
     : undefined;
-  const locativeRelation = c.site && c.frame.relation && relationHasSemanticClass(c.frame.relation, "locative")
-    ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
-    : undefined;
+  const siteArgument = objectArg?.role === AdviceArgumentRole.Site ? objectArg
+    : c.site ? c.frame.args.find(arg => arg.role === AdviceArgumentRole.Site) : undefined;
+  const locativeRelation = c.site ? instructionSiteRelation(c, siteArgument) : undefined;
   const resultRelation = c.result && c.frame.relation
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
@@ -3548,31 +4410,28 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
   text = appendLocale(text, c.manner);
 
   if (locativeRelation && c.site) {
-    // The site is already part of `object`; rebuild from the label so the relation
-    // controls attachment rather than duplicating the site.
-    text = appendQuantity(c.label, amount);
-    text = appendLocale(text, c.manner);
+    // Rebuild only when the selected object is the site itself. A separate
+    // medication Theme/Object keeps its quantity and name before the site.
+    if (objectArg?.role === AdviceArgumentRole.Site) {
+      text = appendQuantity(c.label, amount);
+      text = appendLocale(text, c.manner);
+    }
     text = appendLocale(text, joinLocalizedTokens(c.locale, [locativeRelation, c.site]));
   }
 
   text = appendDuration(text, c.duration);
-  const timeRelation = c.time && relationHasGrammarFeature(c.frame.relation, "timeComplement")
-    ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
-    : undefined;
-  text = appendLocale(text, c.time ? joinLocalizedTokens(c.locale, [timeRelation, c.time]) : undefined);
-  if (withTarget && c.frame.relation) {
-    const materialRelation = localizeAdviceRelation(
-      c.frame.relation, c.locale, "complement"
-    ) ?? c.frame.relation;
-    text = appendLocale(text, joinLocalizedTokens(c.locale, [materialRelation, withTarget]));
-  }
+  text = appendLocale(text, realizeTimeArgument(c));
+  text = appendLocale(text, defaultActionAccompaniment(c, relationTargetArg));
+  if (selected.additionalAccompaniments) for (const arg of selected.additionalAccompaniments)
+    text = appendLocale(text, defaultActionAccompaniment(c, arg));
   text = appendLocale(text, activityPhrase);
   text = appendLocale(text, resultPhrase);
   return text;
 };
 const RESULT_REALIZER: ActionRealizer = (c) => {
   const profile = localeRealizationProfile(c.locale);
-  let text = joinLocalizedTokens(c.locale, [c.label, c.manner]);
+  const head = c.amount ? c.label + profile.quantitySeparator + c.amount : c.label;
+  let text = joinLocalizedTokens(c.locale, [head, c.manner]);
   if (c.site) {
     const sourceSiteAlreadyHasLocative = stripBodySiteSourceLead(c.site) !== c.site;
     if (sourceSiteAlreadyHasLocative) {
@@ -3606,26 +4465,89 @@ const RESULT_REALIZER: ActionRealizer = (c) => {
       joinLocalizedTokens(c.locale, [profile.durationPrefix || undefined, c.duration])
     ]);
   }
-  return text;
+  // The selected Site is already realized above. Other nominal companions
+  // retain their own relation, role and quantity through the shared owner.
+  const realizedSite = c.site ? c.frame.args.find(argument => argument.role === AdviceArgumentRole.Site) : undefined;
+  for (const argument of c.frame.args) if (argument !== realizedSite)
+    text = joinLocalizedTokens(c.locale, [text, defaultActionAccompaniment(c, argument)]);
+  return joinLocalizedTokens(c.locale, [text, realizeTimeArgument(c)]);
 };
 
 const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   const profile = localeRealizationProfile(c.locale);
-  const relation = c.destination && c.frame.relation
+  let targetArgument: AdviceArgument | undefined;
+  let materialArgument: AdviceArgument | undefined, nextMaterialArgument: AdviceArgument | undefined;
+  let unmarkedMaterial: AdviceArgument | undefined, unmarkedSubstance: AdviceArgument | undefined;
+  let unmarkedDestination: AdviceArgument | undefined;
+  for (const arg of c.frame.args) {
+    if (arg.role === AdviceArgumentRole.Time || arg.role === AdviceArgumentRole.Duration) continue;
+    if (arg.relation && arg.relation === c.frame.relation) {
+      targetArgument ??= arg;
+    } else if (!arg.relation && arg.role !== AdviceArgumentRole.Amount &&
+        arg.role !== AdviceArgumentRole.Activity && arg.role !== AdviceArgumentRole.Manner) {
+      if (!materialArgument) materialArgument = arg;
+      else nextMaterialArgument ??= arg;
+      if (arg.role === AdviceArgumentRole.Material) unmarkedMaterial ??= arg;
+      else if (arg.role === AdviceArgumentRole.Substance) unmarkedSubstance ??= arg;
+      else if (arg.role === AdviceArgumentRole.Destination) unmarkedDestination ??= arg;
+    }
+  }
+  // Older dilution frames kept TO on the head and its final volume as an
+  // unmarked Object. That complement is the destination, not the material.
+  if (!targetArgument && c.frame.relation === AdviceRelation.To &&
+      !c.destination && !c.substance && materialArgument?.role === AdviceArgumentRole.Object) {
+    targetArgument = materialArgument;
+    materialArgument = undefined;
+  }
+  // A legacy frame-level relation can own only an unmarked daughter. A
+  // destination already attached by TO cannot also become the WITH vehicle.
+  if (!targetArgument && c.frame.relation) {
+    targetArgument = unmarkedDestination ?? unmarkedSubstance;
+    if (targetArgument === materialArgument) materialArgument = nextMaterialArgument;
+  }
+  const relationTarget = targetArgument ? translatedArgument(targetArgument, c.locale) : undefined;
+  const relation = relationTarget && c.frame.relation
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
-  const destination = relation && c.destination
-    ? joinLocalizedTokens(c.locale, [relation, c.destination])
+  const destinations: string[] = [];
+  if (relation && relationTarget) destinations.push(
+    joinLocalizedTokens(c.locale, [relation, relationTarget]));
+  for (const arg of c.frame.args) {
+    if (arg === targetArgument || arg.role === AdviceArgumentRole.Time ||
+        arg.role === AdviceArgumentRole.Duration || !arg.relation ||
+        relationHasSemanticClass(arg.relation, "temporal") ||
+        relationHasGrammarFeature(arg.relation, "conditionalTail")) continue;
+    const text = translatedArgument(arg, c.locale);
+    if (text) destinations.push(joinLocalizedTokens(c.locale, [
+      localizeAdviceRelation(arg.relation, c.locale) ?? arg.relation, text
+    ]));
+  }
+  const destination = joinLocalizedTokens(c.locale, destinations);
+  // Explicitly related arguments were rendered as complements above. Only
+  // unmarked material can also occupy the dilution material slot.
+  const materialSource = targetArgument ? materialArgument : unmarkedMaterial ??
+    ((!relation || c.destination) ? unmarkedSubstance : undefined) ?? materialArgument;
+  const materialValue = materialSource && translatedArgument(materialSource, c.locale);
+  const material = materialValue
+    ? joinLocalizedTokens(c.locale, [c.amount ? profile.materialPrefix || undefined : undefined, materialValue])
     : undefined;
-  const material = c.material
-    ? joinLocalizedTokens(c.locale, [profile.materialPrefix || undefined, c.material])
-    : undefined;
-  return renderLocaleTemplate(profile.amountMaterialDestinationTemplate, {
+  let text = renderLocaleTemplate(profile.amountMaterialDestinationTemplate, {
     label: c.label,
     amount: c.amount,
     material,
     destination: destination ? `${profile.tokenSeparator}${destination}` : undefined
   });
+  if (c.duration) {
+    const duration = joinLocalizedTokens(c.locale, [profile.durationPrefix || undefined, c.duration]);
+    text = `${text}${text ? profile.quantitySeparator : ""}${duration}`;
+  }
+  // A preparation's frame relation may already belong to its material.
+  // Only a temporal governor can be inherited by an unmarked Time.
+  if (!c.selectedTime?.relation && c.timeRelation &&
+      !relationHasSemanticClass(c.timeRelation, "temporal") && c.timeRelation !== AdviceRelation.In)
+    c.timeRelation = undefined;
+  const time = realizeTimeArgument(c);
+  return time ? joinLocalizedTokens(c.locale, [text, time]) : text;
 };
 
 const ACTION_REALIZERS: Partial<Record<MedicationInstructionActionRealizer, ActionRealizer>> = {
@@ -3634,7 +4556,17 @@ const ACTION_REALIZERS: Partial<Record<MedicationInstructionActionRealizer, Acti
   "amount-material-destination": AMOUNT_MATERIAL_DESTINATION_REALIZER
 };
 
-function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false): string {
+function sameTimeConstraint(left: AdviceArgument, right: AdviceArgument, inherited: AdviceRelation | undefined): boolean {
+  return left.role === AdviceArgumentRole.Time &&
+    (left.relation ?? inherited) === (right.relation ?? inherited) &&
+    (left.normalized ?? left.conceptId ?? left.text) === (right.normalized ?? right.conceptId ?? right.text) &&
+    sameArgumentQuantity(left, right);
+}
+
+function realizeAction(
+  frame: AdviceFrame, locale: string, roundtripSafe = false,
+  coverage?: { singleScheduledEvent: boolean }, clause?: CanonicalSigClause
+): string {
   // Never discard inherited prohibition or modality: its governing words may
   // occur outside this frame's exact source span.
   if (frame.sourceText && !frame.modality &&
@@ -3642,258 +4574,335 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
       hasUntranslatedThaiArgument(frame, locale)) {
     return trimSemanticText(frame.sourceText);
   }
+  const firstArguments: Partial<Record<AdviceArgumentRole, AdviceArgument>> = {};
+  let temporalAdjuncts: AdviceArgument[] | undefined;
+  let retainedMeasuredSource: string | undefined;
+  const independentTemporal = !frame.relation || !relationHasSemanticClass(frame.relation, "temporal");
+  // A frame relation can govern its Time only when that registered relation
+  // admits a temporal complement. Duration/purpose relations keep their owner.
+  const inheritedTimeRelation = relationHasGrammarFeature(frame.relation, "timeComplement") ? frame.relation : undefined;
+  for (const arg of frame.args) {
+    if (instructionArgumentNeedsAuthoredDirections(arg, locale) && arg.text)
+      retainedMeasuredSource = retainedMeasuredSource ? retainedMeasuredSource + "; " + arg.text : arg.text;
+    const firstTime = firstArguments[AdviceArgumentRole.Time];
+    const additionalTime = arg.role === AdviceArgumentRole.Time && firstTime !== undefined;
+    if (arg.role === AdviceArgumentRole.Time) {
+      let duplicate = firstTime !== undefined && sameTimeConstraint(firstTime, arg, inheritedTimeRelation);
+      if (!duplicate) for (const prior of temporalAdjuncts ?? [])
+        if (sameTimeConstraint(prior, arg, inheritedTimeRelation)) { duplicate = true; break; }
+      if (duplicate) continue;
+    }
+    const temporalRelation = arg.relation ?? (additionalTime ? inheritedTimeRelation : undefined);
+    const additionalPointTime = additionalTime && !temporalRelation;
+    if (additionalPointTime || (independentTemporal || additionalTime || (arg.role === AdviceArgumentRole.Result || arg.role === AdviceArgumentRole.Time ||
+        arg.role === AdviceArgumentRole.Activity) && arg.relation !== frame.relation) &&
+        temporalRelation &&
+        (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time ||
+          arg.role === AdviceArgumentRole.Result) &&
+        (relationHasSemanticClass(temporalRelation, "temporal") ||
+          arg.role === AdviceArgumentRole.Time &&
+          (additionalTime || arg.relation !== undefined && arg.relation !== frame.relation) &&
+          relationHasGrammarFeature(temporalRelation, "timeComplement"))) {
+      (temporalAdjuncts ??= []).push(arg.relation || !temporalRelation ? arg : { ...arg, relation: temporalRelation });
+    } else firstArguments[arg.role] ??= arg;
+  }
   const first = (role: AdviceArgumentRole): string | undefined => {
-    const arg = frame.args.filter((candidate) => candidate.role === role).slice(0, 1)[0];
+    const arg = firstArguments[role];
     return arg ? translatedArgument(arg, locale) : undefined;
   };
-  const label = actionLabel(frame, locale, roundtripSafe);
-  const amount = first(AdviceArgumentRole.Amount);
-  const theme = first(AdviceArgumentRole.Theme) ?? first(AdviceArgumentRole.Object);
+  const definition = instructionActionDefinitionForRealization(frame);
+  const label = actionLabel(frame, locale, definition, roundtripSafe);
+  let amount = first(AdviceArgumentRole.Amount);
+  const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
+  const defaultArguments = realizerKey === "default" ? defaultActionArguments(frame) : undefined;
+  const objectArg = defaultArguments?.objectArg ?? (realizerKey === "relation-duration"
+    ? firstArguments[AdviceArgumentRole.Theme] ?? firstArguments[AdviceArgumentRole.Object] : undefined);
+  if (objectArg) {
+    const amountArg = defaultArguments?.amountArg ?? firstArguments[AdviceArgumentRole.Amount];
+    const objectSource = normalizedInstructionSurface(objectArg.text);
+    const amountSource = normalizedInstructionSurface(amountArg?.text ?? "");
+    const containsAmount = objectSource && amountSource &&
+      (" " + objectSource + " ").includes(" " + amountSource + " ") &&
+      (!objectArg.span || !amountArg?.span ||
+        objectArg.span.start <= amountArg.span.start && amountArg.span.end <= objectArg.span.end);
+    if (containsAmount) amount = undefined;
+  }
+  const themeArg = objectArg && (objectArg.role === AdviceArgumentRole.Theme || objectArg.role === AdviceArgumentRole.Object)
+    ? objectArg : firstArguments[AdviceArgumentRole.Theme] ?? firstArguments[AdviceArgumentRole.Object];
+  const theme = themeArg && !(realizerKey === "site-relation" && relationHasSemanticClass(themeArg.relation, "accompaniment"))
+    ? translatedArgument(themeArg, locale) : undefined;
   const container = first(AdviceArgumentRole.Container);
   const destination = first(AdviceArgumentRole.Destination);
-  const site = first(AdviceArgumentRole.Site);
-  const substance = first(AdviceArgumentRole.Substance);
+  const site = objectArg?.role === AdviceArgumentRole.Site ? translatedArgument(objectArg, locale) : first(AdviceArgumentRole.Site);
+  const substance = objectArg?.role === AdviceArgumentRole.Substance ? translatedArgument(objectArg, locale) : first(AdviceArgumentRole.Substance);
   const result = first(AdviceArgumentRole.Result);
   const activity = first(AdviceArgumentRole.Activity);
-  const timeArg = frame.args.find((arg) => arg.role === AdviceArgumentRole.Time);
+  const timeArg = firstArguments[AdviceArgumentRole.Time];
   const time = timeArg ? translatedArgument(timeArg, locale) : undefined;
   const duration = first(AdviceArgumentRole.Duration);
   const material = first(AdviceArgumentRole.Material);
   const manner = first(AdviceArgumentRole.Manner);
-  const definition = getMedicationInstructionAction(frame.predicate.lemma);
-  let input: InstructionActionRealizationInput = {
+  let input: ActionRealizationContext = {
     frame, locale, label, amount, theme, container, destination, site,
-    substance, result, activity, time, duration, material, manner,
+    substance, result, activity, time, selectedTime: timeArg,
+    timeRelation: timeArg ? timeArg.relation ?? inheritedTimeRelation : undefined, duration, material, manner,
     realizerConfig: frame.predicate.realizerConfig ?? definition?.realizerConfig,
     definition,
+    timeWasRendered: coverage || frame.polarity === AdvicePolarity.Negate ? false : undefined,
     translateArgumentConcept: (arg) => translatedArgumentConcept(arg, locale),
     translateQuantity: (quantity) => translatedQuantity(quantity, locale)
   };
   const adapter = getInstructionActionLocaleAdapter(locale);
   input = adapter.selectLexicalRealization?.(input) ?? input;
-  if (frame.polarity === AdvicePolarity.Negate) {
-    return adapter.renderNegated(input);
-  }
-  const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
+  const negated = frame.polarity === AdvicePolarity.Negate;
   const genericRealizer = ACTION_REALIZERS[realizerKey];
-  const realized = genericRealizer
-    ? genericRealizer(input)
-    : adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
+  const genericText = genericRealizer && (!negated ||
+      realizerKey === "amount-material-destination" ||
+      realizerKey === "default" && defaultArguments?.relationTargetArg &&
+        (relationHasSemanticClass(defaultArguments.relationTargetArg.relation ?? frame.relation, "accompaniment") ||
+          defaultArguments.relationTargetArg.role === AdviceArgumentRole.MealState) ||
+      (realizerKey === "default" || realizerKey === "result") && firstArguments[AdviceArgumentRole.Amount]?.quantity)
+    ? genericRealizer === DEFAULT_ACTION_REALIZER
+      ? DEFAULT_ACTION_REALIZER(input, input.frame === frame ? defaultArguments : undefined)
+      : genericRealizer(input)
+    : undefined;
+  const realized = negated ? adapter.renderNegated(input, genericText ??
+      (realizerKey === "mix-substance" || realizerKey === "amount-duration" || realizerKey === "site-relation" ||
+        realizerKey === "object-amount-material" ||
+        (realizerKey === "relation-duration" || realizerKey === "object-time") && firstArguments[AdviceArgumentRole.Amount]?.quantity
+          ? adapter.render(realizerKey, input) : undefined))
+    : genericText ?? adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
   // material/site valence. Never infer a temporal relation from display text.
-  const temporalAdjunct = frame.args.find((arg) =>
-    arg.role === AdviceArgumentRole.Activity && arg.relation &&
-    relationHasSemanticClass(arg.relation, "temporal")
+  let complete = realized;
+  if (negated && input.time && !input.timeWasRendered)
+    complete = joinLocalizedTokens(locale, [complete, realizeTimeArgument(input)]);
+  if (coverage && clause) coverage.singleScheduledEvent = Boolean(
+    input.timeWasRendered && timeArg && timeArgumentCoversSingleScheduledEvent(frame, timeArg, clause)
   );
-  const temporalRelation = temporalAdjunct?.relation && (
-    !frame.relation || !relationHasSemanticClass(frame.relation, "temporal")
-  ) ? temporalAdjunct.relation : undefined;
-  // Avoid duplicating an event already entailed by an explicitly registered
-  // compound noun ("before first use"). It remains a fully typed independent
-  // action argument in source and FHIR; only redundant display is omitted.
-  const temporallyEntailedByCompound = temporalAdjunct && frame.args.some((arg) => {
-    const implication = arg.conceptId
-      ? getMedicationInstructionConcept(arg.conceptId)?.impliedArgument : undefined;
-    return implication?.role === temporalAdjunct.role &&
-      implication.conceptId === temporalAdjunct.conceptId &&
-      implication.relation === temporalAdjunct.relation;
-  });
-  const temporalPhrase = temporalRelation && temporalAdjunct && !temporallyEntailedByCompound
-    ? joinLocalizedTokens(locale, [
-        localizeAdviceRelation(temporalRelation, locale) ?? temporalRelation,
-        translatedArgumentConcept(temporalAdjunct, locale)
-      ])
-    : undefined;
-  return adapter.applyPositiveModality(
-    temporalPhrase ? joinLocalizedTokens(locale, [realized, temporalPhrase]) : realized,
-    frame
-  );
+  if (temporalAdjuncts) {
+    // One compound lookup pass serves every independent adjunct. Ordinary
+    // actions without a temporal daughter pay no lookup or set allocation.
+    let entailed: Set<string> | undefined;
+    for (const arg of frame.args) {
+      const implication = arg.conceptId
+        ? getMedicationInstructionConcept(arg.conceptId)?.impliedArgument : undefined;
+      if (implication) (entailed ??= new Set()).add(
+        implication.role + "\0" + implication.conceptId + "\0" + implication.relation);
+    }
+    const temporalPhrases: string[] = [];
+    for (const adjunct of temporalAdjuncts) {
+      if (entailed?.has(adjunct.role + "\0" + adjunct.conceptId + "\0" + adjunct.relation)) continue;
+      const value = translatedArgument(adjunct, locale);
+      const temporalPhrase = (adjunct.role === AdviceArgumentRole.Time && realizeTimeArgument({
+        locale, time: value, selectedTime: adjunct, timeRelation: adjunct.relation, frame
+      })) || joinLocalizedTokens(locale, [
+        localizeAdviceRelation(adjunct.relation!, locale) ?? adjunct.relation, value
+      ]);
+      if (!temporalPhrase) continue;
+      temporalPhrases.push(temporalPhrase);
+      if (coverage && clause && timeArgumentCoversSingleScheduledEvent(frame, adjunct, clause))
+        coverage.singleScheduledEvent = true;
+    }
+    if (temporalPhrases.length) complete = joinLocalizedTokens(locale, [complete,
+      temporalPhrases.length === 1 ? temporalPhrases[0] : getAdviceLocaleAdapter(locale).joinArguments(temporalPhrases)]);
+  }
+  if (!negated) complete = adapter.applyPositiveModality(complete, frame);
+  return retainedMeasuredSource
+    ? (adapter.withAuthoredDirections ?? getInstructionActionLocaleAdapter("en").withAuthoredDirections!)(complete, retainedMeasuredSource)
+    : complete;
 }
 
-export function realizeInstructionAction(frame: AdviceFrame, locale = "en"): string {
-  return realizeAction(frame, locale);
+/** Realize one selected action with its existing external graph scope, when supplied. */
+export function realizeInstructionAction(
+  frame: AdviceFrame, locale = "en", graph?: CanonicalInstructionGraph
+): string {
+  const text = realizeAction(frame, locale);
+  let actionIndex = graph?.relations?.length ? graph.actions.indexOf(frame) : -1;
+  if (graph?.relations?.length && actionIndex < 0) {
+    for (let index = 0; index < graph.actions.length; index++) {
+      const action = graph.actions[index];
+      if (action.span.start !== frame.span.start || action.span.end !== frame.span.end ||
+          action.predicate.lemma !== frame.predicate.lemma) continue;
+      // A detached occurrence can inherit scope only when its correspondence
+      // is unique; equal or absent source ranges do not identify a graph node.
+      if (actionIndex >= 0) { actionIndex = -1; break; }
+      actionIndex = index;
+    }
+  }
+  const inline = inlineInstructionCondition(frame, graph?.sourceLocale ?? "en", locale,
+    graph?.relations, actionIndex >= 0 ? actionIndex : undefined);
+  if (!graph?.relations?.length || actionIndex < 0)
+    return inline ? attachInstructionGraphPrimaryConditions(text, [inline], locale) : text;
+  const conditions: InstructionGraphPrimaryCondition[] = inline ? [inline] : [];
+  for (const relation of graph.relations) {
+    if (relation.fromActionIndex !== undefined || relation.toActionIndex !== actionIndex) continue;
+    const condition = instructionGraphCondition(relation, frame, graph.sourceLocale ?? "en", locale);
+    if (condition) conditions.push(condition);
+  }
+  return attachInstructionGraphPrimaryConditions(text, conditions, locale);
+}
+
+/** A rich source action can carry its own Manner/Time but no Amount because a
+ * preceding preparatory verb supplied the original quantity. When the
+ * clinician edits the canonical dose, never let that amountless rich action
+ * replace the numeric administration text without the CURRENT dose.
+ * This is a display-only frame copy, not an edit of source graph/provenance. */
+export function realizeRichPrimaryWithCanonicalDose(
+  frame: AdviceFrame, clause: CanonicalSigClause, locale: string,
+  options?: Pick<ParseOptions, "instructionActionMap" | "realizationMode">,
+  coverage?: { singleScheduledEvent: boolean }
+): string {
+  const sourceFrame = frame;
+  const owner = clause.instructionGraph ? primaryDoseAmountOwner(clause.instructionGraph, clause, options) : undefined;
+  const sourceAmount = owner?.action === sourceFrame ? owner.argument : undefined;
+  frame = frameWithCanonicalPrimaryContext(frame, clause);
+  const conflictingAmount = primaryAmountConflicts(sourceAmount, clause.dose,
+    !clause.dose && clause.sourceProjectionVerified === false);
+  // Generated realization composes an owned Amount from its typed facts,
+  // independently of an opaque nominal remainder or the requested parse locale.
+  // Verified roundtrip source replay remains separate from this display copy.
+  const realizer = frame.predicate.realizer ?? frameActionDefinition(frame, options)?.realizer ?? "default";
+  const normalizeAmount = Boolean(sourceAmount && clause.dose &&
+    (options?.realizationMode !== "roundtrip" || !frame.sourceText) &&
+    frame.args.some(arg => arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
+    (realizer === "default" || realizer === "relation-duration"));
+  if (sourceAmount && (conflictingAmount || normalizeAmount))
+    frame = frameWithReconciledAmount(frame, sourceAmount, clause.dose, true);
+  if (clause.method && !actionMatchesCanonicalMethod(frame, clause, options)) {
+    const method = clause.method;
+    const definition = resolveMedicationInstructionActionForMethod(method, options);
+    const sourceDefinition = frameActionDefinition(frame, options);
+    const sourceRealizer = frame.predicate.realizer ?? sourceDefinition?.realizer ?? "default";
+    // The edited head keeps the source frame's typed argument realization,
+    // including both the live amount and any independent physical result.
+    const realizer = sourceRealizer;
+    const methodBoundManners = sourceDefinition?.methodBoundMannerConcepts;
+    // Independent material, manner and event daughters stay with the edited
+    // action. Only the source method's declared bound qualifiers are superseded.
+    frame = { ...frame, sourceText: "",
+      args: methodBoundManners?.length ? frame.args.filter(arg =>
+        arg.role !== AdviceArgumentRole.Manner || !arg.conceptId ||
+        methodBoundManners.indexOf(arg.conceptId) < 0) : frame.args,
+      predicate: definition ? {
+      lemma: definition.code, display: definition.display, i18n: definition.i18n,
+      semanticClass: definition.semanticClass, realizer,
+      realizerConfig: frame.predicate.realizerConfig, codings: medicationInstructionActionCodings(definition)
+    } : { lemma: method.text ?? method.coding?.display ?? method.coding?.code ?? "",
+      display: method.text ?? method.coding?.display, realizer,
+      realizerConfig: frame.predicate.realizerConfig,
+      codings: method.coding ? [method.coding] : undefined } };
+  }
+  const dose = clause.dose;
+  if (!dose || frame.args.some(arg =>
+    arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
+    (dose.value === undefined && !dose.range)) return realizeAction(frame, locale, false, coverage, clause);
+  // A preceding preparation already supplies the unchanged amount. Add the
+  // live dose only when no independently rendered owner still supplies it.
+  if (owner && owner.action !== sourceFrame)
+    return realizeAction(frame, locale, false, coverage, clause);
+  const { value, range, unit, comparator } = dose;
+  return realizeAction({
+    ...frame, sourceText: "",
+    args: [{
+      role: AdviceArgumentRole.Amount,
+      text: "", quantity: { value, range, unit, comparator }
+    }, ...frame.args.filter(arg => arg.role !== AdviceArgumentRole.Amount)]
+  }, locale, false, coverage, clause);
 }
 
 function normalizedInstructionSurface(value: string): string {
   return value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
 }
 
-export function instructionGraphRepresentsText(
-  graph: CanonicalInstructionGraph,
-  text: string
+
+/** Argument roles are independent slots; the order within a role is retained. */
+function correspondingAdviceArguments(
+  selected: readonly AdviceArgument[], actual: readonly AdviceArgument[],
+  matches: (left: AdviceArgument, right: AdviceArgument) => boolean,
+  complete = true
 ): boolean {
-  const normalized = normalizedInstructionSurface(text);
-  if (!normalized) return false;
-  const compact = (value: string): string => value.replace(/\s+/gu, "");
-  const pieces: Array<{ start: number; end: number; text: string }> = [];
-  for (const action of graph.actions) {
-    if (action.sourceText?.trim()) {
-      pieces.push({ start: action.span.start, end: action.span.end, text: action.sourceText });
+  if (complete && selected.length !== actual.length) return false;
+  for (let index = 0; index < selected.length; index++) {
+    const expected = selected[index];
+    let ordinal = 0;
+    for (let prior = 0; prior < index; prior++) if (selected[prior].role === expected.role) ordinal++;
+    let found: AdviceArgument | undefined;
+    for (const candidate of actual) {
+      if (candidate.role !== expected.role) continue;
+      if (ordinal-- === 0) { found = candidate; break; }
     }
+    if (!found || !matches(expected, found)) return false;
   }
-  for (const relation of graph.relations ?? []) {
-    if (relation.text?.trim() && relation.span) {
-      pieces.push({ start: relation.span.start, end: relation.span.end, text: relation.text });
-    }
+  return true;
+}
+
+function sameAdviceArgumentMeaning(left: AdviceArgument, right: AdviceArgument): boolean {
+  for (const field of ["role", "text", "normalized", "relation", "conceptId", "administrationTargetCount"] as const)
+    if (left[field] !== right[field]) return false;
+  return equalStructuredValues(left.span, right.span) &&
+    preservesAdviceArgumentFacts(left, right) && preservesAdviceArgumentFacts(right, left);
+}
+
+/** Typed warning equivalence retains complete qualifiers and the established negative-force tolerance. */
+export function sameTypedWarning(left: AdviceFrame, right: AdviceFrame): boolean {
+  return left.predicate.lemma === right.predicate.lemma &&
+    left.predicate.semanticClass === right.predicate.semanticClass &&
+    (left.polarity ?? AdvicePolarity.Affirm) === (right.polarity ?? AdvicePolarity.Affirm) &&
+    (right.polarity === AdvicePolarity.Negate || left.force === right.force) &&
+    left.modality === right.modality && left.relation === right.relation &&
+    preservesAdviceCodings(left.predicate.codings, right.predicate.codings) &&
+    preservesAdviceComponents(left.predicate.semanticComponents, right.predicate.semanticComponents) &&
+    preservesAdviceComponents(right.predicate.semanticComponents, left.predicate.semanticComponents) &&
+    correspondingAdviceArguments(left.args, right.args, sameAdviceArgumentMeaning);
+}
+
+
+/** The selected occurrence may gain presentation/coding facts during graph
+ * composition. Absent facts permit enrichment; supplied conflicting facts do not. */
+function selectedAdviceFrameMatchesGraph(selected: AdviceFrame, actual: AdviceFrame): boolean {
+  const sameOccurrence = selected.span.start === actual.span.start && selected.span.end === actual.span.end;
+  const timeExtension = !sameOccurrence && sourceBackedTimeExtension(selected, actual);
+  if (!sameOccurrence && !timeExtension) return false;
+  let samePredicate = selected.predicate.lemma === actual.predicate.lemma;
+  if (!samePredicate) {
+    const code = resolveMedicationInstructionAction(selected.predicate.lemma)?.code;
+    samePredicate = code !== undefined && code === resolveMedicationInstructionAction(actual.predicate.lemma)?.code;
   }
-  for (const opaque of graph.opaqueSpans ?? []) {
-    if (opaque.text?.trim()) {
-      pieces.push({ start: opaque.start, end: opaque.end, text: opaque.text });
-    }
-  }
-  pieces.sort((left, right) => left.start - right.start || left.end - right.end);
-  const represented = normalizedInstructionSurface(pieces.map((piece) => piece.text).join(" "));
-  if (represented && compact(represented).includes(compact(normalized))) {
+  if (!samePredicate || selected.modality !== actual.modality ||
+      !preservesAdviceFrameFacts(selected, actual)) return false;
+  return correspondingAdviceArguments(selected.args, actual.args, (expected, candidate) => {
+    const extendedTime = timeExtension && expected === selected.args.find(arg => arg.role === AdviceArgumentRole.Time) &&
+      candidate === actual.args.find(arg => arg.role === AdviceArgumentRole.Time);
+    if (!extendedTime && (expected.normalized ?? expected.text) !== (candidate.normalized ?? candidate.text)) return false;
+    if (!extendedTime && expected.span !== undefined &&
+        !equalStructuredValues(expected.span, candidate.span)) return false;
     return true;
-  }
-  return graph.actions.some((action) => {
-    const candidate = normalizedInstructionSurface(action.sourceText);
-    return Boolean(candidate && (candidate === normalized || candidate.includes(normalized)));
-  });
+  }, false);
 }
 
-export function instructionGraphTextParticipatesInRelation(
-  graph: CanonicalInstructionGraph,
-  text: string
-): boolean {
-  const normalized = normalizedInstructionSurface(text);
-  if (!normalized) return false;
-  const compact = (value: string): string => value.replace(/\s+/gu, "");
-  const matchingIndices: number[] = [];
-  for (let index = 0; index < graph.actions.length; index += 1) {
-    const source = normalizedInstructionSurface(graph.actions[index]?.sourceText ?? "");
-    if (!source) continue;
-    if (source === normalized || compact(source).includes(compact(normalized)) || compact(normalized).includes(compact(source))) {
-      matchingIndices.push(index);
-    }
-  }
-  return matchingIndices.some((index) =>
-    graph.relations?.some((relation) =>
-      relation.fromActionIndex === index || relation.toActionIndex === index
-    ) ?? false
-  );
-}
-
-export function instructionGraphSingleActionRepresentsText(
-  graph: CanonicalInstructionGraph,
-  text: string
-): boolean {
-  const normalized = normalizedInstructionSurface(text);
-  if (!normalized) return false;
-  const compact = (value: string): string => value.replace(/\s+/gu, "");
-  return graph.actions.some((action) => {
-    const candidate = normalizedInstructionSurface(action.sourceText);
-    return Boolean(candidate && compact(candidate) === compact(normalized));
-  });
-}
-
-
-/**
- * Non-coded advice is redundant only when the grammar already owns every
- * negative predicate in the same source interval. Free text alone cannot
- * justify deleting a distinct clinical prohibition.
- */
-export function instructionGraphCoversTypedWarnings(
-  graph: CanonicalInstructionGraph,
-  frames: readonly AdviceFrame[] | undefined
-): boolean {
-  if (!frames?.length) return false;
-  return frames.every((expected) => {
-    if (expected.polarity !== AdvicePolarity.Negate) return false;
-    const expectedCode = resolveMedicationInstructionAction(expected.predicate.lemma)?.code ??
-      expected.predicate.lemma;
-    return graph.actions.some((actual) => {
-      if (actual.polarity !== AdvicePolarity.Negate) return false;
-      const actualCode = resolveMedicationInstructionAction(actual.predicate.lemma)?.code ??
-        actual.predicate.lemma;
-      if (actualCode !== expectedCode ||
-          actual.span.end <= expected.span.start ||
-          expected.span.end <= actual.span.start) return false;
-      return expected.args.filter((arg) => arg.quantity || arg.conceptId).every((arg) =>
-        actual.args.some((candidate) =>
-          candidate.role === arg.role &&
-          (arg.conceptId === undefined || arg.conceptId === candidate.conceptId) &&
-          (!arg.quantity || Boolean(candidate.quantity &&
-            arg.quantity.value === candidate.quantity.value &&
-            arg.quantity.unit === candidate.quantity.unit &&
-            arg.quantity.range?.low === candidate.quantity.range?.low &&
-            arg.quantity.range?.high === candidate.quantity.range?.high))
-        )
-      );
-    });
-  });
-}
-
-/** A coded qualifier already entailed by the displayed action graph needs no
- * second patient-visible sentence, but keeps its exact FHIR coding. */
-export function instructionGraphEntailsAdviceCoding(
-  graph: CanonicalInstructionGraph,
-  coding: FhirCoding | undefined
-): boolean {
-  if (!coding?.code) return false;
-  return matchComposedAdviceCodings(graph.actions).some((definition) => {
-    const candidate = definition.coding;
-    return candidate?.code === coding.code &&
-      (candidate?.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM);
-  });
-}
-
-/**
- * Give a complete source-preserved free-text instruction ownership of the
- * graph actions whose exact source ranges it contains. This prevents duplicate
- * rendering without reinterpreting the instruction or dropping its remaining
- * unparsed clinical content.
- */
-export function instructionGraphSourceOwnedByAdvice(
-  graph: CanonicalInstructionGraph,
-  instruction: CanonicalAdditionalInstructionExpr
-): string[] {
-  if (!instruction.text?.trim() || instruction.coding?.code || instruction.frames?.length) {
-    return [];
-  }
-  const source = graph.sourceText.toLocaleLowerCase("en");
-  const phrase = instruction.text.trim().toLocaleLowerCase("en");
+/** Locate an authored fragment; this is correspondence, not action identity. */
+export function instructionSourceRange(graph: CanonicalInstructionGraph, text: string | undefined,
+  source = graph.sourceText.toLocaleLowerCase("en")): TextRange | undefined {
+  if (!text?.trim()) return undefined;
+  const phrase = text.trim().toLocaleLowerCase("en");
   const start = source.indexOf(phrase);
-  if (start < 0 || source.indexOf(phrase, start + 1) !== -1) return [];
-  const end = start + phrase.length;
-  return graph.actions
-    .filter((action) =>
-      action.span.start >= start && action.span.end <= end &&
-      Boolean(action.sourceText.trim())
-    )
-    .map((action) => action.sourceText);
+  return start < 0 || source.indexOf(phrase, start + 1) !== -1
+    ? undefined : { start, end: start + phrase.length };
 }
 
-/**
- * A source-backed additional fragment is fully represented when every
- * lexical constituent belongs to a composed action or its licensed
- * coordination connector. A partial match cannot delete unresolved advice.
- */
-export function instructionGraphFullyOwnsAdvice(
-  graph: CanonicalInstructionGraph,
+/** Selected instruction evidence covers exactly its complete typed frames. */
+export function instructionHasCompleteFrameEvidence(
   instruction: CanonicalAdditionalInstructionExpr
 ): boolean {
-  if (!instruction.text?.trim() || instruction.coding?.code || instruction.frames?.length) return false;
-  const source = graph.sourceText.toLocaleLowerCase("en");
-  const phrase = instruction.text.trim().toLocaleLowerCase("en");
-  const start = source.indexOf(phrase);
-  if (start < 0 || source.indexOf(phrase, start + 1) !== -1) return false;
-  const end = start + phrase.length;
-  const actions = graph.actions.filter((action) =>
-    action.span.start < end && start < action.span.end
-  );
-  if (!actions.length) return false;
-  return lexInput(graph.sourceText.slice(start, end)).every((token) => {
-    const localStart = start + token.sourceStart;
-    const localEnd = start + token.sourceEnd;
-    if (actions.some((action) =>
-      action.span.start <= localStart && localEnd <= action.span.end
-    )) return true;
-    const normalized = key(token);
-    return normalized === "," ||
-      ACTION_COORDINATION_CONNECTORS.has(normalized) ||
-      ACTION_DISCOURSE_CONNECTORS.has(normalized);
-  });
+  const frames = instruction.frames;
+  const evidence = instruction.evidence;
+  return Boolean(frames?.length && evidence?.length &&
+    evidence.every(item => item.lexicalCategory === "instruction" && item.spans.length &&
+      item.spans.every(span => frames.some(frame =>
+        frame.span.start === span.start && frame.span.end === span.end))) &&
+    frames.every(frame => evidence.some(item => item.spans.some(span =>
+      span.start === frame.span.start && span.end === frame.span.end))));
 }
 
 /** Exact source-backed discourse connector that introduces the first action
@@ -3916,21 +4925,6 @@ export function instructionGraphPostAdministrationDiscourseConnector(
   );
 }
 
-/** Use complete realized negative actions to recognize otherwise untyped FHIR text. */
-export function instructionGraphRealizesWarningText(
-  graph: CanonicalInstructionGraph,
-  text: string
-): boolean {
-  const normalized = normalizedInstructionSurface(text);
-  if (!normalized) return false;
-  return graph.actions.some((frame) =>
-    frame.polarity === AdvicePolarity.Negate &&
-    ["en", "th"].some((locale) =>
-      normalizedInstructionSurface(realizeInstructionAction(frame, locale)) === normalized
-    )
-  );
-}
-
 function codingEquivalent(
   left: { system?: string; code?: string } | undefined,
   right: { system?: string; code?: string } | undefined
@@ -3945,7 +4939,8 @@ function quantityCoveredByDose(arg: AdviceArgument, dose: CanonicalDoseExpr | un
   return arg.quantity.value === dose.value &&
     arg.quantity.range?.low === dose.range?.low &&
     arg.quantity.range?.high === dose.range?.high &&
-    arg.quantity.unit === dose.unit;
+    arg.quantity.unit === dose.unit &&
+    arg.quantity.comparator === dose.comparator;
 }
 
 function siteArgumentCoveredByClause(arg: AdviceArgument, clause: CanonicalSigClause): boolean {
@@ -3956,15 +4951,28 @@ function siteArgumentCoveredByClause(arg: AdviceArgument, clause: CanonicalSigCl
   return Boolean(left && right && left === right);
 }
 
-function actionMatchesCanonicalMethod(frame: AdviceFrame, clause: CanonicalSigClause): boolean {
+function actionMatchesCanonicalMethod(
+  frame: AdviceFrame, clause: Pick<CanonicalSigClause, "method">,
+  options?: Pick<ParseOptions, "instructionActionMap">
+): boolean {
   const method = clause.method;
   if (!method) return false;
-  if (method.coding?.code && frame.predicate.codings?.some((coding) => codingEquivalent(coding, method.coding))) {
-    return true;
+  const definition = frameActionDefinition(frame, options);
+  // Distinct authored actions may share an administration code (Apply/Reapply).
+  // Compare declared identities; an unknown custom source cannot be treated as
+  // a different default action merely because its local lemma is unfamiliar.
+  if (definition && method.text?.trim()) {
+    const current = resolveMedicationInstructionActionForMethod(method, options, true);
+    if (current) return current.code === definition.code && current.display === definition.display;
+  }
+  if (method.coding?.code) {
+    if (frame.predicate.codings?.some((coding) => codingEquivalent(coding, method.coding))) return true;
+    const declared = definition?.administrationMethod;
+    if (declared && codingEquivalent(declared, method.coding)) return true;
+    if (resolveMedicationInstructionActionByMethod(method.coding, options)) return false;
   }
   const methodText = normalizeActionSurface(method.text ?? "");
   if (!methodText) return false;
-  const definition = getMedicationInstructionAction(frame.predicate.lemma);
   const candidates = [
     frame.predicate.lemma,
     frame.predicate.display ?? "",
@@ -4019,20 +5027,138 @@ function argumentCoveredByCanonicalText(
   );
 }
 
+function argumentEventTiming(arg: AdviceArgument): EventTiming | undefined {
+  if (arg.role !== AdviceArgumentRole.Time || !arg.normalized) return undefined;
+  return KNOWN_EVENT_TIMINGS.has(arg.normalized) ? arg.normalized as EventTiming :
+    EVENT_TIMING_TOKENS[normalizeActionSurface(arg.normalized)];
+}
+
 function timeArgumentCoveredBySchedule(
   frame: AdviceFrame,
   arg: AdviceArgument,
-  clause: CanonicalSigClause
+  clause: CanonicalSigClause,
+  // Lexical event identity can reconcile a changed live event, but does not
+  // prove the canonical phrase preserves a rich action's relation or locale
+  // realization. General action coverage retains canonical-code evidence.
+  timing = arg.role === AdviceArgumentRole.Time && arg.normalized &&
+    KNOWN_EVENT_TIMINGS.has(arg.normalized) ? arg.normalized as EventTiming : undefined
 ): boolean {
-  if (arg.role !== AdviceArgumentRole.Time || !arg.normalized || !clause.schedule?.when?.length) {
-    return false;
-  }
-  const timing = arg.normalized as EventTiming;
-  if (clause.schedule.when.indexOf(timing) >= 0) return true;
-  const related = frame.relation
-    ? MEAL_TIMING_BY_RELATION.get(frame.relation as "before" | "after" | "with")?.get(timing)
+  if (!timing || !clause.schedule?.when?.length) return false;
+  const relation = arg.relation ?? frame.relation;
+  const relationMapping = relation
+    ? MEAL_TIMING_BY_RELATION.get(relation as "before" | "after" | "with")
     : undefined;
-  return Boolean(related && clause.schedule.when.indexOf(related) >= 0);
+  // HS already encodes before sleep, so retain that authored qualifier.
+  // Declared direct-time heads (IN/ON) preserve the event point. Other
+  // unmapped relations, such as UNTIL or AFTER sleep, do not claim it.
+  const related = relation === "before" && timing === EventTiming["Before Sleep"]
+    ? timing : relationMapping ? relationMapping.get(timing)
+    : !relation || relationHasGrammarFeature(relation, "directTimeRealization") ? timing : undefined;
+  return related !== undefined && clause.schedule.when.indexOf(related) >= 0;
+}
+
+const KNOWN_EVENT_TIMINGS = new Set<string>(objectValues(EventTiming));
+
+/** Counted or qualified sites use the canonical site's complete dose scope. */
+export function canonicalSiteOwnsPrimaryPhrase(clause: CanonicalSigClause): boolean {
+  const site = clause.site;
+  return Boolean(site?.spatialRelation || site?.restrictions?.length ||
+    site?.administrationTargetCount !== undefined && site.administrationTargetCount > 1);
+}
+
+/** Apply the selected primary's live schedule/site in one display-only pass.
+ * A source graph clock is independent unless the wire source established
+ * structured clock ownership. Source arguments and other actions stay intact. */
+function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalSigClause): AdviceFrame {
+  const schedule = clause.schedule;
+  const hasOffset = schedule?.offset !== undefined || schedule?.offsetMin !== undefined ||
+    schedule?.offsetMax !== undefined;
+  const hasClocks = Boolean(schedule?.timeOfDay?.length);
+  const ownsClocks = clause.sourceHasStructuredClocks === true;
+  // A saved false means the graph event was independent. Native clauses
+  // without source evidence keep their existing schedule-owned interpretation.
+  const ownsEvents = clause.sourceHasStructuredEvents === true ||
+    clause.sourceHasStructuredEvents !== false && (hasOffset || Boolean(schedule?.when?.length));
+  const site = clause.site;
+  const ownsSite = Boolean(site) || clause.sourceHasStructuredSite === true;
+  // Both callers have already selected the source primary. A simultaneous
+  // method edit cannot revoke its current schedule/site ownership.
+  if (clause.sourceProjectionVerified !== false && !ownsEvents && !ownsClocks && !hasClocks && !ownsSite) return frame;
+  const args: AdviceArgument[] = [];
+  let changed = false, removedFrameTime = false, retainedFrameTime = false;
+  for (const arg of frame.args) {
+    if (arg.role === AdviceArgumentRole.Time && arg.normalized) {
+      const clock = /^[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?$/.test(arg.normalized);
+      const event = ownsEvents ? argumentEventTiming(arg) : undefined;
+      // A newly added structured clock does not take ownership of an
+      // independent graph time. Identical clocks need only one display.
+      const clockRelation = arg.relation ?? frame.relation;
+      const directClock = clock && (!clockRelation || relationHasGrammarFeature(clockRelation, "directTimeRealization"));
+      const mirrorsClock = directClock && hasClocks && schedule!.timeOfDay!.some(time =>
+        (time.length === 5 ? time + ":00" : time.replace(/\.0+$/u, "")) ===
+        (arg.normalized!.length === 5 ? arg.normalized + ":00" : arg.normalized!.replace(/\.0+$/u, "")));
+      // A positively owned multi-event schedule renders its complete current
+      // list once. Other Time kinds and independently scoped actions remain.
+      if (directClock && (ownsClocks || mirrorsClock) || event &&
+          (hasOffset || (schedule?.when?.length ?? 0) > 1 || !timeArgumentCoveredBySchedule(frame, arg, clause, event))) {
+        changed = true;
+        if (instructionFrameRelationOwnsTemporalArgument(frame, arg)) removedFrameTime = true;
+        continue;
+      }
+      if (instructionFrameRelationOwnsTemporalArgument(frame, arg)) retainedFrameTime = true;
+    }
+    // The graph's plain Site argument cannot express live spatial relations
+    // or restrictions. The canonical site phrase owns this primary display;
+    // other actions and the saved graph keep their authored sites.
+    if (arg.role === AdviceArgumentRole.Site &&
+        (canonicalSiteOwnsPrimaryPhrase(clause) || !site && clause.sourceHasStructuredSite === true)) {
+      changed = true;
+      continue;
+    }
+    if (arg.role === AdviceArgumentRole.Site && site) {
+      const text = site.text ?? site.coding?.display ?? site.coding?.code ?? "";
+      const currentTranslations = site.i18n ?? site.coding?.i18n;
+      if (arg.text !== site.text || arg.coding?.code !== site.coding?.code ||
+          arg.coding?.system !== site.coding?.system) {
+        changed = true;
+        args.push({ ...arg, text, normalized: text, conceptId: undefined,
+          coding: site.coding, codings: site.coding ? [site.coding] : undefined,
+          i18n: currentTranslations ?? codingFromSite(text)?.i18n });
+        continue;
+      }
+      // A translation edit does not change the argument's lexical identity.
+      // Supplied locales own their current wording; independent graph locales
+      // retain their lexical realization (for example English "the hair").
+      let i18n = arg.i18n;
+      if (currentTranslations) {
+        for (const locale of Object.keys(currentTranslations)) if (i18n?.[locale] !== currentTranslations[locale]) {
+          i18n = { ...i18n, ...currentTranslations };
+          break;
+        }
+      } else if (i18n) {
+        const defaults = codingFromSite(text)?.i18n;
+        for (const locale of Object.keys(i18n)) if (i18n[locale] !== defaults?.[locale]) {
+          if (i18n === arg.i18n) i18n = { ...i18n };
+          if (defaults?.[locale] !== undefined) i18n[locale] = defaults[locale];
+          else delete i18n[locale];
+        }
+      }
+      if (i18n !== arg.i18n) {
+        changed = true;
+        args.push({ ...arg, i18n });
+        continue;
+      }
+    }
+    args.push(arg);
+  }
+  // A failed proof forbids old raw wording, even when a graph-only clock
+  // survives as an independent typed argument.
+  if (!changed && clause.sourceProjectionVerified !== false && !ownsEvents && !ownsClocks) return frame;
+  // A consumed Time must not donate its owned frame relation to an unmarked
+  // Site in this display copy. Explicit Site attachments remain on the child.
+  const relation = removedFrameTime && !retainedFrameTime &&
+    relationHasSemanticClass(frame.relation, "locative") ? undefined : frame.relation;
+  return { ...frame, relation, sourceText: "", args: changed ? args : frame.args };
 }
 
 /**
@@ -4041,34 +5167,54 @@ function timeArgumentCoveredBySchedule(
  * Both localizers share this compositional check instead of reparsing the
  * displayed text independently.
  */
-export function instructionGraphActionCoversSingleScheduledEvent(
+function timeArgumentCoversSingleScheduledEvent(
   frame: AdviceFrame,
+  arg: AdviceArgument,
   clause: CanonicalSigClause
 ): boolean {
-  if (clause.schedule?.when?.length !== 1) return false;
-  return frame.args.some((arg) => {
-    if (timeArgumentCoveredBySchedule(frame, arg, clause)) return true;
-    if (arg.role !== AdviceArgumentRole.Time) return false;
-    const words = normalizeActionSurface(arg.normalized ?? arg.text)
-      .split(/\s+/u).filter((word) => word !== "the" && word.length > 0);
-    for (let index = 0; index < words.length; index += 1) {
-      if (resolveEventTimingExpression(words, index)?.timing === clause.schedule?.when?.[0]) return true;
-    }
-    return false;
-  });
+  if (arg.role !== AdviceArgumentRole.Time || clause.schedule?.when?.length !== 1 ||
+      clause.schedule.offset !== undefined || clause.schedule.offsetMin !== undefined ||
+      clause.schedule.offsetMax !== undefined) return false;
+  if (timeArgumentCoveredBySchedule(frame, arg, clause)) return true;
+  if (arg.normalized && KNOWN_EVENT_TIMINGS.has(arg.normalized)) return false;
+  const words = normalizeActionSurface(arg.normalized ?? arg.text)
+    .split(/\s+/u).filter((word) => word.length > 0 && !EVENT_ARTICLE_TOKENS.has(word));
+  const expression = resolveEventTimingExpression(words, 0);
+  return Boolean(expression && expression.length === words.length &&
+    timeArgumentCoveredBySchedule(frame, arg, clause, expression.timing));
 }
 
 function primaryActionCoveredByCanonicalClause(
   frame: AdviceFrame,
   actions: readonly AdviceFrame[],
-  clause: CanonicalSigClause
+  clause: CanonicalSigClause,
+  selectedOwner?: AdviceFrame | null,
+  sourceFrame: AdviceFrame = frame
 ): boolean {
-  if (!actionMatchesCanonicalMethod(frame, clause)) return false;
-  const matching = actions
-    .filter((candidate) => candidate.polarity !== AdvicePolarity.Negate && actionMatchesCanonicalMethod(candidate, clause))
-    .slice()
-    .sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end);
-  if (!matching.length || matching[0] !== frame) return false;
+  if (selectedOwner === null || !actionMatchesCanonicalMethod(frame, clause)) return false;
+  if (selectedOwner) {
+    // An explicit primary source span owns the canonical dose, even when a
+    // different earlier administration happens to use the same verb.
+    if (sourceFrame !== selectedOwner) return false;
+  } else {
+    // Without a selected source owner, retain the historical first-matching
+    // method behavior. A single scan avoids sorting/cloning the actions.
+    let first: AdviceFrame | undefined;
+    for (const candidate of actions) {
+      if (candidate.polarity === AdvicePolarity.Negate ||
+          !actionMatchesCanonicalMethod(candidate, clause)) continue;
+      if (!first || candidate.span.start < first.span.start ||
+          (candidate.span.start === first.span.start && candidate.span.end < first.span.end)) {
+        first = candidate;
+      }
+    }
+    if (first !== sourceFrame) return false;
+  }
+  // Site and schedule equality do not represent this valence's direct
+  // object beside its temporal complement. Keep their composition together.
+  const realizer = frame.predicate.realizer ?? instructionActionDefinitionForRealization(frame)?.realizer;
+  if (realizer === "site-relation" && frame.args.some(arg => arg.role === AdviceArgumentRole.Site) &&
+      frame.args.some(arg => instructionFrameRelationOwnsTemporalArgument(frame, arg))) return false;
   return frame.args.every((arg) =>
     (arg.role === AdviceArgumentRole.Site && siteArgumentCoveredByClause(arg, clause)) ||
     (arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, clause.dose)) ||
@@ -4078,91 +5224,252 @@ function primaryActionCoveredByCanonicalClause(
   );
 }
 
+/** The normalized and source-preserving primary selectors must honor the
+ * same current dose, while leaving superseded graph/source data untouched. */
+function primaryAmountConflicts(
+  amount: AdviceArgument | undefined, dose: CanonicalDoseExpr | undefined, removed = false
+): boolean {
+  return Boolean(amount?.quantity && (dose || removed) && (!dose || !quantityCoveredByDose(amount, dose)));
+}
+
+/** Locate an existing Amount label within its source nominal. */
+function sourceAmountLabelOffset(text: string, label: string): number {
+  const at = label ? text.toLowerCase().indexOf(label.toLowerCase()) : -1;
+  return at >= 0 &&
+    (at === 0 || !/[a-z0-9]/i.test(text[at - 1])) &&
+    (at + label.length === text.length || !/[a-z0-9]/i.test(text[at + label.length])) ? at : -1;
+}
+
+/** Realize the current Amount without rewriting its saved graph.
+ * Its source label may also be embedded in a larger Object ('1 tablet of
+ * amoxicillin'); remove only the owned amount, keeping the drug name and the
+ * action's independent material/target. Numeric edits and forced localized
+ * display use the same typed ownership. */
+function frameWithReconciledAmount(
+  frame: AdviceFrame, sourceAmount: AdviceArgument,
+  currentDose: CanonicalDoseExpr | undefined, replaceAtOwner = false
+): AdviceFrame {
+  const replacement = replaceAtOwner && currentDose &&
+    (currentDose.value !== undefined || currentDose.range) ? {
+      value: currentDose.value, range: currentDose.range,
+      unit: currentDose.unit, comparator: currentDose.comparator
+    } : undefined;
+  const args: AdviceArgument[] = [];
+  for (const arg of frame.args) {
+    // Only the dose-bearing Amount belongs to the canonical dose. An
+    // independent 100 mL mixing Substance or 5-minute Duration must never
+    // disappear because the tablet amount changed.
+    if (arg === sourceAmount) {
+      if (replacement) args.push({ ...arg, quantity: replacement, i18n: undefined });
+      continue;
+    }
+    if (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) {
+      const text = arg.text ?? "";
+      const labelOffset = sourceAmountLabelOffset(text, sourceAmount.text ?? "");
+      // Disjoint source spans identify independent quantities even when
+      // their values and units happen to match.
+      const ownsSource = arg.span && sourceAmount.span
+        ? arg.span.start <= sourceAmount.span.start && arg.span.end >= sourceAmount.span.end
+        : !arg.relation && labelOffset >= 0;
+      if (ownsSource) {
+        const remaining = labelOffset >= 0
+          ? (text.slice(0, labelOffset) + " " +
+              text.slice(labelOffset + sourceAmount.text.length)).replace(/^\s*of\s+/i, "").trim()
+          : text;
+        const quantity = sourceAmount.quantity;
+        const sharesSourceQuantity = quantity && arg.quantity &&
+          quantity.value === arg.quantity.value && quantity.unit === arg.quantity.unit &&
+          quantity.comparator === arg.quantity.comparator &&
+          quantity.range?.low === arg.quantity.range?.low &&
+          quantity.range?.high === arg.quantity.range?.high;
+        if (!remaining && (!arg.quantity || sharesSourceQuantity)) continue;
+        // Amount owns the current dose. This Object keeps its remaining drug
+        // description and any independent quantity, never a second dose copy.
+        args.push({ ...arg,
+          ...(sharesSourceQuantity ? { quantity: undefined } : {}),
+          text: remaining, normalized: remaining || undefined, i18n: undefined });
+        continue;
+      }
+    }
+    args.push(arg);
+  }
+  return { ...frame, sourceText: "", args };
+}
+
+type PrimaryInstructionOwnership = NonNullable<CanonicalInstructionGraph["primaryOwnership"]>;
+
+/** Resolve the selected source head and Amount once while HPSG/action facts
+ * and the original vocabulary are available. Older saved graphs reuse this
+ * conservative inference; an explicit binding never depends on edited values. */
+function inferPrimaryOwnership(
+  graph: CanonicalInstructionGraph,
+  clause: Pick<CanonicalSigClause, "dose" | "method" | "sourceProjectionVerified">,
+  options?: Pick<ParseOptions, "instructionActionMap">
+): PrimaryInstructionOwnership {
+  const primary = graph.primaryAdministrationSpan;
+  const canOwnDose = Boolean(clause.dose || clause.sourceProjectionVerified === false && primary);
+  let administrationActionIndex: number | undefined, overlap: number | undefined,
+    overlapArgument = -1, earliest: number | undefined, earliestArgument = -1,
+    earlier: number | undefined, earlierArgument = -1, earlierCount = 0;
+  for (let index = 0; index < graph.actions.length; index++) {
+    const action = graph.actions[index];
+    if (action.polarity === AdvicePolarity.Negate) continue;
+    const overlaps = Boolean(primary && action.span.start < primary.end && primary.start < action.span.end);
+    if (overlaps && administrationActionIndex === undefined) administrationActionIndex = index;
+    if (!canOwnDose) continue;
+    let amountIndex = -1, theme: AdviceArgument | undefined;
+    for (let argumentIndex = 0; argumentIndex < action.args.length; argumentIndex++) {
+      const argument = action.args[argumentIndex];
+      if (amountIndex < 0 && argument.role === AdviceArgumentRole.Amount && argument.quantity) amountIndex = argumentIndex;
+      if (!theme && (argument.role === AdviceArgumentRole.Theme || argument.role === AdviceArgumentRole.Object)) theme = argument;
+    }
+    if (amountIndex < 0) continue;
+    if (overlaps && overlap === undefined) { overlap = index; overlapArgument = amountIndex; }
+    if (primary && action.span.end > primary.start) continue;
+    const amount = action.args[amountIndex];
+    const ownsAmount = !theme ? !primary || quantityCoveredByDose(amount, clause.dose) : (theme.span && amount.span
+      ? theme.span.start <= amount.span.start && amount.span.end <= theme.span.end
+      : quantityCoveredByDose(theme, amount.quantity) || !theme.relation &&
+        sourceAmountLabelOffset(theme.text ?? "", amount.text ?? "") >= 0);
+    if (!ownsAmount) continue;
+    const definition = frameActionDefinition(action, options);
+    if ((!definition || definition.definesDose || definition.primaryAdministrationHead || definition.administrationMethod) &&
+        (earliest === undefined || action.span.start < graph.actions[earliest].span.start)) {
+      earliest = index; earliestArgument = amountIndex;
+    }
+    if (definition?.definesDose) { earlierCount++; earlier = index; earlierArgument = amountIndex; }
+  }
+  const doseAction = overlap ?? (earlierCount === 1 ? earlier : primary ? undefined : earliest);
+  const doseArgument = overlap !== undefined ? overlapArgument : earlierCount === 1 ? earlierArgument : earliestArgument;
+  // A saved graph with no selected head can supply a missing administration
+  // only from the same matching dose owner, never a later coincidental amount.
+  if (!primary && !clause.method && doseAction !== undefined &&
+      quantityCoveredByDose(graph.actions[doseAction].args[doseArgument], clause.dose))
+    administrationActionIndex = doseAction;
+  return {
+    ...(administrationActionIndex !== undefined ? { administrationActionIndex } : {}),
+    ...(doseAction !== undefined ? { dose: { actionIndex: doseAction, argumentIndex: doseArgument } } : {})
+  };
+}
+
+function primaryInstructionOwnership(
+  graph: CanonicalInstructionGraph,
+  clause: Pick<CanonicalSigClause, "dose" | "method" | "sourceProjectionVerified">,
+  options?: Pick<ParseOptions, "instructionActionMap">
+): PrimaryInstructionOwnership {
+  return graph.primaryOwnership ?? inferPrimaryOwnership(graph, clause, options);
+}
+
+function primaryDoseAmountOwner(
+  graph: CanonicalInstructionGraph,
+  clause: Pick<CanonicalSigClause, "dose" | "method" | "sourceProjectionVerified">,
+  options?: Pick<ParseOptions, "instructionActionMap">
+): { action: AdviceFrame; argument: AdviceArgument } | undefined {
+  if (!clause.dose && clause.sourceProjectionVerified !== false) return undefined;
+  const owner = primaryInstructionOwnership(graph, clause, options).dose;
+  if (!owner) return undefined;
+  const action = graph.actions[owner.actionIndex];
+  return { action, argument: action.args[owner.argumentIndex] };
+}
+
+/** A sole typed preparation owns the amount before a later administration.
+ * Ordinary primary-only graphs return before the ownership walk. */
+export function instructionGraphPreparationOwnsDose(
+  clause: CanonicalSigClause, options?: Pick<ParseOptions, "instructionActionMap">
+): boolean {
+  const graph = clause.instructionGraph;
+  const primary = graph?.primaryAdministrationSpan;
+  if (!clause.dose || !graph || !primary || !graph.actions.length ||
+      graph.actions[0].span.start >= primary.start) return false;
+  const owner = primaryDoseAmountOwner(graph, clause, options);
+  return Boolean(owner && owner.action.span.end <= primary.start);
+}
+
+/** Whole-source replay and action realization have the same amount owner.
+ * Unrelated later-stage Amounts are not evidence the canonical dose changed. */
+export function instructionGraphSourceConflictsWithDose(
+  clause: CanonicalSigClause, options?: Pick<ParseOptions, "instructionActionMap">
+): boolean {
+  const graph = clause.instructionGraph;
+  const dose = clause.dose;
+  if (!graph) return false;
+  if (clause.sourceProjectionVerified === false) return true;
+  if (!dose || (dose.value === undefined && !dose.range)) return false;
+  // A failed live timing/dose proof takes precedence over source ownership.
+  if (dose.sourceDoseVerified === false) return true;
+  // The single-dose default is precisely one discrete unit. Changing that
+  // amount does not inherit permission to replay the old amountless wording.
+  if (dose.defaulted && dose.value === 1 && dose.unit === dose.defaultedUnit &&
+      !dose.range && !dose.comparator) return false;
+  const owner = primaryDoseAmountOwner(graph, clause, options);
+  if (!owner) {
+    // HPSG primary-dose facts need not be repeated in auxiliary actions.
+    // Failed live-source proof was handled above; an Amount owner below
+    // remains independent evidence and is compared with the live dose.
+    if (dose.sourceDoseVerified) return false;
+    for (const evidence of clause.evidence ?? [])
+      if (evidence.lexicalCategory === "dose") return false;
+    return true;
+  }
+  return primaryAmountConflicts(owner.argument, dose);
+}
+
 export function instructionGraphRichPrimaryAction(
   clause: CanonicalSigClause
 ): AdviceFrame | undefined {
   const graph = clause.instructionGraph;
   if (!graph?.actions.length) return undefined;
-  const primary = graph.primaryAdministrationSpan;
-  const dose = clause.dose;
-  const matchesDose = (action: AdviceFrame): boolean => Boolean(
-    dose && action.args.some((arg) =>
-      arg.role === AdviceArgumentRole.Amount &&
-      arg.quantity?.value === dose.value &&
-      arg.quantity?.range?.low === dose.range?.low &&
-      arg.quantity?.range?.high === dose.range?.high &&
-      arg.quantity?.unit === dose.unit
+  const index = primaryInstructionOwnership(graph, clause).administrationActionIndex;
+  const action = index === undefined ? undefined : graph.actions[index];
+  if (!action || action.polarity === AdvicePolarity.Negate) return undefined;
+  const hasCanonicalAdministration = Boolean(
+    clause.method || clause.route || clause.dose || clause.site ||
+    clause.schedule && (
+      clause.schedule.timingCode || clause.schedule.frequency !== undefined ||
+      clause.schedule.period !== undefined || clause.schedule.when?.length ||
+      clause.schedule.dayOfWeek?.length || clause.schedule.timeOfDay?.length ||
+      clause.schedule.activityTiming?.length
     )
   );
-  return graph.actions.find((action) => {
-    if (action.polarity === AdvicePolarity.Negate) return false;
-    const overlapsPrimary = Boolean(
-      primary && action.span.start < primary.end && primary.start < action.span.end
-    );
-    const hasCanonicalAdministration = Boolean(
-      clause.method || clause.route || clause.dose || clause.site ||
-      clause.schedule && (
-        clause.schedule.timingCode || clause.schedule.frequency !== undefined ||
-        clause.schedule.period !== undefined || clause.schedule.when?.length ||
-        clause.schedule.dayOfWeek?.length || clause.schedule.timeOfDay?.length ||
-        clause.schedule.activityTiming?.length
-      )
-    );
-    if (hasCanonicalAdministration && primaryActionCoveredByCanonicalClause(action, graph.actions, clause)) {
-      return false;
-    }
-    if (!hasCanonicalAdministration) return false;
-    const suppliesMissingHead = Boolean(!clause.method && dose && matchesDose(action));
-    if (!overlapsPrimary && !suppliesMissingHead) return false;
-    const rich = Boolean(
-      action.relation || action.args.some((arg) =>
-        [
-          AdviceArgumentRole.Duration, AdviceArgumentRole.Time, AdviceArgumentRole.Activity,
-          AdviceArgumentRole.Material, AdviceArgumentRole.Result, AdviceArgumentRole.Destination,
-          AdviceArgumentRole.Substance, AdviceArgumentRole.Manner
-        ].indexOf(arg.role) >= 0
-      )
-    );
-    // A selected HPSG dose may live on the canonical administration while
-    // its richer action frame carries only a typed manner/time adjunct.
-    // It is still the SAME primary event when the predicate unifies and its
-    // source overlaps the HPSG-owned primary span. Reject any conflicting
-    // explicit action quantity; do not infer a quantity from wording.
-    const conflictingAmount = Boolean(dose && action.args.some((arg) =>
-      arg.role === AdviceArgumentRole.Amount && arg.quantity &&
-      !quantityCoveredByDose(arg, dose)
-    ));
-    const samePrimaryWithCanonicalDose = Boolean(
-      dose && overlapsPrimary && actionMatchesCanonicalMethod(action, clause) &&
-      !conflictingAmount
-    );
-    return (rich || suppliesMissingHead) &&
-      (!dose || matchesDose(action) || samePrimaryWithCanonicalDose);
-  });
+  if (!hasCanonicalAdministration || primaryActionCoveredByCanonicalClause(action, graph.actions, clause, action)) return undefined;
+  const rich = action.relation || action.args.some(arg => [
+    AdviceArgumentRole.Duration, AdviceArgumentRole.Time, AdviceArgumentRole.Activity,
+    AdviceArgumentRole.Material, AdviceArgumentRole.Result, AdviceArgumentRole.Destination,
+    AdviceArgumentRole.Substance, AdviceArgumentRole.Manner,
+    AdviceArgumentRole.Object, AdviceArgumentRole.Theme
+  ].indexOf(arg.role) >= 0);
+  const suppliesMissingHead = !clause.method && clause.dose && action.args.some(arg =>
+    arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, clause.dose));
+  return rich || suppliesMissingHead ? action : undefined;
 }
 
 export function instructionGraphRoundTripPrimaryAction(
   clause: CanonicalSigClause
 ): AdviceFrame | undefined {
   const graph = clause.instructionGraph;
-  const primary = graph?.primaryAdministrationSpan;
-  if (!graph || !primary) return undefined;
-  return graph.actions.find((action) => {
-    if (action.span.end <= primary.start || action.span.start >= primary.end) return false;
-    const hasLocalRelation = relationHasGrammarFeature(action.relation, "roundtripRichRelation");
-    const hasRichArgument = action.args.some((arg) =>
-      [
-        AdviceArgumentRole.Time, AdviceArgumentRole.Duration, AdviceArgumentRole.Material,
-        AdviceArgumentRole.Activity, AdviceArgumentRole.Result, AdviceArgumentRole.Destination,
-        AdviceArgumentRole.Substance, AdviceArgumentRole.Manner
-      ].indexOf(arg.role) >= 0 ||
-      ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
-        /\b(?:new|replacement|another|fresh)\b/i.test(arg.text))
-    );
-    return hasLocalRelation || hasRichArgument;
-  });
+  if (!graph) return undefined;
+  const ownership = primaryInstructionOwnership(graph, clause);
+  const index = ownership.administrationActionIndex;
+  const action = index === undefined ? undefined : graph.actions[index];
+  if (!action) return undefined;
+  const hasLocalRelation = relationHasGrammarFeature(action.relation, "roundtripRichRelation");
+  const hasRichArgument = action.args.some((arg) =>
+    [
+      AdviceArgumentRole.Time, AdviceArgumentRole.Duration, AdviceArgumentRole.Material,
+      AdviceArgumentRole.Activity, AdviceArgumentRole.Result, AdviceArgumentRole.Destination,
+      AdviceArgumentRole.Substance, AdviceArgumentRole.Manner
+    ].indexOf(arg.role) >= 0 ||
+    ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
+      /\b(?:new|replacement|another|fresh)\b/i.test(arg.text))
+  );
+  // Compare the original bound argument, before any temporary display view
+  // filters/replaces its neighbors. Other amounts keep their separate meaning.
+  const amount = ownership.dose && ownership.dose.actionIndex === index ? action.args[ownership.dose.argumentIndex] : undefined;
+  const conflictingAmount = primaryAmountConflicts(amount, clause.dose,
+    !clause.dose && clause.sourceProjectionVerified === false);
+  return !conflictingAmount && (!clause.method || actionMatchesCanonicalMethod(action, clause)) &&
+    (hasLocalRelation || hasRichArgument) ? action : undefined;
 }
-
 
 export function instructionGraphPrimarySiteRelation(
   clause: CanonicalSigClause
@@ -4170,20 +5477,22 @@ export function instructionGraphPrimarySiteRelation(
   const graph = clause.instructionGraph;
   const primary = graph?.primaryAdministrationSpan;
   if (!graph || !primary || !clause.site) return undefined;
-  return graph.actions
-    .filter((action) =>
-      action.polarity !== AdvicePolarity.Negate &&
-      action.relation !== undefined &&
-      relationHasSemanticClass(action.relation, "locative") &&
-      action.span.start < primary.end && primary.start < action.span.end &&
-      actionMatchesCanonicalMethod(action, clause) &&
-      action.args.some((arg) =>
-        arg.role === AdviceArgumentRole.Site && siteArgumentCoveredByClause(arg, clause)
-      )
-    )
-    .sort((left, right) =>
-      left.span.start - right.span.start || left.span.end - right.span.end
-    )[0]?.relation;
+  let selected: AdviceFrame | undefined, selectedRelation: AdviceRelation | undefined;
+  for (const action of graph.actions) {
+    if (action.polarity === AdvicePolarity.Negate || action.span.start >= primary.end ||
+        primary.start >= action.span.end || !actionMatchesCanonicalMethod(action, clause)) continue;
+    for (const arg of action.args) {
+      if (arg.role !== AdviceArgumentRole.Site || !siteArgumentCoveredByClause(arg, clause)) continue;
+      const relation = instructionFrameSiteRelation(action, arg);
+      if (relation && (!selected || action.span.start < selected.span.start ||
+          action.span.start === selected.span.start && action.span.end < selected.span.end)) {
+        selected = action;
+        selectedRelation = relation;
+      }
+      break;
+    }
+  }
+  return selectedRelation;
 }
 
 export function instructionGraphPrimaryAdministrationModality(
@@ -4204,22 +5513,9 @@ export function instructionGraphPrimaryAdministrationModality(
     )[0]?.modality;
 }
 
-export function instructionGraphHasNovelNonWarningContent(
-  graph: CanonicalInstructionGraph,
-  representedTexts: readonly string[]
-): boolean {
-  const represented = representedTexts.map(normalizedInstructionSurface).filter(Boolean);
-  const isRepresented = (text: string): boolean => {
-    const normalized = normalizedInstructionSurface(text);
-    return Boolean(normalized && represented.some((candidate) => candidate.includes(normalized)));
-  };
-  for (const action of graph.actions) {
-    if (action.polarity !== AdvicePolarity.Negate && !isRepresented(action.sourceText)) return true;
-  }
-  for (const opaque of graph.opaqueSpans ?? []) {
-    if (!isRepresented(opaque.text)) return true;
-  }
-  return false;
+/** Presentation classification only; action licensing and scope use their own typed facts. */
+export function isInstructionGraphDisplayWarning(frame: AdviceFrame): boolean {
+  return frame.polarity === AdvicePolarity.Negate || frame.force === AdviceForce.Warning;
 }
 
 function sourceTextCoversFrameMeaning(frame: AdviceFrame): boolean {
@@ -4250,6 +5546,23 @@ function conditionRelationBody(text: string, kind: AdviceRelation): string | und
     break;
   }
   return body || undefined;
+}
+
+/** A live guard subsumes retained graph wording only when every permitted
+ * alternative still requires that condition; no graph reparse is needed. */
+function primaryConditionOwnsSource(
+  condition: MedicationCondition, source: string, negative: boolean, negated = false
+): boolean {
+  if (condition.kind === "not")
+    return primaryConditionOwnsSource(condition.condition, source, negative, !negated);
+  if ("conditions" in condition) {
+    if (!condition.conditions.length) return false;
+    const owns = (child: MedicationCondition) => primaryConditionOwnsSource(child, source, negative, negated);
+    const conjunction = (condition.kind === "all") !== negated;
+    return conjunction ? condition.conditions.some(owns) : condition.conditions.every(owns);
+  }
+  const negativeLeaf = negated !== (condition.kind === "state" && !condition.expected);
+  return negative === negativeLeaf && normalizedInstructionSurface(condition.text) === source;
 }
 
 function localizeConditionRelationText(
@@ -4288,6 +5601,257 @@ function localizeConditionRelationText(
   return targetAdapter.joinConditionLead(lead, body);
 }
 
+/** A graph condition whose primary action is rendered by the clause formatter. */
+export interface InstructionGraphPrimaryCondition {
+  text: string;
+  position: "pre" | "post";
+  start: number;
+  imperative: boolean;
+}
+
+/** A negated action's inline condition uses the same condition realizer as edges.
+ * A corresponding selected edge retains its own source placement and wording. */
+function inlineInstructionCondition(
+  frame: AdviceFrame, sourceLocale: string, targetLocale: string,
+  relations?: readonly CanonicalInstructionRelation[], actionIndex?: number
+): InstructionGraphPrimaryCondition | undefined {
+  const kind = frame.relation;
+  if (frame.polarity !== AdvicePolarity.Negate || !kind || !relationHasGrammarFeature(kind, "conditionScope")) return undefined;
+  const arguments_ = frame.args.filter(arg => arg.role === AdviceArgumentRole.Free && arg.text.trim());
+  if (!arguments_.length) return undefined;
+  // Occurrence coverage uses current argument/edge facts before any locale
+  // fragment is rendered. A custom joiner cannot decide condition ownership.
+  if (arguments_.length === 1 && actionIndex !== undefined && relations?.some(relation =>
+      relation.fromActionIndex === undefined && relation.toActionIndex === actionIndex && relation.kind === kind &&
+      conditionRelationBody(relation.text ?? "", kind) === arguments_[0].text.trim())) return undefined;
+  const body = getAdviceLocaleAdapter(sourceLocale).joinArguments(arguments_.map(arg => arg.text.trim()));
+  if (!body) return undefined;
+  const lead = localizeAdviceRelation(kind, sourceLocale) ?? kind;
+  const relation: CanonicalInstructionRelation = { kind, toActionIndex: actionIndex ?? 0,
+    text: getInstructionActionLocaleAdapter(sourceLocale).joinConditionLead(lead, body),
+    ...(arguments_.length === 1 && arguments_[0].span ? { span: arguments_[0].span } : {}) };
+  const selectedBodies = arguments_.map(arg => localizedValue(arg.i18n, targetLocale));
+  if (selectedBodies.every((value): value is string => Boolean(value))) {
+    const selected = getAdviceLocaleAdapter(targetLocale).joinArguments(selectedBodies)!;
+    relation.text = getInstructionActionLocaleAdapter(targetLocale).joinConditionLead(
+      localizeAdviceRelation(kind, targetLocale) ?? kind, selected);
+    sourceLocale = targetLocale;
+  }
+  return instructionGraphCondition(relation, frame, sourceLocale, targetLocale);
+}
+
+/** Resolve the same typed external relation for complete graph or scoped
+ * instruction realization. Unknown condition wording stays source-preserved. */
+function instructionGraphCondition(
+  relation: CanonicalInstructionRelation, target: AdviceFrame,
+  sourceLocale: string, targetLocale: string, sourceReplayed = false
+): InstructionGraphPrimaryCondition | undefined {
+  if (!relation.text) return undefined;
+  if (sourceReplayed) {
+    // Only the selected replay can cover a source-scoped edge. An argument
+    // retained in the frame is not evidence that its canonical renderer used it.
+    if (relation.span && target.span.start <= relation.span.start &&
+        relation.span.end <= target.span.end) return undefined;
+    if (!relation.span && target.relation === relation.kind) {
+      const body = conditionRelationBody(relation.text, relation.kind);
+      if (body && target.args.some(arg =>
+          arg.role === AdviceArgumentRole.Free && arg.text.trim() === body)) return undefined;
+    }
+  }
+  const text = localizeConditionRelationText(relation, sourceLocale, targetLocale);
+  return text ? {
+    text,
+    position: relation.span && relation.span.end <= target.span.start ? "pre" : "post",
+    start: relation.span?.start ?? target.span.end,
+    imperative: !target.modality && target.polarity !== AdvicePolarity.Negate
+  } : undefined;
+}
+
+/** Attach only conditions owned by that primary, before independent graph
+ * actions/advice are composed. Ordinary clauses do not allocate this report. */
+export function attachInstructionGraphPrimaryConditions(
+  text: string,
+  conditions: InstructionGraphPrimaryCondition[] | undefined,
+  locale: string,
+  guardedPrimary = false
+): string {
+  if (!text || !conditions?.length) return text;
+  const adapter = getInstructionActionLocaleAdapter(locale);
+  const ending = text.match(/[.!?]+$/u)?.[0] ?? "";
+  let body = ending ? text.slice(0, -ending.length) : text;
+  if (conditions.length > 1) conditions.sort((a, b) => a.start - b.start);
+  for (const condition of conditions) if (condition.position === "post" && !guardedPrimary) {
+    const continuation = adapter.postposedCondition(condition.text, body);
+    body += /^\s/u.test(continuation) ? continuation : " " + continuation;
+  }
+  for (let index = conditions.length - 1; index >= 0; index -= 1) {
+    const condition = conditions[index];
+    if (condition.position === "pre" || guardedPrimary) {
+      const continuation = adapter.conditionalContinuation(body, condition.imperative);
+      body = condition.text + (/^[\s,;:]/u.test(continuation) ? "" : " ") + continuation;
+    }
+  }
+  return body.charAt(0).toUpperCase() + body.slice(1) + ending;
+}
+
+/** Associate selected advice with current typed action occurrences; no display coverage is inferred. */
+export function instructionGraphAdviceAssociation(
+  graph: CanonicalInstructionGraph,
+  instruction: CanonicalAdditionalInstructionExpr,
+  includeRepresentation = false
+): { actionIndices: number[]; representedActionIndices: number[]; codingProved: boolean } {
+  let actionIndices: number[] = [];
+  if (instruction.frames?.length) {
+    const selected = instruction.frames.map(frame => graph.actions.findIndex(action =>
+      selectedAdviceFrameMatchesGraph(frame, action)));
+    if (selected.every(index => index >= 0)) actionIndices = selected;
+  }
+  // This existing coded matcher retains its selected frame identity instead
+  // of projecting it to a source string and finding that occurrence again.
+  let codingProved = false;
+  const firstFrame = instruction.frames?.[0];
+  const templateFrames = !actionIndices.length && firstFrame && instruction.coding?.code && !instruction.evidence?.length
+    ? buildAdditionalInstructionFramesFromCoding(instruction.coding.system ?? SNOMED_SYSTEM,
+      instruction.coding.code, firstFrame.sourceText, firstFrame.span) : undefined;
+  const onlyCodedTemplate = templateFrames && equalStructuredValues(instruction.frames, templateFrames);
+  if (!actionIndices.length && (!instruction.frames?.length || onlyCodedTemplate) && instruction.coding?.code) {
+    actionIndices = composedCodedAdviceActions(graph.actions, instruction.coding)
+      .map(frame => graph.actions.indexOf(frame));
+    codingProved = actionIndices.length > 0;
+  }
+  // Association may license a richer graph realization. Only standard materialization
+  // requests the additional proof that every current qualifier is represented by the row.
+  const representedFrames = !includeRepresentation ? undefined
+    : actionIndices.length && instruction.frames?.length ? instruction.frames
+    : actionIndices.length && instruction.coding?.code
+      ? buildAdditionalInstructionFramesFromCoding(instruction.coding.system ?? SNOMED_SYSTEM, instruction.coding.code)
+      : undefined;
+  const representedActionIndices = representedFrames?.length ? actionIndices.filter(index =>
+    representedFrames.some(frame => sameTypedWarning(frame, graph.actions[index]))) : [];
+  return { actionIndices, representedActionIndices, codingProved };
+}
+
+interface InstructionAdviceBinding {
+  instruction: CanonicalAdditionalInstructionExpr;
+  actionIndices: number[];
+  range?: TextRange;
+  rowIndex: number;
+  graphOwnsWording: boolean;
+  completeRow: boolean;
+  derivedQualifier: boolean;
+  codingProved: boolean;
+  alreadyRendered: boolean;
+}
+
+/** Select current occurrences once, before either locale chooses their wording. */
+function collectGraphInstructionOwnership(
+  graph: CanonicalInstructionGraph,
+  instructions: readonly CanonicalAdditionalInstructionExpr[],
+  rendered: readonly CanonicalAdditionalInstructionExpr[],
+  source: string
+): InstructionAdviceBinding[] {
+  return instructions.map((instruction, rowIndex) => {
+    let { actionIndices, codingProved } = instructionGraphAdviceAssociation(graph, instruction);
+    const derivedQualifier = codingProved && actionIndices.every(index =>
+      !isInstructionGraphDisplayWarning(graph.actions[index]));
+    const completeFrames = instructionHasCompleteFrameEvidence(instruction);
+    let range = completeFrames && actionIndices.length === 1 ? graph.actions[actionIndices[0]].span
+      : instructionSourceRange(graph, instruction.text, source);
+    if (range && actionIndices.length && !actionIndices.some(index =>
+        range!.start < graph.actions[index].span.end && graph.actions[index].span.start < range!.end)) range = undefined;
+    if (!instruction.frames?.length && !instruction.coding?.code && range) {
+      actionIndices = graph.actions.map((action, index) =>
+        range!.start < action.span.end && action.span.start < range!.end ? index : -1).filter(index => index >= 0);
+    } else if (!instruction.coding?.code && actionIndices.length && range) {
+      // A selected row can name a complete procedure while its frames record
+      // only one daughter. Keep all selected actions wholly owned by its range;
+      // a conflicting supplied frame never enters this source association.
+      for (let index = 0; index < graph.actions.length; index++) {
+        const action = graph.actions[index];
+        if (range.start <= action.span.start && action.span.end <= range.end && actionIndices.indexOf(index) < 0)
+          actionIndices.push(index);
+      }
+    }
+    const externalCondition = actionIndices.some(index => graph.relations?.some(relation =>
+      relation.fromActionIndex === undefined && relation.toActionIndex === index));
+    if (externalCondition && completeFrames && actionIndices.length === 1) {
+      // Action evidence does not include an external qualifier. Retain the
+      // selected row's own range when its wording also owns that relation.
+      const rowRange = instructionSourceRange(graph, instruction.text, source);
+      const action = graph.actions[actionIndices[0]];
+      if (rowRange && rowRange.start < action.span.end && action.span.start < rowRange.end) range = rowRange;
+    }
+    let completeRow = completeFrames;
+    if (!completeRow && range && actionIndices.length) {
+      const selectedRanges = actionIndices.map(index => graph.actions[index].span);
+      for (const relation of graph.relations ?? []) {
+        if (relation.span && actionIndices.indexOf(relation.toActionIndex) >= 0 &&
+            (relation.fromActionIndex === undefined || actionIndices.indexOf(relation.fromActionIndex) >= 0))
+          selectedRanges.push(relation.span);
+      }
+      for (const opaque of graph.opaqueSpans ?? []) selectedRanges.push(opaque);
+      completeRow = uncoveredSourceRanges(range, selectedRanges).every(part =>
+        !trimOpaqueSpan(graph.sourceText, part.start, part.end));
+    }
+    return {
+      instruction, actionIndices, range, rowIndex, derivedQualifier, codingProved, completeRow,
+      // External qualifiers remain graph nodes; a row's frame evidence does
+      // not license deletion of an IF/UNLESS relation or a temporal edge.
+      graphOwnsWording: derivedQualifier || Boolean(actionIndices.length && completeRow &&
+        (externalCondition || actionIndices.length > 1 || !instruction.coding?.code)),
+      alreadyRendered: rendered.indexOf(instruction) >= 0
+    };
+  });
+}
+
+interface ClauseInstructionRealization {
+  pre?: string;
+  post?: string;
+  whole?: string;
+  patient?: string;
+  preFlowsIntoAdministration?: boolean;
+  postFlowsFromAdministration?: boolean;
+}
+interface ClauseInstructionContext {
+  clause: CanonicalSigClause;
+  bindings: InstructionAdviceBinding[];
+  render: (instruction: CanonicalAdditionalInstructionExpr) => string | undefined;
+  presentGraphAction?: (text: string) => string | undefined;
+  result: ClauseInstructionRealization;
+  source: string;
+}
+
+/** Internal clause preview uses the same selected node walk as the public graph
+ * realizer. No receipt or source ownership is stored on the clinical values. */
+export function realizeClauseInstructions(
+  clause: CanonicalSigClause,
+  locale: string,
+  options: Parameters<typeof realizeInstructionGraph>[2],
+  render: (instruction: CanonicalAdditionalInstructionExpr) => string | undefined,
+  alreadyRendered: readonly CanonicalAdditionalInstructionExpr[] = [],
+  presentGraphAction?: (text: string) => string | undefined
+): ClauseInstructionRealization {
+  const instructions = clause.additionalInstructions ?? [];
+  if (!clause.instructionGraph) {
+    let whole = "";
+    for (const instruction of instructions) {
+      if (alreadyRendered.indexOf(instruction) >= 0) continue;
+      const text = render(instruction);
+      if (text) whole += (whole ? " " : "") + text;
+    }
+    return { whole: whole || undefined, patient: clause.patientInstruction };
+  }
+  const source = clause.instructionGraph.sourceText.toLocaleLowerCase("en");
+  const context: ClauseInstructionContext = {
+    clause, source,
+    bindings: collectGraphInstructionOwnership(clause.instructionGraph, instructions, alreadyRendered, source),
+    render, presentGraphAction,
+    result: {}
+  };
+  realizeInstructionGraphInternal(clause.instructionGraph, locale, options, context);
+  return context.result;
+}
+
 export function realizeInstructionGraph(
   graph: CanonicalInstructionGraph,
   locale = graph.sourceLocale ?? "en",
@@ -4295,6 +5859,11 @@ export function realizeInstructionGraph(
     includeWarnings?: boolean;
     onlyWarnings?: boolean;
     omitCanonicalAdministration?: CanonicalSigClause;
+    /** The selected primary action already realized with its full arguments.
+     * Identity remains valid even when imported source wording is absent. */
+    omitRenderedAction?: AdviceFrame;
+    /** Report conditions attached to the covered primary during this walk. */
+    primaryConditions?: InstructionGraphPrimaryCondition[];
     /** Prefer each understood action's exact source wording when source and target locales match. */
     preferSourceText?: boolean;
     /** Source phrases already rendered through another semantic channel. */
@@ -4303,16 +5872,59 @@ export function realizeInstructionGraph(
     position?: "all" | "pre" | "post";
     /** Prefer deliberately unambiguous lexical labels when generating parse-safe text. */
     roundtripSafe?: boolean;
+    instructionActionMap?: ParseOptions["instructionActionMap"];
   }
+): string | undefined {
+  return realizeInstructionGraphInternal(graph, locale, options);
+}
+
+/** The single action/condition/opaque node selection and emission owner. */
+function realizeInstructionGraphInternal(
+  graph: CanonicalInstructionGraph,
+  locale: string,
+  options: Parameters<typeof realizeInstructionGraph>[2],
+  preview?: ClauseInstructionContext
 ): string | undefined {
   const omittedSources = (options?.omitSourceTexts ?? [])
     .map(normalizedInstructionSurface)
     .filter(Boolean);
   const position = options?.position ?? "all";
   const primary = graph.primaryAdministrationSpan;
-  const primaryAction = primary ? graph.actions.findIndex(frame =>
-    frame.span.start <= primary.start && primary.end <= frame.span.end) : -1;
+  let patientRanges: TextRange[] | undefined;
+  if (preview?.clause.patientInstruction) {
+    const exact = instructionSourceRange(graph, preview.clause.patientInstruction, preview.source);
+    if (exact) patientRanges = [exact];
+    else {
+      // HPSG composes selected patient fragments with this existing separator.
+      // Locate every complete fragment; no punctuation normalization or clinical
+      // interpretation is used to turn an unrelated supplied passage into one.
+      const fragments = preview.clause.patientInstruction.split("; ");
+      if (fragments.length > 1) {
+        const ranges = fragments.map(text => instructionSourceRange(graph, text, preview.source));
+        if (ranges.every((range): range is TextRange => Boolean(range)) &&
+            ranges.every((range, index) => index === 0 || ranges[index - 1].end <= range.start)) patientRanges = ranges;
+      }
+    }
+  }
+  const coveredRanges: TextRange[] | undefined = patientRanges ? [] : undefined;
+  const coveredActions = preview ? new Set<number>() : undefined;
+  const renderedRows = preview ? new Set<number>() : undefined;
+  let rowByAction: Map<number, InstructionAdviceBinding[]> | undefined;
+  for (const binding of preview?.bindings ?? [])
+    for (const index of binding.actionIndices) {
+      if (!rowByAction) rowByAction = new Map();
+      const rows = rowByAction.get(index);
+      if (rows) rows.push(binding); else rowByAction.set(index, [binding]);
+    }
+  const doseOwner = options?.omitCanonicalAdministration
+    ? primaryDoseAmountOwner(graph, options.omitCanonicalAdministration, options) : undefined;
+  const amountOwner = doseOwner?.action;
+  const primaryAction = graph.primaryOwnership
+    ? graph.primaryOwnership.administrationActionIndex ?? -1
+    : primary ? graph.actions.findIndex(frame =>
+      frame.span.start <= primary.start && primary.end <= frame.span.end) : -1;
   const temporalEdges = new Map<number, number[]>();
+  let temporalOrderDiffersFromSource = false;
   for (const relation of graph.relations ?? []) {
     if (relation.fromActionIndex === undefined) continue;
     const from = relation.kind === AdviceRelation.After ? relation.toActionIndex : relation.fromActionIndex;
@@ -4321,6 +5933,8 @@ export function realizeInstructionGraph(
         relation.kind !== AdviceRelation.Then) continue;
     const targets = temporalEdges.get(from) ?? [];
     targets.push(to); temporalEdges.set(from, targets);
+    if (graph.actions[from]?.span.start >= graph.actions[to]?.span.start)
+      temporalOrderDiffersFromSource = true;
   }
   const precedes = (from: number, to: number): boolean => {
     const pending = [...(temporalEdges.get(from) ?? [])];
@@ -4343,16 +5957,61 @@ export function realizeInstructionGraph(
     if (position === "pre") return end <= primary.start;
     return start >= primary.start;
   };
-  const frames = graph.actions.filter((frame) => {
-    if (!inRequestedPosition(frame.span.start, frame.span.end, frame.sequenceIndex)) return false;
-    const frameSource = normalizedInstructionSurface(frame.sourceText);
+  const frames: number[] = [];
+  const conditionTargets = new Map<number | undefined, AdviceFrame>();
+  let coveredPrimaryAction: number | undefined;
+  let displayedAmountOwner = amountOwner;
+  for (let actionIndex = 0; actionIndex < graph.actions.length; actionIndex += 1) {
+    const sourceFrame = graph.actions[actionIndex];
+    if (sourceFrame === options?.omitRenderedAction) {
+      coveredRanges?.push(sourceFrame.span);
+      coveredActions?.add(actionIndex);
+      if (!options?.onlyWarnings) {
+        conditionTargets.set(actionIndex, sourceFrame);
+        coveredPrimaryAction = actionIndex;
+      }
+      continue;
+    }
+    const ownsPrimary = primaryAction >= 0
+      ? actionIndex === primaryAction : !graph.primaryOwnership && sourceFrame === amountOwner;
+    const frame = ownsPrimary && options?.omitCanonicalAdministration
+      ? frameWithCanonicalPrimaryContext(sourceFrame, options.omitCanonicalAdministration) : sourceFrame;
+    if (sourceFrame === amountOwner) displayedAmountOwner = frame;
+    const inPosition = inRequestedPosition(frame.span.start, frame.span.end, actionIndex);
+    // A preposed condition can precede its canonically rendered primary
+    // action. Resolve that one target even when the action is outside PRE.
+    if (!inPosition && !(position === "pre" && primaryAction >= 0 &&
+        sourceFrame === graph.actions[primaryAction] && options?.omitCanonicalAdministration)) continue;
+    const frameSource = omittedSources.length ? normalizedInstructionSurface(sourceFrame.sourceText) : undefined;
     // A partial text overlap is not evidence that an independent action was
     // rendered. In particular, it cannot erase one half of a prohibition.
-    if (frameSource && omittedSources.indexOf(frameSource) >= 0) return false;
+    if (frameSource && omittedSources.indexOf(frameSource) >= 0) continue;
+    const hasAmount = options?.omitCanonicalAdministration &&
+      frame.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity);
     if (options?.omitCanonicalAdministration &&
-      primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration)) {
-      return false;
+      // A later, independent action may now happen to match the clinician's
+      // EDITED method and dose. Only the source-backed amount owner may be
+      // removed as the canonical administration; other quantified actions
+      // keep their separate meaning and original temporal relationship.
+      // An amountless action instead follows the explicit primary span,
+      // including when an independent preparation supplied the dose.
+      (!hasAmount || amountOwner === sourceFrame) &&
+      primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration,
+        graph.primaryOwnership ? primaryAction >= 0 ? graph.actions[primaryAction] : null
+          : primary ? !hasAmount && primaryAction >= 0 ? graph.actions[primaryAction] : amountOwner : undefined,
+        sourceFrame)) {
+      coveredRanges?.push(sourceFrame.span);
+      coveredActions?.add(actionIndex);
+      // The administration sentence covers this action, not its graph-only
+      // conditional relation. Keep the target without emitting the action twice.
+      if (!options?.onlyWarnings &&
+          !(options?.includeWarnings === false && isInstructionGraphDisplayWarning(frame))) {
+        conditionTargets.set(actionIndex, frame);
+        if (ownsPrimary) coveredPrimaryAction = actionIndex;
+      }
+      continue;
     }
+    if (!inPosition) continue;
     const definition = getMedicationInstructionAction(frame.predicate.lemma);
     if (
       options?.omitCanonicalAdministration &&
@@ -4364,13 +6023,19 @@ export function realizeInstructionGraph(
       frame.span.end <= primary.start &&
       primary.start - frame.span.end <= 1
     ) {
-      return false;
+      continue;
     }
-    const warning = frame.polarity === AdvicePolarity.Negate;
-    if (options?.onlyWarnings) return warning;
-    return options?.includeWarnings !== false || !warning;
-  });
+    const warning = isInstructionGraphDisplayWarning(frame);
+    if (options?.onlyWarnings ? !warning : options?.includeWarnings === false && warning) continue;
+    frames.push(actionIndex);
+    conditionTargets.set(actionIndex, frame);
+  }
   const localeAdapter = getInstructionActionLocaleAdapter(locale);
+  let directRanges: TextRange[] | undefined;
+  const directRowCoversRelation = preview ? (binding: InstructionAdviceBinding, relation: CanonicalInstructionRelation): boolean =>
+    Boolean(relation.span && binding.range && renderedRows?.has(binding.rowIndex) &&
+      directRanges && directRanges.indexOf(binding.range) >= 0 &&
+      binding.range.start <= relation.span.start && relation.span.end <= binding.range.end) : undefined;
   const nodes: Array<{
     start: number;
     end: number;
@@ -4379,11 +6044,35 @@ export function realizeInstructionGraph(
     actionIndex?: number;
     conditionTargetActionIndex?: number;
     warning?: boolean;
+    sourceReplayed?: boolean;
+    completeAction?: boolean;
+    rowIndex?: number;
   }> = [];
   const targetLanguage = baseLanguageTag(locale) ?? locale.toLowerCase();
   const sourceLocale = graph.sourceLocale ?? "en";
   const sourceLanguage = baseLanguageTag(sourceLocale) ?? sourceLocale.toLowerCase();
-  for (const frame of frames) {
+  for (const actionIndex of frames) {
+    const sourceFrame = conditionTargets.get(actionIndex)!;
+    const currentDose = options?.omitCanonicalAdministration?.dose;
+    const editedPrimary = Boolean(displayedAmountOwner === sourceFrame &&
+      primaryAmountConflicts(doseOwner?.argument, currentDose,
+        !currentDose && options?.omitCanonicalAdministration?.sourceProjectionVerified === false));
+    // The source dose owner keeps its role after an external amount edit.
+    // A sole preparation before the primary action supplies the live amount
+    // there; the later rich administration does not repeat or inherit it.
+    const frame = editedPrimary
+      ? frameWithReconciledAmount(sourceFrame, doseOwner!.argument, currentDose,
+          Boolean(primary && amountOwner && amountOwner.span.end <= primary.start))
+      : sourceFrame;
+    if (editedPrimary && frame.args.length === 0 && options?.omitCanonicalAdministration &&
+        primaryActionCoveredByCanonicalClause(frame, graph.actions,
+          options.omitCanonicalAdministration, sourceFrame, sourceFrame)) {
+      // A removed stale Amount can leave only the administration already
+      // rendered from current facts. Its index still owns graph conditions.
+      conditionTargets.set(actionIndex, frame);
+      coveredPrimaryAction = actionIndex;
+      continue;
+    }
     const definition = getMedicationInstructionAction(frame.predicate.lemma);
     const secondaryAdministration = Boolean(
       definition?.administrationMethod?.code &&
@@ -4391,118 +6080,339 @@ export function realizeInstructionGraph(
       (frame.span.end <= graph.primaryAdministrationSpan.start ||
        frame.span.start >= graph.primaryAdministrationSpan.end)
     );
-    const sourceFaithful = (
+    const sourceFaithful = !editedPrimary && (
       options?.preferSourceText || secondaryAdministration ||
       frame.polarity === AdvicePolarity.Negate
     ) && frame.polaritySource !== "shared" &&
       targetLanguage === sourceLanguage && sourceTextCoversFrameMeaning(frame)
       ? trimSemanticText(frame.sourceText)
       : undefined;
-    const text = sourceFaithful || realizeAction(frame, locale, options?.roundtripSafe === true);
+    const bindings = rowByAction?.get(actionIndex);
+    const binding = bindings?.[0];
+    if (bindings && bindings.length > 1 && bindings.every((row, index) => row.range &&
+          (index === 0 || bindings[index - 1].range!.end <= row.range.start)) &&
+        uncoveredSourceRanges(frame.span, bindings.map(row => row.range!)).every(range =>
+          !trimOpaqueSpan(graph.sourceText, range.start, range.end))) {
+      // Several selected rows can be pieces of one enriched action frame.
+      // Their own authored pieces, not a replay of that full frame per row,
+      // supply wording while the action and external relations keep identity.
+      for (let index = 0; index < bindings.length; index++) {
+        const row = bindings[index];
+        const text = localizedValue(row.instruction.i18n, locale) ?? row.instruction.text;
+        if (!text || row.alreadyRendered) continue;
+        renderedRows!.add(row.rowIndex);
+        coveredRanges?.push(row.range!);
+        (directRanges ??= []).push(row.range!);
+        nodes.push({ start: row.range!.start, end: row.range!.end, text: text.trim().replace(/[.!?]+$/u, ""),
+          understood: index === 0, actionIndex: index === 0 ? actionIndex : undefined,
+          rowIndex: row.rowIndex, warning: isInstructionGraphDisplayWarning(frame) });
+      }
+      coveredActions?.add(actionIndex);
+      continue;
+    }
+    if (binding?.alreadyRendered) {
+      renderedRows!.add(binding.rowIndex);
+      coveredRanges?.push(frame.span);
+      coveredActions?.add(actionIndex);
+      continue;
+    }
+    // One authored row can cover several selected actions. Its actual emitted
+    // range owns those actions once; their typed relations remain in the graph.
+    const rowAlreadyEmitted = Boolean(binding && binding.actionIndices.length > 1 &&
+      renderedRows!.has(binding.rowIndex) && binding.range && directRanges &&
+      directRanges.indexOf(binding.range) >= 0 &&
+      binding.range.start <= frame.span.start && frame.span.end <= binding.range.end);
+    if (rowAlreadyEmitted && !graph.relations?.some(relation => relation.fromActionIndex === undefined &&
+        relation.toActionIndex === actionIndex && !directRowCoversRelation!(binding!, relation))) {
+      coveredActions?.add(actionIndex);
+      continue;
+    }
+    // A structural composite may include the already-rendered administration
+    // plus a warning. Keep each remaining exact action at its own node instead
+    // of repeating the whole composite label at that warning.
+    const composedWithCoveredPrimary = Boolean(binding?.codingProved && binding.actionIndices.length > 1 &&
+      coveredPrimaryAction !== undefined && binding.actionIndices.indexOf(coveredPrimaryAction) >= 0);
+    const graphOwnsWording = binding?.graphOwnsWording || composedWithCoveredPrimary || rowAlreadyEmitted;
+    let explicitWording = binding && !binding.derivedQualifier && !composedWithCoveredPrimary && !rowAlreadyEmitted
+      ? localizedValue(binding.instruction.i18n, locale) : undefined;
+    if (explicitWording && graphOwnsWording && options?.roundtripSafe) {
+      const definition = instructionActionDefinitionForRealization(frame);
+      const ordinaryLabel = actionLabel(frame, locale, definition);
+      if (explicitWording === ordinaryLabel && actionLabel(frame, locale, definition, true) !== ordinaryLabel)
+        explicitWording = undefined;
+    }
+    const direct = explicitWording ?? (binding && !graphOwnsWording
+      ? preview!.render(binding.instruction) : undefined);
+    let graphText = direct ? undefined : sourceFaithful || realizeAction(frame, locale, options?.roundtripSafe === true);
+    if (graphText && !sourceFaithful) {
+      const inline = inlineInstructionCondition(frame, graph.sourceLocale ?? "en", locale, graph.relations, actionIndex);
+      if (inline) graphText = attachInstructionGraphPrimaryConditions(graphText, [inline], locale);
+    }
+    const text = direct ? direct.trim().replace(/[.!?]+$/u, "") : graphText;
     if (text) {
+      if (binding) renderedRows!.add(binding.rowIndex);
+      coveredRanges?.push(direct && binding?.range ? binding.range : frame.span);
+      if (direct && binding?.range) (directRanges ??= []).push(binding.range);
+      coveredActions?.add(actionIndex);
       nodes.push({
-        start: frame.span.start,
-        end: frame.span.end,
+        start: direct && binding?.range ? binding.range.start : frame.span.start,
+        end: direct && binding?.range ? binding.range.end : frame.span.end,
         text,
         understood: true,
-        actionIndex: frame.sequenceIndex,
-        warning: frame.force === AdviceForce.Warning || frame.force === AdviceForce.Caution ||
-          frame.polarity === AdvicePolarity.Negate
+        actionIndex,
+        sourceReplayed: !direct && Boolean(sourceFaithful),
+        completeAction: !direct || binding?.completeRow,
+        rowIndex: direct ? binding?.rowIndex : undefined,
+        warning: isInstructionGraphDisplayWarning(frame) || frame.force === AdviceForce.Caution
       });
     }
   }
-  const selectedActionIndices = new Set(frames.map((frame) => frame.sequenceIndex));
   for (const relation of graph.relations ?? []) {
     if (relation.fromActionIndex !== undefined || relation.toActionIndex === undefined) continue;
-    if (!selectedActionIndices.has(relation.toActionIndex)) continue;
-    if (!relation.text || !relation.span || !inRequestedPosition(relation.span.start, relation.span.end, relation.toActionIndex)) continue;
-    const target = frames.find((frame) => frame.sequenceIndex === relation.toActionIndex);
-    if (!target) continue;
-    const normalizedRelation = normalizedInstructionSurface(relation.text);
-    const representedByTarget = target.relation === relation.kind && target.args.some((arg) => {
-      const argSurface = normalizedInstructionSurface(arg.text ?? arg.normalized ?? "");
-      return Boolean(
-        normalizedRelation && argSurface &&
-        (normalizedRelation.includes(argSurface) || argSurface.includes(normalizedRelation))
-      );
-    });
-    if (representedByTarget) continue;
-    const relationText = localizeConditionRelationText(
-      relation,
-      graph.sourceLocale ?? "en",
-      locale
-    );
-    if (relationText) {
-      nodes.push({
-        start: relation.span.start,
-        end: relation.span.end,
-        text: relationText,
-        understood: false,
-        conditionTargetActionIndex: relation.toActionIndex
+    const target = conditionTargets.get(relation.toActionIndex);
+    if (!target || !relation.text || relation.span &&
+        !inRequestedPosition(relation.span.start, relation.span.end, relation.toActionIndex)) continue;
+    if (rowByAction?.get(relation.toActionIndex)?.some(binding => directRowCoversRelation!(binding, relation))) {
+      coveredRanges?.push(relation.span!);
+      continue;
+    }
+    const mayReplayCondition = target.sourceText && (!relation.span ||
+      target.span.start <= relation.span.start && relation.span.end <= target.span.end);
+    const targetNode = !relation.span || mayReplayCondition
+      ? nodes.find(node => node.actionIndex === relation.toActionIndex) : undefined;
+    const condition = instructionGraphCondition(relation, target, graph.sourceLocale ?? "en", locale,
+      targetNode?.sourceReplayed);
+    if (!condition) {
+      if (relation.span && targetNode?.sourceReplayed) coveredRanges?.push(relation.span);
+      continue;
+    }
+    const currentCondition = options?.omitCanonicalAdministration?.clinicalAdjuncts?.condition;
+    if (currentCondition && relation.toActionIndex === coveredPrimaryAction &&
+        relationHasSemanticClass(relation.kind, "conditional")) {
+      const sourceBody = conditionRelationBody(relation.text, relation.kind);
+      if (sourceBody && primaryConditionOwnsSource(currentCondition,
+          normalizedInstructionSurface(sourceBody), relation.kind === AdviceRelation.Unless)) {
+        if (relation.span) coveredRanges?.push(relation.span);
+        continue;
+      }
+    }
+    if (options?.primaryConditions && relation.toActionIndex === coveredPrimaryAction &&
+        relationHasGrammarFeature(relation.kind, "conditionScope")) {
+      if (!relation.span && position === "pre") continue;
+      if (relation.span) coveredRanges?.push(relation.span);
+      options.primaryConditions.push({
+        ...condition,
+        position: relation.span && relation.span.end <= (primary?.start ?? target.span.start) ? "pre" : "post"
       });
+      continue;
+    }
+    if (!relation.span) {
+      if (targetNode) targetNode.text += localeAdapter.postposedCondition(condition.text, targetNode.text);
+      continue;
+    }
+    coveredRanges?.push(relation.span);
+    nodes.push({
+      start: relation.span.start,
+      end: relation.span.end,
+      text: condition.text,
+      understood: false,
+      conditionTargetActionIndex: relation.toActionIndex
+    });
+  }
+  if (preview) {
+    for (const binding of preview.bindings) {
+      if (binding.alreadyRendered || renderedRows!.has(binding.rowIndex) ||
+          (binding.graphOwnsWording || binding.codingProved && binding.actionIndices.length > 1 &&
+            coveredPrimaryAction !== undefined && binding.actionIndices.indexOf(coveredPrimaryAction) >= 0) &&
+          binding.actionIndices.every(index => coveredActions!.has(index))) continue;
+      const text = preview.render(binding.instruction);
+      if (!text) continue;
+      let start = binding.range?.start;
+      if (start === undefined) {
+        const next = preview.bindings.slice(binding.rowIndex + 1).find(row => row.actionIndices.length || row.range);
+        start = next?.range?.start ?? (next?.actionIndices.length ? graph.actions[next.actionIndices[0]].span.start : Number.POSITIVE_INFINITY);
+      }
+      nodes.push({ start, end: binding.range?.end ?? start, text: text.trim().replace(/[.!?]+$/u, ""),
+        understood: false, rowIndex: binding.rowIndex });
+      if (binding.range) {
+        (directRanges ??= []).push(binding.range);
+        coveredRanges?.push(binding.range);
+      }
     }
   }
   if (!options?.onlyWarnings) {
     for (const opaque of graph.opaqueSpans ?? []) {
       if (!inRequestedPosition(opaque.start, opaque.end)) continue;
-      const text = opaque.text.trim();
-      if (text) nodes.push({ start: opaque.start, end: opaque.end, text, understood: false });
+      if (!directRanges?.length) {
+        const text = opaque.text.trim();
+        if (text) {
+          coveredRanges?.push(opaque);
+          nodes.push({ start: opaque.start, end: opaque.end, text, understood: false });
+        }
+        continue;
+      }
+      for (const range of uncoveredSourceRanges(opaque, directRanges)) {
+        const fragment = trimOpaqueSpan(graph.sourceText, range.start, range.end);
+        if (fragment) {
+          coveredRanges?.push(fragment);
+          nodes.push({ start: fragment.start, end: fragment.end, text: fragment.text, understood: false });
+        }
+      }
+    }
+  }
+  if (preview?.clause.patientInstruction) {
+    if (!patientRanges) preview.result.patient = preview.clause.patientInstruction;
+    else {
+      // A selected relation is covered only with its actual endpoints. External
+      // conditions were recorded at their own emission/primary attachment above.
+      for (const relation of graph.relations ?? []) {
+        if (relation.span && relation.fromActionIndex !== undefined &&
+            coveredActions!.has(relation.fromActionIndex) && coveredActions!.has(relation.toActionIndex))
+          coveredRanges!.push(relation.span);
+      }
+      for (const patientRange of patientRanges) for (const range of uncoveredSourceRanges(patientRange, coveredRanges!)) {
+        const fragment = trimOpaqueSpan(graph.sourceText, range.start, range.end);
+        if (fragment) nodes.push({ start: fragment.start, end: fragment.end, text: fragment.text, understood: false });
+      }
     }
   }
   if (!nodes.length) return undefined;
-  nodes.sort((left, right) => left.start - right.start);
-  let output = "";
-  for (let index = 0; index < nodes.length; index += 1) {
-    const node = nodes[index];
-    if (!output) {
-      output = node.text;
-      continue;
+  // A shared antecedent has one source span but a separate owned relation
+  // to each consequent. Keep each emitted condition beside its target.
+  nodes.sort((left, right) => {
+    const leftOwner = left.conditionTargetActionIndex === undefined ? undefined
+      : graph.actions[left.conditionTargetActionIndex];
+    const rightOwner = right.conditionTargetActionIndex === undefined ? undefined
+      : graph.actions[right.conditionTargetActionIndex];
+    return (leftOwner?.span.start ?? left.start) - (rightOwner?.span.start ?? right.start) ||
+      left.start - right.start || (left.rowIndex ?? Number.MAX_SAFE_INTEGER) - (right.rowIndex ?? Number.MAX_SAFE_INTEGER);
+  });
+  if (temporalOrderDiffersFromSource && nodes.length > 1) {
+    // Include omitted actions in the edge walk so their predecessors still
+    // precede their successors. Emit each condition with its owning action.
+    type Group = { start: number; nodes: typeof nodes; before: Group[] };
+    const actions = new Map<number, Group>();
+    const groups: Group[] = [];
+    for (let index = 0; index < graph.actions.length; index++) {
+      const group: Group = { start: graph.actions[index].span.start, nodes: [], before: [] };
+      actions.set(index, group);
+      groups.push(group);
     }
-    const previous = nodes[index - 1];
-    const conditional = !previous?.understood && node.understood
-      ? graph.relations?.find((relation) =>
-        relation.fromActionIndex === undefined &&
-        relation.toActionIndex === node.actionIndex &&
-        relation.span?.start === previous.start &&
-        relation.span?.end === previous.end
-      )
-      : undefined;
-    if (conditional) {
-      const target = frames.find((frame) => frame.sequenceIndex === node.actionIndex);
-      const imperative = Boolean(target && !target.modality && target.polarity !== AdvicePolarity.Negate);
-      output += localeAdapter.conditionalContinuation(node.text, imperative);
-      continue;
+    for (const node of nodes) {
+      const owner = node.actionIndex ?? node.conditionTargetActionIndex;
+      const group = owner === undefined ? undefined : actions.get(owner);
+      if (group) {
+        group.start = Math.min(group.start, node.start);
+        group.nodes.push(node);
+      } else groups.push({ start: node.start, nodes: [node], before: [] });
     }
-    const postposedConditional = Boolean(
-      previous?.understood &&
-      !node.understood &&
-      node.conditionTargetActionIndex === previous.actionIndex
-    );
-    if (postposedConditional) {
-      output += localeAdapter.postposedCondition(node.text);
-      continue;
+    for (const [from, targets] of temporalEdges) {
+      for (const to of targets) actions.get(to)!.before.push(actions.get(from)!);
     }
-    const discourseConnector = !previous?.understood && node.understood &&
-      ACTION_DISCOURSE_CONNECTORS.has(normalizedInstructionSurface(previous?.text ?? "")) &&
-      !graph.sourceText.slice(previous.end, node.start).trim();
-    if (discourseConnector) {
-      output += " " + localeAdapter.continuationText(node.text, true);
-      continue;
+    groups.sort((left, right) => left.start - right.start);
+    for (const group of groups) group.before.sort((left, right) => left.start - right.start);
+    const visited = new Set<Group>();
+    nodes.length = 0;
+    for (const group of groups) {
+      if (visited.has(group)) continue;
+      visited.add(group);
+      const pending = [{ group, next: 0 }];
+      while (pending.length) {
+        const current = pending[pending.length - 1];
+        const before = current.group.before[current.next++];
+        if (before) {
+          if (!visited.has(before)) {
+            visited.add(before);
+            pending.push({ group: before, next: 0 });
+          }
+          continue;
+        }
+        nodes.push(...current.group.nodes);
+        pending.pop();
+      }
     }
-    const explicitRelation = previous?.understood && node.understood
-      ? graph.relations?.find((relation) =>
-          relation.fromActionIndex === previous.actionIndex &&
-          relation.toActionIndex === node.actionIndex
-        )
-      : undefined;
-    if (previous?.understood && node.understood && node.warning && !explicitRelation) {
-      output += `. ${node.text}`;
-      continue;
-    }
-    output += previous?.understood && node.understood && relationHasSemanticClass(explicitRelation?.kind, "sequence")
-      ? localeAdapter.sequenceSeparator()
-      : "; ";
-    output += localeAdapter.continuationText(node.text, node.understood);
   }
-  return output;
+  let output = "";
+  let previous: typeof nodes[number] | undefined;
+  let preOutput = "";
+  let postOutput = "";
+  let prePrevious: typeof previous;
+  let postPrevious: typeof previous;
+  let firstPost: typeof previous;
+  for (const node of nodes) {
+    const ownerIndex = node.actionIndex ?? node.conditionTargetActionIndex;
+    const owner = ownerIndex === undefined ? undefined : graph.actions[ownerIndex];
+    let beforePrimary = false;
+    if (preview && primary) {
+      const before = ownerIndex !== undefined && primaryAction >= 0 && ownerIndex !== primaryAction
+        ? precedes(ownerIndex, primaryAction) : false;
+      const after = ownerIndex !== undefined && primaryAction >= 0 && ownerIndex !== primaryAction
+        ? precedes(primaryAction, ownerIndex) : false;
+      beforePrimary = before !== after ? before : (owner?.span.end ?? node.end) <= primary.start;
+      output = beforePrimary ? preOutput : postOutput;
+      previous = beforePrimary ? prePrevious : postPrevious;
+    }
+    const presentSentence = node.actionIndex !== undefined && node.rowIndex === undefined
+      ? preview?.presentGraphAction : undefined;
+    if (!previous) output = presentSentence
+      ? (presentSentence(node.text) ?? node.text).trim().replace(/[.!?]+$/u, "") : node.text;
+    else {
+      const conditional = !previous.understood && node.understood
+        ? graph.relations?.find(relation => relation.fromActionIndex === undefined &&
+            relation.toActionIndex === node.actionIndex &&
+            relation.span?.start === previous!.start && relation.span?.end === previous!.end)
+        : undefined;
+      const postposedConditional = previous.understood && !node.understood &&
+        node.conditionTargetActionIndex === previous.actionIndex;
+      const discourseConnector = !previous.understood && node.understood &&
+        ACTION_DISCOURSE_CONNECTORS.has(normalizedInstructionSurface(previous.text)) &&
+        !graph.sourceText.slice(previous.end, node.start).trim();
+      if (conditional) {
+        const target = conditionTargets.get(node.actionIndex);
+        output += localeAdapter.conditionalContinuation(node.text,
+          Boolean(target && !target.modality && target.polarity !== AdvicePolarity.Negate));
+      } else if (postposedConditional) output += localeAdapter.postposedCondition(node.text, previous.text);
+      else if (discourseConnector) output += " " + localeAdapter.continuationText(node.text, true);
+      else {
+        const explicitRelation = previous.understood && node.understood
+          ? graph.relations?.find(relation => relation.fromActionIndex === previous!.actionIndex &&
+              relation.toActionIndex === node.actionIndex) : undefined;
+        if (previous.understood && node.understood && node.warning && !explicitRelation) {
+          const text = presentSentence
+            ? (presentSentence(node.text) ?? node.text).trim().replace(/[.!?]+$/u, "") : node.text;
+          output += `. ${text}`;
+        }
+        else {
+          const sequence = previous.understood && node.understood && relationHasSemanticClass(explicitRelation?.kind, "sequence");
+          const sentence = !sequence && (previous.rowIndex !== undefined || node.rowIndex !== undefined);
+          output += sequence ? localeAdapter.sequenceSeparator() : sentence ? ". " : "; ";
+          const text = sentence && presentSentence
+            ? (presentSentence(node.text) ?? node.text).trim().replace(/[.!?]+$/u, "") : node.text;
+          output += localeAdapter.continuationText(text, sentence ? false : node.understood);
+        }
+      }
+    }
+    previous = node;
+    if (preview && primary) {
+      if (beforePrimary) { preOutput = output; prePrevious = node; }
+      else { postOutput = output; postPrevious = node; firstPost ??= node; }
+    }
+  }
+  if (preview) {
+    if (primary) {
+      preview.result.pre = preOutput || undefined;
+      preview.result.post = postOutput || undefined;
+      if (!options?.roundtripSafe) {
+        const lastPreAction = prePrevious?.actionIndex === undefined ? undefined : graph.actions[prePrevious.actionIndex];
+        const firstPostAction = firstPost?.actionIndex === undefined ? undefined : graph.actions[firstPost.actionIndex];
+        preview.result.preFlowsIntoAdministration = Boolean(prePrevious?.completeAction && lastPreAction &&
+          lastPreAction.polarity !== AdvicePolarity.Negate && !/[.!?;]/u.test(graph.sourceText.slice(prePrevious.end, primary.start)));
+        preview.result.postFlowsFromAdministration = Boolean(firstPost?.completeAction && firstPostAction &&
+          firstPostAction.polarity !== AdvicePolarity.Negate && !/[.!?;]/u.test(graph.sourceText.slice(primary.end, firstPost.start)) &&
+          (!(firstPostAction.modality || isInstructionGraphDisplayWarning(firstPostAction) || firstPostAction.force === AdviceForce.Caution) ||
+            relationHasSemanticClass(relationFromSourceText(graph.sourceText.slice(primary.end, firstPost.start)), "sequence")));
+      }
+    } else preview.result.whole = output || undefined;
+  }
+  return output || undefined;
 }

@@ -1,16 +1,18 @@
 import { cloneStructuredValue } from "./stable-structure";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { baseLanguageTag } from "./localization";
-import { inferMedicationLocale } from "./locale-detection";
+import { withMedicationSourceI18n } from "./locale-detection";
 import { lexInput } from "./lexer/lex";
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS } from "./hpsg/lexical-classes";
 import {
+  cloneMedicationInstructionActionRealizerConfig,
   medicationInstructionActionCodings,
   medicationInstructionActionContextualCodings,
   medicationInstructionActionSemanticComponentsForArgs,
   resolveMedicationInstructionAction
 } from "./instruction-action-terminology";
 import {
+  cloneMedicationInstructionConceptComponents,
   medicationInstructionConceptCodings,
   resolveMedicationInstructionConcept
 } from "./instruction-concept-terminology";
@@ -118,14 +120,10 @@ function buildBodySiteArgument(
     conceptId: resolved.canonical,
     coding: resolved.coding,
     codings: resolved.coding ? [resolved.coding] : undefined,
-    i18n: {
+    i18n: withMedicationSourceI18n(sourceText, {
       en: resolved.englishObjectText,
-      ...(resolved.definition?.i18n ?? {}),
-      ...(() => {
-        const sourceLocale = inferMedicationLocale(sourceText, "en");
-        return sourceLocale === "en" ? {} : { [sourceLocale]: sourceText };
-      })()
-    },
+      ...(resolved.definition?.i18n ?? {})
+    }),
     span: absolute
   };
 }
@@ -146,7 +144,7 @@ function buildConceptArgument(
     text: sourceText,
     normalized: definition.display,
     conceptId: definition.code,
-    ...(definition.components?.length ? { components: definition.components } : {}),
+    ...(definition.components?.length ? { components: cloneMedicationInstructionConceptComponents(definition.components) } : {}),
     coding: preferred,
     codings,
     i18n: { en: definition.display, ...(definition.i18n ?? {}) },
@@ -201,7 +199,7 @@ function validateActionProposal(
   options?: ParseOptions
 ): AdviceFrame | undefined {
   if (!validRelativeRange(proposal.range, opaque.text.length)) return undefined;
-  const definition = resolveMedicationInstructionAction(proposal.action, options);
+  const definition = resolveMedicationInstructionAction(proposal.action, options, true);
   if (!definition?.procedural) return undefined;
   if (
     proposal.confidence !== undefined &&
@@ -229,6 +227,8 @@ function validateActionProposal(
       semanticClass: definition.semanticClass,
       display: definition.display,
       i18n: definition.i18n ? { ...definition.i18n } : undefined,
+      realizer: definition.realizer,
+      realizerConfig: cloneMedicationInstructionActionRealizerConfig(definition.realizerConfig),
       codings: [
         ...medicationInstructionActionCodings(definition),
         ...medicationInstructionActionContextualCodings(definition, args)

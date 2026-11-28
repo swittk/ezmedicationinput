@@ -191,7 +191,7 @@ function buildClauseConfidence(internal: ParserState, leftovers: CanonicalSource
   return clampConfidence(confidence);
 }
 
-export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigClause): boolean {
+export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigClause, includeConstraints = true): boolean {
   const schedule = clause.schedule;
   const hasSchedule = Boolean(schedule && (
     schedule.frequency !== undefined ||
@@ -206,16 +206,19 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.administrationDuration !== undefined ||
     schedule.administrationDurationMax !== undefined ||
     schedule.administrationDurationUnit !== undefined ||
+    schedule.administrationDurationRange?.low?.value !== undefined ||
+    schedule.administrationDurationRange?.high?.value !== undefined ||
     schedule.offset !== undefined ||
     schedule.offsetMin !== undefined ||
     schedule.offsetMax !== undefined ||
     Boolean(schedule.activityTiming?.length) ||
-    schedule.occurrenceCap !== undefined ||
-    Boolean(schedule.maxDosePerPeriod?.length) ||
-    schedule.count !== undefined ||
-    schedule.timingCode ||
-    schedule.dayOfWeek?.length ||
-    schedule.when?.length ||
+    (includeConstraints && (schedule.occurrenceCap !== undefined ||
+      Boolean(schedule.maxDosePerPeriod?.length) || schedule.countMax !== undefined ||
+      schedule.sharedCount?.countMax !== undefined)) ||
+    schedule.count !== undefined || schedule.sharedCount?.count !== undefined ||
+    schedule.timingCode || schedule.timingText?.trim() ||
+    schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
+    schedule.eventWindow || schedule.clockWindow || schedule.when?.length ||
     schedule.timeOfDay?.length ||
     schedule.calendarEvents?.length
   ));

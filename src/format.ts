@@ -1,3 +1,8 @@
+import { TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
+import { getDoseUnitKind, getQuantityDurationUnit } from "./unit-lexicon";
+import { joinLocalizedList } from "./utils/text";
+import { ENGLISH_COURSE, ENGLISH_DAY_NAMES, ENGLISH_CLAUSE_TIMING, routeCodeFromDisplayText } from "./locales/course/en";
+import type { CourseLanguage } from "./localization";
 import { buildCanonicalSigClauses, canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
   collectLocalizedWhenPhrases,
@@ -5,33 +10,34 @@ import {
   type LocalizedTimingGrammar
 } from "./localized-timing";
 import { ParserState } from "./parser-state";
-import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
+import { appendClinicalConditionText, resolveNativeClauseRendering, type SigLocalization, type SigLongContext, type SigShortContext, type SigDoseScope } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
-import { composedCodedWarningActionSources } from "./advice";
-import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction } from "./instruction-action-terminology";
-import { baseLanguageTag } from "./localization";
+import { findAdditionalInstructionDefinitionByCoding } from "./advice";
+import { getPrimitiveTranslation } from "./fhir-translations";
+import { EN_POSITIVE_MODALITY_PREFIX } from "./instruction-action-locale-adapter";
+import { getMedicationInstructionAction, medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "./instruction-action-terminology";
+import { baseLanguageTag, quantityComparatorText } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
 import {
-  instructionGraphHasNovelNonWarningContent,
+  isInstructionGraphDisplayWarning,
+  relationFromSourceText,
   instructionGraphPrimaryAdministrationModality,
   instructionGraphPrimarySiteRelation,
+  canonicalSiteOwnsPrimaryPhrase,
   instructionGraphRichPrimaryAction,
-  instructionGraphActionCoversSingleScheduledEvent,
+  realizeRichPrimaryWithCanonicalDose,
+  instructionGraphSourceConflictsWithDose,
+  instructionGraphPreparationOwnsDose,
   instructionGraphRoundTripPrimaryAction,
-  instructionGraphEntailsAdviceCoding,
-  instructionGraphCoversTypedWarnings,
-  instructionGraphRealizesWarningText,
-  instructionGraphSourceOwnedByAdvice,
-  instructionGraphFullyOwnsAdvice,
-  instructionGraphRepresentsText,
-  instructionGraphSingleActionRepresentsText,
-  instructionGraphTextParticipatesInRelation,
   realizeInstructionAction,
-  realizeInstructionGraph,
+  realizeClauseInstructions,
+  attachInstructionGraphPrimaryConditions,
+  type InstructionGraphPrimaryCondition,
   instructionGraphPostAdministrationDiscourseConnector
 } from "./instruction-graph";
 import { resolveBodySitePhrase, realizeBodySiteRestriction } from "./body-site-grammar";
+import { resolveBodySiteTargetText, resolveBodySiteSpatialTargetText } from "./body-site-target";
 import {
   getUniqueAdviceRelationByGrammarFeature,
   getBodySiteRelationRealization,
@@ -41,7 +47,9 @@ import {
 } from "./relation-terminology";
 import {
   AdviceArgumentRole,
-  AdviceModality,
+  AdviceForce,
+  type AdviceFrame,
+  type CanonicalAdditionalInstructionExpr,
   AdvicePolarity,
   AdviceRelation,
   BodySiteSpatialRelation,
@@ -50,10 +58,17 @@ import {
   CanonicalSigClause,
   EventTiming,
   FhirPeriodUnit,
-  RouteCode
+  RouteCode,
+  type MedicationCondition,
+  type FhirDayOfWeek
 } from "./types";
 import {
   getMealTimingGroup,
+  intervalTimingPreviewDescriptor, isCompactIntervalTimingCode,
+  TIMING_CODE_DAILY_FREQUENCIES,
+  TIMING_CODE_HOURLY_PERIODS,
+  matchesDailyCodeCadence,
+  timingPreviewDescriptor,
   inferDailyOccurrenceCount,
   type MealTimingGroup,
   type TimingSummaryOptions
@@ -106,15 +121,7 @@ const WHEN_TEXT: Partial<Record<EventTiming, string>> = {
   [EventTiming.Immediate]: "immediately"
 };
 
-export const DAY_NAMES: Record<string, string> = {
-  mon: "Monday",
-  tue: "Tuesday",
-  wed: "Wednesday",
-  thu: "Thursday",
-  fri: "Friday",
-  sat: "Saturday",
-  sun: "Sunday"
-};
+export const DAY_NAMES: Record<string, string> = ENGLISH_DAY_NAMES;
 
 const EN_TIMES_PER_DAY: Record<number, string> = {
   1: "once daily",
@@ -224,65 +231,33 @@ function scheduleOf(clause: CanonicalSigClause): CanonicalScheduleExpr {
   return clause.schedule ?? {};
 }
 
-function grammarFromRouteText(text: string | undefined): RouteGrammar | undefined {
-  if (!text) {
-    return undefined;
-  }
-  const normalized = text.trim().toLowerCase();
-  if (!normalized) {
-    return undefined;
-  }
-  if (normalized.includes("mouth") || normalized.includes("oral")) {
-    return ROUTE_GRAMMAR[RouteCode["Oral route"]];
-  }
-  if (normalized.includes("ophthalm")) {
-    return ROUTE_GRAMMAR[RouteCode["Ophthalmic route"]];
-  }
-  if (normalized.includes("intravitreal")) {
-    return ROUTE_GRAMMAR[RouteCode["Intravitreal route (qualifier value)"]];
-  }
-  if (normalized.includes("topical")) {
-    return ROUTE_GRAMMAR[RouteCode["Topical route"]];
-  }
-  if (normalized.includes("transdermal")) {
-    return ROUTE_GRAMMAR[RouteCode["Transdermal route"]];
-  }
-  if (normalized.includes("subcutaneous") || normalized === "sc" || normalized === "sq") {
-    return ROUTE_GRAMMAR[RouteCode["Subcutaneous route"]];
-  }
-  if (normalized.includes("intramuscular") || normalized === "im") {
-    return ROUTE_GRAMMAR[RouteCode["Intramuscular route"]];
-  }
-  if (normalized.includes("intravenous") || normalized === "iv") {
-    return ROUTE_GRAMMAR[RouteCode["Intravenous route"]];
-  }
-  if (normalized.includes("rectal") || normalized.includes("rectum")) {
-    return ROUTE_GRAMMAR[RouteCode["Per rectum"]];
-  }
-  if (normalized.includes("vagin")) {
-    return ROUTE_GRAMMAR[RouteCode["Per vagina"]];
-  }
-  if (normalized.includes("otic") || normalized.includes("ear")) {
-    return ROUTE_GRAMMAR[RouteCode["Otic route"]];
-  }
-  if (normalized.includes("nasal")) {
-    return ROUTE_GRAMMAR[RouteCode["Nasal route"]];
-  }
-  if (normalized.includes("inhal")) {
-    return ROUTE_GRAMMAR[RouteCode["Respiratory tract route (qualifier value)"]];
-  }
-  return undefined;
-}
 
 function resolveRouteGrammar(clause: CanonicalSigClause): RouteGrammar {
   const routeCode = clause.route?.code;
   if (routeCode && ROUTE_GRAMMAR[routeCode]) {
     return ROUTE_GRAMMAR[routeCode] ?? DEFAULT_ROUTE_GRAMMAR;
   }
-  return grammarFromRouteText(clause.route?.text) ?? DEFAULT_ROUTE_GRAMMAR;
+  const textRoute = routeCodeFromDisplayText(clause.route?.text, true);
+  return (textRoute ? ROUTE_GRAMMAR[textRoute] : undefined) ?? DEFAULT_ROUTE_GRAMMAR;
 }
 
-function resolveMethodVerb(clause: CanonicalSigClause, grammar: RouteGrammar): string {
+/** A method can name a registered manner rather than an action head. */
+export function registeredMethodManner(
+  method: CanonicalSigClause["method"],
+  resolvedMethod?: SigLongContext["resolvedMethod"]
+) {
+  if (resolvedMethod && resolvedMethod !== getMedicationInstructionAction(resolvedMethod.code)) return undefined;
+  const coding = method?.coding;
+  if (!coding?.code || getMedicationInstructionConcept(coding.code, coding.system)?.role !== AdviceArgumentRole.Manner)
+    return undefined;
+  return findAdditionalInstructionDefinitionByCoding(coding.system ?? "http://snomed.info/sct", coding.code);
+}
+
+function resolveMethodVerb(clause: CanonicalSigClause, grammar: RouteGrammar,
+  resolvedMethod?: SigLongContext["resolvedMethod"]): string {
+  const manner = registeredMethodManner(clause.method, resolvedMethod);
+  if (manner?.text) return getPrimitiveTranslation(clause.method?._text, "en") ??
+    clause.method?.coding?.i18n?.en ?? getPrimitiveTranslation(clause.method?.coding?._display, "en") ?? manner.text;
   const methodText = clause.method?.text?.trim();
   if (methodText) {
     return methodText;
@@ -385,15 +360,23 @@ function formatPatientInstructionSentence(text: string | undefined): string | un
   return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
 
-function describeAlternateEventCadenceEnglish(
+export function alternateDayEvent(
   schedule: CanonicalScheduleExpr | undefined
-): string | undefined {
+): EventTiming | undefined {
   if (
     schedule?.period !== 2 || schedule.periodUnit !== FhirPeriodUnit.Day ||
-    schedule.when?.length !== 1 || schedule.frequency !== undefined || schedule.frequencyMax !== undefined
+    (schedule.periodMax !== undefined && schedule.periodMax !== 2) ||
+    schedule.when?.length !== 1 || schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
+    schedule.offset !== undefined || schedule.offsetMin !== undefined || schedule.offsetMax !== undefined
   ) return undefined;
-  if (schedule.when[0] === EventTiming.Night) return "every other night";
-  if (schedule.when[0] === EventTiming.Morning) return "every other morning";
+  const event = schedule.when[0];
+  return event === EventTiming.Night || event === EventTiming.Morning ? event : undefined;
+}
+
+function describeAlternateEventCadenceEnglish(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const event = alternateDayEvent(schedule);
+  if (event === EventTiming.Night) return "every other night";
+  if (event === EventTiming.Morning) return "every other morning";
   return undefined;
 }
 
@@ -415,139 +398,170 @@ export function hasDailyRecurrenceAcrossClocks(schedule: CanonicalScheduleExpr |
   return clocks.some(clock => (clock.length === 5 ? clock + ":00" : clock) !== first);
 }
 
-function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string | undefined {
-  if (hasDailyRecurrenceAcrossClocks(schedule)) return "daily";
+type FrequencyDisplayMode =
+  | "daily" | "daily-count" | "daily-range" | "daily-maximum"
+  | "period" | "period-maximum" | "alternate-days"
+  | "calendar-count" | "calendar-range" | "calendar-maximum"
+  | "code" | "code-period" | "count" | "count-bounds";
+
+interface FrequencyDisplay {
+  mode: FrequencyDisplayMode;
+  countPrefix: "none" | "count" | "range" | "maximum";
+  frequency?: number;
+  frequencyMax?: number;
+  period?: number;
+  periodMax?: number;
+  periodUnit?: FhirPeriodUnit;
+  rangeEnd?: number;
+  timingCode?: string;
+  codePeriod?: { period: number; periodUnit: FhirPeriodUnit };
+}
+
+/** A composed code supplies its cadence label only in the absence of selected positions. */
+function timingPreviewCadenceCode(code: string, schedule: CanonicalScheduleExpr): string {
+  return !schedule.when?.length && !schedule.timeOfDay?.length
+    ? timingPreviewDescriptor(code)?.code ?? code : code;
+}
+
+/** Select clinical display meaning once; each locale retains its wording. */
+export function frequencyDisplay(
+  schedule: CanonicalScheduleExpr | undefined, uppercaseTimingCode = false
+): FrequencyDisplay | undefined {
+  if (hasDailyRecurrenceAcrossClocks(schedule)) return { mode: "daily", countPrefix: "none" };
   const frequency = schedule?.frequency;
   const frequencyMax = schedule?.frequencyMax;
   const period = schedule?.period;
   const periodMax = schedule?.periodMax;
   const periodUnit = schedule?.periodUnit;
-  const timingCode = schedule?.timingCode;
+  let timingCode = uppercaseTimingCode ? schedule?.timingCode?.toUpperCase() : schedule?.timingCode;
+  if (timingCode?.toUpperCase() === "QOD" && timingCodeMatchesRecurrence(schedule!))
+    return { mode: "alternate-days", countPrefix: "none" };
+  const hours = timingCode ? TIMING_CODE_HOURLY_PERIODS[timingCode.toUpperCase()] : undefined;
+  if (hours && !schedule?.when?.length && !schedule?.timeOfDay?.length &&
+      frequencyMax === undefined && periodMax === undefined &&
+      matchesDailyCodeCadence(24 / hours, schedule!))
+    return { mode: "code-period", countPrefix: "none", timingCode,
+      codePeriod: { period: hours, periodUnit: FhirPeriodUnit.Hour } };
+  const rangedPeriod = periodMax !== undefined && periodMax !== period;
+  const countPrefix = frequency !== undefined &&
+    (rangedPeriod || frequency !== 1 || frequencyMax !== undefined && frequencyMax !== frequency)
+    ? frequencyMax !== undefined && frequencyMax !== frequency ? "range" : "count"
+    : frequencyMax !== undefined && frequency === undefined ? "maximum" : "none";
+  let mode: FrequencyDisplayMode | undefined;
+  let rangeEnd: number | undefined;
+  let codePeriod: FrequencyDisplay["codePeriod"];
 
-  if (
-    frequency !== undefined &&
-    frequencyMax !== undefined &&
-    periodUnit === FhirPeriodUnit.Day &&
-    (!period || period === 1)
-  ) {
-    if (frequency === 1 && frequencyMax === 1) {
-      return "once daily";
-    }
-    if (frequency === 1 && frequencyMax === 2) {
-      return "one to two times daily";
-    }
-    return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times daily`;
-  }
-  if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1)) {
-    const dailyText = EN_TIMES_PER_DAY[frequency];
-    if (dailyText) {
-      return dailyText;
-    }
-    return `${stripTrailingZero(frequency)} times daily`;
-  }
-  if (periodUnit === FhirPeriodUnit.Minute && period) {
-    if (periodMax && periodMax !== period) {
-      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} minutes`;
-    }
-    return `every ${stripTrailingZero(period)} minute${period === 1 ? "" : "s"}`;
-  }
-  if (periodUnit === FhirPeriodUnit.Hour && period) {
-    if (periodMax && periodMax !== period) {
-      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} hours`;
-    }
-    return `every ${stripTrailingZero(period)} hour${period === 1 ? "" : "s"}`;
-  }
-  if (periodUnit === FhirPeriodUnit.Day && period && period !== 1) {
-    if (period === 2 && (!periodMax || periodMax === 2)) {
-      return "every other day";
-    }
-    if (periodMax && periodMax !== period) {
-      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} days`;
-    }
-    return `every ${stripTrailingZero(period)} days`;
-  }
-  if (periodUnit === FhirPeriodUnit.Week && period) {
-    if (
-      frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency &&
-      period === 1 && (!periodMax || periodMax === 1)
-    ) {
-      return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times weekly`;
-    }
-    if (
-      schedule?.dayOfWeek?.length && period === 1 && (!periodMax || periodMax === 1) &&
-      frequency === undefined && schedule.dayOfWeek.length > 1
-    ) {
-      return undefined;
-    }
+  if (period === undefined && periodMax !== undefined && periodUnit) {
+    mode = "period-maximum";
+  } else if (frequency !== undefined && frequencyMax !== undefined &&
+      periodUnit === FhirPeriodUnit.Day && (period === undefined || period === 1) && !rangedPeriod) {
+    mode = frequency === 1 && frequencyMax === 1 ? "daily-count" : "daily-range";
+  } else if (frequency === undefined && frequencyMax !== undefined &&
+      periodUnit === FhirPeriodUnit.Day && (period === undefined || period === 1) && !rangedPeriod) {
+    mode = "daily-maximum";
+  } else if (frequency && periodUnit === FhirPeriodUnit.Day && (period === undefined || period === 1) && !rangedPeriod) {
+    mode = "daily-count";
+  } else if (periodUnit === FhirPeriodUnit.Second && period !== undefined) {
+    mode = "period";
+    if (periodMax !== undefined && periodMax !== period) rangeEnd = periodMax;
+  } else if ((periodUnit === FhirPeriodUnit.Minute || periodUnit === FhirPeriodUnit.Hour) && period !== undefined) {
+    mode = "period";
+    if (periodMax !== undefined && periodMax !== period) rangeEnd = periodMax;
+  } else if (periodUnit === FhirPeriodUnit.Day && period !== undefined && (period !== 1 || rangedPeriod)) {
+    mode = countPrefix === "none" && period === 2 && (!periodMax || periodMax === 2)
+      ? "alternate-days" : "period";
+    if (periodMax !== undefined && periodMax !== period) rangeEnd = periodMax;
+  } else if ((periodUnit === FhirPeriodUnit.Week || periodUnit === FhirPeriodUnit.Month ||
+      periodUnit === FhirPeriodUnit.Year) && period !== undefined) {
     if (period === 1 && (!periodMax || periodMax === 1)) {
-      if (frequency === 2) return "twice weekly";
-      return frequency !== undefined && frequency !== 1
-        ? `${stripTrailingZero(frequency)} times weekly`
-        : "once weekly";
+      if (frequency === undefined && frequencyMax !== undefined) mode = "calendar-maximum";
+      else if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency)
+        mode = "calendar-range";
+      else if (frequency === undefined && periodUnit === FhirPeriodUnit.Month &&
+          (schedule?.dayOfWeek?.length ?? 0) > 1) mode = "period";
+      else if (frequency === undefined && (
+        periodUnit === FhirPeriodUnit.Week && (schedule?.dayOfWeek?.length ?? 0) > 1 ||
+        periodUnit === FhirPeriodUnit.Month && (schedule?.dayOfMonth?.length ?? 0) > 1
+      )) return undefined;
+      else mode = "calendar-count";
+    } else {
+      mode = "period";
+      if (periodMax !== undefined && periodMax !== period) rangeEnd = periodMax;
     }
-    if (periodMax && periodMax !== period) {
-      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} weeks`;
-    }
-    return `every ${stripTrailingZero(period)} weeks`;
-  }
-  if (periodUnit === FhirPeriodUnit.Month && period) {
-    if (period === 1 && (!periodMax || periodMax === 1)) {
-      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
-        return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times monthly`;
-      }
-      if (frequency === undefined && (schedule?.dayOfMonth?.length ?? 0) > 1) return undefined;
-      if (frequency === 2) return "twice monthly";
-      return frequency !== undefined && frequency !== 1
-        ? `${stripTrailingZero(frequency)} times monthly`
-        : "once monthly";
-    }
-    if (periodMax && periodMax !== period) {
-      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} months`;
-    }
-    return `every ${stripTrailingZero(period)} months`;
-  }
-  if (periodUnit === FhirPeriodUnit.Year && period) {
-    if (period === 1 && (!periodMax || periodMax === 1)) {
-      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
-        return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times yearly`;
-      }
-      if (frequency === 2) return "twice yearly";
-      return frequency !== undefined && frequency !== 1
-        ? `${stripTrailingZero(frequency)} times yearly`
-        : "once yearly";
-    }
-    if (periodMax && periodMax !== period) {
-      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} years`;
-    }
-    return `every ${stripTrailingZero(period)} years`;
-  }
-  if (timingCode) {
-    if (timingCode === "WK") {
-      return "once weekly";
-    }
-    if (timingCode === "MO") {
-      return "once monthly";
-    }
-    const map: Record<string, string> = {
-      BID: "twice daily",
-      TID: "three times daily",
-      QID: "four times daily",
-      QD: "once daily",
-      QOD: "every other day",
-      Q6H: "every 6 hours",
-      Q8H: "every 8 hours"
-    };
-    if (map[timingCode]) {
-      return map[timingCode];
+  } else if (timingCode && timingCodeMatchesRecurrence(schedule!)) {
+    timingCode = timingPreviewCadenceCode(timingCode, schedule!);
+    switch (timingCode.toUpperCase()) {
+      case "BID": case "TID": case "QID": case "QD": case "QOD": case "WK": case "MO":
+        mode = "code";
+        break;
+      default:
+        const interval = intervalTimingPreviewDescriptor(timingCode);
+        if (interval?.periodMax !== undefined)
+          return { mode: "period", countPrefix, period: interval.period, periodMax: interval.periodMax,
+            periodUnit: interval.periodUnit, rangeEnd: interval.periodMax !== interval.period ? interval.periodMax : undefined };
+        codePeriod = interval;
+        if (codePeriod) mode = "code-period";
     }
   }
-  if (frequency && periodUnit === undefined && period === undefined) {
-    if (frequency === 1) {
-      return "once";
-    }
-    return `${stripTrailingZero(frequency)} times`;
+  if (!mode) {
+    if (frequency === undefined && frequencyMax === undefined && period === 1 &&
+        periodUnit === FhirPeriodUnit.Day && !rangedPeriod) mode = "daily";
+    else if (frequencyMax !== undefined && frequencyMax !== frequency &&
+        periodUnit === undefined && period === undefined) mode = "count-bounds";
+    else if (frequency && periodUnit === undefined && period === undefined) mode = "count";
+    else return undefined;
   }
-  return undefined;
+  return { mode, countPrefix, frequency, frequencyMax, period, periodMax, periodUnit, rangeEnd, timingCode, codePeriod };
+}
+
+const EN_FREQUENCY_CODE_TEXT: Readonly<Record<string, string>> = {
+  BID: "twice daily", TID: "three times daily", QID: "four times daily", QD: "once daily",
+  QOD: "every other day", WK: "once weekly", MO: "once monthly"
+};
+
+function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
+  const display = frequencyDisplay(schedule, true);
+  if (!display) return undefined;
+  const { frequency, frequencyMax, period, periodMax, periodUnit, rangeEnd } = display;
+  const countPrefix = display.countPrefix === "range"
+    ? `${stripTrailingZero(frequency!)} to ${stripTrailingZero(frequencyMax!)} times `
+    : display.countPrefix === "count"
+      ? frequency === 1 ? "once " : frequency === 2 ? "twice " : `${stripTrailingZero(frequency!)} times `
+      : display.countPrefix === "maximum" ? `up to ${stripTrailingZero(frequencyMax!)} times ` : "";
+  switch (display.mode) {
+    case "daily": return "daily";
+    case "daily-count": return EN_TIMES_PER_DAY[frequency!] ?? `${stripTrailingZero(frequency!)} times daily`;
+    case "daily-range": return frequency === 1 && frequencyMax === 2 ? "one to two times daily"
+      : `${stripTrailingZero(frequency!)} to ${stripTrailingZero(frequencyMax!)} times daily`;
+    case "daily-maximum": return `up to ${stripTrailingZero(frequencyMax!)} times daily`;
+    case "period-maximum":
+      return `${countPrefix}every up to ${stripTrailingZero(periodMax!)} ${words.timeUnit(periodUnit!, periodMax) ?? periodUnit}`;
+    case "alternate-days": return "every other day";
+    case "period": {
+      const interval = rangeEnd !== undefined
+        ? `${stripTrailingZero(period!)} to ${stripTrailingZero(rangeEnd)}` : stripTrailingZero(period!);
+      const unitValue = rangeEnd === undefined ? period : undefined;
+      const unit = words.timeUnit(periodUnit!, unitValue) ??
+        ENGLISH_COURSE.timeUnit(periodUnit!, unitValue) ?? periodUnit;
+      return `${countPrefix}every ${interval} ${unit}`;
+    }
+    case "calendar-count":
+    case "calendar-range":
+    case "calendar-maximum": {
+      const unit = periodUnit === FhirPeriodUnit.Week ? "weekly" : periodUnit === FhirPeriodUnit.Month ? "monthly" : "yearly";
+      if (display.mode === "calendar-maximum") return `up to ${stripTrailingZero(frequencyMax!)} times ${unit}`;
+      if (display.mode === "calendar-range") return `${stripTrailingZero(frequency!)} to ${stripTrailingZero(frequencyMax!)} times ${unit}`;
+      if (frequency === 2) return `twice ${unit}`;
+      return frequency !== undefined && frequency !== 1 ? `${stripTrailingZero(frequency)} times ${unit}` : `once ${unit}`;
+    }
+    case "code": return EN_FREQUENCY_CODE_TEXT[display.timingCode!];
+    case "code-period": {
+      const interval = display.codePeriod!;
+      return `${countPrefix}every ${stripTrailingZero(interval.period)} ${words.timeUnit(interval.periodUnit, interval.period) ?? interval.periodUnit}`;
+    }
+    case "count-bounds": return countPrefix.trim();
+    case "count": return frequency === 1 ? "once" : `${stripTrailingZero(frequency!)} times`;
+  }
 }
 
 function describeFrequencyCount(count: number | undefined): string | undefined {
@@ -561,9 +575,9 @@ function describeFrequencyCount(count: number | undefined): string | undefined {
   return `${stripTrailingZero(count)} times daily`;
 }
 
-function describeStandaloneOccurrenceCount(
+export function standaloneOccurrenceCount(
   schedule: CanonicalScheduleExpr | undefined
-): string | undefined {
+): number | undefined {
   const count = schedule?.count;
   if (!count || count <= 0 || schedule?.countMax !== undefined) {
     return undefined;
@@ -589,6 +603,12 @@ function describeStandaloneOccurrenceCount(
   ) {
     return undefined;
   }
+  return count;
+}
+
+function describeStandaloneOccurrenceCount(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const count = standaloneOccurrenceCount(schedule);
+  if (count === undefined) return undefined;
   switch (count) {
     case 1:
       return "once";
@@ -627,10 +647,11 @@ function formatDoseShort(dose: CanonicalDoseExpr | undefined): string | undefine
     }
   }
   if (dose.value !== undefined) {
+    const amount = `${dose.comparator ?? ""}${stripTrailingZero(dose.value)}`;
     if (dose.unit) {
-      return `${stripTrailingZero(dose.value)} ${dose.unit}`;
+      return `${amount} ${dose.unit}`;
     }
-    return `${stripTrailingZero(dose.value)}`;
+    return amount;
   }
   return undefined;
 }
@@ -663,12 +684,23 @@ function formatDoseLong(dose: CanonicalDoseExpr | undefined): string | undefined
     }
   }
   if (dose.value !== undefined) {
+    const english = quantityComparatorText(dose.comparator, "en");
+    const amount = `${english}${stripTrailingZero(dose.value)}`;
     if (dose.unit) {
-      return `${stripTrailingZero(dose.value)} ${pluralize(dose.unit, dose.value)}`;
+      return `${amount} ${pluralize(dose.unit, dose.value)}`;
     }
-    return `${stripTrailingZero(dose.value)}`;
+    return amount;
   }
   return undefined;
+}
+
+/** A typed scalar/range, or an already complete native rich amount, can be
+ * labelled without selecting it as the administration's prescribed dose. */
+export function formatDoseEnglish(
+  dose: CanonicalDoseExpr | string, style: "short" | "long", scope?: SigDoseScope
+): string | undefined {
+  const amount = typeof dose === "string" ? dose : style === "short" ? formatDoseShort(dose) : formatDoseLong(dose);
+  return amount && scope ? amount + " (" + (scope.site?.perTargetText ?? "per administration target") + ")" : amount;
 }
 
 function summarizeMealTimingGroup(group: MealTimingGroup): string {
@@ -681,7 +713,14 @@ function summarizeMealTimingGroup(group: MealTimingGroup): string {
   return `${relationText} ${joinWithAnd(group.meals)}`;
 }
 
-function formatEventOffsetQuantityEnglish(minutes: number): string {
+function describeEventWindowEnglish(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
+  const window = schedule?.eventWindow;
+  return window ? words.eventWindow(WHEN_TEXT[window.start] ?? window.start, WHEN_TEXT[window.end] ?? window.end) : undefined;
+}
+
+function formatEventOffsetQuantityEnglish(minutes: number, maximum?: number): string {
+  if (maximum !== undefined && maximum !== minutes)
+    return `${stripTrailingZero(minutes)}–${stripTrailingZero(maximum)} minutes`;
   const seconds = Number((minutes * 60).toFixed(9));
   if (minutes < 1 && Number.isInteger(seconds)) {
     return `${stripTrailingZero(seconds)} second${seconds === 1 ? "" : "s"}`;
@@ -705,6 +744,10 @@ function formatActivityTimingEnglish(schedule: CanonicalScheduleExpr | undefined
       : undefined;
     const activity = definition?.display ?? timing.activity.text;
     const relation = timing.relation;
+    if (timing.offsetMin !== undefined && timing.offsetMax !== undefined) {
+      result.push(`${formatEventOffsetQuantityEnglish(timing.offsetMin, timing.offsetMax)} ${relation} ${activity}`);
+      continue;
+    }
     const value = timing.offsetMin ?? timing.offsetMax ?? timing.offset;
     if (value === undefined) {
       result.push(`${relation} ${activity}`);
@@ -726,6 +769,8 @@ function formatEventOffsetEnglish(
   eventText: string,
   schedule: CanonicalScheduleExpr
 ): string {
+  if (schedule.offsetMin !== undefined && schedule.offsetMax !== undefined)
+    return `${formatEventOffsetQuantityEnglish(schedule.offsetMin, schedule.offsetMax)} ${eventText}`;
   const value = schedule.offsetMin ?? schedule.offsetMax ?? schedule.offset;
   if (value === undefined) return eventText;
   if (value === 0 && schedule.offset !== undefined) return `immediately ${eventText}`;
@@ -755,20 +800,11 @@ function collectWhenPhrases(
   schedule: CanonicalScheduleExpr | undefined,
   options?: TimingSummaryOptions
 ): string[] {
-  return collectLocalizedWhenPhrases(schedule, EN_TIMING_GRAMMAR, options);
+  return collectLocalizedWhenPhrases(timingEventPreviewSchedule(schedule), EN_TIMING_GRAMMAR, options);
 }
 
 export function joinWithAnd(parts: string[]): string {
-  if (!parts.length) {
-    return "";
-  }
-  if (parts.length === 1) {
-    return parts[0];
-  }
-  if (parts.length === 2) {
-    return `${parts[0]} and ${parts[1]}`;
-  }
-  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  return joinLocalizedList(parts, "and");
 }
 
 function combineFrequencyAndEvents(
@@ -834,18 +870,22 @@ function buildRoutePhrase(
 
 function renderSpatialSiteEnglish(
   relation: BodySiteSpatialRelation | undefined,
-  grammar: RouteGrammar
+  grammar: RouteGrammar,
+  targetCount: number | undefined,
+  words: CourseLanguage
 ): string | undefined {
   if (!relation?.relationText) {
     return undefined;
   }
-  const rawTarget = relation.targetText ?? relation.targetCoding?.display;
+  const rawTarget = resolveBodySiteSpatialTargetText(relation);
   if (!rawTarget) {
     return undefined;
   }
   const resolvedTarget = resolveBodySitePhrase(rawTarget);
-  const target = resolvedTarget?.englishObjectText ??
+  let target = resolvedTarget?.englishObjectText ??
     `the ${rawTarget.charAt(0).toLowerCase()}${rawTarget.slice(1)}`;
+  if (targetCount !== undefined && targetCount > 1 && targetCount !== resolvedTarget?.definition?.administrationTargetCount)
+    target += " (" + words.applicationSites(targetCount) + ")";
   const realization = getBodySiteRelationRealization(relation.relationText, "en");
   if (!realization) return undefined;
   if (realization.strategy === "prefix") {
@@ -868,6 +908,7 @@ function appendSiteRestrictionsEnglish(
   if (!restrictions?.length) return sitePhrase;
   const parts = [sitePhrase];
   for (const restriction of restrictions) {
+    // The selected predicate may cover only part of the authored restriction.
     const relative = realizeBodySiteRestriction(restriction, "en");
     if (relative && !parts.some((part) => part.toLowerCase().includes(relative.toLowerCase()))) {
       parts.push(relative);
@@ -876,14 +917,23 @@ function appendSiteRestrictionsEnglish(
   return parts.join(" ").replace(/\s+/g, " ").trim();
 }
 
+/** Discrete doses distribute across paired targets; metric amounts are totals. */
+export function doseUnitUsesTargetScope(unit: string | undefined): boolean {
+  const kind = getDoseUnitKind(unit);
+  return kind !== undefined && kind !== "metric" && kind !== "biologic_unit";
+}
+
 function formatSite(
   clause: CanonicalSigClause,
   grammar: RouteGrammar,
-  directObject = false
+  directObject = false,
+  words: CourseLanguage = ENGLISH_COURSE
 ): string | undefined {
   let text = clause.site?.text?.trim();
-  if (!text) {
-    const spatialSite = renderSpatialSiteEnglish(clause.site?.spatialRelation, grammar);
+  const spatial = clause.site?.spatialRelation;
+  const targetText = (spatial?.targetText ?? spatial?.targetCoding?.display)?.trim();
+  if (!text || targetText && text.toLowerCase() === targetText.toLowerCase()) {
+    const spatialSite = renderSpatialSiteEnglish(spatial, grammar, clause.site?.administrationTargetCount, words);
     if (spatialSite) {
       return appendSiteRestrictionsEnglish(clause, spatialSite);
     }
@@ -917,12 +967,14 @@ function formatSite(
   if (isVaginalRoute && (lower === "vagina" || lower === "vaginal")) {
     return undefined;
   }
-  if (resolvedSite?.features.kind === "locative") {
-    return appendSiteRestrictionsEnglish(clause, resolvedSite.englishObjectText);
-  }
-  const perTargetNoun = clause.dose ? resolvedSite?.definition?.perTargetText : undefined;
-  const noun = perTargetNoun ?? resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
-  if (directObject) return appendSiteRestrictionsEnglish(clause, noun);
+  const perTargetNoun = doseUnitUsesTargetScope(clause.dose?.unitIdentity ?? clause.dose?.unit)
+    ? resolvedSite?.definition?.perTargetText : undefined;
+  let noun = perTargetNoun ?? resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
+  const count = clause.site?.administrationTargetCount;
+  if (count !== undefined && count > 1 && count !== resolvedSite?.definition?.administrationTargetCount)
+    noun += " (" + words.applicationSites(count) + ")";
+  if (resolvedSite?.features.kind === "locative" || directObject)
+    return appendSiteRestrictionsEnglish(clause, noun);
   const preferredPreposition = resolvedSite?.preferredPreposition;
   const primarySiteRelation = instructionGraphPrimarySiteRelation(clause);
   const sourcePreposition = relationHasSemanticClass(primarySiteRelation, "locative")
@@ -970,10 +1022,31 @@ function describeCalendarEventsEnglish(
   if (!events?.length) return undefined;
   const parts: string[] = [];
   for (const event of events) {
-    const formatted = formatIsoCalendarDateEnglish(event.isoDate);
+    const formatted = event.fhirDateTime ?? formatIsoCalendarDateEnglish(event.isoDate);
     if (formatted) parts.push(formatted);
   }
   return parts.length ? `on ${joinWithAnd(parts)}` : undefined;
+}
+
+/** Whether the recurrence supports describing selected days as occurring each month. */
+export function dayOfMonthUsesSingleMonth(schedule: CanonicalScheduleExpr | undefined): boolean {
+  if (!schedule || schedule.periodMax !== undefined && schedule.periodMax !== schedule.period ||
+      schedule.frequency !== undefined && schedule.frequencyMax !== undefined &&
+      schedule.frequencyMax !== schedule.frequency) return false;
+  const period = schedule.period;
+  // A bare calendar selection retains its monthly domain. An unresolved
+  // cadence reference or code does not establish that same guarantee.
+  if (period === undefined) return schedule.periodUnit === undefined &&
+    schedule.timingCode === undefined && schedule.timingReference === undefined;
+  if (period <= 0) return false;
+  switch (schedule.periodUnit) {
+    case FhirPeriodUnit.Second: return period <= 86400;
+    case FhirPeriodUnit.Minute: return period <= 1440;
+    case FhirPeriodUnit.Hour: return period <= 24;
+    case FhirPeriodUnit.Day: return period <= 1;
+    case FhirPeriodUnit.Month: return period === 1;
+    default: return false;
+  }
 }
 
 /** Describe typed month-day selection independently of medication amount.
@@ -985,9 +1058,10 @@ function describeDayOfMonth(schedule: CanonicalScheduleExpr | undefined): string
   if (!days.length) return undefined;
   const sorted = [...days].sort((a, b) => a - b);
   const contiguous = sorted.every((day, index) => !index || day === sorted[index - 1] + 1);
-  if (sorted.length === 1) return `on day ${sorted[0]} of each month`;
-  return contiguous ? `on days ${sorted[0]}–${sorted[sorted.length - 1]} of each month`
-    : `on days ${sorted.join(" and ")} of each month`;
+  const period = dayOfMonthUsesSingleMonth(schedule) ? " of each month" : "";
+  if (sorted.length === 1) return `on day ${sorted[0]}${period}`;
+  return contiguous ? `on days ${sorted[0]}–${sorted[sorted.length - 1]}${period}`
+    : `on days ${sorted.join(" and ")}${period}`;
 }
 
 function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1001,21 +1075,43 @@ function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string 
   }
   if (days.length && schedule?.weekdayOrdinal !== undefined) {
     const names: Record<number, string> = { [-1]: "last", 1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth" };
-    return `on the ${names[schedule.weekdayOrdinal]} ${joinWithAnd(days)} of each month`;
+    const period = dayOfMonthUsesSingleMonth(schedule) ? " of each month" : "";
+    return `on the ${names[schedule.weekdayOrdinal]} ${joinWithAnd(days)}${period}`;
   }
   return days.length ? `on ${joinWithAnd(days)}` : undefined;
 }
 
-function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefined {
-  if (schedule.duration === undefined || !schedule.durationUnit) {
+function durationEndpointPrefix(comparator: CanonicalScheduleExpr["durationComparator"], bound: string): string {
+  return (!comparator || comparator === "~" ? bound : "") + (comparator ?? "");
+}
+
+export function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefined {
+  const durationUnit = schedule.durationUnit ??
+    (schedule.durationUnitLabel ? " " + schedule.durationUnitLabel : undefined);
+  const durationMaxUnit = schedule.durationMaxUnit ??
+    (schedule.durationMaxUnitLabel ? " " + schedule.durationMaxUnitLabel : undefined);
+  if (schedule.durationIsRange && schedule.duration !== undefined && schedule.durationMax !== undefined &&
+      (!schedule.durationUnit || !schedule.durationMaxUnit)) {
+    const low = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration) + (durationUnit ?? "");
+    const high = (schedule.durationMaxComparator ?? "") + stripTrailingZero(schedule.durationMax) + (durationMaxUnit ?? "");
+    return `x${low} – ${high}`;
+  }
+  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !durationUnit && !schedule.durationIsRange) {
     return undefined;
   }
-  const base = stripTrailingZero(schedule.duration);
-  const qualifier =
-    schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration
-      ? `${base}-${stripTrailingZero(schedule.durationMax)}`
-      : base;
-  return `x${qualifier}${schedule.durationUnit}`;
+  const upperUnit = durationMaxUnit ?? durationUnit ?? "";
+  if (schedule.duration === undefined)
+    return `x${durationEndpointPrefix(schedule.durationMaxComparator, "<=")}${stripTrailingZero(schedule.durationMax!)}${upperUnit}`;
+  const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
+  if (schedule.durationMax !== undefined &&
+      (schedule.durationMax !== schedule.duration || upperUnit !== durationUnit ||
+        schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
+    const lowerUnit = upperUnit !== durationUnit ? durationUnit : "";
+    return `x${base}${lowerUnit}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}${upperUnit}`;
+  }
+  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
+    (!schedule.durationComparator || schedule.durationComparator === "~") ? ">=" : "";
+  return `x${lowerBound}${base}${durationUnit ?? ""}`;
 }
 
 function describeOccurrenceCapEnglish(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1031,47 +1127,93 @@ function describeOccurrenceCapEnglish(schedule: CanonicalScheduleExpr | undefine
   return `maximum ${stripTrailingZero(cap.max)} doses per ${period}`;
 }
 
-function describeDuration(schedule: CanonicalScheduleExpr | undefined): string | undefined {
-  if (!schedule || schedule.duration === undefined || !schedule.durationUnit) {
-    return undefined;
-  }
-  const unit = schedule.durationUnit;
-  const label = (value: number): string => {
-    switch (unit) {
-      case FhirPeriodUnit.Minute:
-        return value === 1 ? "minute" : "minutes";
-      case FhirPeriodUnit.Hour:
-        return value === 1 ? "hour" : "hours";
-      case FhirPeriodUnit.Day:
-        return value === 1 ? "day" : "days";
-      case FhirPeriodUnit.Week:
-        return value === 1 ? "week" : "weeks";
-      case FhirPeriodUnit.Month:
-        return value === 1 ? "month" : "months";
-      case FhirPeriodUnit.Year:
-        return value === 1 ? "year" : "years";
-      default:
-        return value === 1 ? "unit" : "units";
-    }
-  };
-  if (schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
-    return `for ${stripTrailingZero(schedule.duration)} to ${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax)}`;
-  }
-  return `for ${stripTrailingZero(schedule.duration)} ${label(schedule.duration)}`;
+export interface DurationWording {
+  readonly locale: string;
+  readonly coursePrefix: string;
+  readonly administrationPrefix: string;
+  readonly administrationShortPrefix: string;
+  readonly range: string;
+  readonly upper: string;
+  readonly lower: string;
+  administrationUnit(unit: FhirPeriodUnit, value: number | undefined, maximum: number | undefined,
+    short: boolean, words: CourseLanguage): string;
 }
 
-function describeAdministrationDuration(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+const ENGLISH_DURATION_WORDING: DurationWording = {
+  locale: "en", coursePrefix: "for", administrationPrefix: "over",
+  administrationShortPrefix: "over", range: " to ", upper: "up to ", lower: "at least ",
+  administrationUnit: (unit, value, maximum, _short, words) => words.timeUnit(unit, maximum ?? value) ?? unit
+};
+
+export function describeDuration(
+  schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage,
+  text: DurationWording = ENGLISH_DURATION_WORDING
+): string | undefined {
+  if (schedule?.durationIsRange && schedule.duration !== undefined && schedule.durationMax !== undefined &&
+      (!schedule.durationUnit || !schedule.durationMaxUnit)) {
+    const endpoint = (value: number, unit: string | undefined, authoredUnit: string | undefined, comparator: string | undefined): string => {
+      const label = unit ? words.timeUnit(unit, value) ?? authoredUnit ?? unit : authoredUnit;
+      return (comparator ?? "") + stripTrailingZero(value) + (label ? " " + label : "");
+    };
+    return `${text.coursePrefix} ${endpoint(schedule.duration, schedule.durationUnit, schedule.durationUnitLabel, schedule.durationComparator)} – ${endpoint(schedule.durationMax, schedule.durationMaxUnit, schedule.durationMaxUnitLabel, schedule.durationMaxComparator)}`;
+  }
+  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit && !schedule.durationUnitLabel && !schedule.durationIsRange) {
+    return undefined;
+  }
+  const unit = schedule.durationUnit ?? schedule.durationUnitLabel ?? "";
+  const upperUnit = schedule.durationMaxUnit ?? schedule.durationMaxUnitLabel ?? unit;
+  const upperUnitCode = schedule.durationMaxUnit ?? schedule.durationUnit;
+  const label = (value: number, endpointUnit = unit, unitCode = schedule.durationUnit): string =>
+    unitCode ? words.timeUnit(unitCode, value) ?? endpointUnit : endpointUnit;
+  if (schedule.duration === undefined)
+    return `${text.coursePrefix} ${durationEndpointPrefix(schedule.durationMaxComparator, text.upper)}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax!, upperUnit, upperUnitCode)}`.trim();
+  const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
+  if (schedule.durationMax !== undefined &&
+      (schedule.durationMax !== schedule.duration || upperUnit !== unit ||
+        schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
+    const lowerUnit = upperUnit !== unit ? " " + label(schedule.duration) : "";
+    return `${text.coursePrefix} ${lower}${lowerUnit}${text.range}${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit, upperUnitCode)}`.trim();
+  }
+  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
+    (!schedule.durationComparator || schedule.durationComparator === "~") ? text.lower : "";
+  return `${text.coursePrefix} ${lowerBound}${lower} ${label(schedule.duration)}`.trim();
+}
+
+export function describeAdministrationDuration(
+  schedule: CanonicalScheduleExpr | undefined, short = false, words: CourseLanguage = ENGLISH_COURSE,
+  text: DurationWording = ENGLISH_DURATION_WORDING, prefix = text.administrationPrefix
+): string | undefined {
+  const range = schedule?.administrationDurationRange;
+  if (range) {
+    const endpoint = (quantity: NonNullable<typeof range.low>): string => {
+      const unit = quantity.code ?? quantity.unit ?? "";
+      const recognizedUnit = short ? undefined : getQuantityDurationUnit(quantity);
+      const label = short ? quantity.unit ?? unit :
+        (recognizedUnit && words.timeUnit(recognizedUnit, quantity.value)) || quantity.unit || unit;
+      return (short ? quantity.comparator ?? "" : quantityComparatorText(quantity.comparator, text.locale)) +
+        (quantity.value === undefined ? "" : stripTrailingZero(quantity.value)) + (short ? "" : " ") + label;
+    };
+    const low = range.low?.value !== undefined ? endpoint(range.low) : undefined;
+    const high = range.high?.value !== undefined ? endpoint(range.high) : undefined;
+    if (low && high) return short ? text.administrationShortPrefix + low + "-" + high : prefix + " " + low + text.range + high;
+    if (high) return short ? text.administrationShortPrefix + (range.high?.comparator && range.high.comparator !== "~" ? "" : "<=") + high : prefix + " " + (range.high?.comparator && range.high.comparator !== "~" ? "" : text.upper) + high;
+    if (low) return short ? text.administrationShortPrefix + (range.low?.comparator && range.low.comparator !== "~" ? "" : ">=") + low : prefix + " " + (range.low?.comparator && range.low.comparator !== "~" ? "" : text.lower) + low;
+    return undefined;
+  }
   const value = schedule?.administrationDuration;
   const unit = schedule?.administrationDurationUnit;
-  if (value === undefined || !unit) return undefined;
-  const label = unit === FhirPeriodUnit.Minute ? (value === 1 ? "minute" : "minutes")
-    : unit === FhirPeriodUnit.Hour ? (value === 1 ? "hour" : "hours")
-      : unit === FhirPeriodUnit.Second ? (value === 1 ? "second" : "seconds")
-        : unit === FhirPeriodUnit.Day ? (value === 1 ? "day" : "days") : unit;
   const max = schedule?.administrationDurationMax;
-  return max !== undefined && max !== value
-    ? `over ${stripTrailingZero(value)} to ${stripTrailingZero(max)} ${label}`
-    : `over ${stripTrailingZero(value)} ${label}`;
+  if ((value === undefined && max === undefined) || !unit) return undefined;
+  const lower = value === undefined
+    ? (short ? "<=" : text.upper) + stripTrailingZero(max!)
+    : (short ? schedule?.administrationDurationComparator ?? ""
+      : quantityComparatorText(schedule?.administrationDurationComparator, text.locale)) + stripTrailingZero(value);
+  const duration = value !== undefined && max !== undefined && max !== value
+    ? lower + (short ? "-" : text.range) + stripTrailingZero(max)
+    : lower;
+  if (short) return text.administrationShortPrefix + duration + unit;
+  const label = text.administrationUnit(unit, value, max, false, words);
+  return `${prefix} ${duration} ${label}`;
 }
 
 function shouldUseGenericMedicationObject(clause: CanonicalSigClause): boolean {
@@ -1112,9 +1254,89 @@ function shouldSuppressRoutePhrase(
   }
 }
 
-function formatShort(clause: CanonicalSigClause): string {
+/** A count bound cannot use an authored exact cadence as its active period. */
+function authoredCountTimingText(
+  code: string | undefined,
+  recurrence: Pick<CanonicalScheduleExpr, "frequency" | "frequencyMax" | "periodUnit"> | undefined
+): string | undefined {
+  if (!code || recurrence?.frequencyMax === undefined ||
+      recurrence.frequencyMax === recurrence.frequency || recurrence.periodUnit !== undefined) return undefined;
+  return WORD_FREQUENCIES[code.toLowerCase()] === undefined ? undefined : code;
+}
+
+/** Preserve free labels; recognized cadence prose yields to a typed recurrence. */
+export function independentTimingText(
+  code: string | undefined,
+  recurrence?: Pick<CanonicalScheduleExpr, "frequency" | "frequencyMax" | "period" | "periodMax" | "periodUnit">
+): string | undefined {
+  if (!code || TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined ||
+      authoredCountTimingText(code, recurrence)) return undefined;
+  const lower = code.toLowerCase();
+  if (timingPreviewDescriptor(code)) return undefined;
+  if (WORD_FREQUENCIES[lower] && recurrence?.periodUnit !== undefined &&
+      (recurrence.frequency !== undefined || recurrence.frequencyMax !== undefined ||
+       recurrence.period !== undefined || recurrence.periodMax !== undefined)) return undefined;
+  // Compact shorthand yields when a typed cadence replaces it.
+  // Otherwise retain the source label.
+  return isCompactIntervalTimingCode(code) && recurrence?.periodUnit !== undefined &&
+    (recurrence.period !== undefined || recurrence.periodMax !== undefined) ? undefined : code;
+}
+
+export function timingCodeMatchesRecurrence(
+  schedule: Pick<CanonicalScheduleExpr, "timingCode" | "frequency" | "frequencyMax" | "period" | "periodMax" | "periodUnit" | "when" | "timeOfDay">,
+  code = schedule.timingCode
+): boolean {
+  if (!code) return true;
+  const daily = TIMING_CODE_DAILY_FREQUENCIES[code];
+  const interval = daily === undefined || schedule.when?.length || schedule.timeOfDay?.length
+    ? timingPreviewDescriptor(code) : undefined;
+  if (interval?.when?.length && (schedule.when?.length
+      ? interval.when.length !== schedule.when.length ||
+        schedule.when.some((event, index) => event !== interval.when![index])
+      : Boolean(schedule.timeOfDay?.length))) return false;
+  if (daily === undefined && !interval) {
+    // Free text is not a recurrence abbreviation. Typed cadence owns the
+    // preview while the authored label stays on the source timing.
+    return schedule.frequency === undefined &&
+      schedule.frequencyMax === undefined && schedule.period === undefined &&
+      schedule.periodMax === undefined && schedule.periodUnit === undefined;
+  }
+  const hours = TIMING_CODE_HOURLY_PERIODS[code.toUpperCase()];
+  const codedCadence = hours ? 24 / hours
+    : code === "QOD" && (schedule.periodUnit === FhirPeriodUnit.Day || schedule.periodUnit === FhirPeriodUnit.Week)
+      ? daily : undefined;
+  if (codedCadence !== undefined && !schedule.when?.length && !schedule.timeOfDay?.length &&
+      schedule.frequencyMax === undefined && schedule.periodMax === undefined &&
+      matchesDailyCodeCadence(codedCadence, schedule)) return true;
+  const frequency = code === "QOD" ? 1 : daily ?? interval!.frequency ?? 1;
+  const period = code === "QOD" ? 2 : interval?.period ?? 1;
+  const unit = interval?.periodUnit ?? FhirPeriodUnit.Day;
+  return (schedule.frequency === undefined || schedule.frequency === frequency) &&
+    (schedule.frequencyMax === undefined || schedule.frequency !== undefined && schedule.frequencyMax === frequency) &&
+    (schedule.period === undefined || schedule.period === period) &&
+    (schedule.periodMax === undefined || schedule.periodMax === period) &&
+    (schedule.periodUnit === undefined || schedule.periodUnit === unit);
+}
+
+/** A code-only event supplies display meaning without changing authored timing. */
+export function timingEventPreviewSchedule(
+  schedule: CanonicalScheduleExpr | undefined
+): CanonicalScheduleExpr | undefined {
+  if (!schedule?.timingCode || schedule.when?.length || schedule.timeOfDay?.length) return schedule;
+  const descriptor = timingPreviewDescriptor(schedule.timingCode);
+  const when = descriptor?.when;
+  const anchorOnly = descriptor?.frequency === undefined && descriptor?.period === undefined &&
+    descriptor?.periodUnit === undefined;
+  return when?.length && (anchorOnly || timingCodeMatchesRecurrence(schedule)) ? { ...schedule, when } : schedule;
+}
+
+function formatShort(clause: CanonicalSigClause, words: CourseLanguage, resolvedMethod?: SigLongContext["resolvedMethod"]): string {
   const schedule = scheduleOf(clause);
+  const codeText = independentTimingText(schedule.timingCode, schedule);
+  const timingText = schedule.timingTextIsLiteral ? schedule.timingText
+    : schedule.timingText === undefined ? codeText : independentTimingText(schedule.timingText, schedule);
   const parts: string[] = [];
+  let codeEmitted = false;
   const dosePart = formatDoseShort(clause.dose);
   if (dosePart) {
     parts.push(dosePart);
@@ -1131,36 +1353,79 @@ function formatShort(clause: CanonicalSigClause): string {
   } else if (routeText) {
     parts.push(routeText);
   }
-  if (hasDailyRecurrenceAcrossClocks(schedule)) {
+  if (clause.site) {
+    const site = formatSite(clause, resolveRouteGrammar(clause), false, words);
+    if (site) parts.push(site);
+  }
+  if (schedule.period === undefined && schedule.periodMax !== undefined && schedule.periodUnit) {
+    parts.push(describeFrequency(schedule, words)!);
+  } else if (hasDailyRecurrenceAcrossClocks(schedule)) {
     parts.push("daily");
-  } else if (schedule.timingCode) {
-    parts.push(schedule.timingCode);
+  } else if (schedule.timingCode && (!codeText || isCompactIntervalTimingCode(schedule.timingCode)) &&
+      timingCodeMatchesRecurrence(schedule)) {
+    const previewCode = timingPreviewCadenceCode(schedule.timingCode, schedule);
+    parts.push(previewCode);
+    // A composed descriptor still owns its independently selected event anchor.
+    codeEmitted = previewCode === schedule.timingCode;
+  } else if (
+    schedule.frequency === undefined && schedule.frequencyMax !== undefined &&
+    schedule.periodUnit === FhirPeriodUnit.Day &&
+    schedule.period === undefined &&
+    (schedule.periodMax === undefined || schedule.periodMax === 1)
+  ) {
+    parts.push(`<=${stripTrailingZero(schedule.frequencyMax)}x/d`);
   } else if (
     schedule.frequency !== undefined &&
     schedule.frequencyMax !== undefined &&
     schedule.periodUnit === FhirPeriodUnit.Day &&
-    (!schedule.period || schedule.period === 1)
+    (schedule.period === undefined || schedule.period === 1) &&
+    (schedule.periodMax === undefined || schedule.periodMax === 1)
   ) {
     parts.push(`${stripTrailingZero(schedule.frequency)}-${stripTrailingZero(schedule.frequencyMax)}x/d`);
   } else if (
     schedule.frequency &&
     schedule.periodUnit === FhirPeriodUnit.Day &&
-    (!schedule.period || schedule.period === 1)
+    (schedule.period === undefined || schedule.period === 1) &&
+    (schedule.periodMax === undefined || schedule.periodMax === 1)
   ) {
     parts.push(`${stripTrailingZero(schedule.frequency)}x/d`);
-  } else if (schedule.period && schedule.periodUnit &&
-      !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.frequency === undefined &&
+  } else if (schedule.period !== undefined && schedule.periodUnit &&
+      !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.period === 1 &&
+        (schedule.periodMax === undefined || schedule.periodMax === 1) &&
+        schedule.frequency === undefined && schedule.frequencyMax === undefined &&
         (schedule.dayOfMonth?.length ?? 0) > 1)) {
     const base = stripTrailingZero(schedule.period);
     const qualifier =
-      schedule.periodMax && schedule.periodMax !== schedule.period
+      schedule.periodMax !== undefined && schedule.periodMax !== schedule.period
         ? `${base}-${stripTrailingZero(schedule.periodMax)}`
         : base;
-    parts.push(`Q${qualifier}${schedule.periodUnit.toUpperCase()}`);
+    const frequency = schedule.frequency;
+    const maximum = schedule.frequencyMax;
+    if (frequency !== undefined && frequency !== 1 || maximum !== undefined && maximum !== frequency) {
+      const count = maximum !== undefined && maximum !== frequency
+        ? frequency === undefined ? `<=${stripTrailingZero(maximum)}`
+          : `${stripTrailingZero(frequency)}-${stripTrailingZero(maximum)}`
+        : stripTrailingZero(frequency!);
+      parts.push(`${count}x/${qualifier}${schedule.periodUnit}`);
+    } else parts.push(`Q${qualifier}${schedule.periodUnit.toUpperCase()}`);
+  } else if (schedule.frequency !== undefined || schedule.frequencyMax !== undefined) {
+    const frequency = schedule.frequency, maximum = schedule.frequencyMax;
+    const count = maximum !== undefined && maximum !== frequency
+      ? frequency === undefined ? `<=${stripTrailingZero(maximum)}`
+        : `${stripTrailingZero(frequency)}-${stripTrailingZero(maximum)}`
+      : stripTrailingZero(frequency!);
+    parts.push(`${count}x`);
   }
-  if (schedule.when?.length) {
-    parts.push(schedule.when.join(" "));
+  if (timingText && !(codeEmitted && timingText === schedule.timingCode)) parts.push(timingText);
+  const hasEventOffset = schedule.offset !== undefined || schedule.offsetMin !== undefined || schedule.offsetMax !== undefined;
+  const eventSchedule = codeEmitted && !hasEventOffset ? schedule : timingEventPreviewSchedule(schedule)!;
+  if (eventSchedule.when?.length) {
+    parts.push(eventSchedule.offset !== undefined || eventSchedule.offsetMin !== undefined || eventSchedule.offsetMax !== undefined
+      ? collectWhenPhrases(eventSchedule).join(" ") : eventSchedule.when.join(" "));
   }
+  if (schedule.activityTiming?.length) parts.push(...formatActivityTimingEnglish(schedule));
+  const eventWindow = describeEventWindowEnglish(schedule, words);
+  if (eventWindow) parts.push(eventWindow);
   if (schedule.dayOfMonth?.length) {
     parts.push(describeDayOfMonth(schedule)!);
   }
@@ -1180,7 +1445,7 @@ function formatShort(clause: CanonicalSigClause): string {
     parts.push(times.join(","));
   }
   if (schedule.calendarEvents?.length) {
-    parts.push(`@${schedule.calendarEvents.map((event) => event.isoDate).join(",")}`);
+    parts.push(`@${schedule.calendarEvents.map((event) => event.fhirDateTime ?? event.isoDate).join(",")}`);
   }
   if (schedule.boundsStart) {
     parts.push(`from${schedule.boundsStart}`);
@@ -1189,21 +1454,21 @@ function formatShort(clause: CanonicalSigClause): string {
     parts.push(`thru${schedule.boundsEnd}`);
   }
   if (schedule.countMax !== undefined) {
-    parts.push(`x${stripTrailingZero(schedule.count ?? 1)}-${stripTrailingZero(schedule.countMax)}`);
+    parts.push(schedule.count === undefined ? `x<=${stripTrailingZero(schedule.countMax)}`
+      : `x${stripTrailingZero(schedule.count)}-${stripTrailingZero(schedule.countMax)}`);
   } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
-  if (schedule.administrationDuration !== undefined && schedule.administrationDurationUnit) {
-    const max = schedule.administrationDurationMax;
-    const duration = max !== undefined && max !== schedule.administrationDuration
-      ? `${stripTrailingZero(schedule.administrationDuration)}-${stripTrailingZero(max)}`
-      : stripTrailingZero(schedule.administrationDuration);
-    parts.push(`over${duration}${schedule.administrationDurationUnit}`);
-  }
+  const administrationDuration = describeAdministrationDuration(schedule, true, words);
+  if (administrationDuration) parts.push(administrationDuration);
   const durationShort = formatDurationShort(schedule);
   if (durationShort) {
     parts.push(durationShort);
   }
+  const occurrenceCap = describeOccurrenceCapEnglish(schedule);
+  if (occurrenceCap) parts.push(occurrenceCap);
+  const clockWindow = describeClockWindow(schedule);
+  if (clockWindow) parts.push(clockWindow);
   if (clause.prn?.enabled) {
     const reason = getPreferredCanonicalPrnReasonText(clause.prn.reason, clause.prn.reasons);
     if (reason) {
@@ -1212,39 +1477,242 @@ function formatShort(clause: CanonicalSigClause): string {
       parts.push("PRN");
     }
   }
+  if (!parts.length && clause.method) parts.push(resolveMethodVerb(clause, resolveRouteGrammar(clause), resolvedMethod));
   return parts.filter(Boolean).join(" ");
+}
+
+interface LongAdministrationTimingParts {
+  frequency?: string;
+  event?: string;
+  eventWindow?: string;
+  clockWindow?: string;
+  activities: string[];
+  calendarEvents?: string;
+  dayOfWeek?: string;
+  dayOfMonth?: string;
+  calendarBounds?: string;
+  count?: string;
+  administrationDuration?: string;
+  duration?: string;
+  occurrenceCap?: string;
+}
+
+interface RichAdministrationParts {
+  route?: string;
+  frequencyWithoutEvent?: string;
+  independentTiming?: string;
+  clock?: string;
+  asNeeded?: string;
+  site?: string;
+  coversSingleEvent: boolean;
+}
+
+/** Locale realizers supply words; their clinical timing order is shared. */
+export function describeClockWindow(
+  schedule: CanonicalScheduleExpr | undefined, timing = ENGLISH_CLAUSE_TIMING
+): string | undefined {
+  const window = schedule?.clockWindow;
+  if (!window) return undefined;
+  const clock = (value: string): string => value.length === 8 && value.slice(5) === ":00" ? value.slice(0, 5) : value;
+  return timing.clockWindow(clock(window.start), clock(window.end), Boolean(window.endInclusive));
+}
+
+export function appendLongAdministrationTiming(
+  parts: string[], timing: LongAdministrationTimingParts, richTiming?: RichAdministrationParts
+): void {
+  const frequency = richTiming?.coversSingleEvent ? richTiming.frequencyWithoutEvent : timing.frequency;
+  if (frequency) parts.push(frequency);
+  if (timing.event && !richTiming?.coversSingleEvent) parts.push(timing.event);
+  else if (richTiming) {
+    if (richTiming.independentTiming) parts.push(richTiming.independentTiming);
+    if (richTiming.clock) parts.push(richTiming.clock);
+  }
+  if (timing.eventWindow) parts.push(timing.eventWindow);
+  if (timing.clockWindow) parts.push(timing.clockWindow);
+  for (const activity of timing.activities) parts.push(activity);
+  if (timing.calendarEvents) parts.push(timing.calendarEvents);
+  if (timing.dayOfWeek) parts.push(timing.dayOfWeek);
+  if (timing.dayOfMonth) parts.push(timing.dayOfMonth);
+  if (timing.calendarBounds) parts.push(timing.calendarBounds);
+  if (timing.count) parts.push(timing.count);
+  if (timing.administrationDuration) parts.push(timing.administrationDuration);
+  if (timing.duration) parts.push(timing.duration);
+  if (timing.occurrenceCap) parts.push(timing.occurrenceCap);
+}
+
+export function richGraphAdministrationTail(
+  clause: CanonicalSigClause,
+  action: AdviceFrame,
+  timing: LongAdministrationTimingParts,
+  parts: RichAdministrationParts
+): string[] {
+  const result: string[] = [];
+  if (parts.route) result.push(parts.route);
+  appendLongAdministrationTiming(result, timing, parts);
+  if (parts.asNeeded) result.push(parts.asNeeded);
+  const actionHasSite = !canonicalSiteOwnsPrimaryPhrase(clause) &&
+    action.args.some((arg) => arg.role === AdviceArgumentRole.Site);
+  if (parts.site && !actionHasSite) result.push(parts.site);
+  return result;
+}
+
+export function instructionGraphMatchesDose(clause: CanonicalSigClause): boolean {
+  return !clause.dose || Boolean(clause.instructionGraph?.actions.some((action) =>
+    action.args.some((arg) =>
+      arg.role === AdviceArgumentRole.Amount &&
+      arg.quantity?.value === clause.dose?.value &&
+      arg.quantity?.range?.low === clause.dose?.range?.low &&
+      arg.quantity?.range?.high === clause.dose?.range?.high &&
+      arg.quantity?.unit === clause.dose?.unit &&
+      arg.quantity?.comparator === clause.dose?.comparator
+    )
+  ));
+}
+
+export function instructionGraphActionHasSequenceSuccessor(
+  clause: CanonicalSigClause, action: AdviceFrame | undefined
+): boolean {
+  const actionIndex = action && clause.instructionGraph ? clause.instructionGraph.actions.indexOf(action) : -1;
+  return actionIndex >= 0 && Boolean(clause.instructionGraph?.relations?.some((relation) =>
+    relationHasSemanticClass(relation.kind, "sequence") && relation.fromActionIndex === actionIndex
+  ));
+}
+
+export function hasExplicitAdministrationMethod(clause: CanonicalSigClause): boolean {
+  return Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);
+}
+
+export function instructionGraphCanStandAlone(
+  clause: CanonicalSigClause,
+  timingText: string | undefined,
+  graphRepresentsDose: boolean,
+  richPrimaryAction: AdviceFrame | undefined,
+  graphText: string | undefined,
+  primaryConditions: InstructionGraphPrimaryCondition[] | undefined
+): boolean {
+  const schedule = scheduleOf(clause);
+  const hasAdministrationTiming = Boolean(
+    timingText || schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
+    schedule.period !== undefined || schedule.periodMax !== undefined ||
+    schedule.when?.length || schedule.eventWindow || schedule.clockWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
+    schedule.timeOfDay?.length || schedule.calendarEvents?.length ||
+    schedule.boundsStart !== undefined || schedule.boundsEnd !== undefined ||
+    schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
+    schedule.duration !== undefined || schedule.durationMax !== undefined ||
+    schedule.durationUnit !== undefined || schedule.administrationDuration !== undefined ||
+    schedule.administrationDurationMax !== undefined || schedule.administrationDurationUnit !== undefined ||
+    schedule.administrationDurationRange !== undefined || schedule.offset !== undefined ||
+    schedule.offsetMin !== undefined || schedule.offsetMax !== undefined ||
+    Boolean(schedule.activityTiming?.length) || schedule.occurrenceCap !== undefined
+  );
+  return Boolean(
+    !richPrimaryAction && !hasExplicitAdministrationMethod(clause) && graphText &&
+    clause.instructionGraph?.actions.length && !clause.prn?.enabled && !clause.route && !clause.site &&
+    !hasAdministrationTiming && !clause.clinicalAdjuncts?.excludedDates?.length &&
+    !clause.clinicalAdjuncts?.excludedWeekdays?.length && graphRepresentsDose && !primaryConditions?.length
+  );
 }
 
 const SPREAD_THINLY_INSTRUCTION_CODE = "420162004";
 
-const ENGLISH_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
-  [AdviceModality.May]: "May",
-  [AdviceModality.Can]: "Can",
-  [AdviceModality.Might]: "Might",
-  [AdviceModality.Could]: "Could",
-  [AdviceModality.Should]: "Should",
-  [AdviceModality.Must]: "Must"
-};
-
 function applyEnglishAdministrationModality(verb: string, clause: CanonicalSigClause): string {
   const modality = instructionGraphPrimaryAdministrationModality(clause);
-  const prefix = modality ? ENGLISH_MODALITY_PREFIX[modality] : undefined;
+  const prefix = modality ? EN_POSITIVE_MODALITY_PREFIX[modality] : undefined;
   if (!prefix) return verb;
-  return `${prefix} ${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
+  return `${prefix}${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
 }
 
-function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions): string {
+/** Calendar qualifiers use locale-owned labels and stay on their medication
+ * primary before independent instructions are composed. */
+export function appendClinicalCalendarText(
+  text: string, dates: readonly string[] | undefined,
+  weekdays: readonly FhirDayOfWeek[] | undefined, words: CourseLanguage
+): string {
+  if (dates?.length) {
+    const trimmed = text.trim().replace(/[.!?]+$/u, "");
+    text = (trimmed ? trimmed + " " : "") + words.exceptDates + " " + dates.join(words.allSeparator) + ".";
+  }
+  if (weekdays?.length) {
+    const seen = new Set<FhirDayOfWeek>(), labels: string[] = [];
+    for (const day of weekdays) if (!seen.has(day)) {
+      seen.add(day);
+      labels.push(words.weekdayName(day));
+    }
+    const trimmed = text.trim().replace(/[.!?]+$/u, "");
+    text = (trimmed ? trimmed + " " : "") + words.exceptWeekdays + words.joinList(labels) + ".";
+  }
+  return text;
+}
+
+function qualifyNativePrimaryDirections(
+  text: string, condition: MedicationCondition | undefined, words: CourseLanguage,
+  calendar?: CanonicalSigClause["clinicalAdjuncts"]
+): string {
+  if (condition) text = appendClinicalConditionText(text, condition, words);
+  return appendClinicalCalendarText(text, calendar?.excludedDates, calendar?.excludedWeekdays, words);
+}
+
+/** A source-only primary and its recognized cadence describe one medication.
+ * Qualify that complete primary before independent advice is composed. */
+export function composeNativePrimaryDirections(
+  rendered: string, authored: string | undefined,
+  condition: MedicationCondition | undefined, words: CourseLanguage,
+  deferredDirections?: { text?: string; current?: string },
+  clause?: CanonicalSigClause
+): string {
+  const calendar = clause?.clinicalAdjuncts;
+  const qualified = condition || calendar?.excludedDates?.length || calendar?.excludedWeekdays?.length;
+  if (deferredDirections?.current) {
+    // Rich native amounts belong to the same primary administration. Compose
+    // them before its qualifiers and before the locale adds independent advice.
+    const primary = rendered.trim().replace(/[.!?]+$/u, "");
+    const current = (primary ? primary + "; " : "") + deferredDirections.current;
+    if (authored) deferredDirections.text = authored;
+    return qualified ? qualifyNativePrimaryDirections(current, condition, words, calendar) : current;
+  }
+  if (!authored) return qualified ? qualifyNativePrimaryDirections(rendered, condition, words, calendar) : rendered;
+  const current = rendered.trim().replace(/[.!?]+$/u, "");
+  const source = authored.trim().replace(/[.!?]+$/u, "");
+  if (!current) return qualified ? qualifyNativePrimaryDirections(authored, condition, words, calendar)
+    : /[.!?]$/u.test(authored.trim()) ? authored.trim() : authored.trim() + ".";
+  if (qualified) {
+    // The typed caller selected the authored primary. Qualify that dose
+    // before suppressing duplicate wording or composing independent advice.
+    const directions = qualifyNativePrimaryDirections(authored, condition, words, calendar);
+    const qualifiedCurrent = qualifyNativePrimaryDirections(rendered, condition, words, calendar);
+    if (qualifiedCurrent.trim().replace(/[.!?]+$/u, "") === directions.trim().replace(/[.!?]+$/u, ""))
+      return directions;
+    // A current administration carries the same live qualifier as its authored
+    // dose. A standalone maximum remains a constraint, not a replacement dose.
+    const currentDirections = clause && canonicalClauseHasAdministrationSemantics(clause, false)
+      ? qualifiedCurrent : rendered;
+    if (deferredDirections) {
+      deferredDirections.text = directions;
+      return currentDirections;
+    }
+    return words.withAuthoredDirections(currentDirections.trim().replace(/[.!?]+$/u, ""), directions);
+  }
+  if (current === source) return rendered;
+  return words.withAuthoredDirections(current, source) + ".";
+}
+
+function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | undefined, words: CourseLanguage,
+  resolvedMethod?: SigLongContext["resolvedMethod"], condition?: MedicationCondition, authoredPrimary?: string,
+  deferredDirections?: { text?: string; current?: string }): string {
+  const hasCanonicalAdministration = canonicalClauseHasAdministrationSemantics(clause);
+  const hasCalendarQualifiers = Boolean(clause.clinicalAdjuncts?.excludedDates?.length || clause.clinicalAdjuncts?.excludedWeekdays?.length);
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
-  const baseVerb = resolveMethodVerb(clause, grammar);
+  const baseVerb = resolveMethodVerb(clause, grammar, resolvedMethod);
   const verb = applyEnglishAdministrationModality(baseVerb, clause);
-  const explicitDosePart = formatDoseLong(clause.dose);
+  const preparationSuppliesDose = instructionGraphPreparationOwnsDose(clause, options);
+  const explicitDosePart = preparationSuppliesDose ? undefined : formatDoseLong(clause.dose);
   const integratedThinLayer = options?.realizationMode !== "roundtrip" &&
     !explicitDosePart &&
     (clause.additionalInstructions ?? []).find((instruction) =>
       instruction.coding?.code === SPREAD_THINLY_INSTRUCTION_CODE
     );
-  const methodDefinition = resolveMedicationInstructionAction(clause.method?.text ?? baseVerb);
+  const methodDefinition = resolvedMethod ?? resolveMedicationInstructionAction(clause.method?.text ?? baseVerb);
   const directSiteObject = Boolean(
     !explicitDosePart && medicationInstructionActionLocaleRealizerConfig(
       methodDefinition?.realizerConfig,
@@ -1255,7 +1723,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     integratedThinLayer ? "a thin layer" :
     !directSiteObject && shouldUseGenericMedicationObject(clause) ? "the medication" : undefined
   );
-  const sitePart = formatSite(clause, grammar, directSiteObject);
+  const sitePart = formatSite(clause, grammar, directSiteObject, words);
   const roundTrip = options?.realizationMode === "roundtrip";
   let routePart = shouldSuppressRoutePhrase(clause, grammar, baseVerb)
     ? undefined
@@ -1269,10 +1737,15 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     : undefined;
   const frequencyPart =
     alternateEventCadence ??
-    describeFrequency(schedule) ??
+    describeFrequency(schedule, words) ??
     standaloneOccurrenceCount ??
     describeFrequencyCount(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrases(schedule, options);
+  const timingText = schedule.timingTextIsLiteral ? schedule.timingText
+    : independentTimingText(schedule.timingText ?? schedule.timingCode, schedule);
+  if (timingText) eventParts.push(timingText);
+  const eventWindowPart = describeEventWindowEnglish(schedule, words);
+  let clockPart: string | undefined;
   if (schedule.timeOfDay?.length) {
     const timeStrings: string[] = [];
     for (const time of schedule.timeOfDay) {
@@ -1288,7 +1761,8 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       timeStrings.push(`${displayHours}:${displayMinutes}${isAm ? " am" : " pm"}`);
     }
     if (timeStrings.length) {
-      eventParts.push(`at ${timeStrings.join(", ")}`);
+      clockPart = `at ${timeStrings.join(", ")}`;
+      eventParts.push(clockPart);
     }
   }
   const timing = combineFrequencyAndEvents(schedule, frequencyPart, eventParts, options);
@@ -1297,14 +1771,18 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const calendarEventPart = describeCalendarEventsEnglish(schedule);
   const calendarBoundsPart = describeCalendarBoundsEnglish(schedule);
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
-    ? `for up to ${stripTrailingZero(schedule.countMax)} doses`
+    ? schedule.count === undefined
+      ? `for up to ${stripTrailingZero(schedule.countMax)} doses`
+      : schedule.count === schedule.countMax
+        ? schedule.count === 1 ? "once only" : `for ${stripTrailingZero(schedule.count)} doses`
+        : `for ${stripTrailingZero(schedule.count)} to ${stripTrailingZero(schedule.countMax)} doses`
     : schedule.count !== undefined && !standaloneOccurrenceCount
       ? schedule.count === 1
         ? "once only"
         : `for ${stripTrailingZero(schedule.count)} doses`
       : undefined;
-  const administrationDurationPart = describeAdministrationDuration(schedule);
-  const durationPart = describeDuration(schedule);
+  const administrationDurationPart = describeAdministrationDuration(schedule, false, words);
+  const durationPart = describeDuration(schedule, words);
   const occurrenceCapPart = describeOccurrenceCapEnglish(schedule);
   const reason = getLocalizedCanonicalPrnReasonText(clause.prn?.reason, clause.prn?.reasons, "en");
   const triggerReason = clause.prn?.reasons?.find((candidate) => candidate.triggerPhase === "onset") ??
@@ -1317,6 +1795,15 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       : reason ? `as needed for ${reason}` : "as needed"
     : undefined;
 
+  const timingParts: LongAdministrationTimingParts = {
+    frequency: timing.frequency, event: timing.event, eventWindow: eventWindowPart,
+    clockWindow: describeClockWindow(schedule),
+    activities: formatActivityTimingEnglish(schedule), calendarEvents: calendarEventPart,
+    dayOfWeek: dayPart, dayOfMonth: monthDayPart, calendarBounds: calendarBoundsPart,
+    count: countPart, administrationDuration: administrationDurationPart,
+    duration: durationPart, occurrenceCap: occurrenceCapPart
+  };
+
   const segments: string[] = [];
   if (dosePart) {
     segments.push(dosePart);
@@ -1327,39 +1814,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   if (routePart) {
     segments.push(routePart);
   }
-  if (timing.frequency) {
-    segments.push(timing.frequency);
-  }
-  if (timing.event) {
-    segments.push(timing.event);
-  }
-  for (const activityTiming of formatActivityTimingEnglish(schedule)) {
-    segments.push(activityTiming);
-  }
-  if (calendarEventPart) {
-    segments.push(calendarEventPart);
-  }
-  if (dayPart) {
-    segments.push(dayPart);
-  }
-  if (monthDayPart) {
-    segments.push(monthDayPart);
-  }
-  if (calendarBoundsPart) {
-    segments.push(calendarBoundsPart);
-  }
-  if (countPart) {
-    segments.push(countPart);
-  }
-  if (administrationDurationPart) {
-    segments.push(administrationDurationPart);
-  }
-  if (durationPart) {
-    segments.push(durationPart);
-  }
-  if (occurrenceCapPart) {
-    segments.push(occurrenceCapPart);
-  }
+  appendLongAdministrationTiming(segments, timingParts);
   if (roundTrip && sitePart && asNeededPart) {
     segments.push(sitePart);
   }
@@ -1370,297 +1825,83 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     segments.push(sitePart);
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-  const richPrimaryGraphAction = options?.realizationMode !== "roundtrip"
+  const graphRepresentsDose = preparationSuppliesDose || instructionGraphMatchesDose(clause);
+  const graphSourceIsEnglish = !clause.instructionGraph?.sourceLocale ||
+    baseLanguageTag(clause.instructionGraph.sourceLocale) === "en";
+  const primaryGraphAction = roundTrip
+    ? instructionGraphRoundTripPrimaryAction(clause)
+    : undefined;
+  // If whole-source replay is unavailable in this locale, an action's partial
+  // source cannot stand in for its independently structured cadence.
+  const needsCurrentPrimary = Boolean(primaryGraphAction && (
+    !graphSourceIsEnglish || !primaryGraphAction.sourceText.trim() || clause.sourceProjectionVerified === false ||
+    schedule.clockWindow ||
+    !graphRepresentsDose && instructionGraphSourceConflictsWithDose(clause, options)
+  ));
+  const richPrimaryGraphAction = !roundTrip || !primaryGraphAction
     ? instructionGraphRichPrimaryAction(clause)
-    : undefined;
+    : needsCurrentPrimary ? primaryGraphAction : undefined;
+  const richPrimaryCoverage = richPrimaryGraphAction && clause.schedule?.when?.length === 1
+    ? { singleScheduledEvent: false } : undefined;
   const richPrimaryGraphText = richPrimaryGraphAction
-    ? realizeInstructionAction(richPrimaryGraphAction, "en")
+    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "en", options, richPrimaryCoverage)
     : undefined;
-  const richPrimaryHasSite = Boolean(
-    richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
-  );
-  const richPrimaryCoversSingleEvent = Boolean(
-    richPrimaryGraphAction &&
-    instructionGraphActionCoversSingleScheduledEvent(richPrimaryGraphAction, clause)
-  );
-  const graphRegimenTail: string[] = [];
-  if (richPrimaryGraphText) {
-    if (routePart) graphRegimenTail.push(routePart);
-    if (timing.frequency) graphRegimenTail.push(timing.frequency);
-    if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
-    graphRegimenTail.push(...formatActivityTimingEnglish(schedule));
-    if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
-    if (dayPart) graphRegimenTail.push(dayPart);
-    if (monthDayPart) graphRegimenTail.push(monthDayPart);
-    if (calendarBoundsPart) graphRegimenTail.push(calendarBoundsPart);
-    if (countPart) graphRegimenTail.push(countPart);
-    if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);
-    if (durationPart) graphRegimenTail.push(durationPart);
-    if (occurrenceCapPart) graphRegimenTail.push(occurrenceCapPart);
-    if (asNeededPart) graphRegimenTail.push(asNeededPart);
-    if (sitePart && !richPrimaryHasSite) graphRegimenTail.push(sitePart);
-  }
+  const richPrimaryCoversSingleEvent = richPrimaryCoverage?.singleScheduledEvent === true;
+  const graphRegimenTail = richPrimaryGraphText && richPrimaryGraphAction
+    ? richGraphAdministrationTail(clause, richPrimaryGraphAction, timingParts, {
+        route: routePart, frequencyWithoutEvent: frequencyPart,
+        independentTiming: timingText, clock: clockPart, asNeeded: asNeededPart, site: sitePart,
+        coversSingleEvent: richPrimaryCoversSingleEvent
+      })
+    : [];
   const richGraphAdministrationSentence = richPrimaryGraphText
     ? formatPatientInstructionSentence(
         [richPrimaryGraphText, ...graphRegimenTail].filter(Boolean).join(" ")
       )
     : undefined;
-  const primaryGraphAction = roundTrip
-    ? instructionGraphRoundTripPrimaryAction(clause)
-    : undefined;
-  const instructionPhrases: string[] = [];
-  const codedWarningSources: string[] = [];
-  // Keep one source lookup per instruction for this render. All three
-  // consumers below use the same graph and coding, not separate matches.
-  const codedWarningSourcesByInstruction: string[][] = [];
-  for (const instruction of clause.additionalInstructions ?? []) {
-    const sources = composedCodedWarningActionSources(
-      clause.instructionGraph?.actions ?? [], instruction.coding
-    );
-    codedWarningSourcesByInstruction.push(sources);
-    codedWarningSources.push(...sources);
-  }
-  const hasCodedAdditionalInstruction = Boolean(
-    clause.additionalInstructions?.some((instruction, index) =>
-      instruction.coding?.code && (
-        codedWarningSourcesByInstruction[index].length > 0 ||
-        !clause.instructionGraph ||
-        !instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding)
-      ))
-  );
-  const normalizeInstruction = (value: string) => value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
-  const graphWarnings = clause.instructionGraph?.actions.filter((action) =>
-    action.polarity === AdvicePolarity.Negate
-  ) ?? [];
+  const primaryConditions: InstructionGraphPrimaryCondition[] | undefined =
+    clause.instructionGraph?.relations?.length ? [] : undefined;
   const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
-  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction, index) => {
-    if (!instruction.text || !clause.instructionGraph) return false;
-    if (instructionGraphFullyOwnsAdvice(clause.instructionGraph, instruction)) return true;
-    if (instruction.coding?.code) {
-      return !codedWarningSourcesByInstruction[index].length &&
-        instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding);
-    }
-    const normalized = normalizeInstruction(instruction.text);
-    // An uncoded shorthand advice fragment may end before a contiguous
-    // unparsed nominal tail that the typed instruction graph still retains.
-    // Prefer the graph's complete action+opaque source span, not the shorter
-    // additionalInstruction label ("hold on fasting" vs "... fasting days").
-    // This is source ownership only; no FHIR or clinical interpretation.
-    const graphOwnsLongerSource = !instruction.coding?.code &&
-      !(instruction.frames?.length) &&
-      clause.instructionGraph.actions.some((action) => {
-        const actionText = normalizeInstruction(action.sourceText);
-        return Boolean(actionText && normalized.includes(actionText) &&
-          clause.instructionGraph?.opaqueSpans?.some((opaque) =>
-            opaque.start >= action.span.end && opaque.text.trim() &&
-            !clause.instructionGraph?.sourceText
-              .slice(action.span.end, opaque.start).trim()
-          ));
-      });
-    if (graphOwnsLongerSource) return true;
-    const representedByWarning = graphWarnings.some((action) => {
-      const source = normalizeInstruction(action.sourceText);
-      return source === normalized || source.includes(normalized) || normalized.includes(source);
-    });
-    return instructionGraphCoversTypedWarnings(clause.instructionGraph, instruction.frames) ||
-      instructionGraphRealizesWarningText(clause.instructionGraph, instruction.text) ||
-      // Raw source coverage can include unresolved relation/opaque text; it
-      // does not by itself license replacing the complete editable advice.
-      instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
-      representedByWarning ||
-      (positionedGraph &&
-        instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text) &&
-        instructionGraphTextParticipatesInRelation(clause.instructionGraph, instruction.text)) ||
-      (!canonicalClauseHasAdministrationSemantics(clause) &&
-        instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text))
-    );
-  });
-  const additionalForDirectRendering = (clause.additionalInstructions ?? []).filter((instruction) =>
-    graphOwnedAdditional.indexOf(instruction) === -1 && instruction !== integratedThinLayer
-  );
-  const additionalTexts = additionalForDirectRendering
-    .map((instruction) => instruction.text?.trim())
-    .filter((text): text is string => Boolean(text));
-  const additionalSemanticSourceTexts = additionalTexts.slice();
-  for (const instruction of additionalForDirectRendering) {
-    for (const frame of instruction.frames ?? []) {
-      const source = frame.sourceText?.trim();
-      if (source && additionalSemanticSourceTexts.indexOf(source) === -1) {
-        additionalSemanticSourceTexts.push(source);
-      }
-    }
-  }
-  for (const source of codedWarningSources) {
-    if (additionalSemanticSourceTexts.indexOf(source) === -1) {
-      additionalSemanticSourceTexts.push(source);
-    }
-  }
-  if (clause.instructionGraph) {
-    for (const instruction of additionalForDirectRendering) {
-      for (const ownedSource of instructionGraphSourceOwnedByAdvice(clause.instructionGraph, instruction)) {
-        if (additionalSemanticSourceTexts.indexOf(ownedSource) === -1) {
-          additionalSemanticSourceTexts.push(ownedSource);
-        }
-      }
-    }
-  }
-  const allAdditionalRepresentedByGraphWarnings = Boolean(
-    graphWarnings.length &&
-    additionalTexts.every((text) => {
-      const normalized = normalizeInstruction(text);
-      return Boolean(clause.instructionGraph &&
-        instructionGraphRealizesWarningText(clause.instructionGraph, text));
-    })
-  );
   const positionedRoundTrip = Boolean(roundTrip && positionedGraph);
-  const graphWholeInstruction = clause.instructionGraph &&
-    !positionedGraph &&
-    !hasCodedAdditionalInstruction &&
-    allAdditionalRepresentedByGraphWarnings
-      ? realizeInstructionGraph(clause.instructionGraph, "en", {
-          includeWarnings: true,
-          omitCanonicalAdministration: clause,
-          preferSourceText: roundTrip,
-          roundtripSafe: roundTrip,
-          omitSourceTexts: richPrimaryGraphAction
-            ? [...additionalSemanticSourceTexts, richPrimaryGraphAction.sourceText]
-            : additionalSemanticSourceTexts
-        })
-      : undefined;
-  if (!graphWholeInstruction) {
-    const directInstruction = formatAdditionalInstructions({
-      ...clause,
-      additionalInstructions: additionalForDirectRendering
-    });
-    if (directInstruction) instructionPhrases.push(directInstruction);
-    const graphWarning = clause.instructionGraph && !positionedGraph
-      ? realizeInstructionGraph(clause.instructionGraph, "en", {
-          onlyWarnings: true,
-          omitCanonicalAdministration: clause,
-          preferSourceText: roundTrip,
-          roundtripSafe: roundTrip,
-          omitSourceTexts: additionalSemanticSourceTexts
-        })
-      : undefined;
-    const graphWarningText = graphWarning ? formatPatientInstructionSentence(graphWarning) : undefined;
-    if (graphWarningText && !instructionPhrases.some((value) =>
-      normalizeInstruction(value).includes(normalizeInstruction(graphWarningText)) ||
-      normalizeInstruction(graphWarningText).includes(normalizeInstruction(value))
-    )) {
-      instructionPhrases.push(graphWarningText);
-    }
-  }
-  const representedInstructionTexts = additionalForDirectRendering
-    .map((instruction) => instruction.text)
-    .filter((text): text is string => Boolean(text));
-  const preGraphInstruction = positionedGraph && clause.instructionGraph
-    ? realizeInstructionGraph(clause.instructionGraph, "en", {
-        includeWarnings: true,
-        omitCanonicalAdministration: clause,
-        preferSourceText: roundTrip,
-        roundtripSafe: roundTrip,
-        omitSourceTexts: additionalSemanticSourceTexts,
-        position: "pre"
-      })
-    : undefined;
-  const graphPrimaryForOmission = primaryGraphAction ?? richPrimaryGraphAction;
-  const postGraphOmissions = graphPrimaryForOmission
-    ? [...additionalSemanticSourceTexts, graphPrimaryForOmission.sourceText]
-    : additionalSemanticSourceTexts;
-  const postGraphInstruction = positionedGraph && clause.instructionGraph
-    ? realizeInstructionGraph(clause.instructionGraph, "en", {
-        includeWarnings: true,
-        omitCanonicalAdministration: clause,
-        preferSourceText: roundTrip,
-        roundtripSafe: roundTrip,
-        omitSourceTexts: postGraphOmissions,
-        position: "post"
-      })
-    : undefined;
-  const graphInstruction = graphWholeInstruction ?? postGraphInstruction ?? (
-    !positionedGraph && clause.instructionGraph &&
-    instructionGraphHasNovelNonWarningContent(clause.instructionGraph, representedInstructionTexts)
-      ? realizeInstructionGraph(clause.instructionGraph, "en", {
-          includeWarnings: false,
-          omitCanonicalAdministration: clause,
-          preferSourceText: roundTrip,
-          roundtripSafe: roundTrip,
-          omitSourceTexts: postGraphOmissions
-        })
-      : undefined
-  );
-  const primarySpanForFlow = clause.instructionGraph?.primaryAdministrationSpan;
-  const graphActionsForFlow = clause.instructionGraph?.actions ?? [];
-  const lastPreActionForFlow = primarySpanForFlow
-    ? graphActionsForFlow.filter((action) => action.span.end <= primarySpanForFlow.start)
-        .sort((a, b) => b.span.end - a.span.end)[0]
-    : undefined;
-  const firstPostActionForFlow = primarySpanForFlow
-    ? graphActionsForFlow.filter((action) => action.span.start >= primarySpanForFlow.end)
-        .sort((a, b) => a.span.start - b.span.start)[0]
-    : undefined;
-  const graphFlowSource = clause.instructionGraph?.sourceText ?? clause.rawText;
-  const noStrongBoundaryForFlow = (start: number, end: number): boolean =>
-    !/[.!?;]/u.test(graphFlowSource.slice(start, end));
-  const preFlowsIntoAdministration = Boolean(
-    !roundTrip && preGraphInstruction && primarySpanForFlow && lastPreActionForFlow &&
-    lastPreActionForFlow.polarity !== AdvicePolarity.Negate &&
-    noStrongBoundaryForFlow(lastPreActionForFlow.span.end, primarySpanForFlow.start)
-  );
-  const postFlowsFromAdministration = Boolean(
-    !roundTrip && postGraphInstruction && primarySpanForFlow && firstPostActionForFlow &&
-    firstPostActionForFlow.polarity !== AdvicePolarity.Negate &&
-    // The post-action's source-backed contrast already joins it to the
-    // administration; prefixing a generic temporal THEN reverses the
-    // connector's meaning ("but hold" is not "then but hold").
-    !instructionGraphPostAdministrationDiscourseConnector(clause.instructionGraph!) &&
-    noStrongBoundaryForFlow(primarySpanForFlow.end, firstPostActionForFlow.span.start)
-  );
-
-  const graphOwnsPatientInstruction = Boolean(
-    clause.patientInstruction && clause.instructionGraph && (
-      richPrimaryGraphAction &&
-      instructionGraphSingleActionRepresentsText(clause.instructionGraph, clause.patientInstruction) ||
-      !canonicalClauseHasAdministrationSemantics(clause) &&
-      instructionGraphFullyOwnsAdvice(clause.instructionGraph, {
-        text: clause.patientInstruction, frames: []
-      })
-    )
-  );
+  const instructionPreview = realizeClauseInstructions(clause, "en", {
+    includeWarnings: true,
+    omitCanonicalAdministration: clause,
+    instructionActionMap: options?.instructionActionMap,
+    preferSourceText: roundTrip,
+    roundtripSafe: roundTrip,
+    omitRenderedAction: primaryGraphAction ?? richPrimaryGraphAction,
+    primaryConditions
+  }, instruction => formatAdditionalInstruction(instruction, baseVerb),
+    integratedThinLayer ? [integratedThinLayer] : []);
+  const preGraphInstruction = instructionPreview.pre;
+  const postGraphInstruction = instructionPreview.post;
+  const graphInstruction = instructionPreview.whole ?? postGraphInstruction;
+  const preFlowsIntoAdministration = instructionPreview.preFlowsIntoAdministration;
+  // A source-backed contrast already joins the English post-action.
+  const postFlowsFromAdministration = instructionPreview.postFlowsFromAdministration &&
+    !instructionGraphPostAdministrationDiscourseConnector(clause.instructionGraph!);
   const patientInstruction = postFlowsFromAdministration
-    ? undefined
-    : formatPatientInstructionSentence(
-        graphInstruction ?? (positionedGraph || graphOwnsPatientInstruction ? undefined : clause.patientInstruction)
-      );
-  if (patientInstruction) instructionPhrases.push(patientInstruction);
-  const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
-  const hasExplicitMethod = Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);
-  const graphSourceIsEnglish = !clause.instructionGraph?.sourceLocale ||
-    baseLanguageTag(clause.instructionGraph.sourceLocale) === "en";
+    ? undefined : formatPatientInstructionSentence(graphInstruction);
+  const fallbackPatientInstruction = formatPatientInstructionSentence(instructionPreview.patient);
+  const trailingInstructionText = [patientInstruction, fallbackPatientInstruction]
+    .filter(Boolean).join(" ").trim() || undefined;
+  const hasExplicitMethod = hasExplicitAdministrationMethod(clause);
   if (
-    roundTrip && !hasExplicitMethod && graphSourceIsEnglish &&
-    clause.instructionGraph?.sourceText.trim()
+    !authoredPrimary && !hasCalendarQualifiers && !schedule.clockWindow && roundTrip &&
+    (!hasExplicitMethod || primaryGraphAction && !needsCurrentPrimary) && graphSourceIsEnglish &&
+    clause.instructionGraph?.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options) &&
+    (!condition || clause.sourceProjectionVerified !== false)
   ) {
     return clause.instructionGraph.sourceText.trim();
   }
-  if (!canonicalClauseHasAdministrationSemantics(clause)) {
-    const wholeGraph = clause.instructionGraph
-      ? realizeInstructionGraph(clause.instructionGraph, "en", {
-          includeWarnings: true,
-          preferSourceText: roundTrip,
-          roundtripSafe: roundTrip
-        })
-      : undefined;
-    const wholeGraphText = formatPatientInstructionSentence(wholeGraph);
-    const parts: string[] = [];
-    for (const value of [wholeGraphText, ...instructionPhrases]) {
-      if (!value) continue;
-      const normalized = normalizeInstruction(value);
-      if (parts.some((existing) => {
-        const candidate = normalizeInstruction(existing);
-        return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
-      })) continue;
-      parts.push(value);
+  if (!hasCanonicalAdministration) {
+    const parts = [formatPatientInstructionSentence(preGraphInstruction),
+      formatPatientInstructionSentence(graphInstruction), fallbackPatientInstruction]
+      .filter((value): value is string => Boolean(value));
+    if (deferredDirections?.current || authoredPrimary || condition || hasCalendarQualifiers) {
+      const primary = composeNativePrimaryDirections(
+        authoredPrimary ? "" : verb, authoredPrimary, condition, words, deferredDirections, clause);
+      parts.unshift(parts.length ? formatPatientInstructionSentence(primary)! : primary);
     }
     return parts.join(" ").trim() || `${verb}.`;
   }
@@ -1669,33 +1910,14 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     : preGraphInstruction
       ? formatPatientInstructionSentence(preGraphInstruction)
       : undefined;
-  const graphRepresentsDose = !clause.dose || Boolean(clause.instructionGraph?.actions.some((action) =>
-    action.args.some((arg) =>
-      arg.role === AdviceArgumentRole.Amount &&
-      arg.quantity?.value === clause.dose?.value &&
-      arg.quantity?.range?.low === clause.dose?.range?.low &&
-      arg.quantity?.range?.high === clause.dose?.range?.high &&
-      arg.quantity?.unit === clause.dose?.unit
-    )
-  ));
-  const hasAdministrationTiming = Boolean(
-    schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
-    schedule.period !== undefined || schedule.periodMax !== undefined ||
-    schedule.when?.length || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
-    schedule.timeOfDay?.length ||
-    schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
-    schedule.duration !== undefined || schedule.durationMax !== undefined ||
-    schedule.durationUnit !== undefined || schedule.offset !== undefined ||
-    schedule.offsetMin !== undefined || schedule.offsetMax !== undefined ||
-    Boolean(schedule.activityTiming?.length) || schedule.occurrenceCap !== undefined
+  const graphCanStandAlone = instructionGraphCanStandAlone(
+    clause, timingText, graphRepresentsDose, richPrimaryGraphAction,
+    trailingInstructionText, primaryConditions
   );
-  const graphCanStandAlone = Boolean(
-    !richPrimaryGraphAction && !hasExplicitMethod && trailingInstructionText &&
-    clause.instructionGraph?.actions.length &&
-    !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose
-  );
-  if (graphCanStandAlone) return trailingInstructionText as string;
-  const primarySourceSentence = primaryGraphAction
+  if (graphCanStandAlone && !authoredPrimary && !deferredDirections?.current) return condition
+    ? appendClinicalConditionText(trailingInstructionText as string, condition, words)
+    : trailingInstructionText as string;
+  const primarySourceSentence = primaryGraphAction && !needsCurrentPrimary
     ? formatPatientInstructionSentence(primaryGraphAction.sourceText)
     : undefined;
   const primaryActionIndex = primaryGraphAction
@@ -1707,19 +1929,17 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
         relation.fromActionIndex !== undefined
       )
     : false;
-  const richPrimaryActionIndex = richPrimaryGraphAction && clause.instructionGraph
-    ? clause.instructionGraph.actions.indexOf(richPrimaryGraphAction)
-    : -1;
-  const graphContinuesWithThen = richPrimaryActionIndex >= 0 && Boolean(
-    clause.instructionGraph?.relations?.some((relation) =>
-      relationHasSemanticClass(relation.kind, "sequence") && relation.fromActionIndex === richPrimaryActionIndex
-    )
-  );
+  const graphContinuesWithThen = instructionGraphActionHasSequenceSuccessor(clause, richPrimaryGraphAction);
   const sequenceRelation = getUniqueAdviceRelationByGrammarFeature("defaultSequenceRelation");
   if (!sequenceRelation) throw new Error("Missing declarative default sequence relation");
   const sequenceSurface = localizeAdviceRelation(sequenceRelation, "en") ?? sequenceRelation;
   const compose = (base: string): string => {
     let effectiveBase = richGraphAdministrationSentence ?? primarySourceSentence ?? base;
+    effectiveBase = composeNativePrimaryDirections(effectiveBase, authoredPrimary, condition, words, deferredDirections, clause);
+    // Independent graph conditions remain attached to this administration
+    // alongside its current structured clinical guard.
+    if (primaryConditions?.length)
+      effectiveBase = attachInstructionGraphPrimaryConditions(effectiveBase, primaryConditions, "en", Boolean(condition));
     if (preFlowsIntoAdministration && preGraphInstruction) {
       const rawPre = preGraphInstruction.replace(/[.!?]+$/, "");
       const pre = rawPre ? rawPre.charAt(0).toUpperCase() + rawPre.slice(1) : rawPre;
@@ -1730,6 +1950,8 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       effectiveBase = `${effectiveBase.replace(/[.!?]+$/, "")}; ${sequenceSurface} ${post}`;
       if (!/[.!?]$/.test(effectiveBase)) effectiveBase += ".";
     }
+    if (deferredDirections?.current && trailingInstructionText)
+      effectiveBase = formatPatientInstructionSentence(effectiveBase)!;
     if (leadingInstructionText && effectiveBase && entersPrimaryWithThen) {
       const leading = leadingInstructionText.replace(/[.!?]+$/, "");
       return [
@@ -1743,57 +1965,35 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     return [leadingInstructionText, effectiveBase, effectiveTrailing].filter(Boolean).join(" ").trim();
   };
   if (!body) {
-    if (!trailingInstructionText && !leadingInstructionText) return `${verb}.`;
+    if (!deferredDirections?.current && !authoredPrimary && !hasCalendarQualifiers && !trailingInstructionText && !leadingInstructionText && !primaryConditions?.length)
+      return condition ? appendClinicalConditionText(`${verb}.`, condition, words) : `${verb}.`;
     return hasExplicitMethod ? compose(`${verb}.`) : compose("");
   }
   return compose(`${verb} ${body}.`);
 }
 
-function formatAdditionalInstructions(clause: CanonicalSigClause): string | undefined {
-  const instructions = clause.additionalInstructions ?? [];
-  if (!instructions.length) {
-    return undefined;
-  }
-  const phrases: string[] = [];
-  const grammar = resolveRouteGrammar(clause);
-  const verb = resolveMethodVerb(clause, grammar);
-  for (const instruction of instructions) {
-    if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) {
-      const contextual = verb ? `${verb} slowly` : "Slowly";
-      phrases.push(contextual);
-      continue;
-    }
-    if (
-      instruction.coding?.code === EMPTY_STOMACH_QUALIFIER_CODE ||
-      instruction.frames?.some(
-        (frame) =>
-          relationHasGrammarFeature(frame.relation, "mealStateComplement") &&
-          frame.args.some(
-            (arg) =>
-              arg.role === AdviceArgumentRole.MealState &&
-              arg.conceptId === "empty_stomach"
-          )
-      )
-    ) {
-      phrases.push("On an empty stomach");
-      continue;
-    }
-    const text = instruction.text ?? instruction.coding?.display;
-    if (!text) {
-      continue;
-    }
-    const trimmed = text.trim();
-    if (trimmed) {
-      phrases.push(trimmed);
-    }
-  }
-  if (!phrases.length) {
-    return undefined;
-  }
-  return phrases.map((phrase) => {
-    const sentence = phrase.charAt(0).toUpperCase() + phrase.slice(1);
-    return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
-  }).join(" ").trim();
+export function isEmptyStomachInstruction(instruction: CanonicalAdditionalInstructionExpr): boolean {
+  return instruction.coding?.code === EMPTY_STOMACH_QUALIFIER_CODE || Boolean(instruction.frames?.some((frame) =>
+    frame.polarity !== AdvicePolarity.Negate &&
+    relationHasGrammarFeature(frame.relation, "mealStateComplement") && frame.args.some((arg) =>
+      arg.role === AdviceArgumentRole.MealState && arg.conceptId === "empty_stomach"
+    )
+  ));
+}
+
+function formatAdditionalInstruction(instruction: CanonicalAdditionalInstructionExpr, verb: string): string | undefined {
+  let text: string | undefined;
+  if (instruction.coding?.code === SLOWLY_QUALIFIER_CODE) text = verb ? `${verb} slowly` : "Slowly";
+  else if (isEmptyStomachInstruction(instruction)) text = "On an empty stomach";
+  else text = instruction.i18n?.en ?? instruction.text ?? instruction.coding?.display ?? (
+    instruction.coding?.code ? findAdditionalInstructionDefinitionByCoding(
+      instruction.coding.system ?? "http://snomed.info/sct", instruction.coding.code
+    )?.text : undefined
+  );
+  const trimmed = text?.trim();
+  if (!trimmed) return undefined;
+  const sentence = trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
 }
 
 function firstCanonicalClause(internal: ParserState): CanonicalSigClause {
@@ -1811,47 +2011,74 @@ function firstCanonicalClause(internal: ParserState): CanonicalSigClause {
   };
 }
 
-export function formatCanonicalClause(
+function resolvedSitePlacement(options: TimingSummaryOptions | undefined): "natural" | "trailing" {
+  return options?.sitePlacement ?? (options?.realizationMode === "roundtrip" ? "trailing" : "natural");
+}
+
+export function formatNativeCanonicalClause(
   clause: CanonicalSigClause,
   style: "short" | "long",
   localization?: SigLocalization,
-  options?: TimingSummaryOptions
+  options?: TimingSummaryOptions,
+  authoredPrimary?: string,
+  deferredDirections?: { text?: string; current?: string },
+  sharedCountAlreadyDisplayed = false
 ): string {
+  // Per-call vocabulary can declare method identities beyond the built-in
+  // compiler dictionary. Resolve that head for every locale's display view
+  // without replacing source method text or adding work to ordinary clauses.
+  let resolvedMethod: SigLongContext["resolvedMethod"];
+  if (options?.instructionActionMap && clause.method) {
+    resolvedMethod = resolveMedicationInstructionActionForMethod(clause.method, options);
+    if (resolvedMethod && resolvedMethod.display !== clause.method.text)
+      clause = { ...clause, method: { ...clause.method, text: resolvedMethod.display } };
+  }
+  const native = resolveNativeClauseRendering(localization);
+  const shared = clause.schedule?.sharedCount;
+  if (shared) {
+    const words = localization?.course ?? ENGLISH_COURSE;
+    const count = shared.count === undefined
+      ? shared.countMax === undefined ? undefined : words.upTo(String(shared.countMax))
+      : shared.countMax !== undefined && shared.countMax !== shared.count
+        ? `${shared.count}-${shared.countMax}` : String(shared.count);
+    const rendered = formatNativeCanonicalClause({ ...clause,
+      schedule: { ...clause.schedule, sharedCount: undefined }
+    }, style, localization, options, authoredPrimary, deferredDirections);
+    return sharedCountAlreadyDisplayed ? rendered
+      : native.timing.sharedAdministration(rendered, count === undefined ? undefined : words.administrations(count));
+  }
   const cycle = clause.schedule?.cycleDayConstraint;
   if (cycle) {
-    const sourceQualifier = cycle.sourceText.trim();
+    const retainedQualifier = cycle.sourceText.trim();
+    const sourceQualifier = clause.sourceProjectionVerified === false ? "" : retainedQualifier;
     const alreadyRealized = style === "long" && sourceQualifier &&
       clause.additionalInstructions?.some(instruction => instruction.text?.trim() === sourceQualifier);
     if (!alreadyRealized) {
-      // The known modifier is the authority after a textless FHIR import.
-      // Realize its retained qualifier without interpreting or executing it.
-      const rendered = formatCanonicalClause({ ...clause,
+      // Current typed cycle fields own display after a source disagreement.
+      // Keep their old wording in source, including a duplicate advice entry,
+      // but do not replay that entry alongside the edited cycle.
+      const rendered = formatNativeCanonicalClause({ ...clause,
+        additionalInstructions: clause.sourceProjectionVerified === false && retainedQualifier
+          ? clause.additionalInstructions?.filter(instruction => instruction.text?.trim() !== retainedQualifier)
+          : clause.additionalInstructions,
         schedule: { ...clause.schedule, cycleDayConstraint: undefined }
-      }, style, localization, options);
-      const thai = localization?.locale.startsWith("th");
-      const details = [
-        ...(cycle.days.length ? [thai ? `วันที่ในรอบ ${cycle.days.join(", ")}` : `cycle days ${cycle.days.join(", ")}`] : []),
-        ...(cycle.periodDays !== undefined ? [thai ? `รอบละ ${cycle.periodDays} วัน` : `${cycle.periodDays}-day cycle`] : []),
-        ...(cycle.cycles !== undefined ? [thai ? `${cycle.cycles} รอบ` : `${cycle.cycles} cycles`] : []),
-        ...(cycle.anchor ? [thai ? `วันเริ่มรอบ ${cycle.anchor}` : `cycle anchor ${cycle.anchor}`] : [])
-      ];
-      const qualifier = sourceQualifier ||
-        (thai ? "ยังระบุเวลาในรอบไม่ได้" : "Unresolved cycle timing") +
-        (details.length ? ` (${details.join("; ")})` : "");
+      }, style, localization, options, authoredPrimary, deferredDirections);
+      let qualifier = sourceQualifier;
+      if (!qualifier) {
+        let days = "";
+        for (let index = 0; index < cycle.days.length;) {
+          const first = cycle.days[index++];
+          let last = first;
+          while (index < cycle.days.length && cycle.days[index] === last + 1)
+            last = cycle.days[index++];
+          days += (days ? ", " : "") + first + (last === first ? "" : "-" + last);
+        }
+        qualifier = (localization?.course ?? ENGLISH_COURSE).unresolvedCycleTiming(
+          days, cycle.periodDays, cycle.cycles, cycle.anchor
+        );
+      }
       return `${rendered.replace(/[.。]$/u, "")}; ${qualifier.replace(/[.。]$/u, "")}.`;
     }
-  }
-  const clockWindow = clause.schedule?.clockWindow;
-  if (clockWindow) {
-    const schedule = { ...clause.schedule, clockWindow: undefined };
-    const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
-    const start = clockWindow.start.slice(0, 5);
-    const end = clockWindow.end.slice(0, 5);
-    const thai = localization?.locale.startsWith("th");
-    const range = thai ? `เฉพาะช่วงเวลา ${start}–${end} ทุกวัน` :
-      `only between ${start} and ${end} each day`;
-    const boundary = clockWindow.endInclusive ? "" : thai ? " (ไม่รวมเวลาสิ้นสุด)" : " (end excluded)";
-    return `${rendered.replace(/[.。]$/u, "")} ${range}${boundary}.`;
   }
   const offset = clause.schedule?.administrationOffsetMinutes;
   if (offset !== undefined && Number.isFinite(offset)) {
@@ -1867,39 +2094,48 @@ export function formatCanonicalClause(
       return { day, clock: `${hour < 10 ? "0" : ""}${hour}:${minute < 10 ? "0" : ""}${minute}` +
         (second ? `:${second < 10 ? "0" : ""}${second}` : "") };
     });
-    const thai = localization?.locale.startsWith("th");
-    const minutes = Math.abs(offset);
-    const offsetNote = offset < 0
-      ? thai ? "เร็วกว่าเวลาเดิมแต่ละครั้ง " + minutes + " นาที"
-        : minutes + " minutes earlier each time"
-      : thai ? "ช้ากว่าเวลาเดิมแต่ละครั้ง " + minutes + " นาที"
-        : minutes + " minutes later each time";
+    const offsetNote = native.timing.offset(offset);
     if (clocks?.length && !schedule.when?.length && clocks.every(value => Number.isFinite(value.day))) {
       const sameDayShift = clocks.every(value => value.day === clocks[0].day) ? clocks[0].day : undefined;
       if (sameDayShift === undefined) {
         // Mixed-day clocks cannot safely be displayed as an unqualified
         // same-day list. Retain their original times and state the actual
         // elapsed offset once, without fabricating an event chronology.
-        const original = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+        const original = formatNativeCanonicalClause({ ...clause, schedule }, style, localization, options, authoredPrimary, deferredDirections);
         return original.replace(/[.。]$/u, "") + " (" + offsetNote + ").";
       }
       schedule.timeOfDay = clocks.map(value => value.clock);
-      const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+      const rendered = formatNativeCanonicalClause({ ...clause, schedule }, style, localization, options, authoredPrimary, deferredDirections);
       if (sameDayShift === 0) return rendered;
-      const note = sameDayShift === 1
-        ? thai ? "ในวันถัดไป" : "the following day"
-        : sameDayShift === -1
-          ? thai ? "ในวันก่อนหน้า" : "the previous day"
-          : sameDayShift < 0
-            ? thai ? "ก่อนรอบต้นทาง " + Math.abs(sameDayShift) + " วัน"
-              : Math.abs(sameDayShift) + " days earlier"
-            : thai ? "หลังรอบต้นทาง " + sameDayShift + " วัน"
-              : sameDayShift + " days later";
+      const note = native.timing.dayShift(sameDayShift);
       return rendered.replace(/[.。]$/u, "") + " (" + note + ").";
     }
-    const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+    const rendered = formatNativeCanonicalClause({ ...clause, schedule }, style, localization, options, authoredPrimary, deferredDirections);
     return rendered.replace(/[.。]$/u, "") + " (" + offsetNote + ").";
   }
+  const words = localization?.course ?? ENGLISH_COURSE;
+  const longOptions = options?.realizationMode === "roundtrip" && options.sitePlacement === undefined
+    ? { ...options, sitePlacement: resolvedSitePlacement(options) } : options;
+  const rendered = style === "short"
+    ? native.short ? native.short(clause, words, resolvedMethod) : formatShort(clause, words, resolvedMethod)
+    : native.long ? native.long(clause, longOptions, words, resolvedMethod, authoredPrimary, deferredDirections)
+      : formatLong(clause, longOptions, words, resolvedMethod, clause.clinicalAdjuncts?.condition, authoredPrimary, deferredDirections);
+  const schedule = clause.schedule;
+  const authoredTiming = !schedule?.timingTextIsLiteral &&
+    authoredCountTimingText(schedule?.timingText ?? schedule?.timingCode, schedule);
+  return authoredTiming
+    ? words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), authoredTiming) + "." : rendered;
+}
+
+export function formatCanonicalClause(
+  clause: CanonicalSigClause,
+  style: "short" | "long",
+  localization?: SigLocalization,
+  options?: TimingSummaryOptions,
+  nativeDefault?: (target: "short" | "long") => string
+): string {
+  const resolvedMethod = options?.instructionActionMap && clause.method
+    ? resolveMedicationInstructionActionForMethod(clause.method, options) : undefined;
   let shortDefault: string | undefined;
   let longDefault: string | undefined;
 
@@ -1907,12 +2143,12 @@ export function formatCanonicalClause(
     switch (target) {
       case "short":
         if (shortDefault === undefined) {
-          shortDefault = formatShort(clause);
+          shortDefault = nativeDefault ? nativeDefault("short") : formatNativeCanonicalClause(clause, "short", localization, options);
         }
         return shortDefault;
       case "long":
         if (longDefault === undefined) {
-          longDefault = formatLong(clause, options);
+          longDefault = nativeDefault ? nativeDefault("long") : formatNativeCanonicalClause(clause, "long", localization, options);
         }
         return longDefault;
     }
@@ -1927,12 +2163,14 @@ export function formatCanonicalClause(
       style: "short",
       clause,
       defaultText: formatDefault("short"),
+      course: localization.course,
       groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
       includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
       realizationMode: options?.realizationMode ?? "normalized",
-      sitePlacement: options?.sitePlacement ??
-        (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
-      formatDefault
+      sitePlacement: resolvedSitePlacement(options),
+      formatDefault,
+      instructionActionMap: options?.instructionActionMap,
+      resolvedMethod
     };
     return localization.formatShort(context);
   }
@@ -1942,12 +2180,14 @@ export function formatCanonicalClause(
       style: "long",
       clause,
       defaultText: formatDefault("long"),
+      course: localization.course,
       groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
       includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
       realizationMode: options?.realizationMode ?? "normalized",
-      sitePlacement: options?.sitePlacement ??
-        (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
-      formatDefault
+      sitePlacement: resolvedSitePlacement(options),
+      formatDefault,
+      instructionActionMap: options?.instructionActionMap,
+      resolvedMethod
     };
     return localization.formatLong(context);
   }
@@ -1964,7 +2204,7 @@ export function formatInternal(
   return formatCanonicalClause(firstCanonicalClause(internal), style, localization, options);
 }
 
-function stripTrailingZero(value: number): string {
+export function stripTrailingZero(value: number): string {
   const text = value.toString();
   if (text.includes(".")) {
     return text.replace(/\.0+$/, "").replace(/0+$/, "");

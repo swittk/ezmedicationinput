@@ -5,20 +5,27 @@
  * value without introducing a production compatibility API.
  */
 import { parseSig as parseR6, parseSigAsync as parseR6Async } from "../../src/index";
-import type { FhirDosage, FhirR6DosageDetails, ParseBatchResult, ParseOptions } from "../../src/types";
+import { withDosageEditProvenance } from "../../src/dosage-course";
+import type { FhirDosage, FhirR6DosageInstruction, ParseBatchResult, ParseOptions } from "../../src/types";
 
 export type R5ParserTestResult = Omit<ParseBatchResult, "fhir" | "course"> & {
   fhir: FhirDosage;
-  dosageDetails: FhirR6DosageDetails;
+  dosageDetails: FhirR6DosageInstruction;
 };
 
 function forHistoricalAssertions(value: ParseBatchResult): R5ParserTestResult {
   const { fhir: _dosages, course: _course, ...rest } = value;
+  const row = value.items[0]?.fhir;
+  const fhir = row ? withDosageEditProvenance([row], row.text)[0] : {};
+  const items = value.items.slice();
+  if (items[0]) items[0] = { ...items[0], fhir };
   return {
     ...rest,
     // Historical fixtures intentionally expose only the FIRST clause here;
     // multi-clause tests must use items[] or the shipping .fhir array.
-    fhir: value.items[0]?.fhir ?? {},
+    // Keep that clause's parser-produced source agreement after a fresh save.
+    fhir,
+    items,
     dosageDetails: value.fhirNext
   };
 }

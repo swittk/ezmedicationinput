@@ -1,7 +1,9 @@
+import lexicalVocabulary from "./hpsg/lexical-classes.json";
 import {
   BodySiteDefinition,
   EventTiming,
   FhirDayOfWeek,
+  type FhirCoding,
   FhirPeriodUnit,
   PrnReasonDefinition,
   RouteCode,
@@ -88,6 +90,19 @@ export const ROUTE_TEXT = objectFromEntries(
 export const ROUTE_BY_SNOMED = objectFromEntries(
   ROUTE_SNOMED_ENTRIES.map(([routeCode, meta]) => [meta.code, routeCode])
 ) as Record<SNOMEDCTRouteCodes, RouteCode>;
+
+/** Prefer the first explicitly identified route; keep a systemless legacy fallback. */
+export function routeCodeFromCodings(codings: readonly Pick<FhirCoding, "system" | "code">[] | undefined): RouteCode | undefined {
+  let fallback: RouteCode | undefined;
+  for (const coding of codings ?? []) {
+    if (!coding.code || coding.system && coding.system !== SNOMED_SYSTEM) continue;
+    const route = ROUTE_BY_SNOMED[coding.code as SNOMEDCTRouteCodes];
+    if (!route) continue;
+    if (coding.system === SNOMED_SYSTEM) return route;
+    fallback ??= route;
+  }
+  return fallback;
+}
 
 export interface RouteSynonym {
   code: RouteCode;
@@ -266,6 +281,18 @@ const BODY_SITE_LATERALITIES = [
     display: SNOMED_CT_BILATERAL_QUALIFIER_DISPLAY
   }
 ] as const;
+
+/** Read canonical anatomical laterality from the same vocabulary that creates it. */
+export function splitBodySiteLaterality(text: string): {
+  baseText: string; lateralityCode: string; localeSuffixes: Readonly<Record<string, readonly string[]>>
+} | undefined {
+  for (const laterality of BODY_SITE_LATERALITIES) {
+    const prefix = laterality.textPrefix + " ";
+    if (text.startsWith(prefix)) return { baseText: text.slice(prefix.length),
+      lateralityCode: laterality.code, localeSuffixes: laterality.localeSuffixes };
+  }
+  return undefined;
+}
 
 const LATERALIZABLE_DIGIT_BODY_SITES: LateralizableBodySiteDefinition[] = [
   {
@@ -830,11 +857,20 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { coding: { code: "287579007", display: "Right hip" }, routeHint: RouteCode["Topical route"] }
     },
     {
-      names: ["hand", "hands", "มือ"],
+      names: ["hand", "มือ"],
       definition: {
         coding: { code: "85562004", display: "Hand" },
         text: "hand",
         i18n: { th: "มือ" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["hands"],
+      definition: {
+        coding: { code: "85562004", display: "Hand" },
+        text: "hands",
+        i18n: { en: "hands", th: "มือ" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -2011,6 +2047,7 @@ const UCUM_DOSE_UNIT_CODES: Record<string, string> = {
   kg: "kg", g: "g", mg: "mg", mcg: "ug", ug: "ug", microg: "ug", ng: "ng",
   L: "L", mL: "mL", dL: "dL", mcL: "uL", uL: "uL", nL: "nL", cm3: "cm3",
   IU: "[iU]", U: "[iU]", "[iU]": "[iU]", tsp: "5.mL", tbsp: "15.mL",
+  "[tsp_m]": "[tsp_m]", "[tbs_m]": "[tbs_m]",
   // The source labels retain *what* is measured (product ribbon, BSA, drops).
   // UCUM conveys only the physical measure, never a calibrated device dose.
   cm: "cm", "[in_i]": "[in_i]", "%": "%",
@@ -2066,20 +2103,46 @@ const SNOMED_PRODUCT_DOSE_UNIT_CODES: Record<string, string> = {
   dropperful: "421954001", scoop: "415505006", "pea-sized amount": "769392001",
   enema: "1382282001"
 };
+const NCIT_UNIT_BY_CODE = new Map<string, string>(
+  objectEntries(NCIT_PRODUCT_DOSE_UNIT_CODES).map(([unit, code]): [string, string] => [code, unit])
+);
+const SNOMED_UNIT_BY_CODE = new Map<string, string>(
+  objectEntries(SNOMED_PRODUCT_DOSE_UNIT_CODES).map(([unit, code]): [string, string] => [code, unit])
+);
 
+
+/** Remove non-dimensional UCUM annotations for comparison only.
+ * Callers retain their own terminology, supported-unit and case rules. */
+export function stripUcumAnnotations(code: string): string {
+  if (code.indexOf("{") < 0) return code;
+  return code.replace(/\{[^{}]*\}/gu, "");
+}
 
 /** Resolve standard codes and plain unit labels to the same calculation unit.
  * @param quantity A dose or limit quantity; its original display remains untouched.
+ * @param includeOpaqueCode Retain an unknown code as a display/counting label.
+ * Dimensional calculations disable that fallback, while still accepting authored
+ * unit labels and explicit UCUM expressions outside the simple-unit lexicon.
  */
-export function getDoseQuantityUnit(quantity: { system?: string; code?: string; unit?: string } | undefined): string {
+export function getDoseQuantityUnit(
+  quantity: { system?: string; code?: string; unit?: string } | undefined,
+  includeOpaqueCode = true
+): string {
   if (!quantity) return "";
+  let code = quantity.code;
+  if (!includeOpaqueCode && code && (!quantity.system || quantity.system === "http://unitsofmeasure.org")) {
+    // Keep the authored code and display untouched.
+    code = stripUcumAnnotations(code);
+  }
+  const fallbackCode = includeOpaqueCode || !quantity.system || quantity.system === "http://unitsofmeasure.org"
+    ? code : undefined;
   if (quantity.system === "http://standardterms.edqm.eu" && quantity.code) {
-    return EDQM_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? quantity.code;
+    return EDQM_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
   }
   if (quantity.system === "http://spor.ema.europa.eu/v1/lists/200000000014" && quantity.code) {
-    return EMA_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? quantity.code;
+    return EMA_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
   }
-  const recognizedUnit = (label: string | undefined): string | undefined => {
+  const recognizedUnit = (label: string | undefined, explicitUcum = false): string | undefined => {
     if (!label) return undefined;
     if (label === "5.mL") return "tsp";
     if (label === "15.mL") return "tbsp";
@@ -2087,13 +2150,29 @@ export function getDoseQuantityUnit(quantity: { system?: string; code?: string; 
     const canonical = synonym ?? label;
     // Recognized lexical units retain their canonical label even if no
     // standard unit code exists; unknown opaque codes still fall through.
-    if (!getStandardDoseUnitCoding(canonical)) return synonym;
+    const standard = getStandardDoseUnitCoding(canonical);
+    if (!standard) return synonym;
+    // Clinical UCUM codes retain case-sensitive identity; display aliases
+    // remain available for lexical labels without an explicit code system.
+    if (explicitUcum && (standard.system !== "http://unitsofmeasure.org" ||
+        standard.code !== label && standard.code !== label.replace(/l(?=\/|$)/g, "L"))) return label;
     const measured = UCUM_DOSE_UNIT_CODES[canonical] ?? canonical;
     return measured === "5.mL" ? "tsp" :
       measured === "15.mL" ? "tbsp" : measured;
   };
-  return recognizedUnit(quantity.code) ?? recognizedUnit(quantity.unit) ??
-    quantity.unit ?? quantity.code ?? "";
+  if (quantity.system === "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl" && quantity.code) {
+    return recognizedUnit(quantity.unit) ?? NCIT_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
+  }
+  if (quantity.system === "http://snomed.info/sct" && quantity.code) {
+    return recognizedUnit(quantity.unit) ?? SNOMED_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
+  }
+  // A foreign code must not override the authored unit as a UCUM spelling.
+  // Keep the existing lexical and opaque-label fallbacks for imported quantities.
+  const codedUnit = !quantity.system || quantity.system === "http://unitsofmeasure.org"
+    ? recognizedUnit(code, quantity.system === "http://unitsofmeasure.org") : undefined;
+  const dimensionalCode = !includeOpaqueCode && quantity.system === "http://unitsofmeasure.org"
+    ? code : undefined;
+  return codedUnit ?? recognizedUnit(quantity.unit) ?? dimensionalCode ?? quantity.unit ?? fallbackCode ?? "";
 }
 
 /** Resolve a known dosage unit without changing its display or numerical value.
@@ -2375,54 +2454,14 @@ export const DISCOURAGED_TOKENS: Record<string, string> = {
   ad: "AD"
 };
 
-export const DAY_OF_WEEK_TOKENS: Record<string, FhirDayOfWeek> = {
-  monday: FhirDayOfWeek.Monday,
-  mondays: FhirDayOfWeek.Monday,
-  mon: FhirDayOfWeek.Monday,
-  mond: FhirDayOfWeek.Monday,
-  tuesday: FhirDayOfWeek.Tuesday,
-  tuesdays: FhirDayOfWeek.Tuesday,
-  tue: FhirDayOfWeek.Tuesday,
-  tues: FhirDayOfWeek.Tuesday,
-  wednesday: FhirDayOfWeek.Wednesday,
-  wednesdays: FhirDayOfWeek.Wednesday,
-  wed: FhirDayOfWeek.Wednesday,
-  weds: FhirDayOfWeek.Wednesday,
-  thursday: FhirDayOfWeek.Thursday,
-  thursdays: FhirDayOfWeek.Thursday,
-  thu: FhirDayOfWeek.Thursday,
-  thur: FhirDayOfWeek.Thursday,
-  thurs: FhirDayOfWeek.Thursday,
-  friday: FhirDayOfWeek.Friday,
-  fridays: FhirDayOfWeek.Friday,
-  fri: FhirDayOfWeek.Friday,
-  saturday: FhirDayOfWeek.Saturday,
-  saturdays: FhirDayOfWeek.Saturday,
-  sat: FhirDayOfWeek.Saturday,
-  sunday: FhirDayOfWeek.Sunday,
-  sundays: FhirDayOfWeek.Sunday,
-  sun: FhirDayOfWeek.Sunday,
-  จ: FhirDayOfWeek.Monday,
-  จัน: FhirDayOfWeek.Monday,
-  จันทร์: FhirDayOfWeek.Monday,
-  อ: FhirDayOfWeek.Tuesday,
-  อัง: FhirDayOfWeek.Tuesday,
-  อังคาร: FhirDayOfWeek.Tuesday,
-  พ: FhirDayOfWeek.Wednesday,
-  พุธ: FhirDayOfWeek.Wednesday,
-  พฤ: FhirDayOfWeek.Thursday,
-  พฤหัส: FhirDayOfWeek.Thursday,
-  พฤหัสบดี: FhirDayOfWeek.Thursday,
-  ศ: FhirDayOfWeek.Friday,
-  ศุก: FhirDayOfWeek.Friday,
-  ศุกร์: FhirDayOfWeek.Friday,
-  ส: FhirDayOfWeek.Saturday,
-  เสา: FhirDayOfWeek.Saturday,
-  เสาร์: FhirDayOfWeek.Saturday,
-  อา: FhirDayOfWeek.Sunday,
-  อาท: FhirDayOfWeek.Sunday,
-  อาทิตย์: FhirDayOfWeek.Sunday
-};
+// Full calendar forms and contextual token aliases share one locale inventory.
+// Short Thai aliases remain available to the existing token/context owner only.
+export const DAY_OF_WEEK_TOKENS: Record<string, FhirDayOfWeek> = {};
+for (const entry of lexicalVocabulary.calendarWeekdayLexemes) {
+  for (const token of [...entry.en, ...entry.th, ...entry.thContextual]) {
+    DAY_OF_WEEK_TOKENS[token] = entry.day as FhirDayOfWeek;
+  }
+}
 
 export const WORD_FREQUENCIES: Record<string, { frequency: number; periodUnit: FhirPeriodUnit }> = {
   daily: { frequency: 1, periodUnit: FhirPeriodUnit.Day },

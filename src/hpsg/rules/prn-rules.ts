@@ -26,7 +26,6 @@ import {
   AS_NEEDED_LEAD_PHRASES,
   DURATION_LEAD_TOKENS,
   INSTRUCTION_START_WORDS,
-  MAXIMUM_COUNT_LEAD_SEQUENCES,
   MAXIMUM_COUNT_LEAD_TOKENS,
   PRN_BREAKING_COORDINATORS,
   PRN_COMPACT_REASON_SEPARATORS,
@@ -51,6 +50,7 @@ import {
 import { isMedicationAdministrationMethod } from "../method-lexicon";
 import {
   HpsgClauseContext,
+  maximumCountLeadAt,
   hasLexicalSeparator,
   isPunctuation,
   joinTokenText,
@@ -62,7 +62,7 @@ import {
   isMedicationGuardMarker,
   tokensAvailable
 } from "../rule-context";
-import { HpsgLexicalRule, lexicalSign } from "../signature";
+import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
 import { isScheduleLead, followingCourseDurationHeaderAt } from "./timing-rules";
 import { productRouteHint } from "./product-route";
 
@@ -76,12 +76,7 @@ function startsDoseComplement(context: HpsgClauseContext, start: number): boolea
 }
 
 export function startsMaximumCountLead(context: HpsgClauseContext, start: number): boolean {
-  return MAXIMUM_COUNT_LEAD_SEQUENCES.some((parts) => {
-    const tokens = tokensAvailable(context, start, parts.length);
-    return Boolean(tokens && tokens.every(
-      (token, offset) => normalizeTokenLower(token) === parts[offset]
-    ));
-  });
+  return maximumCountLeadAt(context, start)?.headStart === start;
 }
 
 function prnReasonBoundary(lower: string, context: HpsgClauseContext): boolean {
@@ -716,7 +711,7 @@ export function symptomOnsetPrnRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
-export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
+function createPrnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.prn", (context, start) => {
     const lead = tokensAvailable(context, start, 1)?.[0];
     if (!lead) {
@@ -920,4 +915,21 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       })
     ];
   });
+}
+
+const PRN_LEXICAL_RULE = createPrnLexicalRule();
+
+/** Share a PRN daughter requested before chart admission by scope ownership. */
+export function prnAt(context: HpsgClauseContext, start: number): HpsgSign[] {
+  const matches = context.clinicalCache.prnLookahead ??= new Map<number, HpsgSign[]>();
+  const cached = matches.get(start);
+  if (cached) return cached;
+  const signs = PRN_LEXICAL_RULE.match(context, start);
+  matches.set(start, signs);
+  return signs;
+}
+
+export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
+  return lexicalRule("hpsg.lex.prn", (context, start) =>
+    context.clinicalCache.prnLookahead?.get(start) ?? PRN_LEXICAL_RULE.match(context, start));
 }

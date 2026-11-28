@@ -452,33 +452,50 @@ function splitThaiGrammarPrefixTokens(tokens: readonly LexToken[]): LexToken[] {
   return result;
 }
 
+/** Fold only the newly emitted numeric daughters. A fraction waits for its
+ * clinical unit, so date-shaped slash runs keep their source boundaries. */
+function appendThaiQuantityToken(result: LexToken[], token: LexToken, input: string): void {
+  result.push(token);
+  const end = result.length;
+  let start: number, fraction = false;
+  if (result[end - 2]?.original === ".") start = end - 3;
+  else if ((result[end - 3]?.original === "/" ||
+      result[end - 2]?.original.startsWith("/") || result[end - 3]?.original.endsWith("/")) &&
+      isClinicalNumericUnit(DEFAULT_UNIT_SYNONYMS[token.lower] ?? token.canonical ?? canonicalLocaleLexeme(token.lower) ?? token.lower)) {
+    if (result[end - 3]?.original === "/") start = end - 4;
+    else if (result[end - 2]?.original.startsWith("/") ||
+        result[end - 3]?.original.endsWith("/")) start = end - 3;
+    else return;
+    fraction = true;
+  } else return;
+  const numeric = thaiNumericTokenAt(result, start, input);
+  if (!numeric) return;
+  result.length = start;
+  result.push(numeric);
+  if (fraction) result.push(token);
+}
+
 function splitThaiQuantityTokens(tokens: readonly LexToken[], input: string): LexToken[] {
   const result: LexToken[] = [];
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
-    const decimal = thaiDecimalTokenAt(tokens, index, input);
-    if (decimal) {
-      result.push(decimal);
-      index += 2;
-      continue;
-    }
     const numericParts = splitThaiCompactNumericToken(token, input);
     if (numericParts) {
-      result.push(...numericParts);
+      for (const part of numericParts) appendThaiQuantityToken(result, part, input);
       continue;
     }
     if (token.kind !== LexKind.Word || !token.lower.startsWith("ละ") || token.lower.length <= 2) {
-      result.push(token);
+      appendThaiQuantityToken(result, token, input);
       continue;
     }
     const unitSurface = token.lower.slice(2);
     const canonicalUnit = canonicalLocaleLexeme(unitSurface);
     if (!canonicalUnit || !DOSE_UNIT_CANONICALS.has(canonicalUnit.toLowerCase())) {
-      result.push(token);
+      appendThaiQuantityToken(result, token, input);
       continue;
     }
     const splitAt = token.sourceStart + 2;
-    result.push({
+    appendThaiQuantityToken(result, {
       ...token,
       surfaceIndices: [...token.surfaceIndices],
       original: token.original.slice(0, 2),
@@ -487,8 +504,8 @@ function splitThaiQuantityTokens(tokens: readonly LexToken[], input: string): Le
       sourceEnd: splitAt,
       sourceText: token.original.slice(0, 2),
       derived: true
-    });
-    result.push({
+    }, input);
+    appendThaiQuantityToken(result, {
       ...token,
       surfaceIndices: [...token.surfaceIndices],
       original: token.original.slice(2),
@@ -497,7 +514,7 @@ function splitThaiQuantityTokens(tokens: readonly LexToken[], input: string): Le
       sourceStart: splitAt,
       sourceText: token.original.slice(2),
       derived: true
-    });
+    }, input);
   }
   return result;
 }
@@ -624,6 +641,7 @@ const NUMERIC_DATE_LEXEME = /\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})
 function medicationNumberValue(original: string): number | undefined {
   let normalized = "";
   let digitCount = 0;
+  let numerator: number | undefined;
   for (const char of original) {
     if (char >= "0" && char <= "9") {
       normalized += char;
@@ -639,37 +657,39 @@ function medicationNumberValue(original: string): number | undefined {
       normalized += char;
       continue;
     }
+    if (char === "/" && numerator === undefined &&
+        /^(?:\d+(?:\.\d+)?|\.\d+)$/u.test(normalized)) {
+      numerator = Number(normalized);
+      normalized = "";
+      digitCount = 0;
+      continue;
+    }
     return undefined;
   }
   if (!digitCount || !/^(?:\d+(?:\.\d+)?|\.\d+)$/u.test(normalized)) return undefined;
-  const value = Number(normalized);
+  const denominator = Number(normalized);
+  const value = numerator === undefined ? denominator : numerator / denominator;
   return Number.isFinite(value) ? value : undefined;
+}
+
+function isClinicalNumericUnit(canonical: string | undefined): boolean {
+  return Boolean(canonical && (
+    DOSE_UNIT_CANONICALS.has(canonical.toLowerCase()) ||
+    canonical === "times" || canonical === "second" || canonical === "minute" ||
+    canonical === "hour" || canonical === "day" || canonical === "week" || canonical === "month"
+  ));
 }
 
 function hasClinicalCompactNumericNeighbor(original: string): boolean {
   const nonNumericParts = original
     .split(/[0-9๐-๙]+(?:\.[0-9๐-๙]+)?/u)
     .filter(Boolean);
-  return nonNumericParts.some((part) => {
-    const canonical = canonicalLocaleLexeme(part);
-    return Boolean(
-      canonical && (
-        DOSE_UNIT_CANONICALS.has(canonical.toLowerCase()) ||
-        canonical === "times" ||
-        canonical === "second" ||
-        canonical === "minute" ||
-        canonical === "hour" ||
-        canonical === "day" ||
-        canonical === "week" ||
-        canonical === "month"
-      )
-    );
-  });
+  return nonNumericParts.some(part => isClinicalNumericUnit(canonicalLocaleLexeme(part)));
 }
 
-function fragmentToken(token: LexToken, input: string, start: number, end: number): LexToken {
+function fragmentToken(token: LexToken, input: string, start: number, end: number, value?: number): LexToken {
   const original = input.slice(start, end);
-  const numericValue = medicationNumberValue(original);
+  const numericValue = value ?? medicationNumberValue(original);
   return {
     ...token,
     original,
@@ -687,35 +707,51 @@ function fragmentToken(token: LexToken, input: string, start: number, end: numbe
   };
 }
 
-function thaiDecimalTokenAt(
+function thaiNumericTokenAt(
   tokens: readonly LexToken[],
   index: number,
   input: string
 ): LexToken | undefined {
-  const whole = tokens[index];
-  const point = tokens[index + 1];
-  const fraction = tokens[index + 2];
-  if (
-    !whole || !point || !fraction ||
-    point.original !== "." ||
-    whole.sourceEnd !== point.sourceStart ||
-    point.sourceEnd !== fraction.sourceStart ||
-    medicationNumberValue(whole.original) === undefined ||
-    medicationNumberValue(fraction.original) === undefined
-  ) {
-    return undefined;
-  }
+  const whole = tokens[index], separator = tokens[index + 1];
+  if (!whole || !separator) return undefined;
+  const trailingSlash = whole.original.endsWith("/");
+  const leadingSlash = separator.original.startsWith("/") && separator.original.length > 1;
+  const fraction = trailingSlash || leadingSlash ? separator : tokens[index + 2];
+  if (!fraction) return undefined;
   const original = input.slice(whole.sourceStart, fraction.sourceEnd);
-  if (!/[๐-๙]/u.test(original) || medicationNumberValue(original) === undefined) {
-    return undefined;
+  // The caller's clinical-unit gate licenses fractions in either digit script.
+  let value: number | undefined;
+  let comparator: string | undefined;
+  if (separator.original === ".") {
+    if (whole.sourceEnd !== separator.sourceStart || separator.sourceEnd !== fraction.sourceStart)
+      return undefined;
+    value = medicationNumberValue(original);
+  } else if (separator.original === "/" || trailingSlash || leadingSlash) {
+    const numeratorText = trailingSlash ? whole.original.slice(0, -1) : whole.original;
+    const denominatorText = leadingSlash ? fraction.original.slice(1) : fraction.original;
+    if (!/^\s*$/u.test(input.slice(whole.sourceEnd, separator.sourceStart)) ||
+        (!trailingSlash && !leadingSlash &&
+          !/^\s*$/u.test(input.slice(separator.sourceEnd, fraction.sourceStart))) ||
+        numeratorText.includes("/") || denominatorText.includes("/")) return undefined;
+    comparator = numeratorText.match(/^(?:[<>]=?|[~≈≥≤])/u)?.[0];
+    const numerator = medicationNumberValue(comparator ? numeratorText.slice(comparator.length) : numeratorText);
+    const denominator = medicationNumberValue(denominatorText);
+    if (numerator === undefined || denominator === undefined || denominator === 0) return undefined;
+    value = numerator / denominator;
   }
-  const token = fragmentToken(whole, input, whole.sourceStart, fraction.sourceEnd);
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  const token = fragmentToken(whole, input, whole.sourceStart, fraction.sourceEnd, value);
+  if (comparator) {
+    // Keep the qualifier in the numeric head consumed by the shared quantity
+    // grammar; the original Thai phrase and all source spans remain intact.
+    token.kind = LexKind.Word;
+    token.value = undefined;
+    token.canonical = comparator + value;
+  }
   token.surfaceIndices = [];
-  for (const part of [whole, point, fraction]) {
+  for (const part of [whole, separator, fraction]) {
     for (const surfaceIndex of part.surfaceIndices) {
-      if (token.surfaceIndices.indexOf(surfaceIndex) === -1) {
-        token.surfaceIndices.push(surfaceIndex);
-      }
+      if (token.surfaceIndices.indexOf(surfaceIndex) === -1) token.surfaceIndices.push(surfaceIndex);
     }
   }
   return token;
@@ -742,7 +778,9 @@ function splitThaiCompactNumericToken(
   }
   const output: LexToken[] = [];
   let cursor = 0;
-  const numericRun = /[0-9๐-๙]+(?:\.[0-9๐-๙]+)?/gu;
+  // Comparative prefixes and leading decimal points belong to the same
+  // numeric daughter; splitting them can multiply a dose by ten.
+  const numericRun = /(?:[~≈<>≥≤]=?)?(?:[0-9๐-๙]+\/[0-9๐-๙]+|[0-9๐-๙]+(?:\.[0-9๐-๙]+)?|\.[0-9๐-๙]+)/gu;
   for (
     let match = numericRun.exec(token.original);
     match;
@@ -861,7 +899,12 @@ export function applyThaiLocaleLexicon(tokens: readonly LexToken[], input: strin
     }
 
     const token = prepared[cursor];
-    const canonical = canonicalLocaleLexeme(token.lower);
+    // Thai digits in a compact comparative number retain their original
+    // source while sharing the existing numeric grammar with ASCII digits.
+    const canonical = token.canonical ?? canonicalLocaleLexeme(token.lower) ??
+      (/^[~≈<>≥≤]/u.test(token.lower) && /[๐-๙]/u.test(token.lower)
+        ? token.lower.replace(/[๐-๙]/gu, digit => String(digit.charCodeAt(0) - 0x0e50))
+        : undefined);
     normalized.push(canonical ? { ...token, canonical } : { ...token });
     cursor += 1;
   }

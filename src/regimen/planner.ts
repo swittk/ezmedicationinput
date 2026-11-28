@@ -1,5 +1,6 @@
 import { lexInput } from '../lexer/lex';
-import { matchCalendarExclusion } from '../hpsg/rules/condition-rules';
+import { containsCalendarExclusionCue, matchCalendarExclusion } from '../hpsg/rules/condition-rules';
+import { MEDICATION_GUARD_BOUNDARIES } from '../medication-condition';
 import { parseMedicationGuard } from '../hpsg/constructions';
 import { findMedicationDateListSpans } from '../date-interpretation';
 import {
@@ -11,31 +12,31 @@ import {
 } from '../lexer/meaning';
 import { LexKind } from '../lexer/token-types';
 import { EVENT_TIMING_TOKENS } from '../maps';
-import { parseClockToken } from '../hpsg/rule-context';
+import { maximumCountLeadAt, maximumDosePerPeriodAt, parseClockToken } from '../hpsg/rule-context';
 import { explicitDoseLexicalEnd, phaseAdjustmentAt } from '../hpsg/rules/core-rules';
 import {
   ordinalWeekStageSequence, followingCourseDurationHeaderAt,
-  treatmentRelativePeriodStartAt, recognizeCycles
+  treatmentRelativePeriodStartAt, recognizeCycles, maximumOccurrenceAt
 } from '../hpsg/rules/timing-rules';
 import { normalizeUnit } from '../unit-lexicon';
-import { FREQUENCY_SIMPLE_WORDS, mapFrequencyAdverb } from '../hpsg/timing-lexicon';
+import { FREQUENCY_SIMPLE_WORDS, mapFrequencyAdverb, mapIntervalUnit } from '../hpsg/timing-lexicon';
 import { ACTION_DISCOURSE_CONNECTORS, ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS, DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS, DOSE_FRACTION_WORDS, DOSE_NUMBER_WORDS,
   HARD_SEGMENT_BOUNDARY_TOKENS, sequenceConnectorEnd,
-  TREATMENT_PERIOD_START_LEADS,
+  TREATMENT_PERIOD_START_LEADS, RELATIVE_INTERVAL_TRAILING_RELATIONS,
   LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
   coordinationConnectorKind } from '../hpsg/lexical-classes';
-import { AdviceForce, EventTiming, type ParseOptions, type AdviceFrame } from '../types';
+import { AdviceForce, AdvicePolarity, EventTiming, type ParseOptions, type AdviceFrame } from '../types';
 import type { ParserState, Token } from '../parser-state';
 import { buildCustomSiteHints, parseClauseState, findUnparsedTokenGroups } from '../parser';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan, BoundarySite, CoordinationConnectorKind, PlannerOptions, PlannerMetrics, PlanningInput, Proposal, ProbeSummary, Range, StructuralClaim } from '../hpsg/signature';
-import { parseInstructionActions } from '../instruction-graph';
-import { resolveMedicationInstructionAction } from '../instruction-action-terminology';
+import { parseInstructionActions, frameActionDefinition, instructionGraphPreparationOwnsDose } from '../instruction-graph';
+import { getMedicationInstructionAction, resolveMedicationInstructionAction } from '../instruction-action-terminology';
 import { resolveActionRelationSurface } from '../relation-terminology';
 import { parseAdditionalInstructions } from '../advice';
-import { grammaticalProposals, arbitrate, hasAdministrationAdjunct } from './grammar';
+import { grammaticalProposals, arbitrate, hasAdministrationAdjunct, canReceivePostposedOnset } from './grammar';
 import type { RejectedConstruction } from './grammar';
 
 /** Use the existing locale normalizer; grammar never maintains Thai connector spellings. */
@@ -141,10 +142,17 @@ function connectorKind(token: Token | undefined): 'coordination' | 'sequence' | 
   const text = lexeme(token);
   return ACTION_SEQUENCE_MARKERS.has(text) ? 'sequence' : ACTION_COORDINATION_CONNECTORS.has(text) ? 'coordination' : undefined;
 }
+/** Consume an already registered two-word coordinator as one source seam. */
+function coordinationAt(tokens: Token[], start: number): { end: number; kind: CoordinationConnectorKind } {
+  const first = lexeme(tokens[start]), following = lexeme(tokens[start + 1]);
+  const paired = following ? coordinationConnectorKind(`${first} ${following}`) : 'unknown';
+  return paired !== 'unknown' ? { end: start + 2, kind: paired }
+    : { end: start + 1, kind: coordinationConnectorKind(first) };
+}
 function semanticConnectorKind(site: BoundarySite): CoordinationConnectorKind {
   return site.kind === 'alternative'
     ? 'disjunction'
-    : site.kind === 'coordination' ? coordinationConnectorKind(site.surface) : 'unknown';
+    : site.kind === 'coordination' ? site.connectorKind ?? coordinationConnectorKind(site.surface) : 'unknown';
 }
 function isHard(token: Token): boolean {
   return HARD_SEGMENT_BOUNDARY_TOKENS.has(token.original.trim().toLowerCase()) || token.original === '\n' || token.original === '\r';
@@ -168,8 +176,15 @@ function possibleAdditiveDoseSeam(tokens: Token[], site: BoundarySite): boolean 
 /** Lexical seams are candidates, never decisions. Owned structures can veto every seam kind. */
 function candidateSites(input: string, tokens: Token[], options?: ParseOptions): BoundarySite[] {
   const sites: BoundarySite[] = [];
+  const maximumContext = { tokens, options };
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
+    // The existing maximum constituent owns its qualifier, amount and period.
+    // Its internal numerals cannot introduce independent administrations.
+    const maximumHead = maximumCountLeadAt(maximumContext, i);
+    const maximum = maximumHead && (maximumDosePerPeriodAt(maximumContext, i, maximumHead) ??
+      maximumOccurrenceAt(maximumContext, i, maximumHead));
+    if (maximum) { i = maximum.headStart + maximum.tokens.length - 1; continue; }
     // A typed phase-adjustment predicate supplies a candidate boundary;
     // its complete dosage daughter is still checked by the boundary grammar.
     // This includes ADD, replacements and resumed treatment, not only THEN.
@@ -245,10 +260,12 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
     if (followingConnector && (token.original === ',' ||
         ((token.original === ';' || token.original === '.') &&
           followingConnector === 'sequence'))) {
-      const end = tokens[i + 1].sourceEnd;
-      sites.push({ start: token.sourceStart, end, tokenIndex: i, lastTokenIndex: i + 1, rightIndex: i + 2,
-        kind: followingConnector, surface: input.slice(token.sourceStart, end) });
-      i++; continue;
+      const coordination = followingConnector === 'coordination' ? coordinationAt(tokens, i + 1) : undefined;
+      const rightIndex = coordination?.end ?? i + 2;
+      const end = tokens[rightIndex - 1].sourceEnd;
+      sites.push({ start: token.sourceStart, end, tokenIndex: i, lastTokenIndex: rightIndex - 1, rightIndex,
+        kind: followingConnector, connectorKind: coordination?.kind, surface: input.slice(token.sourceStart, end) });
+      i = rightIndex - 1; continue;
     }
     const punctuation = token.original === '.' || token.original === ';' || token.original === '!' || token.original === '?';
     const slash = token.original === '/' && !(tokens[i - 1]?.kind === LexKind.Number && tokens[i + 1]?.kind === LexKind.Number);
@@ -256,9 +273,13 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
     const boundaryKind = kind ?? (token.original === ',' ? 'comma' : isHard(token) ? 'hard' : slash ? 'slash' :
       punctuation ? 'punctuation' : adjacent ? 'adjacent-dose' : undefined);
     if (!boundaryKind) continue;
-    const end = boundaryKind === 'adjacent-dose' ? token.sourceStart : token.sourceEnd;
-    sites.push({ start: token.sourceStart, end, tokenIndex: i, lastTokenIndex: i,
-      rightIndex: boundaryKind === 'adjacent-dose' ? i : i + 1, kind: boundaryKind, surface: input.slice(token.sourceStart, end) });
+    const coordination = boundaryKind === 'coordination' ? coordinationAt(tokens, i) : undefined;
+    const rightIndex = coordination?.end ?? (boundaryKind === 'adjacent-dose' ? i : i + 1);
+    const lastTokenIndex = boundaryKind === 'coordination' ? rightIndex - 1 : i;
+    const end = boundaryKind === 'adjacent-dose' ? token.sourceStart : tokens[lastTokenIndex].sourceEnd;
+    sites.push({ start: token.sourceStart, end, tokenIndex: i, lastTokenIndex,
+      rightIndex, kind: boundaryKind, connectorKind: coordination?.kind, surface: input.slice(token.sourceStart, end) });
+    i = lastTokenIndex;
   }
   return sites;
 }
@@ -427,7 +448,7 @@ class EvidenceContext {
       method: Boolean(c.method?.coding?.code || c.method?.text),
       hasSchedule: Boolean(s && (s.frequency !== undefined || s.frequencyMax !== undefined || s.period !== undefined ||
         s.periodMax !== undefined || s.duration !== undefined || s.durationMax !== undefined || s.boundsStart !== undefined ||
-        s.boundsEnd !== undefined || s.count !== undefined || s.timingCode || s.dayOfWeek?.length || s.when?.length ||
+        s.boundsEnd !== undefined || s.count !== undefined || s.countMax !== undefined || s.timingCode || s.dayOfWeek?.length || s.when?.length ||
         s.timeOfDay?.length || s.calendarEvents?.length || s.timingReference !== undefined ||
         s.administrationOffsetMinutes !== undefined)),
       hasRecurringCadence: Boolean(s && (s.timingCode || s.frequency !== undefined || s.period !== undefined || s.dayOfWeek?.length)),
@@ -485,7 +506,7 @@ class EvidenceContext {
         if (!left || action.span.end > left.span.end) left = action;
       } else if (action.span.start >= range.end && (!right || action.span.start < right.span.start)) right = action;
     }
-    return Boolean(left && right && resolveMedicationInstructionAction(left.predicate.lemma, this.options)?.procedural &&
+    return Boolean(left && right && frameActionDefinition(left, this.options)?.procedural &&
       Math.max(0, range.start - left.span.end) <= 2 && Math.max(0, right.span.start - range.end) <= 2);
   }
 
@@ -533,28 +554,18 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   // The conditional grammar is the sole producer of ELSE scope. Ask for it
   // only when the lexical scan already found a plausible multi-clause seam.
   const hasCoordinationCandidate = sites.some(site => site.kind === 'coordination');
-  // A terminal full stop is a sentence boundary, not an independent dose.
-  // It must not prevent the existing typed ELSE grammar from seeing two
-  // explicit administration candidates.
-  const lastSite = sites[sites.length - 1];
-  const lastDoseSite = lastSite?.kind === 'punctuation' &&
-    !input.slice(lastSite.end).trim()
-    ? sites[sites.length - 2] : lastSite;
-  const hasDoseCandidateEnvelope = sites.length > 1 &&
-    sites[0]?.kind === 'adjacent-dose' &&
-    lastDoseSite?.kind === 'adjacent-dose';
   let guardEvaluated = false;
   let guard: ReturnType<typeof parseMedicationGuard>;
   const guardForInput = () => {
     if (!guardEvaluated) {
-      guard = parseMedicationGuard(input, tokens);
+      guard = parseMedicationGuard(input, tokens, undefined, options);
       guardEvaluated = true;
     }
     return guard;
   };
   const clinicalGuard = hasCoordinationCandidate
     ? guardForInput()
-    : hasDoseCandidateEnvelope ? medicationGuardWithMultipleDoseCandidates(sites, guardForInput) : undefined;
+    : medicationGuardWithMultipleDoseCandidates(sites, guardForInput);
   const alternative = clinicalGuard?.alternative;
   if (alternative) sites = withAlternativeBoundary(input, tokens, sites, alternative);
   const dateSpans = findMedicationDateListSpans(input, options);
@@ -611,7 +622,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       policy: 'no-external-split'
     });
   }
-  // A complete registered NON-administration procedure owns its own nominal
+  // A complete registered procedure or prohibited action owns its nominal
   // arguments. A numeric object inside "repeat 1 tablet after 2 hours" is
   // not an independent medication-order boundary, even when that object has
   // an explicit unit and the procedure has a typed temporal complement.
@@ -622,8 +633,9 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     for (const site of sites) {
       if (site.kind !== 'adjacent-dose') continue;
       const owner = frames.find(frame => {
-        const definition = resolveMedicationInstructionAction(frame.predicate.lemma, options);
-        return definition?.procedural === true && definition.definesDose !== true &&
+        const definition = frameActionDefinition(frame, options);
+        return (frame.polarity === AdvicePolarity.Negate ||
+          definition?.procedural === true && definition.definesDose !== true) &&
           frame.span.start < site.start && site.start < frame.span.end &&
           // An action frame may have an opaque tail past an explicit
           // punctuation boundary. Its valence must never claim a completely
@@ -666,7 +678,19 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   // selected dose evidence itself spans that seam.
   for (const site of sites) {
     if (!possibleAdditiveDoseSeam(tokens, site)) continue;
-    const windowStart = tokens[site.tokenIndex - 1].sourceStart;
+    let windowStart = tokens[site.tokenIndex - 1].sourceStart;
+    // Preserve a governing administration head in this same bounded probe.
+    // Removing it can make a later carrier quantity displace the active dose
+    // before its typed evidence is checked for ownership of the connector.
+    for (let cursor = site.tokenIndex - 2, first = Math.max(0, cursor - 7); cursor >= first; cursor--) {
+      const token = tokens[cursor], lower = lexeme(token);
+      if (isHard(token) || connectorKind(token) || token.kind === LexKind.Number ||
+          DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) break;
+      const action = resolveMedicationInstructionAction(lower, options);
+      if (!action) continue;
+      if (action.definesDose) windowStart = token.sourceStart;
+      break;
+    }
     const followingBoundary = sites.find(candidate =>
       candidate.start > site.end && candidate.kind !== 'adjacent-dose' &&
       candidate.kind !== 'coordination'
@@ -765,7 +789,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       if (site.kind !== 'comma' ||
           explicitDoseLexicalEnd(tokens, site.rightIndex, options) !== undefined) continue;
       const internal = actionFrames.some(frame => {
-        const action = resolveMedicationInstructionAction(frame.predicate.lemma, options);
+        const action = frameActionDefinition(frame, options);
         // An administration frame may retain an opaque text argument while
         // HPSG licenses several complete schedule daughters within it. That
         // text is not a nominal-list constituent and cannot veto their seams.
@@ -836,7 +860,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   // or fronted conditional scope BEFORE HPSG boundary arbitration. Unlike the
   // former candidate-adapter rewrite, this never merges already-decided
   // segments or discards their relation provenance.
-  if (/\b(?:except|excluding)\b|ยกเว้น|เว้น(?=วัน)/iu.test(input)) {
+  if (containsCalendarExclusionCue(input)) {
     const exclusion = matchCalendarExclusion(input, options);
     if (exclusion) claims.push({
       id: `clinical-calendar-exclusion:${exclusion.start}:${exclusion.end}`,
@@ -848,7 +872,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   }
   let frontedConditionalHeader: { start: number; tokenEnd: number } | undefined;
   const frontedGuard = clinicalGuard ??
-    (/^\s*(?:only\s+if|unless|เฉพาะ(?:เมื่อ|หาก)|เว้นแต่|ยกเว้นกรณี)/iu.test(input)
+    (MEDICATION_GUARD_BOUNDARIES.frontedLead.test(input)
       ? guardForInput() : undefined);
   if (frontedGuard && frontedGuard.end < input.length) {
     let clauseStart = 0;
@@ -892,15 +916,22 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       inheritTrailingDurationFromNext: inheritTrailingDurationFromNext || undefined });
     return true;
   };
-  const probeEnd = (rightIndex: number, broad = false) => {
+  const possibleQuantityDenominator = (site: BoundarySite) => site.kind === 'slash' &&
+    (tokens[site.rightIndex]?.kind === LexKind.Number || Boolean(mapIntervalUnit(lexeme(tokens[site.rightIndex])))) &&
+    Boolean(normalizeUnit(lexeme(tokens[site.tokenIndex - 1]), options));
+  const probeBoundary = (rightIndex: number, broad = false): BoundarySite | undefined => {
     const rightStart = tokens[rightIndex]?.sourceStart ?? input.length;
     for (const site of sites) {
-      if (site.start <= rightStart || site.kind === 'adjacent-dose') continue;
+      // Keep a possible unit denominator inside the bounded chart probe.
+      // The selected quantity constituent still decides whether its slash is owned.
+      if (site.start <= rightStart || site.kind === 'adjacent-dose' || possibleQuantityDenominator(site)) continue;
       if (broad && (site.kind === 'coordination' || site.kind === 'sequence' || site.kind === 'punctuation')) continue;
-      if (!owners.owner(site.start)) return site.start;
+      if (!owners.owner(site.start)) return site;
     }
-    return input.length;
+    return undefined;
   };
+  const probeEnd = (rightIndex: number, broad = false) =>
+    probeBoundary(rightIndex, broad)?.start ?? input.length;
   const hasUnit = (a: number, b: number) => tokens.some((t, i) => i >= a && t.sourceStart < b && Boolean(normalizeUnit(lexeme(t), options)));
   const keep = (rule: string, priority: number, feature: string, value: string | boolean): Proposal =>
     ({ action: 'keep', rule, priority, evidence: [{ feature, value }] });
@@ -1021,6 +1052,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
             token.kind === LexKind.TimeLike ||
             mapFrequencyAdverb(lexeme(token)) !== undefined ||
             FREQUENCY_SIMPLE_WORDS[lexeme(token)] !== undefined ||
+            RELATIVE_INTERVAL_TRAILING_RELATIONS.has(lexeme(token)) ||
             resolveActionRelationSurface(lexeme(token)) !== undefined)
         );
         const adjustment = phaseAdjustmentAt(tokens, site.rightIndex);
@@ -1056,14 +1088,36 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       proposals.push(keep('boundary.punctuation-is-not-a-regimen', 0, 'punctuation', site.surface));
     } else if (site.kind === 'hard' || site.kind === 'slash') {
       const right = tokens[site.rightIndex];
-      if (site.kind === 'hard' || right && (right.kind === LexKind.Number || CLAUSE_LEAD_WORDS.has(lexeme(right)))) {
+      let denominatorOwner: 'maximum' | 'clinical-quantity' | undefined;
+      if (possibleQuantityDenominator(site)) {
+        // A spaced denominator belongs to its selected typed quantity sign.
+        // Reuse the cached evidence for this ambiguous unit/slash/number shape;
+        // an unrelated slash still separates independent regimens.
+        const end = probeEnd(site.rightIndex);
+        const probe = evidence.probe(start, end);
+        const hasTimeDenominator = probe.clause.clinicalQuantity?.denominators.some(term => term.dimension === 'time');
+        for (const item of probe.clause.evidence) {
+          const maximum = (item.scheduleFields?.indexOf('maxDosePerPeriod') ?? -1) >= 0 ||
+            item.rule === 'hpsg.lex.instruction.maximumPerDaypart';
+          const clinicalQuantity = hasTimeDenominator && item.rule.startsWith('hpsg.lex.clinicalQuantity.');
+          if ((maximum || clinicalQuantity) && item.spans.some(span =>
+              probe.start + span.start <= site.start && probe.start + span.end >= site.end)) {
+            denominatorOwner = maximum ? 'maximum' : 'clinical-quantity';
+            break;
+          }
+        }
+      }
+      if (denominatorOwner) proposals.push(keep(
+        denominatorOwner === 'maximum' ? 'structure.maximum-dose-period' : 'structure.clinical-quantity-period', 900,
+        denominatorOwner === 'maximum' ? 'maximum-constituent.owns-slash' : 'clinical-quantity.owns-slash', true));
+      else if (site.kind === 'hard' || right && (right.kind === LexKind.Number || CLAUSE_LEAD_WORDS.has(lexeme(right)))) {
         proposals.push({ action: 'split', rule: 'boundary.explicit-delimiter', priority: 200, relation: 'independent',
           evidence: [{ feature: 'delimiter', value: site.surface }] });
       }
     } else {
-      const end = adjacentHead?.end ?? probeEnd(site.rightIndex);
+      const nextBoundary = adjacentHead ? undefined : probeBoundary(site.rightIndex);
+      let end = adjacentHead?.end ?? nextBoundary?.start ?? input.length;
       const rightStart = tokens[site.rightIndex]?.sourceStart ?? input.length;
-      const rightUnit = hasUnit(site.rightIndex, end);
       const priorTiming = tokens.some(t => t.sourceStart >= start && t.sourceEnd <= site.start &&
         (hasEventTimingMeaning(t) || hasTimingAbbreviationMeaning(t) || t.kind === LexKind.TimeLike));
       const canProbe = site.kind !== 'adjacent-dose' || Boolean(adjacentHead) ||
@@ -1072,6 +1126,53 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       if (procedural) proposals.push(keep('regimen.procedural-coordination', 900, 'actionFrames.bridge', true));
 
       if (!procedural && canProbe && rightStart < end) {
+        // A synthetic onset seam cannot hide the schedule belonging to a
+        // coordinated or sequential dose. Extend only when cached typed daughters
+        // show an unscheduled amount followed by a schedule with no independent head.
+        if ((site.kind === 'coordination' || site.kind === 'sequence') && nextBoundary?.kind === 'sequence' &&
+            !nextBoundary.surface &&
+            TREATMENT_PERIOD_START_LEADS.has(lexeme(tokens[nextBoundary.rightIndex])) &&
+            treatmentRelativePeriodStartAt(tokens, nextBoundary.rightIndex)) {
+          const prefix = evidence.probe(rightStart, end);
+          if (canReceivePostposedOnset(prefix)) {
+            const onsetEnd = probeEnd(nextBoundary.rightIndex);
+            const onset = evidence.probe(nextBoundary.start, onsetEnd);
+            if ((onset.hasSchedule || onset.clause.schedule?.treatmentStartOffsetDays !== undefined ||
+                onset.clause.schedule?.phaseStartReference) && !onset.hasDose && !onset.method) end = onsetEnd;
+          }
+        }
+        // A fronted onset and its comma-separated dose are one right daughter.
+        // Preserve that typed attachment before evaluating the phase boundary.
+        if (site.kind === 'sequence' && nextBoundary?.kind === 'comma') {
+          const prefix = evidence.probe(rightStart, end);
+          if (!prefix.hasHead && !prefix.hasDose && (prefix.hasSchedule ||
+              prefix.clause.schedule?.treatmentStartOffsetDays !== undefined || prefix.clause.schedule?.phaseStartReference)) {
+            const administrationEnd = probeEnd(nextBoundary.rightIndex);
+            const full = evidence.probe(rightStart, administrationEnd);
+            if (full.complete && full.hasDose) end = administrationEnd;
+          }
+        }
+        // A prepared dose and its following administration form one right
+        // daughter. The ordinary short probe stops at their internal connector;
+        // extend by that one constituent only when selected HPSG ownership
+        // confirms that the preparation still owns the administered amount.
+        if (site.kind === 'sequence' && nextBoundary?.surface &&
+            (nextBoundary.kind === 'sequence' || nextBoundary.kind === 'coordination' &&
+              semanticConnectorKind(nextBoundary) === 'conjunction')) {
+          const prefix = evidence.probe(rightStart, end);
+          if (prefix.hasDose && !prefix.hasSchedule && !prefix.method &&
+              prefix.clause.instructionGraph?.primaryOwnership?.dose) {
+            const administrationEnd = probeEnd(nextBoundary.rightIndex);
+            const full = evidence.probe(rightStart, administrationEnd);
+            if (full.complete && full.method && instructionGraphPreparationOwnsDose(full.clause, options)) {
+              // An untimed prepared successor still has its own dose and head
+              // after a complete administration; its cadence stays unspecified.
+              const left = full.hasSchedule ? undefined : evidence.probe(start, site.start);
+              if (full.hasSchedule || left?.complete && left.method) end = administrationEnd;
+            }
+          }
+        }
+        const rightUnit = hasUnit(site.rightIndex, end);
         const targetCue = (from: number, to: number) => {
           const ownedTarget = claims.some(claim => claim.kind === 'target-list' &&
             claim.start < to && claim.end > from);
@@ -1088,6 +1189,20 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         let rightValue: ProbeSummary | undefined = adjacentHead?.right;
         let actionValue: AdviceFrame[] | undefined;
         const rightActions = () => actionValue ?? (actionValue = evidence.actions(rightStart, end));
+        const sourceOnset = site.kind === 'sequence' && !site.surface &&
+          TREATMENT_PERIOD_START_LEADS.has(lexeme(tokens[site.rightIndex]))
+          ? treatmentRelativePeriodStartAt(tokens, site.rightIndex) : undefined;
+        if (sourceOnset) {
+          const left = leftValue ?? (leftValue = evidence.probe(start, site.start));
+          const right = rightValue ?? (rightValue = evidence.probe(rightStart, end));
+          // A postposed onset completes the same dose, retaining any local
+          // runtime or delay. An independent head or established recurrence/
+          // bound keeps its phase construction; punctuation stays explicit.
+          if (canReceivePostposedOnset(left) && !right.hasDose && !right.method) {
+            proposals.push(keep('regimen.onset-adjunct-of-unscheduled-dose', 950,
+              'right.schedule-modifies-left-dose', true));
+          }
+        }
         proposals.push(...grammaticalProposals({
           site,
           connectorKind: semanticConnectorKind(site),
@@ -1104,7 +1219,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
             // action as procedural suppressed legitimate independently dosed
             // "inhale 2 puffs OR nebulize 2.5 mg" alternatives.
             return rightActions().some((frame) => {
-              const definition = resolveMedicationInstructionAction(frame.predicate.lemma, options);
+              const definition = frameActionDefinition(frame, options);
               return definition?.procedural === true && definition.definesDose !== true;
             });
           },
@@ -1119,8 +1234,33 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         if (clockEnd(tokens, site.rightIndex) !== undefined) {
           proposals.push(keep('structure.clock-continuation', 500, 'right.type', 'clock'));
         } else if (right?.kind === LexKind.Number || right?.kind === LexKind.NumberRange) {
-          proposals.push({ action: 'split', rule: 'regimen.comma-numeric-head', priority: 300, relation: 'independent',
-            evidence: [{ feature: 'right.lexicalType', value: right.kind }] });
+          // A typed route alone modifies the following quantity; it is not an
+          // independent administration before this comma. The prefix probe is
+          // shared with the grammatical proposals above.
+          const prefix = evidence.probe(start, site.start);
+          const fronted = inheritedAdministration && !prefix.hasHead && !prefix.hasDose && prefix.hasSchedule
+            ? evidence.probe(start, end) : undefined;
+          if (fronted?.complete && fronted.hasDose) {
+            proposals.push(keep('regimen.fronted-adjunct', 850, 'whole.completeWithFrontedAdjunct', true));
+          } else if (prefix.complete && prefix.clause.route && !prefix.hasHead && !prefix.hasSchedule && !prefix.prn) {
+            proposals.push(keep('structure.route-complement', 500, 'left.typed-route-only', true));
+          } else {
+            // An infusion's volume and rate can be comma-separated arguments
+            // of one administration. The existing complete HPSG probe owns
+            // that interpretation and is reused for the resulting segment.
+            const suffix = (prefix.method || prefix.clause.route) && (prefix.clause.dose?.value !== undefined || prefix.clause.dose?.range)
+              ? evidence.probe(right.sourceStart, end) : undefined;
+            const full = suffix && !suffix.clause.dose && !suffix.method && !suffix.prn
+              ? evidence.probe(start, end) : undefined;
+            if (full?.complete && full.clause.clinicalQuantity?.representation === "rate-quantity" &&
+                full.clause.dose?.value === prefix.clause.dose?.value &&
+                full.clause.dose?.range?.low === prefix.clause.dose?.range?.low &&
+                full.clause.dose?.range?.high === prefix.clause.dose?.range?.high &&
+                full.clause.dose?.unit === prefix.clause.dose?.unit) {
+              proposals.push(keep('regimen.comma-dose-rate', 500, 'whole.typed-dose-and-rate', true));
+            } else proposals.push({ action: 'split', rule: 'regimen.comma-numeric-head', priority: 300, relation: 'independent',
+              evidence: [{ feature: 'right.lexicalType', value: right.kind }] });
+          }
         } else if (LATERAL_MODIFIER_WORDS.has(lexeme(right)) && following?.kind !== LexKind.Number) {
           proposals.push(keep('structure.site-continuation', 500, 'right.type', 'lateral-modifier'));
         } else if (right && CLAUSE_LEAD_WORDS.has(lexeme(right))) {
@@ -1128,10 +1268,15 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
           if (evidence.instructionContinuation(site.rightIndex, broadEnd)) {
             proposals.push(keep('regimen.instruction-continuation', 500, 'right.type', 'instruction'));
           } else {
-            const prefix = evidence.probe(start, site.start), full = evidence.probe(start, broadEnd);
-            const fronted = !prefix.hasHead && (prefix.prn || prefix.hasSchedule) ||
-              full.conditionStarts.some(offset => offset < site.start);
-            if (full.complete && full.hasHead && fronted) {
+            const prefix = evidence.probe(start, site.start);
+            const fronted = !prefix.hasHead && (prefix.prn || prefix.hasSchedule ||
+              prefix.clause.schedule?.treatmentStartOffsetDays !== undefined || prefix.clause.schedule?.phaseStartReference);
+            // A fronted adjunct belongs to its complete administration, even
+            // when a later phase makes the broad one-clause probe incomplete.
+            const bounded = fronted ? evidence.probe(start, probeEnd(site.rightIndex)) : undefined;
+            const full = bounded?.complete && bounded.hasHead ? bounded : evidence.probe(start, broadEnd);
+            if (full.complete && full.hasHead &&
+                (fronted || full.conditionStarts.some(offset => offset < site.start))) {
               proposals.push(keep('regimen.fronted-adjunct', 850, 'whole.completeWithFrontedAdjunct', true));
             } else proposals.push({ action: 'split', rule: 'regimen.comma-administration-head', priority: 250, relation: 'independent',
               evidence: [{ feature: 'right.headLexeme', value: lexeme(right) }] });

@@ -63,6 +63,12 @@
         "en": "without",
         "th": "โดยไม่"
       },
+      "realizationProfiles": {
+        "complement": {
+          "en": "without",
+          "th": "โดยไม่มี"
+        }
+      },
       "semanticClass": "accompaniment",
       "grammar": {
         "instructionStart": true,

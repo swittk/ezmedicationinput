@@ -1,7 +1,9 @@
+import { frameActionDefinition, realizeInstructionAction } from "../../instruction-graph";
+import { clinicalQuantityAt } from "./clinical-quantity-rules";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions, realizeAdviceFramesText } from "../../advice";
 import { resolveBodySiteLexeme } from "../../body-site-grammar";
-import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { listMedicationInstructionConcepts, medicationInstructionConceptCodings, normalizeConceptSurface, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import {
   getAdviceRelationRealizations,
@@ -16,6 +18,7 @@ import { getRouteMeaning } from "../../lexer/meaning";
 import { Token } from "../../parser-state";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
+  AdviceArgument,
   AdviceArgumentRole,
   AdviceForce,
   AdviceFrame,
@@ -37,11 +40,11 @@ import {
   EVENT_PREPOSITIONS,
   FREE_TEXT_DIRECTIVE_STARTS,
   CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS,
+  COUNT_CONNECTOR_WORDS_DATA,
   INSTRUCTION_LEADING_SEPARATORS,
   INSTRUCTION_START_WORDS,
   LIST_SEPARATORS,
   MEAL_RELATION_BY_TOKEN,
-  MAXIMUM_COUNT_LEAD_SEQUENCES,
   SITE_ANCHORS,
   SITE_TRAILING_INSTRUCTION_WORDS,
   WORKFLOW_ACTION_RELATION_LEADS,
@@ -53,6 +56,8 @@ import {
 import { isMedicationAdministrationMethod } from "../method-lexicon";
 import {
   HpsgClauseContext,
+  maximumCountLeadAt,
+  medicationAmountAt,
   sourceRangeOverlapsContextDate,
   joinTokenText,
   lexicalRule,
@@ -62,7 +67,7 @@ import {
 } from "../rule-context";
 import { HpsgLexicalRule, type HpsgSign, lexicalSign } from "../signature";
 import { combineSignFeatureStructures } from "../feature-structure";
-import { finiteTreatmentPauseAt, isScheduleLead } from "./timing-rules";
+import { finiteTreatmentPauseAt, isScheduleLead, qualifiedEventAdviceAt } from "./timing-rules";
 import { productLexicalRule } from "./core-rules";
 
 const PRODUCT_COMPLEMENT_RULE = productLexicalRule();
@@ -108,6 +113,18 @@ function isExplicitDoseLead(context: HpsgClauseContext, index: number): boolean 
 
 function startsTypedAdministrationComplement(context: HpsgClauseContext, start: number): boolean {
   if (isExplicitDoseLead(context, start)) return true;
+  // Registered quantity connectors retain the following medication amount
+  // as a typed daughter; they do not turn it into unstructured advice.
+  let amountStart = start;
+  while (amountStart < context.limit) {
+    const token = context.tokens[amountStart];
+    if (!token || context.state.consumed.has(token.index) ||
+        !COUNT_CONNECTOR_WORDS_DATA.has(normalizeTokenLower(token))) break;
+    amountStart++;
+  }
+  const amountToken = context.tokens[amountStart];
+  if (amountStart > start && amountStart < context.limit && amountToken &&
+      !context.state.consumed.has(amountToken.index) && medicationAmountAt(context, amountStart)) return true;
   let cursor = start;
   const first = context.tokens[cursor];
   if (!first || context.state.consumed.has(first.index)) return false;
@@ -135,11 +152,10 @@ function startsScheduledAdministration(context: HpsgClauseContext, index: number
   );
 }
 
-function isProceduralInstructionFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
-  const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+export function isProceduralInstructionFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
+  const definition = frameActionDefinition(frame, context.options);
   const scopedDirective = frame.polarity === AdvicePolarity.Negate ||
-    isConditionalAdviceFrame(context, frame) ||
-    medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options);
+    isConditionalAdviceFrame(context, frame) || definition?.safetyScopeTarget === true;
   return !(
     (!definition?.procedural && !scopedDirective) ||
     (definition?.primaryAdministrationHead && !scopedDirective) ||
@@ -164,15 +180,19 @@ function frameTokens(context: HpsgClauseContext, frame: AdviceFrame): Token[] {
 function frameDose(
   context: HpsgClauseContext,
   frame: AdviceFrame
-): { value?: number; range?: { low?: number; high?: number }; unit?: string } | undefined {
-  const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+): AdviceArgument["quantity"] {
+  // A prohibited amount selects the negative action's target; it is not a
+  // positive administration head competing with coordinated prohibitions.
+  if (frame.polarity === AdvicePolarity.Negate) return undefined;
+  const definition = frameActionDefinition(frame, context.options);
   if (!definition?.definesDose) return undefined;
   const amount = frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount && arg.quantity);
   if (!amount?.quantity) return undefined;
   return {
     value: amount.quantity.value,
     range: amount.quantity.range ? { ...amount.quantity.range } : undefined,
-    unit: amount.quantity.unit
+    unit: amount.quantity.unit,
+    ...(amount.quantity.comparator ? { comparator: amount.quantity.comparator } : {})
   };
 }
 
@@ -183,20 +203,37 @@ export function proceduralActionLexicalRule(): HpsgLexicalRule<HpsgClauseContext
     const signs = [];
     for (const frame of proceduralFrames(context)) {
       if (frame.span.start !== startToken.sourceStart) continue;
-      const tokens = frameTokens(context, frame);
+      let tokens = frameTokens(context, frame);
       if (!tokens.length || tokens.some((token) => context.state.consumed.has(token.index))) continue;
+      // Keep a selected course Time as an ordinary event/clock daughter.
+      // The instruction retains its complete authored frame/text, while its
+      // head tokens no longer hide the independently scoped temporal sign.
+      if (frame.predicate.semanticClass === "course") for (const argument of frame.args) {
+        if (argument.role !== AdviceArgumentRole.Time || !argument.span || !argument.relation) continue;
+        const nominalStart = tokens.findIndex(token => token.sourceStart === argument.span!.start);
+        const relation = tokens[nominalStart - 1];
+        if (relation && resolveActionRelationSurface(normalizeTokenLower(relation)) === argument.relation &&
+            sourceRangeAttachmentClass(context, relation.sourceStart, argument.span.end) === "administration") {
+          tokens = tokens.slice(0, nominalStart - 1);
+          break;
+        }
+      }
       const text = context.state.input.slice(frame.span.start, frame.span.end).trim();
       if (!text) continue;
       const directiveInstructions = frame.polarity === AdvicePolarity.Negate
         ? parseInstructionCandidates(text, frame.span)
-        : [];
+        : frame.modality ? [{ text, frames: [frame] }] : [];
+      // The action definition has already selected this directive's complete
+      // frame. Advice coding and wording must not create a competing argument
+      // interpretation for the same action occurrence.
+      for (const instruction of directiveInstructions) instruction.frames = [frame];
       let sign: HpsgSign = lexicalSign({
         type: "instruction-sign",
         rule: "hpsg.lex.patientInstruction.procedure",
         tokens,
         synsem: {
           head: { dose: frameDose(context, frame) },
-          valence: frame.polarity === AdvicePolarity.Negate
+          valence: frame.polarity === AdvicePolarity.Negate || directiveInstructions.length
             ? { instructions: directiveInstructions.length ? directiveInstructions : [{ text, frames: [frame] }] }
             : { patientInstruction: { text } },
           cont: { clauseKind: "administration" }
@@ -297,7 +334,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       frame.span.start <= first.sourceStart && first.sourceEnd <= frame.span.end
     );
     const firstDefinition = firstFrame
-      ? resolveMedicationInstructionAction(firstFrame.predicate.lemma, context.options)
+      ? frameActionDefinition(firstFrame, context.options)
       : undefined;
     const structurallyHeadedProcedure = Boolean(
       firstFrame &&
@@ -318,6 +355,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
 
+    const bodyStart = cursor;
     const bodyTokens: Token[] = [];
     for (; cursor < context.limit; cursor += 1) {
       const token = context.tokens[cursor];
@@ -373,6 +411,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!bodyTokens.length) {
       return [];
     }
+    const qualifiedNominal = qualifiedEventAdviceAt(context, cursor - 1)?.start === bodyStart;
     const range = rangeFromTokens(bodyTokens);
     const text = range
       ? context.state.input.slice(range.start, range.end).trim()
@@ -383,12 +422,16 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     return [
       lexicalSign({
         type: "instruction-sign",
-        rule: "hpsg.lex.patientInstruction.workflow",
-        lexicalCategory: "workflow",
+        rule: qualifiedNominal ? "hpsg.lex.instruction.qualifiedNominal" : "hpsg.lex.patientInstruction.workflow",
+        lexicalCategory: qualifiedNominal ? "instruction" : "workflow",
         tokens: [...consumed, ...bodyTokens],
         synsem: {
           head: {},
-          valence: { patientInstruction: { text } },
+          // The complete lexical nominal enters the existing typed advice
+          // owner once; ordinary workflow source keeps its opaque fallback.
+          valence: qualifiedNominal && range
+            ? { instructions: parseInstructionCandidates(text, range) }
+            : { patientInstruction: { text } },
           cont: { clauseKind: "administration" }
         },
         score: 12 + bodyTokens.length
@@ -418,7 +461,7 @@ function instructionStartIsLicensed(
       // Their partial generic heads must not compete with that full typed
       // constituent. Unquantified ordinary advice keeps its old pathway.
       (WORKFLOW_START_WORDS.has(frame.predicate.lemma) &&
-        resolveMedicationInstructionAction(frame.predicate.lemma, context.options)?.procedural === true))
+        frameActionDefinition(frame, context.options)?.procedural === true))
   ));
   // A procedural quantity constituent owns its action head and duration.
   // Generic fallback must not take only that head/lead while an ambiguous
@@ -428,7 +471,7 @@ function instructionStartIsLicensed(
   const enclosedByProcedure = Boolean(token && frames.some((frame) => {
     if (frame.span.start >= token.sourceStart || token.sourceEnd > frame.span.end) return false;
     if (frame.polarity === AdvicePolarity.Negate) return false;
-    return resolveMedicationInstructionAction(frame.predicate.lemma, context.options)?.procedural === true;
+    return frameActionDefinition(frame, context.options)?.procedural === true;
   }));
   // A comma inside an already-composed procedural argument cannot make
   // that argument's homographic noun a second directive ("before food,
@@ -440,7 +483,8 @@ function instructionStartIsLicensed(
   if (previousLower && WORKFLOW_CONTINUATION_LICENSES.has(`${previousLower} ${lower}`)) {
     return false;
   }
-  if (INSTRUCTION_START_WORDS.has(lower)) {
+  if (INSTRUCTION_START_WORDS.has(lower) || frames.some(frame =>
+      frame.span.start === token?.sourceStart && frameActionDefinition(frame, context.options)?.adviceClauseHead)) {
     return true;
   }
   return Boolean(previous && isMedicationAdministrationMethod(previousLower, context.options));
@@ -500,17 +544,13 @@ function parseInstructionCandidates(
       defaultForce: AdviceForce.Instruction,
       allowFreeTextFallback: true
     });
-    const instructions = parsed.map((instruction) => {
-      const thai = !instruction.coding?.code && instruction.frames?.length
-        ? realizeAdviceFramesText(instruction.frames, "th")
-        : undefined;
-      return {
-        text: instruction.text,
-        i18n: thai ? { th: thai } : undefined,
-        coding: instruction.coding,
-        frames: instruction.frames
-      };
-    });
+    // Keep typed advice here; locale realization uses its current lexical
+    // facets instead of caching a partially translated phrase in the grammar.
+    const instructions = parsed.map((instruction) => ({
+      text: instruction.text,
+      coding: instruction.coding,
+      frames: instruction.frames
+    }));
     const score = instructions.reduce((sum, instruction) =>
       sum + (instruction.coding?.code ? 4 : 0) + (instruction.frames?.length ? 2 : 0) + (instruction.text ? 1 : 0),
       0
@@ -523,9 +563,10 @@ function parseInstructionCandidates(
   return best;
 }
 
-function bodyParsesAsStyleInstruction(
+function styleInstructionEndsBeforeSite(
   context: HpsgClauseContext,
-  bodyTokens: Token[]
+  bodyTokens: Token[],
+  nextToken: Token
 ): boolean {
   const range = rangeFromTokens(bodyTokens);
   const text = range
@@ -535,14 +576,25 @@ function bodyParsesAsStyleInstruction(
     return false;
   }
   const typedConcept = resolveMedicationInstructionConcept(text, context.options);
-  if (typedConcept && (
+  const typedStyle = Boolean(typedConcept && (
     typedConcept.role === AdviceArgumentRole.Amount ||
     typedConcept.role === AdviceArgumentRole.Manner
-  )) return true;
-  const hasStyleLexeme = bodyTokens.some((token) =>
+  ));
+  if (!typedStyle && !bodyTokens.some((token) =>
     SITE_TRAILING_INSTRUCTION_WORDS.has(normalizeTokenLower(token))
+  )) return false;
+  // A style prefix can end this daughter only before a recognized site.
+  // Keep cheap lexical rejection first, then parse only a usable boundary.
+  const lower = normalizeTokenLower(nextToken);
+  const resolvedSite = resolveBodySiteLexeme(
+    nextToken.original,
+    context.options?.siteCodeMap,
+    { bodySiteContext: context.options?.context?.bodySiteContext }
   );
-  return hasStyleLexeme && parseInstructionCandidates(text, range).some((instruction) =>
+  if (!SITE_ANCHORS.has(lower) && !(
+    resolvedSite?.coding || resolvedSite?.definition || resolvedSite?.spatialRelation
+  )) return false;
+  return typedStyle || parseInstructionCandidates(text, range).some((instruction) =>
     Boolean(instruction.coding?.code || instruction.frames?.length)
   );
 }
@@ -875,6 +927,9 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!first || context.state.consumed.has(first.index)) {
       return [];
     }
+    // A recognized quantity or cumulative limit owns its complete phrase.
+    // Other advice remains an independent sign.
+    if (context.clinicalCache.quantityTokenIndices?.has(first.index)) return [];
     const activityDay = registeredActivityDayAt(context, start);
     if (activityDay) return [activityDay];
     const administrationWindow = administrationWindowInstructionAt(context, start);
@@ -899,7 +954,9 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const next = context.tokens[cursor + 1];
       const nextLower = next ? normalizeTokenLower(next) : "";
       const nextAction = resolveMedicationInstructionAction(nextLower, context.options);
-      if (nextAction?.procedural) {
+      const selected = !nextAction && next
+        ? proceduralFrames(context).find(frame => frame.span.start === next.sourceStart) : undefined;
+      if (nextAction?.procedural || selected && frameActionDefinition(selected, context.options)?.procedural) {
         return [];
       }
       if (
@@ -912,17 +969,13 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!instructionStartIsLicensed(context, cursor, consumed.length > 0)) {
       return [];
     }
+    // A separator alone does not turn a typed medication complement into advice.
+    if (consumed.length > 0 && startsTypedAdministrationComplement(context, cursor)) return [];
     // A separator before "up to 3 doses" is not a license to swallow a
     // clinically meaningful maximum count as unstructured advice.
     // Leave the marker for the typed timing-limit construction; the
     // connector itself can still join the resulting chart daughters.
-    if (consumed.length > 0 && MAXIMUM_COUNT_LEAD_SEQUENCES.some(parts =>
-      parts.every((part, offset) => {
-        const token = context.tokens[cursor + offset];
-        return token && !context.state.consumed.has(token.index) &&
-          normalizeTokenLower(token) === part;
-      })
-    )) return [];
+    if (consumed.length > 0 && maximumCountLeadAt(context, cursor)?.headStart === cursor) return [];
     if (consumed.length > 0 && startsEventTimingPhrase(context, cursor)) return [];
     const firstBodyToken = context.tokens[cursor];
     const firstBodyLower = firstBodyToken ? normalizeTokenLower(firstBodyToken) : "";
@@ -934,6 +987,28 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         isScheduleLead(context, cursor + 1)) return [];
     if (CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS.has(firstBodyLower)) return [];
     const firstBodyAction = resolveMedicationInstructionAction(firstBodyLower, context.options);
+    const adviceFrame = firstBodyToken && getProceduralFrames(context).find(frame =>
+      frame.span.start === firstBodyToken.sourceStart &&
+      frameActionDefinition(frame, context.options)?.adviceClauseHead);
+    if (adviceFrame) {
+      if (isProceduralInstructionFrame(context, adviceFrame)) return [];
+      const frame = adviceFrame;
+      const tokens = frameTokens(context, frame);
+      if (!tokens.length || tokens.some(token => context.state.consumed.has(token.index))) return [];
+      return [lexicalSign({
+        type: "instruction-sign", rule: "hpsg.lex.instruction", lexicalCategory: "instruction",
+        tokens: [...consumed, ...tokens],
+        synsem: {
+          head: {},
+          valence: { instructions: [{
+            text: realizeInstructionAction(frame, context.options?.locale ?? "en") || frame.sourceText,
+            frames: [frame]
+          }] },
+          cont: { clauseKind: "administration" }
+        },
+        score: 18 + tokens.length + frame.args.length * 2
+      })];
+    }
     if (
       !consumed.length &&
       firstBodyAction &&
@@ -955,7 +1030,13 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
 
     const bodyStart = cursor;
+    // A rejected course valence is still a complete detached instruction.
+    // Keep its temporal words with that source body rather than exposing an
+    // unrelated activity's duration as medication timing.
+    const unresolvedCourseBody = firstBodyAction?.semanticClass === "course" &&
+      !getProceduralFrames(context).some(frame => frame.span.start === firstBodyToken?.sourceStart);
     const bodyTokens: Token[] = [];
+    let completeInstructions: CanonicalAdditionalInstructionExpr[] | undefined;
     for (; cursor < context.limit; cursor += 1) {
       const token = context.tokens[cursor];
       if (!token || context.state.consumed.has(token.index)) {
@@ -964,24 +1045,33 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (isInstructionSeparator(token) && bodyTokens.length) {
         break;
       }
-      if (!bodyTokens.length && isScheduleLead(context, cursor)) {
-        return [];
-      }
-      if (bodyTokens.length && isScheduleLead(context, cursor)) {
+      // A separator may precede a rate whose own chart position is later.
+      // Resolve that typed owner once before admitting its tokens as advice.
+      if (cursor > start) clinicalQuantityAt(context, cursor);
+      // A dimensional constituent keeps its numeral even when an earlier
+      // administration cannot license it as a rate. Its maximum-dose owner
+      // may still consume the complete phrase; free advice must not swallow it.
+      if (context.clinicalCache.quantityTokenIndices?.has(token.index) ||
+          context.clinicalCache.unlicensedRateTokenIndices?.has(token.index)) break;
+      if (!unresolvedCourseBody && isScheduleLead(context, cursor)) {
+        if (!bodyTokens.length) return [];
         break;
       }
-      if (bodyTokens.length && bodyParsesAsStyleInstruction(context, bodyTokens)) {
-        const lower = normalizeTokenLower(token);
-        const resolvedSite = resolveBodySiteLexeme(
-          token.original,
-          context.options?.siteCodeMap,
-          { bodySiteContext: context.options?.context?.bodySiteContext }
-        );
-        const startsSite = SITE_ANCHORS.has(lower) || Boolean(
-          resolvedSite?.coding || resolvedSite?.definition || resolvedSite?.spatialRelation
-        );
-        if (startsSite) break;
+      // A complete coded adjunct and a following accompaniment are separate
+      // daughters ("on an empty stomach" + "with water"), not one nominal.
+      if (bodyRelation && bodyTokens.length && relationHasGrammarFeature(
+          resolveActionRelationSurface(normalizeTokenLower(token)), "accompanimentComplement")) {
+        const prefixRange = rangeFromTokens(bodyTokens);
+        if (prefixRange) {
+          const candidates = parseInstructionCandidates(
+            context.state.input.slice(prefixRange.start, prefixRange.end), prefixRange);
+          if (candidates.some(instruction => instruction.coding?.code)) {
+            completeInstructions = candidates;
+            break;
+          }
+        }
       }
+      if (bodyTokens.length && styleInstructionEndsBeforeSite(context, bodyTokens, token)) break;
       bodyTokens.push(token);
     }
     if (!bodyTokens.length) {
@@ -1006,7 +1096,7 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const predicate = isMedicationAdministrationMethod(previousLower, context.options)
       ? previousLower
       : "apply";
-    const adviceInstructions = parseInstructionCandidates(text, range);
+    const adviceInstructions = completeInstructions ?? parseInstructionCandidates(text, range);
     const hasCodedAdvice = adviceInstructions.some((instruction) => Boolean(instruction.coding?.code));
     const typedInstruction = hasCodedAdvice
       ? undefined

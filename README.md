@@ -43,7 +43,7 @@ console.log(batch.items[0].fhir);       // Single FHIR dosage
 
 // Complete batch for multi-dose or phased instructions
 console.log(batch.fhir);                // EzDosage[]: flat R5-compatible rows
-console.log(batch.fhirNext);            // R6-like course and phases
+console.log(batch.fhirNext);            // Current FHIR R6 DosageInstruction
 ```
 
 Example output:
@@ -80,7 +80,7 @@ Example output:
 - `count`: number of parsed dosage clauses.
 - `items[n].fhir`: the dosage for an individual clause.
 - `fhir`: `EzDosage[]` containing all flat R5-compatible dosage rows.
-- `fhirNext`: R6-like course details, including phases and independent dosing schedules.
+- `fhirNext`: native FHIR R6 `DosageInstruction`, with sequential steps and concurrent dosing components.
 - `meta.segments`: source ranges for each clause.
 - `shortText`, `longText`, `warnings`, and `meta`: batch-level display and diagnostics.
 
@@ -88,6 +88,108 @@ Use `items[0].fhir` when displaying or editing a single dosage, and
 `batch.fhir` when processing the complete flat prescription.
 `formatSig` and `fromFhirDosage` accept one dosage; `formatSigBatch`
 accepts an array of dosages.
+
+The R5 array under `fhir` remains the compatibility/editing surface.
+The `fhirNext` object follows the **pinned HL7 R6 CI build dated November 13, 2026**,
+whose profiles use the version label `6.0.0-snapshot1`. The
+[checked-in contract](fhir/r6/official-snapshot1-20261113-contract.json) records
+the supported schema: `DosageInstruction.step[].component[]` contains R6
+`Dosage` values. Use `fromFhir(fhirNext)` to import that structure.
+The [published September 2026 snapshot](https://www.hl7.org/fhir/6.0.0-snapshot1/dosage.html)
+uses the same version label but defines `DosageDetails`; that schema is not a
+supported interchange target. The importer checks the current structural
+contract, not a datatype name or release tag absent from the JSON. Objects in
+the structural overlap are accepted, including text-only `renderedInstruction`
+objects and structured dosages using shared fields. Acceptance does not identify
+which release produced the object or add support for the September schema.
+TypeScript callers of the earlier R6 draft should replace `FhirR6DosageDetails`
+with `FhirR6DosageInstruction`. Its `step` property is optional, matching the
+current wire contract:
+
+```ts
+import type { FhirR6DosageInstruction } from "ezmedicationinput";
+
+function firstStepComponents(instruction: FhirR6DosageInstruction) {
+  return instruction.step?.[0]?.component ?? [];
+}
+```
+
+Empty R6 step lists are omitted on output. For a header containing only shared
+Element metadata (such as an ID and unknown extensions), use the explicit
+`fromFhir` boundary; mixed R5/R6 dispatch cannot infer a version from those fields.
+The R5 editing/export APIs are unchanged; the current reader accepts previously
+saved R5 rows without a downstream storage migration. New exports encode an
+approximation on `SimpleQuantity` using the EMA quantity-operator coding. The
+current reader accepts both that encoding and the older package comparator
+child. Older package readers may not recover `~` from a new export; this is not
+a guarantee that an older reader can interpret every newer extension encoding.
+
+A phase beginning on the day after the preceding phase uses an application-owned
+`step.start.contextCode`: system
+`urn:ezmedicationinput:CodeSystem:course-phase-event`, code
+`previous-phase-next-day`. It names local midnight following the predecessor's
+last occupied treatment day. The scheduler derives that date from the completed
+phase, including admitted doses and administration durations, so delayed starts,
+count limits, and daylight-saving changes retain their meaning. Any supplied
+`offsetDuration` or exact `offsetRange` is applied from that midnight. The
+relation binds to the current preceding step in the ordered course. Reordering or
+removing a step changes that predecessor; a first step has no predecessor and
+leaves the relation unresolved.
+The existing R5 course metadata preserves this boundary and its annotations
+through saves. Patient-facing wording comes from the course language facet.
+
+### R5 clocks alongside event-based timing
+
+For mixed schedules such as `1 tab with meals and @ 10:00`, the R5
+`Timing.repeat.when` retains the meal event. Additional clocks are stored in
+`Timing.repeat.extension` under
+`urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock`.
+Read each matching extension's `valueTime`; `_valueTime` holds its optional
+primitive metadata. Do not rely only on `repeat.timeOfDay` to recover clocks
+from a mixed R5 schedule.
+
+```json
+{
+  "repeat": {
+    "when": ["C"],
+    "extension": [{
+      "url": "urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock",
+      "valueTime": "10:00:00"
+    }]
+  }
+}
+```
+
+### Internal native clinical model (unstable)
+
+**INTERNAL USE ONLY — NOT A BACKWARD-COMPATIBLE API OR PERSISTENCE FORMAT.**
+`CanonicalCourse`, `CanonicalStage`, `CanonicalAdministration`, their
+nested clinical types, `meta.canonical`, and the native
+import/project/format helpers are implementation surfaces for EZMED
+development. **Their structures, identities, field names, invariants, and
+function signatures may be changed or removed at any time without
+deprecation, migration, compatibility adapters, or support for earlier
+internal shapes.** This remains true even where TypeScript types or helper
+functions are currently exported from the package. Do not persist these
+objects, build downstream integrations against them, or assume one version
+can load another version's internal model.
+
+**Only the documented external interchange contracts are compatibility
+boundaries:** `.fhir` and the established R5 editing/persistence APIs
+remain R5; `.fhirNext` and `fromFhir` use the *current supported* R6
+structure, not obsolete R6 drafts. The internal model is deliberately free
+to evolve for maximum clinical expressiveness, performance, and
+maintainability; no old internal representation must be retained.
+
+Native courses are parser implementation data. EZMED does not expose a native
+editing workflow. Parser and projection outputs, including borrowed provider
+listings, are immutable by caller contract; ordinary imports do not deep-clone
+or freeze them defensively. Instruction action and concept vocabulary lookups
+and listings also return borrowed immutable definitions.
+Applications that modify external R5 or current R6 data pass those values back
+through the corresponding import boundary. Native scheduling, formatting, and
+supply consume clinical facts directly; the R5 reconciliation bridge is confined
+to R5 persistence and interchange.
 
 ### PRN reasons & additional instructions
 
@@ -237,6 +339,79 @@ Highlights:
 - `npm run bench:suggest` reports latency, throughput, and retained/peak memory
   without imposing timing-sensitive test thresholds.
 
+
+## Extending course realization to another language
+
+**Internal extension example:** the native course-realization facet and its
+clinical-model inputs are not a versioned third-party plugin contract.
+They may be restructured along with the internal model, without preserving
+previous facet shapes. Future language packs should depend on language
+boundaries and shared clinical semantics rather than pinning a historic
+`CanonicalCourse` layout.
+
+Whole-course wording is a typed optional `course` facet on the existing
+`SigLocalization` registration. It complements the same `formatShort` and
+`formatLong` clause hooks—there is no separate registry or second parser.
+
+The `formatLong` callback receives the complete clause, `defaultText`, and
+`formatDefault(style)`. Its returned string is the final clause wording: custom
+formatters may wrap or replace the whole clause and are responsible for that
+wording. Defaults use the resolved locale and include the clause's native timing
+qualifiers, authored directions, and independent advice. Built-in defaults compose
+medication conditions and independent advice from typed facts.
+
+```ts
+import {
+  importCanonicalCourse,
+  FhirPeriodUnit,
+  registerSigLocalization,
+  resolveSigLocalization,
+  formatCanonicalCourse,
+} from "ezmedicationinput";
+
+const english = resolveSigLocalization("en")!;
+registerSigLocalization({
+  locale: "example",
+  formatShort: ({ defaultText }) => defaultText,
+  formatLong: ({ defaultText }) => defaultText,
+  course: {
+    ...english.course!,
+    dayRange: (first, last) => `Jours ${first}–${last}`,
+    noDoseDays: (first, last) => `Pause ${first}–${last}.`,
+    rateLabel: "Débit: ",
+    unspecified: "non spécifié",
+  },
+});
+
+// An explicit treatment-day window uses both clause and course wording.
+const treatmentDayStart = { coding: [{
+  system: "urn:ezmedicationinput:CodeSystem:course-phase-event", code: "treatment-day-start",
+}] };
+const nativeCourse = importCanonicalCourse({ step: [{
+  start: { contextCode: treatmentDayStart, offsetDuration: { value: 0, unit: "d" } },
+  end: { contextCode: treatmentDayStart, offsetDuration: { value: 3, unit: "d" } },
+  component: [{
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+    timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+  }],
+}] });
+const text = formatCanonicalCourse(nativeCourse, "long", {
+  locale: "example", realizationMode: "normalized",
+});
+// text includes "Jours 1–3" from the registered course.dayRange callback.
+```
+
+A full language implementation supplies its own clause hooks and course facet;
+the example deliberately inherits the other English strings. Course templates
+receive resolved counts, intervals, unit codes, predicates and stage windows.
+They do not change clinical scope, calculate dates, choose a treatment branch,
+or reinterpret dose numbers. `i18n.inherit`/`i18n.course` can inherit or override
+the facet using the existing per-call configuration.
+
+Adding course wording alone does **not** add parsing or autocomplete in that
+language. Lexer, relation/action terminology and suggestion registrations keep
+their existing roles. This boundary lets a future language-pack installer group
+those registrations without changing the shared clinical engine.
 
 ## Formal HPSG substrate
 
@@ -786,22 +961,35 @@ Key rules:
 - Pure frequency schedules (`BID`, `TID`, etc.) fall back to clinic-defined institution times.
 - All timestamps are emitted as ISO strings that include the clinic time-zone offset.
 
+Timezone-aware scheduling and supply require `Intl.DateTimeFormat.prototype.formatToParts` and support for the requested IANA time zone.
+
 `from` is required and marks the evaluation window. `orderedAt` is optional—when supplied it acts as the baseline for interval calculations; otherwise the `from` timestamp is reused. The options bag also accepts `timeZone`, `eventClock`, `mealOffsets`, and `frequencyDefaults` at the top level (mirroring the legacy `config` object). `limit` defaults to 10 when omitted.
 
 ### Medication amount calculation
 
-`calculateTotalUnits` computes the total amount of medication (and optionally the number of containers) required for a specific duration. It accounts for complex schedules, dose ranges (using the high value), and unit conversions between doses and containers.
+`calculateTotalUnits` computes the total amount of medication (and optionally the number of containers) required for a specific duration. It accounts for complex schedules, dose ranges, and unit conversions between doses and containers. A range uses its upper quantity where feasible; interacting quantity and administration-count limits are considered together. For example, 1.5–2 tablets, at most once per day, with a three-tablet limit over 48 hours permits three tablets across two days as 1.5 + 1.5.
+
+Ranged supply with interacting limits uses a bounded exact calculation.
+Successful calls return a `TotalUnitsResult`. When the calculation cannot provide
+an exact attainable maximum, it throws `MedicationQuantityCalculationError`;
+catch the exception and inspect its `code`. For `ranged-capacity-complexity`,
+use a shorter supply window or supply a resolved per-administration quantity.
+For `ranged-capacity-open-maximum`, a strict range has a finite supremum but
+no attainable maximum; the prescriber can resolve the dose or provide a closed
+range before requesting a numeric maximum. These exceptions affect supply
+calculation only. The structured instruction and source remain available for
+parsing, display, persistence, and correction.
 
 ```ts
-import { calculateTotalUnits, parseSig } from "ezmedicationinput";
+import { calculateTotalUnits, parseSig, FhirPeriodUnit } from "ezmedicationinput";
 
-const { fhir } = parseSig("1x3 po pc");
+const { fhir } = parseSig("1 tab PO TID after meals");
 
 const result = calculateTotalUnits({
   dosage: fhir,
   from: "2024-01-01T08:00:00Z",
   durationValue: 7,
-  durationUnit: "d",
+  durationUnit: FhirPeriodUnit.Day,
   timeZone: "Asia/Bangkok",
   context: {
     containerValue: 30, // 30 tabs per bottle
@@ -823,7 +1011,7 @@ calculateTotalUnits({
   dosage: parsed.fhir,
   from: "2024-01-01T08:00:00Z",
   durationValue: 7,
-  durationUnit: "d",
+  durationUnit: FhirPeriodUnit.Day,
   timeZone: "Asia/Bangkok"
 });
 
@@ -858,16 +1046,19 @@ parseStrength("1%", { dosageForm: "cream" });
 parseStrength("250mg/5mL");
 // → { strengthRatio: { numerator: { value: 250, unit: "mg" }, denominator: { value: 5, unit: "mL" } } }
 
-// Composite (sums components into a single ratio)
+// Composite (preserves each ingredient separately)
 parseStrength("875mg + 125mg");
-// → { strengthQuantity: { value: 1000, unit: "mg" } }
+// → { strengthComponents: [
+//     { strengthQuantity: { value: 875, unit: "mg" } },
+//     { strengthQuantity: { value: 125, unit: "mg" } }
+//   ] }
 
 // Simple Quantity
 parseStrength("500mg");
 // → { strengthQuantity: { value: 500, unit: "mg" } }
 ```
 
-`parseStrengthIntoRatio` is also available if you specifically need a FHIR Ratio object regardless of the denominator.
+`parseStrengthIntoRatio` is also available when you need a FHIR Ratio for one ingredient; it returns `null` for composite strengths.
 
 ### Ocular & intravitreal shortcuts
 

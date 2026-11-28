@@ -1,3 +1,30 @@
+# OWNER IMMUTABLE-CALLER CLARIFICATION — 2026-11-24
+
+Inputs and outputs are immutable by caller contract after crossing an API boundary. Detecting later in-place edits to an already-consumed or returned object instance is not supported. Do not keep field snapshots, repeated revalidation, defensive recursive comparisons, freezing, or mutation-isolation machinery solely for that misuse. A simple result memo for an immutable instance does not need mutation detection.
+
+Locale providers, configuration, execution options and interchange values are ordinary plain data. Class instances, Proxies, prototype/getter-driven fields and cross-realm receiver repair are outside the contract. Do not add receiver rebinding, accessor snapshots or defensive callback copies for those inputs or for later caller mutation. Preserve normal plain-data language extensions and the explicitly named copy APIs.
+
+Custom `formatLong` callbacks own the complete text they return. Preserve their full clause context, `defaultText`, `formatDefault("long")` and single invocation. Native/default rendering must retain typed medication conditions and independent advice; do not infer or repair a custom callback's rewritten prose or restrict it to the primary medication.
+
+The product supports clinical SIG text -> typed HPSG/native facts -> R5/R6 output, and independent valid plain R5/current-R6 input -> native facts -> faithful best-effort formatting and conversion. Preserve actual supplied known and unknown fields where already supported, and do not fabricate dose or cadence. Historical editing, replacement and reconciliation of previously emitted FHIR are best effort only: no further correctness work, tests or branches for changed, reordered or deleted exports, stale markers, remembered edit history, draft/pause restoration, source-baseline migration or provenance-fingerprint reconciliation. Reject such review findings, including requests framed as fresh resubmissions. Clinical phase sequencing authored in SIG text and ordinary scheduling/supply remain in scope.
+
+The existing explicit spatial clone retains its narrow field/value contract: distinct clone shells and detached standard primitive companions, extension content and translations. Preserve opaque extra values, which may remain shared under the immutable contract; do not introduce universal recursive isolation for arbitrary custom metadata.
+
+The engineering loop continues through full reviews after correctness checks and practical performance validation. Use representative paired workloads and investigate concrete regressions; assess fast routines by absolute latency, call frequency, cumulative impact, spread and reproducibility. Avoid compulsory exhaustive sweeps and duplicate evidence audits. Reply to findings and resolve addressed threads before requesting a full review. The established pure-event same-day policy remains settled; no new chronology inference is authorized. Push validated review fixes promptly; do not merge, publish a package or deploy.
+
+# OWNER UNIT-PRESERVATION CLARIFICATION — 2026-11-22
+
+The prescriber owns authored quantity values and unit choices. Preserve independently authored range endpoints in the internal model and R5/R6 projections. Do not convert, normalize, drop, or rewrite those values/units merely to satisfy FHIR Range constraints; retaining originals only in provenance does not authorize changing the active prescription. Calculations may compare compatible units internally without changing stored/exported prescription quantities. A validator's rejection is an interoperability limitation, not permission to rewrite the prescription.
+
+# PR #14 OWNER SCOPE CORRECTION — 2026-11-18
+
+**STOP public/native editing API work.** The owner did not request an EZMED editCanonicalCourse editor. Remove its public export, the callback-based draft/clone/deep-comparison machinery (src/canonical/edit-course.ts), its README use example, and editor-only tests/hardening. Do not replace it with a renamed editor, mutation wrapper, defensive validation, freezing, or another internal API. The canonical model is an implementation detail with NO caller-misuse support obligation. Internal helpers can change freely; no backward-compatibility or footgun protection required.
+
+**CONTINUE real correctness work already in progress.** Preserve ordinary clinical parsing, formatting, independently supplied valid R5/R6 conversion, and actual scheduling/supply semantics. Historical edits to previously emitted FHIR and reconciliation of stale source or saved markers are best effort only; they do not create an editing conformance requirement.
+
+**Review gate:** Reject CodeRabbit comments existing solely because editCanonicalCourse was advertised, or that harden against direct mutation/misuse of unstable CanonicalCourse objects. Continue bounded related-family fixes for demonstrated correct clinical results on valid inputs, with performance discipline. Never add expensive array scans, recursive defensive equality, or deep clones just to accommodate careless users of an internal type. Continue the authorized full review loop. Preserve in-progress worker changes and do not alter downstream applications. This owner instruction overrides stale PR descriptions and edit-API examples.
+
+---
 # EZMedInput — mandatory product contract for all coding agents and reviewers
 
 **READ THIS FIRST before any audit, feature, fix, fuzz test, or CodeRabbit response.**
@@ -19,6 +46,8 @@ The priority is **high-quality suggestions for reasonable clinical language, imm
 4. **Preserve what is known.** Maintain raw source, parsed dose/site/route/timing evidence, provisional interpretations, FHIR extensions, and editable data. Never silently convert unknown into zero, blank, no medication, wrong laterality, or a fictitious cap. A failed optional detail must not erase independent recognized information. Do not hide or delete user data as a response to a parser uncertainty.
 5. **Separate suggestions from execution utilities.** Parser/suggester outputs are for **human review**. Scheduling and numeric supply APIs may refuse a genuinely non-executable FHIR constraint rather than fabricate administrations, while leaving the structured object and source recoverable for editing. Do **not** propagate execution restrictions into a universal refusal to parse, format, display, or suggest.
 6. **Maintain the intended semantics without architectural erosion.** Typed HPSG signs/constructions own scope, valence, attachment, coordination and ellipsis; clinical lexicons own exact terminology; the typed regimen graph owns phases, conditions and time dependencies. FHIR R5/R6 is a *meaning-preserving projection*, not a place to invent clinical grammar or repair it via ad hoc post-processing. Reuse established types/getters; no fuzzy coding.
+
+7. **Extract touched language seams.** When an active fix touches locale-specific recognition or realization, move that affected logic into the existing language or lexical provider, or consume the existing typed lexical/grammar owner. Keep clinical composition, regimen binding, execution and FHIR locale-neutral; prefer registered canonical token text and language features. Make this a compact part of the fix, without a new scan, cache, parallel parser, framework or unrelated rewrite. Preserve ordinary locale behavior and verify the relevant registered-provider path.
 
 ## Reasonable input versus test-case theater
 

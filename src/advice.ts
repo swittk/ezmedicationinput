@@ -1,6 +1,7 @@
 import adviceTerminologySource from "./advice-terminology.json";
 import adviceRulesSource from "./advice-rules.json";
 import { lexInput } from "./lexer/lex";
+import type { LexToken } from "./lexer/token-types";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import {
   AdditionalInstructionDefinition,
@@ -15,13 +16,14 @@ import {
   TextRange
 } from "./types";
 import { normalizeLoosePhraseKey } from "./utils/text";
+import { equalStructuredValues } from "./stable-structure";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { resolveMedicationInstructionAction } from "./instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "./instruction-concept-terminology";
 import { composeLocalizedRecords, localizedValue } from "./localization";
 import { getAdviceLocaleAdapter } from "./advice-locale-adapter";
 import { joinLocalizedTokens } from "./locale-realization";
-import { ACTION_COORDINATION_CONNECTOR_I18N } from "./hpsg/lexical-classes";
+import { ACTION_COORDINATION_CONNECTOR_I18N, INSTRUCTION_NOMINAL_ARTICLES } from "./hpsg/lexical-classes";
 import {
   ACTION_SEQUENCE_MARKERS,
   localizeAdviceRelation,
@@ -31,6 +33,116 @@ import {
 } from "./relation-terminology";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
+
+/** Directed clinical Coding identity; presentation and Element annotations stay on their owner. */
+export function preservesAdviceCoding(selected: FhirCoding | undefined, actual: FhirCoding | undefined): boolean {
+  if (!selected) return true;
+  if (!actual) return !selected.code && !selected.system && !selected.version;
+  const system = selected.system || (selected.code ? SNOMED_SYSTEM : undefined);
+  return (!selected.code || selected.code === actual.code) &&
+    (!system || system === (actual.system || SNOMED_SYSTEM)) &&
+    (!selected.version || selected.version === actual.version);
+}
+
+export function preservesAdviceCodings(
+  selected: readonly FhirCoding[] | undefined,
+  actual: readonly FhirCoding[] | undefined
+): boolean {
+  if (!selected?.length) return true;
+  return Boolean(actual && selected.length <= actual.length &&
+    selected.every((coding, index) => preservesAdviceCoding(coding, actual[index])));
+}
+
+export function preservesAdviceComponents(
+  selected: readonly { role: string; text?: string; coding?: FhirCoding }[] | undefined,
+  actual: readonly { role: string; text?: string; coding?: FhirCoding }[] | undefined
+): boolean {
+  if (!selected?.length) return true;
+  return Boolean(actual && selected.length <= actual.length && selected.every((component, index) =>
+    component.role === actual[index].role &&
+    (component.text === undefined || component.text === actual[index].text) &&
+    preservesAdviceCoding(component.coding, actual[index].coding)));
+}
+
+function preservesAdviceTranslations(
+  selected: Record<string, string> | undefined,
+  actual: Record<string, string> | undefined
+): boolean {
+  if (selected) for (const locale in selected) {
+    if (selected[locale] !== actual?.[locale]) return false;
+  }
+  return true;
+}
+
+/** Text, source spans and retained Element annotations are not typed argument facts. */
+export function hasAdviceArgumentFacts(argument: AdviceArgument): boolean {
+  return Boolean(argument.conceptId !== undefined || argument.relation !== undefined ||
+    argument.administrationTargetCount !== undefined || argument.quantity || argument.coding ||
+    argument.codings?.length || argument.components?.length || argument.i18n || argument.sourceRelationCoding);
+}
+
+export function preservesAdviceArgumentFacts(selected: AdviceArgument, actual: AdviceArgument): boolean {
+  if (selected.role !== actual.role ||
+      selected.relation !== undefined && selected.relation !== actual.relation ||
+      selected.conceptId !== undefined && selected.conceptId !== actual.conceptId ||
+      selected.administrationTargetCount !== undefined &&
+        selected.administrationTargetCount !== actual.administrationTargetCount ||
+      !preservesAdviceCoding(selected.coding, actual.coding) ||
+      !preservesAdviceCodings(selected.codings, actual.codings) ||
+      !preservesAdviceCoding(selected.sourceRelationCoding, actual.sourceRelationCoding) ||
+      !preservesAdviceComponents(selected.components, actual.components) ||
+      !preservesAdviceTranslations(selected.i18n, actual.i18n)) return false;
+  const quantity = selected.quantity;
+  if (!quantity) return true;
+  const candidate = actual.quantity;
+  return Boolean(candidate &&
+    (quantity.value === undefined || quantity.value === candidate.value) &&
+    (quantity.unit === undefined || quantity.unit === candidate.unit) &&
+    (quantity.comparator === undefined || quantity.comparator === candidate.comparator) &&
+    (quantity.range?.low === undefined || quantity.range.low === candidate.range?.low) &&
+    (quantity.range?.high === undefined || quantity.range.high === candidate.range?.high));
+}
+
+/**
+ * Preserve selected typed facts while a caller licenses the same occurrence/head.
+ * Source/value correspondence and provisional opaque valence remain caller-owned.
+ */
+export function preservesAdviceFrameFacts(selected: AdviceFrame, actual: AdviceFrame): boolean {
+  const predicate = selected.predicate;
+  const candidate = actual.predicate;
+  if ((selected.polarity ?? AdvicePolarity.Affirm) !== (actual.polarity ?? AdvicePolarity.Affirm) ||
+      selected.force !== actual.force &&
+        !(selected.force === AdviceForce.Instruction && actual.force === AdviceForce.Sequence) ||
+      selected.modality !== undefined && selected.modality !== actual.modality ||
+      selected.relation !== undefined && selected.relation !== actual.relation ||
+      selected.polaritySource !== undefined && selected.polaritySource !== actual.polaritySource ||
+      predicate.semanticClass !== undefined && predicate.semanticClass !== candidate.semanticClass ||
+      predicate.display !== undefined && predicate.display !== candidate.display ||
+      predicate.realizer !== undefined && predicate.realizer !== candidate.realizer ||
+      predicate.realizerConfig !== undefined && !equalStructuredValues(predicate.realizerConfig, candidate.realizerConfig) ||
+      !preservesAdviceTranslations(predicate.i18n, candidate.i18n) ||
+      !preservesAdviceCodings(predicate.codings, candidate.codings) ||
+      !preservesAdviceComponents(predicate.semanticComponents, candidate.semanticComponents) ||
+      !preservesAdviceCoding(selected.coding, actual.coding) ||
+      !preservesAdviceCoding(selected.sourceRelationCoding, actual.sourceRelationCoding)) return false;
+  for (let index = 0; index < selected.args.length; index += 1) {
+    const argument = selected.args[index];
+    if (!hasAdviceArgumentFacts(argument)) continue;
+    let ordinal = 0;
+    for (let prior = 0; prior < index; prior += 1) {
+      if (selected.args[prior].role === argument.role) ordinal += 1;
+    }
+    let matched = false;
+    for (const value of actual.args) {
+      if (value.role !== argument.role) continue;
+      if (ordinal-- !== 0) continue;
+      matched = preservesAdviceArgumentFacts(argument, value);
+      break;
+    }
+    if (!matched) return false;
+  }
+  return true;
+}
 
 interface AdviceLexemeEntry {
   surface: string;
@@ -83,6 +195,7 @@ interface AdviceFrameTemplateArgument {
 interface AdviceFrameTemplate {
   force: AdviceForce;
   polarity?: AdvicePolarity;
+  modality?: AdviceModality;
   predicate: {
     lemma: string;
     semanticClass?: string;
@@ -109,6 +222,7 @@ interface AdviceFrameTemplateArgumentSource {
 interface AdviceFrameTemplateSource {
   force: string;
   polarity?: string;
+  modality?: string;
   predicate: {
     lemma: string;
     semanticClass?: string;
@@ -127,19 +241,25 @@ interface AdviceArgConceptMatcher {
 interface AdviceFrameMatcher {
   predicateLemmas?: string[];
   predicateSemanticClasses?: string[];
-  relations?: AdviceRelation[];
+  /** null requires no selected relation; omitted accepts either. */
+  relations?: AdviceRelation[] | null;
   force?: AdviceForce;
   polarity?: AdvicePolarity;
+  /** null requires an unmodal frame; an omitted constraint accepts either. */
+  modality?: AdviceModality | null;
   argConcepts?: AdviceArgConceptMatcher[];
+  argLiterals?: { roles: AdviceArgumentRole[]; value: string }[];
 }
 
 interface AdviceFrameMatcherSource {
   predicateLemmas?: string[];
   predicateSemanticClasses?: string[];
-  relations?: string[];
+  relations?: string[] | null;
   force?: string;
   polarity?: string;
+  modality?: string | null;
   argConcepts?: AdviceArgConceptMatcherSource[];
+  argLiterals?: { roles: string[]; value: string }[];
 }
 
 interface AdviceArgConceptMatcherSource {
@@ -289,6 +409,7 @@ const EMBEDDED_AVOIDANCE_TRIGGER_CONCEPT_IDS = new Set(
 const LEXEMES_BY_SURFACE: Record<string, AdviceLexemeEntry[]> = Object.create(null);
 const CONCEPTS_BY_SURFACE: Record<string, AdviceConceptEntry[]> = Object.create(null);
 const CONCEPT_KEYS_BY_ID: Record<string, string[]> = Object.create(null);
+const COMPOUND_CONCEPTS_BY_LAST_WORD: Record<string, Array<{ parts: string[]; surface: string }>> = Object.create(null);
 const LEXEME_LIST: AdviceLexemeEntry[] = [];
 const CONCEPT_LIST: AdviceConceptEntry[] = [];
 let MAX_LEXEME_WORDS = 1;
@@ -383,6 +504,14 @@ for (const entry of ADVICE_TERMINOLOGY.concepts) {
   if (wordCount > MAX_CONCEPT_WORDS) {
     MAX_CONCEPT_WORDS = wordCount;
   }
+  if (wordCount > 1) {
+    const parts = surfaceKey.split(" ");
+    const last = parts[parts.length - 1];
+    (COMPOUND_CONCEPTS_BY_LAST_WORD[last] ??= []).push({ parts, surface: surfaceKey });
+  }
+}
+for (const last of Object.keys(COMPOUND_CONCEPTS_BY_LAST_WORD)) {
+  COMPOUND_CONCEPTS_BY_LAST_WORD[last].sort((left, right) => right.parts.length - left.parts.length);
 }
 
 function collapseWhitespace(value: string): string {
@@ -476,6 +605,7 @@ function buildAdviceFrameTemplate(source: AdviceFrameTemplateSource): AdviceFram
   return {
     force: mapAdviceForce(source.force),
     polarity: mapAdvicePolarity(source.polarity),
+    modality: source.modality ? requiredEnumValue<AdviceModality>(AdviceModality, source.modality, "advice modality") : undefined,
     predicate: {
       lemma: source.predicate.lemma,
       semanticClass: source.predicate.semanticClass
@@ -517,10 +647,13 @@ function buildAdviceFrameMatcher(source: AdviceFrameMatcherSource): AdviceFrameM
     predicateSemanticClasses: source.predicateSemanticClasses
       ? source.predicateSemanticClasses.slice()
       : undefined,
-    relations: relations.length ? relations : undefined,
+    relations: source.relations === null ? null : relations.length ? relations : undefined,
     force: source.force ? mapAdviceForce(source.force) : undefined,
     polarity: mapAdvicePolarity(source.polarity),
-    argConcepts: argConcepts.length ? argConcepts : undefined
+    modality: source.modality === null ? null
+      : source.modality ? requiredEnumValue<AdviceModality>(AdviceModality, source.modality, "advice modality") : undefined,
+    argConcepts: argConcepts.length ? argConcepts : undefined,
+    argLiterals: source.argLiterals?.map(argument => ({ roles: argument.roles.map(mapAdviceArgumentRole), value: argument.value }))
   };
 }
 
@@ -611,6 +744,12 @@ function frameMatches(frame: AdviceFrame, matcher: AdviceFrameMatcher): boolean 
   )) {
     return false;
   }
+  if (matcher.modality !== undefined && frame.modality !== (matcher.modality ?? undefined)) return false;
+  for (const literal of matcher.argLiterals ?? []) {
+    if (!frame.args.some(argument => literal.roles.indexOf(argument.role) >= 0 &&
+        (argument.normalized ?? argument.text) === literal.value)) return false;
+  }
+  if (matcher.relations === null && (frame.relation || frame.args.some(argument => argument.relation))) return false;
   if (matcher.relations) {
     let relationMatched = false;
     for (const relation of matcher.relations) {
@@ -718,19 +857,18 @@ function framesShareMaterialReferent(
   });
 }
 
-/** Validate shared-reference constraints declared on the existing matcher. */
+/** Select the actual witness for shared-reference constraints. */
 function matchingFramesShareReferent(
-  frames: AdviceFrame[],
+  frames: readonly AdviceFrame[],
   members: readonly AdviceMatcher[]
-): boolean {
+): AdviceFrame[] | undefined {
   const frameMatchers = members.filter(
     (item): item is AdviceMatcherFrame => "frame" in item
   );
-  if (frameMatchers.length < 2) return true;
   const options = frameMatchers.map((item) =>
     frames.filter((frame) => frameMatches(frame, item.frame))
   );
-  if (options.some((matches) => !matches.length)) return false;
+  if (options.some((matches) => !matches.length)) return undefined;
   const selected: AdviceFrame[] = [];
   const select = (index: number): boolean => {
     if (index === options.length) return true;
@@ -744,54 +882,59 @@ function matchingFramesShareReferent(
     }
     return false;
   };
-  return select(0);
+  return select(0) ? selected : undefined;
 }
 
 function matchesAdviceMatcher(
-  frames: AdviceFrame[],
+  frames: readonly AdviceFrame[],
   normalizedText: string,
-  matcher: AdviceMatcher
+  matcher: AdviceMatcher,
+  supporting?: AdviceFrame[]
 ): boolean {
   if ("allOf" in matcher) {
+    const initialLength = supporting?.length ?? 0;
     for (const item of matcher.allOf) {
-      if (!matchesAdviceMatcher(frames, normalizedText, item)) {
+      // Direct frame daughters are selected together below, retaining the
+      // exact shared-reference witness rather than all independent matches.
+      if (matcher.sharedReferent && "frame" in item) continue;
+      if (!matchesAdviceMatcher(frames, normalizedText, item, supporting)) {
+        if (supporting) supporting.length = initialLength;
         return false;
       }
     }
-    return !matcher.sharedReferent ||
-      matchingFramesShareReferent(frames, matcher.allOf);
+    if (matcher.sharedReferent) {
+      const selected = matchingFramesShareReferent(frames, matcher.allOf);
+      if (!selected) {
+        if (supporting) supporting.length = initialLength;
+        return false;
+      }
+      supporting?.push(...selected);
+    }
+    return true;
   }
   if ("anyOf" in matcher) {
     for (const item of matcher.anyOf) {
-      if (matchesAdviceMatcher(frames, normalizedText, item)) {
-        return true;
-      }
+      if (matchesAdviceMatcher(frames, normalizedText, item, supporting)) return true;
     }
     return false;
   }
   if ("not" in matcher) {
+    // A negative guard licenses the rule but never suppresses an actual action.
     return !matchesAdviceMatcher(frames, normalizedText, matcher.not);
   }
-  if ("frame" in matcher) {
+  if ("frame" in matcher || "argConcept" in matcher) {
+    let found = false;
     for (const frame of frames) {
-      if (frameMatches(frame, matcher.frame)) {
-        return true;
+      if ("frame" in matcher ? frameMatches(frame, matcher.frame) : frameHasArgConcept(frame, matcher.argConcept)) {
+        if (!supporting) return true;
+        supporting.push(frame);
+        found = true;
       }
     }
-    return false;
-  }
-  if ("argConcept" in matcher) {
-    for (const frame of frames) {
-      if (frameHasArgConcept(frame, matcher.argConcept)) {
-        return true;
-      }
-    }
-    return false;
+    return found;
   }
   for (const value of matcher.normalizedTexts) {
-    if (normalizedText === value) {
-      return true;
-    }
+    if (normalizedText === value) return true;
   }
   return false;
 }
@@ -815,7 +958,7 @@ export function matchComposedAdviceCodings(
   if (!frames.length) return [];
   return ADDITIONAL_INSTRUCTION_RULES
     .filter((rule) => adviceMatcherRequiresComposedFrames(rule.matcher) &&
-      matchesAdviceMatcher([...frames], "", rule.matcher))
+      matchesAdviceMatcher(frames, "", rule.matcher))
     .map((rule) => ({
       ...rule.definition,
       coding: rule.definition.coding ? { ...rule.definition.coding } : undefined,
@@ -859,45 +1002,21 @@ function findRuleByCoding(system: string, code: string): AdviceCodingRule | unde
   return undefined;
 }
 
-function supportingFramesForMatcher(
-  frames: readonly AdviceFrame[],
-  matcher: AdviceMatcher
-): AdviceFrame[] {
-  if ("frame" in matcher) return frames.filter((frame) => frameMatches(frame, matcher.frame));
-  if ("argConcept" in matcher) return frames.filter((frame) => frameHasArgConcept(frame, matcher.argConcept));
-  if ("anyOf" in matcher) {
-    const branch = matcher.anyOf.find((item) => matchesAdviceMatcher([...frames], "", item));
-    return branch ? supportingFramesForMatcher(frames, branch) : [];
-  }
-  if ("allOf" in matcher) {
-    if (!matchesAdviceMatcher([...frames], "", matcher)) return [];
-    const supporting: AdviceFrame[] = [];
-    for (const item of matcher.allOf) {
-      supporting.push(...supportingFramesForMatcher(frames, item));
-    }
-    return supporting;
-  }
-  // Negated and text-only guards never justify suppressing an actual action.
-  return [];
-}
-
 /**
- * Standardized coded warnings retain their clinical wording when precisely
- * one composed action entails that warning. Return its original action source
- * for exclusion from a DUPLICATE realization; neither action nor code is lost.
+ * Retain the existing coding matcher's exact supporting action objects for
+ * occurrence-aware realization. Clinical coding and wording remain with their
+ * existing owners; no action identity is reconstructed from rendered text.
  */
-export function composedCodedWarningActionSources(
+export function composedCodedAdviceActions(
   frames: readonly AdviceFrame[],
   coding: Pick<FhirCoding, "system" | "code"> | undefined
-): string[] {
+): AdviceFrame[] {
   if (!coding?.code) return [];
   const rule = findRuleByCoding(coding.system ?? SNOMED_SYSTEM, coding.code);
-  if (!rule?.frames.some((frame) => frame.force === AdviceForce.Warning) ||
-      !matchesAdviceMatcher([...frames], "", rule.matcher)) return [];
-  const supporting = supportingFramesForMatcher(frames, rule.matcher);
-  // Multiple possibly distinct warnings must remain individually visible.
-  return supporting.length === 1 && supporting[0].sourceText
-    ? [supporting[0].sourceText] : [];
+  if (!rule) return [];
+  const supporting: AdviceFrame[] = [];
+  if (!matchesAdviceMatcher(frames, "", rule.matcher, supporting)) return [];
+  return supporting.filter((frame, index) => supporting.indexOf(frame) === index);
 }
 
 function createArgument(
@@ -971,7 +1090,8 @@ function instantiateTemplateFrames(
         args,
         index,
         template.relation,
-        template.polarity
+        template.polarity,
+        template.modality
       )
     );
     index += 1;
@@ -1005,6 +1125,8 @@ export function resolveAdviceMannerModifier(surface: string):
 }
 
 function findContainedConcept(normalized: string): AdviceConceptEntry | undefined {
+  const exact = findExactConcept(normalized);
+  if (exact) return exact;
   let best: AdviceConceptEntry | undefined;
   let bestLength = 0;
   for (const entry of CONCEPT_LIST) {
@@ -1162,9 +1284,69 @@ function mapSemanticClassToRole(semanticClass: string | undefined): AdviceArgume
   return enumValue<AdviceArgumentRole>(AdviceArgumentRole, configured) ?? AdviceArgumentRole.Object;
 }
 
+function withoutNominalArticle(text: string): string {
+  const end = text.indexOf(" ");
+  return end > 0 && INSTRUCTION_NOMINAL_ARTICLES.has(text.slice(0, end).toLowerCase())
+    ? text.slice(end + 1).trim() : text;
+}
+
+function symptomAdviceArgument(normalized: string, sourceText: string): AdviceArgument | undefined {
+  const symptom = resolveSymptomDefinition(normalized);
+  if (symptom) {
+    const coding = symptom.coding ? { ...symptom.coding } : undefined;
+    return {
+      role: AdviceArgumentRole.Object,
+      text: sourceText,
+      normalized: symptom.text?.toLowerCase() ?? normalized,
+      conceptId: coding?.code ?? symptom.text ?? normalized,
+      coding,
+      codings: coding ? [coding] : undefined,
+      i18n: {
+        en: symptom.text ? symptom.text.charAt(0).toLowerCase() + symptom.text.slice(1) : sourceText,
+        ...(symptom.i18n ?? {})
+      }
+    };
+  }
+  return undefined;
+}
+
+/** Exact advice nominals share their existing lexical identity with action arguments. */
+export function resolveAdviceNominalArgument(surface: string, sourceText = surface): AdviceArgument | undefined {
+  const normalized = normalizeAdditionalInstructionKey(surface);
+  const concept = findExactConcept(withoutNominalArticle(normalized));
+  if (concept) {
+    if (STYLE_SEMANTIC_CLASSES.has(concept.semanticClass ?? "")) return undefined;
+    return createArgument(mapSemanticClassToRole(concept.semanticClass),
+      sourceText, normalized, concept.conceptId);
+  }
+  return symptomAdviceArgument(normalized, sourceText);
+}
+
+
+/** A complete compound nominal retains its lexical owner when its final word
+ * also names a generic event. Only declared compounds ending at that word are checked. */
+export function resolveCompoundAdviceNominalEndingAt(
+  tokens: readonly Pick<LexToken, "canonical" | "lower">[], endExclusive: number
+): { start: number; argument: AdviceArgument } | undefined {
+  const last = tokens[endExclusive - 1];
+  const candidates = last && COMPOUND_CONCEPTS_BY_LAST_WORD[last.canonical ?? last.lower];
+  if (!candidates) return undefined;
+  for (const candidate of candidates) {
+    const start = endExclusive - candidate.parts.length;
+    if (start < 0) continue;
+    let index = 0;
+    while (index < candidate.parts.length &&
+      (tokens[start + index].canonical ?? tokens[start + index].lower) === candidate.parts[index]) index++;
+    if (index !== candidate.parts.length) continue;
+    const argument = resolveAdviceNominalArgument(candidate.surface);
+    if (argument) return { start, argument };
+  }
+  return undefined;
+}
+
 function bodySiteAdviceArgument(text: string): AdviceArgument | undefined {
   const cleaned = cleanFreeText(text);
-  const withoutArticle = cleaned.replace(/^(?:the|a|an)\s+/iu, "").trim();
+  const withoutArticle = withoutNominalArticle(cleaned);
   const resolveOne = (value: string) => resolveBodySitePhrase(value, undefined, {
     allowTerminalModifierInheritance: true
   });
@@ -1183,8 +1365,8 @@ function bodySiteAdviceArgument(text: string): AdviceArgument | undefined {
   }
   const match = withoutArticle.match(/^(.+?)\s+(and|or)\s+(.+)$/iu);
   if (!match) return undefined;
-  const left = resolveOne(match[1].replace(/^(?:the|a|an)\s+/iu, "").trim());
-  const right = resolveOne(match[3].replace(/^(?:the|a|an)\s+/iu, "").trim());
+  const left = resolveOne(withoutNominalArticle(match[1]));
+  const right = resolveOne(withoutNominalArticle(match[3]));
   if (!(left?.coding || left?.definition) || !(right?.coding || right?.definition)) return undefined;
   const connector = match[2].toLowerCase();
   const leftI18n = left.definition?.i18n ?? left.coding?.i18n;
@@ -1202,7 +1384,7 @@ function bodySiteAdviceArgument(text: string): AdviceArgument | undefined {
   };
 }
 
-function classifyArgument(text: string): AdviceArgument {
+function classifyArgument(text: string, completeNominal = false): AdviceArgument {
   const cleaned = cleanFreeText(text);
   const normalized = normalizeAdditionalInstructionKey(cleaned);
   if (!normalized) {
@@ -1212,9 +1394,10 @@ function classifyArgument(text: string): AdviceArgument {
   // The main typed argument vocabulary owns exact clinical material
   // compounds, including qualitative quantity. Prefer it over the older
   // advice-only substring lexicon to avoid erasing a meaningful modifier.
+  const nominal = completeNominal ? withoutNominalArticle(normalized) : normalized;
   const shared = resolveMedicationInstructionConcept(cleaned) ??
-    resolveMedicationInstructionConcept(normalized);
-  const concept = findContainedConcept(normalized);
+    resolveMedicationInstructionConcept(nominal);
+  const concept = completeNominal ? findExactConcept(nominal) : findContainedConcept(normalized);
   // Existing advice meal-state/clinical roles outrank a generic shared noun.
   // Within the SAME typed role, prefer the exact shared lexical concept,
   // which preserves a qualified material instead of collapsing it to water.
@@ -1240,25 +1423,11 @@ function classifyArgument(text: string): AdviceArgument {
   const site = bodySiteAdviceArgument(cleaned);
   if (site) return site;
 
-  const symptom = resolveSymptomDefinition(normalized);
-  if (symptom) {
-    const coding = symptom.coding ? { ...symptom.coding } : undefined;
-    return {
-      role: AdviceArgumentRole.Object,
-      text: cleaned,
-      normalized: symptom.text?.toLowerCase() ?? normalized,
-      conceptId: coding?.code ?? symptom.text ?? normalized,
-      coding,
-      codings: coding ? [coding] : undefined,
-      i18n: {
-        en: symptom.text ? symptom.text.charAt(0).toLowerCase() + symptom.text.slice(1) : cleaned,
-        ...(symptom.i18n ?? {})
-      }
-    };
-  }
+  const symptom = symptomAdviceArgument(normalized, cleaned);
+  if (symptom) return symptom;
 
   const parts = normalized.split(" ");
-  if (parts.length >= 2) {
+  if (parts.length >= 2 && (!completeNominal || parts.length === 2)) {
     const first = parts[0];
     const second = parts[1];
     if (/^[0-9]+(?:\.[0-9]+)?$/.test(first) && DURATION_UNIT_WORDS.has(second)) {
@@ -1270,7 +1439,7 @@ function classifyArgument(text: string): AdviceArgument {
     return createArgument(AdviceArgumentRole.Time, cleaned, normalized, normalized);
   }
 
-  return createArgument(AdviceArgumentRole.Object, cleaned, normalized);
+  return createArgument(completeNominal ? AdviceArgumentRole.Free : AdviceArgumentRole.Object, cleaned, normalized);
 }
 
 function trimSegment(text: string, start: number, end: number): AdviceSegment | undefined {
@@ -1304,7 +1473,7 @@ function splitInstructionSegments(sourceText: string, baseRange: TextRange): Adv
   let segmentStart = 0;
   for (let index = 0; index < sourceText.length; index++) {
     const char = sourceText[index];
-    if (char !== ";" && char !== "." && char !== "\n" && char !== "\r") {
+    if (char !== ";" && char !== "." && char !== "!" && char !== "?" && char !== "\n" && char !== "\r") {
       continue;
     }
     if (char === ".") {
@@ -1354,15 +1523,25 @@ function splitInstructionSegments(sourceText: string, baseRange: TextRange): Adv
   ];
 }
 
-function splitSequenceSegments(sourceText: string, baseRange: TextRange): AdviceSegment[] {
-  const tokens = lexInput(sourceText);
+function splitSequenceSegments(
+  sourceText: string, baseRange: TextRange, tokens: readonly LexToken[]
+): AdviceSegment[] {
   if (!tokens.length) {
     return [];
   }
   const segments: AdviceSegment[] = [];
   let segmentStart = 0;
+  let leading = true;
+  let trimmedPrefix = false;
   for (const token of tokens) {
-    if (!SEQUENCE_MARKERS.has(normalizeAdditionalInstructionKey(token.original))) {
+    const word = normalizeAdditionalInstructionKey(token.original);
+    if (leading && LEADING_NOISE_WORDS.has(word)) {
+      segmentStart = token.sourceEnd;
+      trimmedPrefix = true;
+      continue;
+    }
+    leading = false;
+    if (!SEQUENCE_MARKERS.has(word)) {
       continue;
     }
     const trimmed = trimSegment(sourceText, segmentStart, token.sourceStart);
@@ -1376,6 +1555,7 @@ function splitSequenceSegments(sourceText: string, baseRange: TextRange): Advice
       });
     }
     segmentStart = token.sourceEnd;
+    leading = true;
   }
   const finalTrimmed = trimSegment(sourceText, segmentStart, sourceText.length);
   if (finalTrimmed) {
@@ -1387,7 +1567,7 @@ function splitSequenceSegments(sourceText: string, baseRange: TextRange): Advice
       }
     });
   }
-  if (segments.length > 1) {
+  if (segments.length > 1 || trimmedPrefix) {
     return segments;
   }
   return [
@@ -1487,7 +1667,12 @@ function tryParseRelationInstruction(
     return undefined;
   }
   const force = createDefaultForce(sequenceCount, sequenceIndex, context);
-  const args = [classifyArgument(objectText)];
+  // An implicit administration requires a complete nominal daughter. A
+  // contained concept does not license the surrounding instruction as one.
+  // Accompaniment keeps its established open material-object admission.
+  const argument = classifyArgument(objectText, !relationHasSemanticClass(relation, "accompaniment"));
+  if (argument.role === AdviceArgumentRole.Free) return undefined;
+  const args = [argument];
   return [
     createFrame(
       sourceText,
@@ -1848,7 +2033,9 @@ function tryParseClauseInstruction(
   context: AdviceParseContext,
   sequenceIndex: number,
   sequenceCount: number,
-  words: string[]
+  words: string[],
+  tokens: readonly LexToken[],
+  tokenOffset: number
 ): AdviceFrame[] | undefined {
   if (!words.length) {
     return undefined;
@@ -1899,12 +2086,32 @@ function tryParseClauseInstruction(
     return undefined;
   }
 
+  // The coordinated heads were already recognized above. Reuse the sequence
+  // lexer's source offsets rather than assigning every head the whole clause.
+  let heads: LexToken[] | undefined;
+  if (verbEntries.length > 1) {
+    heads = [];
+    for (const token of tokens) {
+      if (tokenOffset + token.sourceStart < span.start || tokenOffset + token.sourceEnd > span.end) continue;
+      if (findVerbLexeme(token.original) !== verbEntries[heads.length]) continue;
+      heads.push(token);
+      if (heads.length === verbEntries.length) break;
+    }
+    if (heads.length !== verbEntries.length) heads = undefined;
+  }
   const frames: AdviceFrame[] = [];
-  for (const verbEntry of verbEntries) {
+  for (let index = 0; index < verbEntries.length; index += 1) {
+    const verbEntry = verbEntries[index];
+    const head = heads?.[index];
+    const actionSpan = head ? {
+      start: index === 0 ? span.start : tokenOffset + head.sourceStart,
+      // Shared complements remain in every head's selected argument scope.
+      end: args.length || relation ? span.end : tokenOffset + head.sourceEnd
+    } : span;
     frames.push(
       createFrame(
-        sourceText,
-        span,
+        head ? sourceText.slice(actionSpan.start - span.start, actionSpan.end - span.start) : sourceText,
+        actionSpan,
         deriveClauseForce(
           sequenceCount,
           context,
@@ -1922,6 +2129,8 @@ function tryParseClauseInstruction(
         prefix.modality
       )
     );
+    if (head && index > 0 && prefix.polarity === AdvicePolarity.Negate)
+      frames[frames.length - 1].polaritySource = "shared";
   }
 
   if (
@@ -1953,7 +2162,8 @@ function parseSequenceFrames(
   span: TextRange,
   context: AdviceParseContext
 ): AdviceFrame[] {
-  const sequenceSegments = splitSequenceSegments(sourceText, span);
+  const tokens = lexInput(sourceText);
+  const sequenceSegments = splitSequenceSegments(sourceText, span, tokens);
   if (!sequenceSegments.length) {
     return [];
   }
@@ -1977,7 +2187,7 @@ function parseSequenceFrames(
         sequenceSegments.length,
         words
       ) ??
-      tryParseClauseInstruction(segment.text, segment.range, context, index, sequenceSegments.length, words);
+      tryParseClauseInstruction(segment.text, segment.range, context, index, sequenceSegments.length, words, tokens, span.start);
     if (!parsed) {
       return [];
     }
@@ -2040,7 +2250,10 @@ function realizeSingleAdviceFrame(frame: AdviceFrame, locale = "en"): string | u
   const adapter = getAdviceLocaleAdapter(locale);
   const argText = joinAdviceArgumentTexts(frame.args, locale);
   const modalityText = adapter.realizeModality(frame.modality);
-  const relationText = localizeAdviceRelation(frame.relation, locale);
+  // A typed meal state supplies nominal context; terminology owns the
+  // locale wording before the adapter receives the resolved relation.
+  const relationText = localizeAdviceRelation(frame.relation, locale,
+    frame.args.some(arg => arg.role === AdviceArgumentRole.MealState) ? "complement" : undefined);
   const lexeme = findVerbLexeme(frame.predicate.lemma);
   const sharedAction = resolveMedicationInstructionAction(frame.predicate.lemma);
   const localizedPredicate = localizedValue(lexeme?.i18n, locale) ??
@@ -2098,7 +2311,7 @@ export function parseAdditionalInstructions(
       continue;
     }
     const normalizedText = normalizeAdditionalInstructionKey(cleanedText);
-    const frames = parseSequenceFrames(cleanedText, segment.range, effectiveContext);
+    const frames = parseSequenceFrames(segment.text, segment.range, effectiveContext);
     const rule = normalizedText
       ? matchAdviceCodingRule(frames, normalizedText)
       : undefined;
@@ -2140,6 +2353,15 @@ export const __test__: {
 } = {
   createDefinitionFromSource
 };
+
+/** Keep authored wording when the selected advice identity has no display. */
+export function additionalInstructionFallbackText(
+  concept: { text?: string; coding?: readonly { display?: string }[] },
+  selectedCoding: { display?: string } | undefined
+): string | undefined {
+  return concept.text ?? (!selectedCoding?.display
+    ? concept.coding?.find(coding => coding.display)?.display : undefined);
+}
 
 export function buildAdditionalInstructionFramesFromCoding(
   system: string,

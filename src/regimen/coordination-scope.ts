@@ -1,4 +1,6 @@
 import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
+import { convertQuantityValue } from '../utils/units';
+import { withMedicationSourceI18n } from '../locale-detection';
 import {
   selectHpsgCoordinationScopeConstruction,
   selectHpsgCalendarClockEllipsisConstruction,
@@ -6,6 +8,8 @@ import {
 } from '../hpsg/constructions';
 import { grammaticalTrailingInstructionScope, hasAdministrationAdjunct } from './grammar';
 import { findUnparsedTokenGroups } from '../parser';
+import { buildInstructionCoverage } from '../instruction-graph';
+import { relationHasGrammarFeature } from '../relation-terminology';
 import { ParserState } from '../parser-state';
 import { AdviceArgumentRole, AdvicePolarity, FhirDayOfWeek, FhirPeriodUnit } from '../types';
 import { MEAL_TIMING_BY_RELATION } from '../hpsg/lexical-classes';
@@ -158,14 +162,14 @@ type ScheduleFeatureGroup = keyof typeof SCHEDULE_FEATURE_GROUPS;
  */
 const SCHEDULE_FEATURE_GROUPS = {
   recurrence: [
-    'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
+    'timingCode', 'timingText', 'count', 'countMax', 'sharedCount', 'frequency', 'frequencyMax',
     'period', 'periodMax', 'periodUnit', 'dayOfWeek', 'dayOfMonth', 'timeOfDay',
     'occurrenceCap', 'maxDosePerPeriod', 'eventWindow', 'clockWindow', 'weekdayOrdinal'
   ],
   eventAnchor: ['when', 'offset', 'offsetMin', 'offsetMax', 'activityTiming'],
-  courseBounds: ['duration', 'durationMax', 'durationUnit', 'boundsStart', 'boundsEnd'],
+  courseBounds: ['duration', 'durationMax', 'durationIsRange', 'durationUnit', 'durationMaxUnit', 'durationUnitLabel', 'durationMaxUnitLabel', 'durationComparator', 'durationMaxComparator', 'boundsStart', 'boundsEnd'],
   administrationDuration: [
-    'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit'
+    'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit', 'administrationDurationComparator', 'administrationDurationRange'
   ],
   calendarEvents: ['calendarEvents', 'cycleDayConstraint'],
   // A derived per-administration dependency is not a lexical trailing cadence.
@@ -173,7 +177,7 @@ const SCHEDULE_FEATURE_GROUPS = {
   // A source anaphor is a typed request to the regimen donor, not an
   // executable inherited recurrence. Resolve before lowering to FHIR.
   sourceTimingReference: ['timingReference'],
-  sourcePhaseStart: ['treatmentStartOffsetDays'],
+  sourcePhaseStart: ['treatmentStartOffsetDays', 'phaseStartReference'],
   regimenCycle: ['repeatCycle', 'repeatCount']
 } as const satisfies Record<string, readonly ScheduleSemanticField[]>;
 
@@ -187,15 +191,15 @@ void scheduleFeatureCoverage;
 
 const COORDINATED_ANCHOR_FIELDS = ['when', 'timeOfDay'] as const;
 const COORDINATED_ANCHOR_CONTEXT_FIELDS = [
-  'duration', 'durationMax', 'durationUnit', 'boundsStart', 'boundsEnd',
-  'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit',
+  'duration', 'durationMax', 'durationIsRange', 'durationUnit', 'durationMaxUnit', 'durationUnitLabel', 'durationMaxUnitLabel', 'durationComparator', 'durationMaxComparator', 'boundsStart', 'boundsEnd',
+  'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit', 'administrationDurationComparator', 'administrationDurationRange',
   'dayOfWeek', 'dayOfMonth', 'weekdayOrdinal', 'calendarEvents', 'cycleDayConstraint'
 ] as const satisfies readonly ScheduleSemanticField[];
 const NON_ANCHOR_SCHEDULE_FIELDS = [
-  'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
+  'timingCode', 'timingText', 'count', 'countMax', 'sharedCount', 'frequency', 'frequencyMax',
   'period', 'periodMax', 'periodUnit', 'offset', 'offsetMin', 'offsetMax',
   'activityTiming', 'eventWindow', 'clockWindow', 'occurrenceCap', 'maxDosePerPeriod', 'administrationOffsetMinutes',
-  'timingReference', 'treatmentStartOffsetDays', 'repeatCycle', 'repeatCount'
+  'timingReference', 'treatmentStartOffsetDays', 'phaseStartReference', 'repeatCycle', 'repeatCount'
 ] as const satisfies readonly ScheduleSemanticField[];
 type CoordinatedScheduleField =
   | (typeof COORDINATED_ANCHOR_FIELDS)[number]
@@ -506,15 +510,19 @@ function instructionDurationUnit(unit: string | undefined): FhirPeriodUnit | und
  * contribution before coordination selection so the ordinary course-bound
  * construction can distribute it; no instruction wording is reparsed here.
  */
-function materializeTypedContinueCourseDuration(clause: CanonicalSigClause): void {
+export function materializeTypedContinueCourseDuration(clause: CanonicalSigClause): void {
   if (hasCourseDuration(clause.schedule)) return;
   const actions = clause.instructionGraph?.actions;
   if (!actions?.length) return;
   const dose = evidenceBounds(clause, 'dose');
-  for (const action of actions) {
+  for (let index = 0; index < actions.length; index++) {
+    const action = actions[index];
     if (action.predicate.lemma !== 'continue-treatment' ||
         action.predicate.semanticClass !== 'course' ||
-        action.polarity === AdvicePolarity.Negate ||
+        action.polarity === AdvicePolarity.Negate || action.modality !== undefined ||
+        action.relation && relationHasGrammarFeature(action.relation, 'conditionScope') ||
+        clause.instructionGraph?.relations?.some(relation => relation.toActionIndex === index &&
+          relationHasGrammarFeature(relation.kind, 'conditionScope')) ||
         dose && action.span.start < dose.end) continue;
     const duration = action.args.find(argument =>
       argument.role === AdviceArgumentRole.Duration && argument.span
@@ -741,6 +749,68 @@ function cloneInstruction(
   };
 }
 
+function sameSourceAction(left: AdviceFrame, right: AdviceFrame, offset = 0): boolean {
+  return left.predicate.lemma === right.predicate.lemma && left.polarity === right.polarity &&
+    left.span.start + offset === right.span.start && left.span.end + offset === right.span.end;
+}
+
+/** Keep the selected action's existing scope when its instruction is inherited. */
+function inheritInstructionRelations(
+  target: CanonicalSigClause,
+  donor: NonNullable<CanonicalSigClause["instructionGraph"]>,
+  inherited: readonly CanonicalAdditionalInstructionExpr[],
+  offset: number,
+  sourceText: string
+): void {
+  if (!donor.relations?.length) return;
+  const selected = new Map<number, AdviceFrame>();
+  for (const instruction of inherited) {
+    for (const frame of instruction.frames ?? []) {
+      const index = donor.actions.findIndex(action => sameSourceAction(action, frame, offset));
+      if (index >= 0) selected.set(index, frame);
+    }
+  }
+  const relations = donor.relations.filter(relation =>
+    selected.has(relation.toActionIndex) &&
+    (relation.fromActionIndex === undefined || selected.has(relation.fromActionIndex))
+  );
+  if (!relations.length) return;
+  const graph = target.instructionGraph ?? (target.instructionGraph = {
+    actions: [], sourceText, sourceLocale: donor.sourceLocale, primaryOwnership: {}
+  });
+  // The inherited spans share the recipient's source origin, but may extend
+  // beyond its local dosage segment. Keep the complete authored source view.
+  graph.sourceText = sourceText;
+  // This source also contains the donor's administration, not just the
+  // recipient's current dose/timing. Retain it without granting whole replay.
+  target.sourceProjectionVerified = false;
+  const indices = new Map<number, number>();
+  for (const [donorIndex, frame] of selected) {
+    let index = graph.actions.findIndex(action => sameSourceAction(action, frame));
+    if (index < 0) {
+      index = graph.actions.length;
+      const action = cloneAdviceFrame(donor.actions[donorIndex], offset);
+      action.sequenceIndex = index;
+      graph.actions.push(action);
+    }
+    indices.set(donorIndex, index);
+  }
+  const targetRelations = graph.relations ?? (graph.relations = []);
+  for (const relation of relations) {
+    targetRelations.push({
+      ...relation,
+      toActionIndex: indices.get(relation.toActionIndex)!,
+      ...(relation.fromActionIndex !== undefined
+        ? { fromActionIndex: indices.get(relation.fromActionIndex)! } : {}),
+      ...(relation.span ? { span: shiftedRange(relation.span, offset) } : {})
+    });
+  }
+  graph.coverage = {
+    ...graph.coverage,
+    ...buildInstructionCoverage(graph.actions, targetRelations, graph.opaqueSpans ?? [])
+  };
+}
+
 function terminalSemicolon(clause: CanonicalSigClause): CanonicalSourceSpan | undefined {
   let selected: CanonicalSourceSpan | undefined;
   for (const evidence of clause.evidence) {
@@ -795,7 +865,7 @@ function sameDose(
 ): boolean {
   if (!left || !right) return left === right;
   return left.value === right.value && left.unit === right.unit &&
-    equalStructuredValues(left.range, right.range);
+    left.comparator === right.comparator && equalStructuredValues(left.range, right.range);
 }
 
 function sameSite(
@@ -942,41 +1012,6 @@ export interface TimingAnchorCompositionResult {
 }
 
 /**
- * A sequential phase may inherit predecessor anchors only while its local
- * recurrence leaves them compatible. If a successor explicitly changes the
- * daily frequency, a differently sized predecessor clock list is no longer
- * a valid ellipsis. The predecessor retains its clocks and source evidence;
- * only the derived recipient copy is withdrawn.
- */
-function removeConflictingInheritedClockLists(states: readonly ParserState[]): void {
-  for (const state of states) {
-    const clause = state.primaryClause;
-    const schedule = clause.schedule;
-    if (!schedule?.timeOfDay?.length || schedule.frequency === undefined ||
-        schedule.frequency === schedule.timeOfDay.length) continue;
-    const inheritedBySequence = schedule.evidence?.some(item =>
-      item.rule === 'regimen.sequence.whole-predecessor-phase'
-    );
-    if (!inheritedBySequence) continue;
-    const localClockEvidence = schedule.evidence?.some(item =>
-      item.scheduleFields?.indexOf('timeOfDay') !== -1 &&
-      item.spans.some(span => span.start >= 0 && span.end <= state.input.length)
-    );
-    if (localClockEvidence) continue;
-    delete schedule.timeOfDay;
-    schedule.evidence = schedule.evidence?.filter(item =>
-      !(item.scheduleFields?.indexOf('timeOfDay') !== -1 &&
-        item.spans.every(span => span.end <= 0 || span.start >= state.input.length))
-    );
-    appendEvidence(schedule.evidence ?? (schedule.evidence = []), {
-      rule: 'hpsg.cx.regimen.explicit-frequency-resets-inherited-clocks',
-      spans: [],
-      note: 'The successor explicit frequency conflicts with the predecessor clock count, so the derived clock-list ellipsis is not licensed.'
-    });
-  }
-}
-
-/**
  * Compose equivalent typed administration daughters before FHIR lowering.
  * Only clock/event anchors may differ; every other schedule and administration
  * feature must already unify, so independent routes, sites and phases survive.
@@ -987,7 +1022,6 @@ export function composeCoordinatedTimingAnchors(
   segments: readonly HpsgSigSegment[],
   source: string
 ): TimingAnchorCompositionResult {
-  removeConflictingInheritedClockLists(states);
   const absorbed = new Set<number>();
   const applications: TimingAnchorCompositionApplication[] = [];
   let recipientIndex = 0;
@@ -1166,6 +1200,42 @@ function relationPathsTo(
   return paths;
 }
 
+function composeMedicationCondition(
+  clinical: NonNullable<CanonicalSigClause["clinicalAdjuncts"]>,
+  condition: NonNullable<NonNullable<CanonicalSigClause["clinicalAdjuncts"]>["condition"]>,
+  dayConstant: boolean
+): void {
+  const prior = clinical.condition;
+  const alreadyBound = prior && equalStructuredValues(prior, condition);
+  const retainsDayDomain = dayConstant && (!prior || alreadyBound ||
+    equalStructuredValues(clinical.calendarDayCondition, prior));
+  clinical.condition = prior && !alreadyBound ? { kind: 'all', conditions: [prior, condition] } : condition;
+  if (retainsDayDomain) clinical.calendarDayCondition = clinical.condition;
+  else delete clinical.calendarDayCondition;
+}
+
+function hasExplicitConditionTarget(
+  target: NonNullable<NonNullable<CanonicalSigClause["clinicalAdjuncts"]>["conditionTarget"]>
+): boolean {
+  return Boolean(target.dose || target.site || target.when?.length || target.timeOfDay?.length ||
+    target.clockRange || target.quantifier || target.members?.some(hasExplicitConditionTarget));
+}
+
+/** An unqualified nominal amount names the standing dose without replacing
+ * its authored operator. Explicit target operators and sites still constrain it. */
+function matchesConditionTarget(
+  clause: CanonicalSigClause,
+  target: NonNullable<NonNullable<CanonicalSigClause["clinicalAdjuncts"]>["conditionTarget"]>
+): boolean {
+  const dose = target.dose && target.dose.comparator === undefined && clause.dose?.comparator !== undefined
+    ? { ...clause.dose, comparator: undefined } : clause.dose;
+  const matchingDose = !target.dose || sameDose(dose, target.dose) ||
+    dose?.value !== undefined && target.dose.value !== undefined && !dose.range && !target.dose.range &&
+      dose.comparator === target.dose.comparator &&
+      convertQuantityValue(dose.value, dose, target.dose) === target.dose.value;
+  return matchingDose && (!target.site || sameSite(clause.site, target.site));
+}
+
 /**
  * Scope a semicolon-terminal negative instruction over compatible dosage
  * daughters before FHIR lowering. The HPSG action licenses the adjunct, and
@@ -1186,24 +1256,19 @@ export function scopeTrailingSharedNegativeInstructions(
   const tail = trimmedTailSpan(donor, separator.end);
   if (!tail) return;
   const negativeActions = (donorClause.instructionGraph?.actions ?? []).filter(action =>
-    action.polarity === AdvicePolarity.Negate && action.span.start >= separator.end
+    action.polarity === AdvicePolarity.Negate && tail.start <= action.span.start && action.span.end <= tail.end
   );
   if (!negativeActions.length) return;
-  const tailText = normalizedInstructionText(tail.text);
-  const shared = (donorClause.additionalInstructions ?? []).filter(instruction => {
-    const text = normalizedInstructionText(instruction.text);
-    return Boolean(text && tailText.includes(text) && instruction.frames?.some(frame =>
-      frame.polarity === AdvicePolarity.Negate && frame.span.start >= separator.end
-    ));
-  });
+  const shared = (donorClause.additionalInstructions ?? []).filter(instruction =>
+    instruction.frames?.some(frame => negativeActions.some(action => sameSourceAction(action, frame)))
+  );
   if (!shared.length) return;
   // Share the predicate only when it is source-owned by this same untargeted
   // prohibition. A selected clock/daypart is handled by nominal target scope,
   // never widened merely because its readable instruction is also retained.
   const donorClinical = donorClause.clinicalAdjuncts;
   const target = donorClinical?.conditionTarget;
-  const selectedTarget = target && (target.when?.length || target.timeOfDay?.length ||
-    target.clockRange || target.quantifier);
+  const selectedTarget = target && hasExplicitConditionTarget(target);
   const sharedGuard = donorClinical?.condition?.kind === 'not' &&
     !selectedTarget && donorClinical.localRanges?.length &&
     donorClinical.localRanges.every(range => tail.start <= range.start && range.end <= tail.end)
@@ -1236,13 +1301,13 @@ export function scopeTrailingSharedNegativeInstructions(
     });
     if (!selected) continue;
 
+    const donorOffset = segments[donorIndex].start - segments[recipientIndex].start;
     const additions = shared.filter(instruction =>
-      !targetClause.additionalInstructions?.some(existing =>
-        normalizedInstructionText(existing.text) === normalizedInstructionText(instruction.text)
-      )
+      !targetClause.additionalInstructions?.some(existing => instruction.frames!.every(frame =>
+        existing.frames?.some(retained => sameSourceAction(frame, retained, donorOffset))
+      ))
     );
     if (!additions.length && !sharedGuard) continue;
-    const donorOffset = segments[donorIndex].start - segments[recipientIndex].start;
     const scopeEvidence: CanonicalEvidence = {
       rule: selected.construction.id,
       spans: [
@@ -1261,10 +1326,7 @@ export function scopeTrailingSharedNegativeInstructions(
     };
     const inherited = additions.map(instruction => {
       const clone = cloneInstruction(instruction, donorOffset);
-      if (donorClause.instructionGraph?.sourceLocale?.toLowerCase().startsWith('th') &&
-          clone.text && /[\u0E00-\u0E7F]/u.test(clone.text)) {
-        clone.i18n = { ...(clone.i18n ?? {}), th: clone.text };
-      }
+      if (clone.text) clone.i18n = withMedicationSourceI18n(clone.text, clone.i18n);
       clone.evidence = [...(clone.evidence ?? [])];
       appendEvidence(clone.evidence, cloneEvidence(scopeEvidence));
       return clone;
@@ -1273,18 +1335,12 @@ export function scopeTrailingSharedNegativeInstructions(
       ...(targetClause.additionalInstructions ?? []),
       ...inherited
     ];
+    inheritInstructionRelations(targetClause, donorClause.instructionGraph!, inherited,
+      donorOffset, source.slice(segments[recipientIndex].start));
     if (sharedGuard?.condition) {
       const clinical = targetClause.clinicalAdjuncts ?? (targetClause.clinicalAdjuncts = {});
-      const prior = clinical.condition;
-      const alreadyShared = prior && equalStructuredValues(prior, sharedGuard.condition);
-      const dayConstant = sharedGuard.calendarDayCondition &&
-        equalStructuredValues(sharedGuard.calendarDayCondition, sharedGuard.condition) &&
-        (!prior || alreadyShared || equalStructuredValues(clinical.calendarDayCondition, prior));
-      clinical.condition = !prior || alreadyShared
-        ? cloneStructuredValue(sharedGuard.condition)
-        : { kind: 'all', conditions: [prior, cloneStructuredValue(sharedGuard.condition)] };
-      if (dayConstant) clinical.calendarDayCondition = cloneStructuredValue(clinical.condition);
-      else delete clinical.calendarDayCondition;
+      composeMedicationCondition(clinical, sharedGuard.condition!, Boolean(sharedGuard.calendarDayCondition &&
+        equalStructuredValues(sharedGuard.calendarDayCondition, sharedGuard.condition)));
       // These are inherited source spans, not local text in the recipient.
       const guardEvidence: CanonicalEvidence = {
         rule: selected.construction.id,
@@ -1357,7 +1413,7 @@ function partitionConditionTargetStates(
       if (member === undefined || !paths?.has(member)) continue;
     }
     const state = states[index], schedule = state.primaryClause.schedule;
-    if (!schedule) continue;
+    if (!schedule || !matchesConditionTarget(state.primaryClause, target)) continue;
     const selected = selectedConditionAnchors(schedule, target);
     const total = (schedule.timeOfDay?.length ?? 0) + (schedule.when?.length ?? 0);
     const count = selected.times.length + selected.events.length;
@@ -1369,6 +1425,22 @@ function partitionConditionTargetStates(
     selectedState.productFormKey = state.productFormKey;
     selectedState.warnings = [...state.warnings];
     const selectedSchedule = selectedState.primaryClause.schedule!;
+    // Retained source describes the unpartitioned anchor set. Neither daughter
+    // independently owns replay of that complete source as its current directions.
+    state.primaryClause.sourceProjectionVerified = false;
+    selectedState.primaryClause.sourceProjectionVerified = false;
+    if (schedule.sharedCount || schedule.count !== undefined || schedule.countMax !== undefined ||
+        schedule.occurrenceCap || schedule.maxDosePerPeriod?.length) {
+      // This split changes which anchors an adjunct selects, not the authored
+      // total or period ceilings. Subsequent splits retain this group identity.
+      const shared = schedule.sharedCount ?? {
+        groupId: `partition-count:${segments[index].start}:${segments[index].end}`,
+        count: schedule.count, countMax: schedule.countMax
+      };
+      schedule.sharedCount = selectedSchedule.sharedCount = shared;
+      delete schedule.count; delete schedule.countMax;
+      delete selectedSchedule.count; delete selectedSchedule.countMax;
+    }
     selectedSchedule.timeOfDay = selected.times.length ? selected.times : undefined;
     selectedSchedule.when = selected.events.length ? selected.events : undefined;
     const remainingTimes = (schedule.timeOfDay ?? []).filter(clock => selected.times.indexOf(clock) < 0);
@@ -1378,12 +1450,17 @@ function partitionConditionTargetStates(
     if (schedule.frequency === total && schedule.period === 1 && schedule.periodUnit === 'd') {
       schedule.frequency = total - count;
       selectedSchedule.frequency = count;
+      // The daughters own their selected cadence, not the complete source code.
+      delete schedule.timingCode;
+      delete selectedSchedule.timingCode;
     }
     if (index === donorIndex) {
       const clinical = state.primaryClause.clinicalAdjuncts;
       if (clinical) {
-        delete clinical.condition; delete clinical.conditionTarget;
-        delete clinical.excludedWeekdays; delete clinical.excludedDates;
+        if (!target.excludedWeekdays?.length && !target.excludedDates?.length) {
+          delete clinical.condition; delete clinical.calendarDayCondition;
+        }
+        delete clinical.conditionTarget;
       }
     }
     states.splice(index + 1, 0, selectedState);
@@ -1403,33 +1480,63 @@ export function scopeMedicationConditionTargets(
     let donor = states[donorIndex];
     let clinical = donor.primaryClause.clinicalAdjuncts;
     const target = clinical?.conditionTarget;
-    const predicate = clinical?.condition;
-    const excludedWeekdays = clinical?.excludedWeekdays;
-    const excludedDates = clinical?.excludedDates;
-    if (!target || !predicate && !excludedWeekdays?.length && !excludedDates?.length) continue;
-    donorIndex = partitionConditionTargetStates(states, segments, plan, target, donorIndex);
+    if (!target) continue;
+    const targets = target.members ?? [target];
+    const calendarTarget = targets.some(member => member.excludedWeekdays?.length || member.excludedDates?.length);
+    const predicate = calendarTarget ? undefined : clinical?.condition;
+    const dayConstant = Boolean(predicate && clinical?.calendarDayCondition &&
+      equalStructuredValues(clinical.calendarDayCondition, predicate));
+    if (!predicate && !calendarTarget) continue;
+    for (const member of targets)
+      donorIndex = partitionConditionTargetStates(states, segments, plan, member, donorIndex);
     donor = states[donorIndex];
     clinical = donor.primaryClause.clinicalAdjuncts!;
-    const explicitTarget = Boolean(target.when?.length || target.timeOfDay?.length || target.clockRange || target.quantifier);
     const terminal = planSegmentIndex(plan, segments[donorIndex]);
-    const paths = explicitTarget && terminal !== undefined
-      ? relationPathsTo(plan, terminal) : undefined;
-    const selected: number[] = [];
-    for (let index = 0; index <= donorIndex; index += 1) {
-      if (!explicitTarget && index !== donorIndex) continue;
-      if (index !== donorIndex) {
-        const member = planSegmentIndex(plan, segments[index]);
-        if (member === undefined || !paths?.has(member)) continue;
+    let paths: ReturnType<typeof relationPathsTo> | undefined;
+    const bindings: Array<{ target: typeof target; selected: number[] }> = [];
+    let unresolved = false;
+    for (const member of targets) {
+      const explicitTarget = hasExplicitConditionTarget(member);
+      if (explicitTarget && !paths && terminal !== undefined) paths = relationPathsTo(plan, terminal);
+      const selected: number[] = [];
+      let opportunities = 0;
+      for (let index = 0; index <= donorIndex; index += 1) {
+        if (!explicitTarget && index !== donorIndex) continue;
+        if (index !== donorIndex) {
+          const source = planSegmentIndex(plan, segments[index]);
+          if (source === undefined || !paths?.has(source)) continue;
+        }
+        const clause = states[index].primaryClause;
+        if (!clause.dose && !clause.method && !clause.schedule) continue;
+        if (!matchesConditionTarget(clause, member)) continue;
+        if (member.when?.length || member.timeOfDay?.length || member.clockRange) {
+          const anchors = selectedConditionAnchors(clause.schedule, member);
+          const count = anchors.times.length + anchors.events.length;
+          if (!count) continue;
+          opportunities += count;
+        } else {
+          opportunities += Math.max(1, (clause.schedule?.timeOfDay?.length ?? 0) + (clause.schedule?.when?.length ?? 0));
+        }
+        selected.push(index);
       }
-      const clause = states[index].primaryClause;
-      if (!clause.dose && !clause.method && !clause.schedule) continue;
-      if (target.when?.length || target.timeOfDay?.length || target.clockRange) {
-        const anchors = selectedConditionAnchors(clause.schedule, target);
-        if (!anchors.times.length && !anchors.events.length) continue;
+      if (!selected.length && (member.dose || member.site)) continue;
+      if (!selected.length || member.quantifier === 'both' && opportunities !== 2) {
+        unresolved = true;
+        continue;
       }
-      selected.push(index);
+      bindings.push({ target: member, selected });
     }
-    if (!selected.length || target.quantifier === 'both' && selected.length !== 2) {
+    if (!bindings.length && !unresolved) {
+      // Unmatched quantified prohibitions stay with their own actions.
+      // Independent administration exclusions are not owned by this target.
+      if (predicate) {
+        delete clinical.condition;
+        delete clinical.calendarDayCondition;
+      }
+      delete clinical.conditionTarget;
+      continue;
+    }
+    if (!bindings.length) {
       // The nominal reference has no unique binding in the available regimen.
       // Keep the original instruction and target reference available for
       // editing, but do not claim an executable predicate on the wrong daughter.
@@ -1440,34 +1547,37 @@ export function scopeMedicationConditionTargets(
       if (donor.warnings.indexOf(note) < 0) donor.warnings.push(note);
       continue;
     }
-    delete clinical.condition;
+    if (predicate) {
+      delete clinical.condition;
+      delete clinical.calendarDayCondition;
+    }
     delete clinical.conditionTarget;
-    delete clinical.excludedWeekdays;
-    delete clinical.excludedDates;
-    for (const index of selected) {
-      const recipient = states[index].primaryClause;
-      const adjunct = recipient.clinicalAdjuncts ?? (recipient.clinicalAdjuncts = {});
-      if (predicate) {
-        const prior = adjunct.condition;
-        adjunct.condition = prior && !equalStructuredValues(prior, predicate)
-          ? { kind: 'all', conditions: [prior, cloneStructuredValue(predicate)] }
-          : cloneStructuredValue(predicate);
-      }
-      if (excludedWeekdays?.length) {
-        adjunct.excludedWeekdays = [...new Set([...(adjunct.excludedWeekdays ?? []), ...excludedWeekdays])];
-        if (recipient.schedule) {
-          const days = recipient.schedule.dayOfWeek ?? [FhirDayOfWeek.Monday, FhirDayOfWeek.Tuesday,
-            FhirDayOfWeek.Wednesday, FhirDayOfWeek.Thursday, FhirDayOfWeek.Friday, FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday];
-          recipient.schedule.dayOfWeek = days.filter(day => adjunct.excludedWeekdays!.indexOf(day) < 0);
+    for (const binding of bindings) {
+      const excludedWeekdays = binding.target.excludedWeekdays;
+      const excludedDates = binding.target.excludedDates;
+      for (const index of binding.selected) {
+        const recipient = states[index].primaryClause;
+        const adjunct = recipient.clinicalAdjuncts ?? (recipient.clinicalAdjuncts = {});
+        if (predicate) {
+          composeMedicationCondition(adjunct, predicate, dayConstant);
         }
+        if (excludedWeekdays?.length) {
+          adjunct.excludedWeekdays = [...new Set([...(adjunct.excludedWeekdays ?? []), ...excludedWeekdays])];
+          if (recipient.schedule) {
+            const days = recipient.schedule.dayOfWeek ?? [FhirDayOfWeek.Monday, FhirDayOfWeek.Tuesday,
+              FhirDayOfWeek.Wednesday, FhirDayOfWeek.Thursday, FhirDayOfWeek.Friday, FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday];
+            const remaining = days.filter(day => adjunct.excludedWeekdays!.indexOf(day) < 0);
+            recipient.schedule.dayOfWeek = remaining.length ? remaining : days;
+          }
+        }
+        if (excludedDates?.length) adjunct.excludedDates = [...new Set([...(adjunct.excludedDates ?? []), ...excludedDates])];
+        if (index === donorIndex) continue;
+        const evidence = (clinical.evidence ?? []).map(item =>
+          shiftEvidenceToRecipient(item, segments[donorIndex].start, segments[index].start)
+        );
+        adjunct.evidence = [...(adjunct.evidence ?? [])];
+        for (const item of evidence) appendEvidence(adjunct.evidence, item);
       }
-      if (excludedDates?.length) adjunct.excludedDates = [...new Set([...(adjunct.excludedDates ?? []), ...excludedDates])];
-      if (index === donorIndex) continue;
-      const evidence = (clinical.evidence ?? []).map(item =>
-        shiftEvidenceToRecipient(item, segments[donorIndex].start, segments[index].start)
-      );
-      adjunct.evidence = [...(adjunct.evidence ?? [])];
-      for (const item of evidence) appendEvidence(adjunct.evidence, item);
     }
   }
 }

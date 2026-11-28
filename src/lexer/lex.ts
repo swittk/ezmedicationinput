@@ -1,4 +1,7 @@
 import { DAY_OF_WEEK_TOKENS } from "../maps";
+import lexicalVocabulary from "../hpsg/lexical-classes.json";
+import { doseComparatorNumberAt, DURATION_LEAD_TOKENS, INSTRUCTION_DURATION_UNITS,
+  RELATIVE_INTERVAL_TRAILING_RELATIONS } from "../hpsg/lexical-classes";
 import { LexKind, LexToken, SurfaceToken, SurfaceTokenKind } from "./token-types";
 import { scanSurfaceTokens } from "./surface";
 import { applyLocaleLexicon } from "./locale";
@@ -216,6 +219,13 @@ function pushSplitParts(
 }
 
 function splitCompactToken(token: string): string[] {
+  const compactDiscrete = token.match(
+    /^((?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))([A-Za-z-]+)$/
+  );
+  if (compactDiscrete && COMPACT_DISCRETE_UNIT_SUFFIX_PATTERN.test(compactDiscrete[2]) &&
+      COMPACT_DISCRETE_UNITS_PATTERN.test(compactDiscrete[2])) {
+    return [compactDiscrete[1], compactDiscrete[2]];
+  }
   if (/^[0-9]+(?:\.[0-9]+)?$/.test(token)) {
     return [token];
   }
@@ -319,11 +329,29 @@ function tryNumericRangeToken(
   surfaces: SurfaceToken[],
   index: number,
   input: string
-): { token: LexToken; nextIndex: number } | undefined {
+): { tokens: LexToken[]; nextIndex: number } | undefined {
   const start = surfaces[index];
   const hyphen = surfaces[index + 1];
   const end = surfaces[index + 2];
 
+  // Either numeric endpoint may own the adjacent dash. Both spellings are
+  // the same bounded range, including an attached unit on the right endpoint.
+  if (isSurfaceText(start) && isSurfaceText(hyphen)) {
+    const leftDash = /[-–—]$/u.test(start.lower);
+    const left = leftDash ? start.original.slice(0, -1) : start.original;
+    const rightOffset = leftDash ? 0 : 1;
+    if (isNumericText(left) && (leftDash || /^[-–—]/u.test(hyphen.lower))) {
+      const parts = splitCompactToken(hyphen.original.slice(rightOffset));
+      if (isNumericText(parts[0])) {
+        const rangeEnd = hyphen.start + rightOffset + parts[0].length;
+        const dash = leftDash ? start.original.slice(-1) : hyphen.original[0];
+        const tokens = [buildToken(left + dash + parts[0],
+          [start, hyphen], input, start.start, rangeEnd, true)];
+        pushSplitParts(tokens, hyphen, parts.slice(1), input);
+        return { tokens, nextIndex: index + 2 };
+      }
+    }
+  }
   if (
     !isSurfaceText(start) ||
     !hyphen ||
@@ -336,7 +364,7 @@ function tryNumericRangeToken(
   }
 
   return {
-    token: buildToken(`${start.original}-${end.original}`, [start, hyphen, end], input, undefined, undefined, true),
+    tokens: [buildToken(`${start.original}-${end.original}`, [start, hyphen, end], input, undefined, undefined, true)],
     nextIndex: index + 3
   };
 }
@@ -380,6 +408,12 @@ function tryFractionToken(
   const slash = surfaces[index + 1];
   const right = surfaces[index + 2];
 
+  if (isSurfaceText(left) && isSurfaceText(slash) && slash.original.startsWith("/") && slash.original.length > 1) {
+    const separator = { ...slash, original: "/", lower: "/", end: slash.start + 1 };
+    const denominator = { ...slash, original: slash.original.slice(1), lower: slash.lower.slice(1), start: slash.start + 1 };
+    const tokens = buildFractionTokens(left, separator, denominator, input);
+    if (tokens) return { tokens, nextIndex: index + 2 };
+  }
   if (!isSurfaceText(left) || !slash || slash.original !== "/" || !isSurfaceText(right)) {
     return undefined;
   }
@@ -424,6 +458,15 @@ function tryTimeLikeToken(
 }
 
 function pushTextToken(output: LexToken[], surface: SurfaceToken, input: string): void {
+  // A slash attached to its right daughter is the same separator as a spaced
+  // slash. Reuse ordinary compact-token expansion for the remaining term.
+  if (surface.original.startsWith("/") && surface.original.length > 1 &&
+      lexicalVocabulary.hardSegmentBoundaryTokens.indexOf(surface.lower) < 0) {
+    output.push(buildToken("/", [surface], input, surface.start, surface.start + 1, true));
+    pushTextToken(output, { ...surface, original: surface.original.slice(1),
+      lower: surface.lower.slice(1), start: surface.start + 1 }, input);
+    return;
+  }
   const slashUnitMatch = surface.original.match(
     /^([0-9]+(?:\.[0-9]+)?)\/(d|day|days|wk|w|week|weeks|mo|month|months|hr|hrs|hour|hours|h|min|mins|minute|minutes)$/i
   );
@@ -493,19 +536,50 @@ function pushTextToken(output: LexToken[], surface: SurfaceToken, input: string)
     }
   }
 
-  const compactDiscrete = surface.original.match(
-    /^((?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))([A-Za-z-]+)$/
-  );
-  if (
-    compactDiscrete &&
-    COMPACT_DISCRETE_UNIT_SUFFIX_PATTERN.test(compactDiscrete[2]) &&
-    COMPACT_DISCRETE_UNITS_PATTERN.test(compactDiscrete[2])
-  ) {
-    pushSplitParts(output, surface, [compactDiscrete[1], compactDiscrete[2]], input);
-    return;
-  }
-
   pushSplitParts(output, surface, splitCompactToken(surface.original), input);
+}
+
+const DOTTED_DOSE_UNIT_ABBREVIATIONS: Readonly<Record<string, string>> =
+  lexicalVocabulary.dottedDoseUnitAbbreviations;
+
+/** A unit abbreviation may continue into a licensed duration, but its period
+ * remains a sentence boundary before independent advice. Locale normalization
+ * has already supplied the canonical unit/relation/numeric daughters. */
+function mergeDottedDoseUnitContinuations(tokens: LexToken[], input: string): LexToken[] {
+  if (input.indexOf(".") < 0) return tokens;
+  let output = 0;
+  for (let cursor = 0; cursor < tokens.length; cursor += 1) {
+    let token = tokens[cursor];
+    const dot = tokens[cursor + 1];
+    if (dot?.lower === "." && token.sourceEnd === dot.sourceStart) {
+      const canonical = DOTTED_DOSE_UNIT_ABBREVIATIONS[token.canonical ?? token.lower];
+      const quantity = tokens[cursor - 1];
+      const lead = tokens[cursor + 2];
+      const durationIndex = lead && DURATION_LEAD_TOKENS.has(lead.canonical ?? lead.lower)
+        ? cursor + 3 : cursor + 2;
+      const duration = tokens[durationIndex];
+      const durationUnit = tokens[durationIndex + 1];
+      const relativeEnd = tokens[durationIndex + 2];
+      const qualified = quantity && doseComparatorNumberAt(tokens, cursor - 1, cursor,
+        quantity.canonical ?? quantity.lower);
+      if (canonical && quantity &&
+          (quantity.kind === LexKind.Number || quantity.kind === LexKind.NumberRange ||
+            qualified?.numericIndex === cursor - 1 && !qualified.rawUnit) &&
+          duration && (duration.kind === LexKind.Number || duration.kind === LexKind.NumberRange) &&
+          durationUnit && INSTRUCTION_DURATION_UNITS.has(durationUnit.canonical ?? durationUnit.lower) &&
+          !(relativeEnd && RELATIVE_INTERVAL_TRAILING_RELATIONS.has(relativeEnd.canonical ?? relativeEnd.lower))) {
+        const original = input.slice(token.sourceStart, dot.sourceEnd);
+        token = { ...token, original, lower: original.toLowerCase(), canonical,
+          sourceEnd: dot.sourceEnd, sourceText: original,
+          surfaceIndices: token.surfaceIndices.concat(dot.surfaceIndices), derived: true };
+        cursor += 1;
+      }
+    }
+    token.index = output;
+    tokens[output++] = token;
+  }
+  tokens.length = output;
+  return tokens;
 }
 
 export function lexInput(input: string): LexToken[] {
@@ -532,7 +606,7 @@ export function lexInput(input: string): LexToken[] {
 
     const numericRange = tryNumericRangeToken(surfaces, index, input);
     if (numericRange) {
-      output.push(numericRange.token);
+      output.push(...numericRange.tokens);
       index = numericRange.nextIndex;
       continue;
     }
@@ -584,5 +658,5 @@ export function lexInput(input: string): LexToken[] {
     index += 1;
   }
 
-  return applyLocaleLexicon(output, input);
+  return mergeDottedDoseUnitContinuations(applyLocaleLexicon(output, input), input);
 }

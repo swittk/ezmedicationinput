@@ -1,17 +1,22 @@
 import { LexKind, type LexToken } from "../lexer/token-types";
-import { AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirPeriodUnit, RouteCode } from "../types";
+import { AdviceForce, AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirDayOfWeek, FhirPeriodUnit, RouteCode, type FhirPrimitiveElement } from "../types";
 import { baseLanguageTag } from "../localization";
+import { buildTranslationPrimitiveElement } from "../fhir-translations";
+import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
 import {
   ACTION_SEQUENCE_MARKERS,
   ACTION_SEQUENCE_RELATION_SURFACES,
   BODY_SITE_EXTERNAL_LOCATIVE_PREFIXES,
   BODY_SITE_LOCATIVE_LEAD_TOKENS,
   listBodySiteRelationDefinitions,
+  localizeAdviceRelation,
   getAdviceRelationCanonicalSetByGrammarFeature
 } from "../relation-terminology";
 export { ACTION_SEQUENCE_MARKERS } from "../relation-terminology";
 import source from "./lexical-classes.json";
+import meaningVocabulary from "../lexer/meaning-terminology.json";
 
+type MaximumPeriodPreposition = { unitDenominator?: boolean; rolling?: boolean };
 type MealRelation = "before" | "after" | "with";
 type MealTimingByRelation = Map<MealRelation, Map<EventTiming, EventTiming>>;
 type BodySiteFeatureKind = "nominal" | "partitive" | "locative";
@@ -296,9 +301,22 @@ export const PRN_COMPACT_REASON_SEPARATORS = setOf(source.prnCompactReasonSepara
 export const SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR = routeCodeSet(source.siteRouteHintsAllowedInGrammar);
 export const PRODUCT_METHOD_REALIZATIONS = source.productMethodRealizations as
   Record<string, Partial<Record<string, Record<string, string>>>>;
-export function productMethodRealizations(verb: string, product: string): Record<string, string> | undefined {
+export function productMethodRealization(
+  verb: string, product: string
+): { text: string; textElement?: FhirPrimitiveElement } | undefined {
   const values = PRODUCT_METHOD_REALIZATIONS[verb]?.[product];
-  return values ? { ...values } : undefined;
+  const text = values?.en;
+  if (!text) return undefined;
+  const translations: Record<string, string> = {};
+  for (const locale of Object.keys(values)) {
+    const value = values[locale];
+    if (locale !== "en" && value) translations[locale] = value;
+  }
+  return {
+    text,
+    textElement: Object.keys(translations).length
+      ? buildTranslationPrimitiveElement(translations) : undefined
+  };
 }
 export const PRODUCT_FORM_MODIFIERS = setOf(source.productFormModifiers);
 export const PRODUCT_SOURCE_PREPOSITIONS = setOf(source.productSourcePrepositions);
@@ -321,6 +339,8 @@ export const DOSE_NUMBER_WORDS = new Map<string, number>(
   numberEntries(source.doseNumberWords as Record<string, number>)
 );
 export const DOSE_UNIT_CONNECTORS = setOf(source.doseUnitConnectors);
+/** Calendar dayparts are not elapsed periods for rolling medication limits. */
+export const DAYPART_INTERVAL_TOKENS = setOf(source.daypartIntervalTokens);
 export const MILLION_DOSE_MULTIPLIER_TOKENS = setOf(source.millionDoseMultiplierTokens);
 export const SCHEDULE_UNIT_SEPARATOR_TOKENS = setOf(source.scheduleUnitSeparatorTokens);
 export const COMPACT_LIST_SEPARATORS = setOf(source.compactListSeparators);
@@ -335,9 +355,15 @@ export const MAXIMUM_COUNT_LEAD_TOKENS = setOf(source.maximumCountLeadTokens ?? 
 export const MAXIMUM_COUNT_LEAD_SEQUENCES = (source.maximumCountLeadSequences ?? [])
   .map((parts) => [...parts])
   .sort((left, right) => right.length - left.length);
+export const MAXIMUM_COUNT_LEAD_FIRST_TOKENS = new Set(
+  MAXIMUM_COUNT_LEAD_SEQUENCES.map((parts) => parts[0]).filter(Boolean)
+);
 export const OCCURRENCE_COUNT_WORDS = setOf(source.occurrenceCountWords ?? []);
 export const OCCURRENCE_COUNT_MODIFIERS = setOf(source.occurrenceCountModifiers);
-export const MAXIMUM_PERIOD_PREPOSITIONS = setOf(source.maximumPeriodPrepositions);
+export const MAXIMUM_PERIOD_PREPOSITIONS = new Map<string, MaximumPeriodPreposition>(
+  Object.keys(source.maximumPeriodPrepositions).map(key => [key,
+    (source.maximumPeriodPrepositions as Record<string, MaximumPeriodPreposition>)[key]])
+);
 export const MAXIMUM_PERIOD_MODIFIERS = setOf(source.maximumPeriodModifiers);
 export const OCCURRENCE_CAP_PERIOD_PHRASES = (source.occurrenceCapPeriodPhrases ?? [])
   .map((entry) => ({ parts: [...entry.parts], period: entry.period, periodUnit: entry.periodUnit }))
@@ -366,6 +392,33 @@ export const DOSE_TARGET_EVENT_MEMBERS = new Map<EventTiming, readonly EventTimi
   Object.keys(source.doseTargetEventMembers).map(key => [key as EventTiming,
     (source.doseTargetEventMembers as Record<string, EventTiming[]>)[key]])
 );
+function calendarAlternatives(forms: readonly string[]): string {
+  return forms.map(form => form.replace(/[.*+?^$(){}|[\]\\]/gu, "\\$&")).join("|");
+}
+const fullThaiWeekdayForms: string[] = [];
+for (const entry of source.calendarWeekdayLexemes) {
+  for (const form of entry.th) fullThaiWeekdayForms.push(form);
+}
+const calendarWeekdayPrefix = calendarAlternatives([source.calendarWeekdayPrefix]);
+export const CALENDAR_WEEKDAY_LEXEMES = source.calendarWeekdayLexemes.map(entry => ({
+  day: entry.day as FhirDayOfWeek,
+  patterns: [
+    new RegExp("\\b(?:" + calendarAlternatives(entry.en) + ")\\b", "giu"),
+    new RegExp("(?:" + calendarWeekdayPrefix + ")?(?:" + calendarAlternatives(entry.th) + ")", "gu")
+  ]
+}));
+// These references license the established exclusion context; spelling and
+// fixed weekday membership remain owned by the registered day-group vocabulary.
+export const CALENDAR_WEEKDAY_GROUPS = source.calendarWeekdayGroups.map(form => ({
+  pattern: new RegExp("\\b" + calendarAlternatives([form]) + "\\b", "giu"),
+  days: meaningVocabulary.dayGroups[form as keyof typeof meaningVocabulary.dayGroups] as FhirDayOfWeek[]
+}));
+export const CALENDAR_DAY_LIST_CONNECTORS = new RegExp(source.calendarDayListConnectors, "giu");
+export const CALENDAR_EXCLUSION_CUE = new RegExp(
+  source.calendarExclusionCue + "|" + calendarAlternatives([source.calendarExclusionWeekdayCue]) +
+    "(?=" + calendarWeekdayPrefix + "(?:" + calendarAlternatives(fullThaiWeekdayForms) + "))", "iu"
+);
+export const CALENDAR_EXCLUSION_DAY_HEADS = setOf(source.calendarExclusionDayHeads);
 export const CALENDAR_UNIVERSAL_DAY_QUANTIFIERS = setOf(source.calendarUniversalDayQuantifiers);
 export const CALENDAR_COMPLEMENT_DAY_MODIFIERS = setOf(source.calendarComplementDayModifiers);
 export const CALENDAR_COMPLEMENT_DETERMINERS = setOf(source.calendarComplementDeterminers);
@@ -401,7 +454,13 @@ export function isThaiDaypartListSeparator(
     THAI_DAYPART_LIST_SEPARATORS.has(separator.canonical ?? separator.lower) &&
     /[\u0E00-\u0E7F]/u.test(left.original) && /[\u0E00-\u0E7F]/u.test(right.original));
 }
+/** Existing rate-head surfaces retain their registered action valence. */
+export const CLINICAL_RATE_ADMINISTRATION_HEADS = new Map(
+  stringEntries(source.clinicalRateAdministrationHeads)
+);
 export const MEDICATION_OBJECT_FILLERS = setOf(source.medicationObjectFillers);
+export const MEDICATION_OBJECT_MODIFIERS = setOf(source.medicationObjectModifiers);
+export const COURSE_CONTINUATION_MODIFIERS = setOf(source.courseContinuationModifiers);
 /** Typed resultative adjustment leads; the following cadence owns the new phase. */
 export const PHASE_ADJUSTMENT_LEAD_SEQUENCES =
   source.phaseAdjustmentLeadSequences.map(parts => [...parts]);
@@ -415,11 +474,38 @@ export const TIMING_ANAPHORA_PHRASES =
 export const CLOCK_LEAD_TOKENS = setOf(source.clockLeadTokens);
 export const EVENT_PREPOSITIONS = setOf(source.eventPrepositions);
 export const EVENT_ARTICLE_TOKENS = setOf(source.eventArticleTokens);
+export const INSTRUCTION_NOMINAL_ARTICLES = setOf(source.instructionNominalArticles);
 export const FIXED_EVENT_PHRASES = eventTimingMap(source.fixedEventPhrases);
 export const MEAL_RELATION_BY_TOKEN = new Map<string, MealRelation>(
   stringEntries(source.mealRelationTokens).map(([token, relation]) => [token, relation as MealRelation])
 );
 export const MEAL_TIMING_BY_RELATION = mealTimingByRelation(source.mealTimingByRelation);
+
+/** Realize the existing meal lexicon's instruction wording and translations.
+ * Typed qualification and offset scope remain with the HPSG construction. */
+export function mealInstructionWording(
+  events: readonly EventTiming[], sourceText: string
+): { text: string; i18n?: Record<string, string> } {
+  const i18n: Record<string, string> = {};
+  for (const locale of ["en", "th"]) {
+    const descriptions: string[] = [];
+    for (const event of events) {
+      for (const [relation, values] of MEAL_TIMING_BY_RELATION) {
+        for (const [anchor, value] of values) {
+          if (value !== event) continue;
+          const kind = relation === "before" ? AdviceRelation.Before :
+            relation === "after" ? AdviceRelation.After : AdviceRelation.With;
+          descriptions.push(joinLocalizedTokens(locale, [
+            localizeAdviceRelation(kind, locale), localizedTimeArgument(anchor, locale)
+          ]));
+        }
+      }
+    }
+    if (descriptions.length) i18n[locale] = descriptions.join(", ");
+  }
+  return { text: i18n.en ?? sourceText, ...(Object.keys(i18n).length ? { i18n } : {}) };
+}
+
 export const SLEEP_EVENT_ALIASES = setOf(source.sleepEventAliases);
 export const WAKE_EVENT_ALIASES = setOf(source.wakeEventAliases);
 export const FOOD_EVENT_ALIASES = setOf(source.foodEventAliases);
@@ -429,6 +515,21 @@ export const CALENDAR_MONTH_DAY_FRAMES = source.calendarMonthDayFrames;
 
 export const RANGE_CONNECTORS = setOf(source.rangeConnectors);
 export const DURATION_LEAD_TOKENS = getAdviceRelationCanonicalSetByGrammarFeature("durationLead");
+
+/** Complete compact interval token shared by grammar and timing preview.
+ * Consumers retain the existing unit admission and cadence normalization. */
+export function compactIntervalParts(surface: string): {
+  period: number;
+  periodMax?: number;
+  unitSurface: string;
+} | undefined {
+  const match = /^q([0-9]+(?:\.[0-9]+)?)(?:-([0-9]+(?:\.[0-9]+)?))?([a-z]+)$/iu.exec(surface);
+  return match ? {
+    period: Number(match[1]),
+    ...(match[2] === undefined ? {} : { periodMax: Number(match[2]) }),
+    unitSurface: match[3].toLowerCase()
+  } : undefined;
+}
 
 /** Shared source-lexical reading of an unspaced headed duration NP.
  * HPSG schedule and procedural action grammar consume the same daughter.
@@ -467,8 +568,11 @@ export const ACTION_DIRECTIVE_PREFIXES = source.actionDirectivePrefixes.map((pre
   parts: prefix.parts as readonly string[],
   polarity: prefix.polarity as AdvicePolarity | undefined,
   modality: prefix.modality as AdviceModality | undefined,
+  force: prefix.force as AdviceForce | undefined,
   complement: prefix.complement as "contact-clause" | undefined
 }));
+export const NEGATIVE_ACTION_DIRECTIVE_LEADS = new Set(ACTION_DIRECTIVE_PREFIXES
+  .filter(prefix => prefix.polarity === AdvicePolarity.Negate).map(prefix => prefix.parts[0]));
 export const ACTION_COORDINATION_CONNECTORS = setOf(source.actionCoordinationConnectors);
 /** Closed-class contrast that connects two instructions, not a new action. */
 export const ACTION_DISCOURSE_CONNECTORS = setOf(source.actionDiscourseConnectors);
@@ -522,6 +626,18 @@ export const CYCLE_COUNT_HEADS = setOf(source.cycleCountHeads);
 
 /** Cheap source-lexical gate for typed treatment-relative phase onsets. */
 export const TREATMENT_PERIOD_START_LEADS = setOf(source.treatmentPeriodStartLeads);
+export const RELATIVE_TIME_END_LEADS = setOf(source.relativeTimeEndLeads);
+export const NEXT_DAY_MODIFIERS = setOf(source.nextDayModifiers);
+export const NEXT_DAY_HEADS = setOf(source.nextDayHeads);
+export const NEXT_DAY_PREPOSITIONS = setOf(source.nextDayPrepositions);
+export const NEXT_DAY_START_LEADS = setOf(source.nextDayStartLeads);
+/** Typed derivation identity shared by lexical timing and phase composition. */
+export const NEXT_DAY_SCHEDULE_RULE = "hpsg.lex.schedule.nextDay";
+export const NEXT_DAY_ONSET_RULE = "hpsg.lex.schedule.nextDay.onset";
+export function isNextDayScheduleRule(rule: string): boolean {
+  return rule === NEXT_DAY_SCHEDULE_RULE || rule === NEXT_DAY_ONSET_RULE;
+}
+export const FIXED_CLOCK_DAYPART_QUALIFICATION_RULE = "hpsg.cx.schedule.fixed-clock-daypart-qualification";
 export const ACTION_COORDINATION_CONNECTOR_I18N = source.actionCoordinationConnectorI18n as
   Record<string, Record<string, string>>;
 /** Disjunction is alternative administration, never conjunctive dose sharing.
@@ -537,13 +653,17 @@ function coordinationSurfaceSet(canonical: string, defaults: readonly string[]):
         result.add(localized[locale]);
     }
   }
+  for (const alias in source.actionCoordinationConnectorAliases) {
+    if (source.actionCoordinationConnectorAliases[alias as keyof typeof source.actionCoordinationConnectorAliases] === canonical)
+      result.add(alias);
+  }
   return result;
 }
 const CONJUNCTIVE_COORDINATION_SURFACES = coordinationSurfaceSet("and", ["and"]);
 const DISJUNCTIVE_COORDINATION_SURFACES = coordinationSurfaceSet("or", ["or", "and/or"]);
 export function coordinationConnectorKind(surface: string):
   "conjunction" | "disjunction" | "unknown" {
-  const normalized = surface.trim().replace(/^[,;]+|[,;]+$/gu, "").trim().toLowerCase();
+  const normalized = surface.trim().replace(/^[,;]+|[,;]+$/gu, "").trim().replace(/\s+/gu, " ").toLowerCase();
   if (DISJUNCTIVE_COORDINATION_SURFACES.has(normalized)) return "disjunction";
   if (CONJUNCTIVE_COORDINATION_SURFACES.has(normalized)) return "conjunction";
   return "unknown";
@@ -675,4 +795,274 @@ export function courseContinuationDurationAt(
   const unit = label ? FhirPeriodUnit[label as keyof typeof FhirPeriodUnit] : undefined;
   return value !== undefined && Number.isFinite(value) && value > 0 && unit
     ? { end: cursor + 2, value, unit } : undefined;
+}
+
+/** One range daughter shared by ordinary doses and dimensional quantities. */
+export function doseRangeNumberAt(tokens: readonly LexToken[], start: number, limit: number) {
+  const token = tokens[start];
+  if (!token || start >= limit) return undefined;
+  if (token.kind === LexKind.NumberRange && token.low !== undefined && token.high !== undefined &&
+      token.high >= token.low) {
+    return { range: { low: token.low, high: token.high }, numericIndex: start };
+  }
+  if (token.kind !== LexKind.Number || token.value === undefined || start + 2 >= limit) return undefined;
+  const connector = tokens[start + 1], high = tokens[start + 2];
+  if (!connector || !RANGE_CONNECTORS.has(connector.canonical ?? connector.lower) ||
+      high?.kind !== LexKind.Number || high.value === undefined || high.value < token.value) return undefined;
+  return { range: { low: token.value, high: high.value }, numericIndex: start + 2 };
+}
+
+/** Authored comparative dose NPs. Only complete number+medication-unit
+ * constituents are licensed; "about 3 weeks" stays temporal, and no
+ * second text-level dose parser runs after HPSG.
+ */
+type DoseComparator = "<" | "<=" | ">" | ">=" | "~";
+export const DOSE_COMPARATOR_PREFIXES = new Map<string, Array<{
+  words: readonly string[];
+  comparator: DoseComparator;
+}>>();
+for (const comparator of Object.keys(source.doseComparatorWordings) as DoseComparator[]) {
+  for (const words of source.doseComparatorWordings[comparator]) {
+    const candidates = DOSE_COMPARATOR_PREFIXES.get(words[0]) ?? [];
+    candidates.push({ words, comparator });
+    DOSE_COMPARATOR_PREFIXES.set(words[0], candidates);
+  }
+}
+export const DOSE_COMPARATOR_SYMBOLS =
+  source.doseComparatorSymbols as Record<string, DoseComparator>;
+
+/** Shared WHOLE + connector + optional article + fraction head. The
+ * caller still owns its medication unit; this cannot swallow two independently
+ * unit-bearing coordinated doses. Returns the last number token it owns. */
+export function additiveDoseNumberAt(
+  tokens: readonly LexToken[], start: number, limit: number, whole: number, allowMillion = true
+): { value: number; numericIndex: number } | undefined {
+  const connector = start + 1 < limit ? tokens[start + 1] : undefined;
+  if (!Number.isInteger(whole) || whole <= 0 || !connector ||
+      !DOSE_ADDITIVE_QUANTITY_CONNECTORS.has(connector.canonical ?? connector.lower)) return undefined;
+  let cursor = start + 2;
+  const article = cursor < limit ? tokens[cursor] : undefined;
+  if (article && DOSE_FRACTION_ARTICLES.has(article.canonical ?? article.lower)) cursor++;
+  const token = cursor < limit ? tokens[cursor] : undefined;
+  if (!token) return undefined;
+  const word = token.canonical ?? token.lower;
+  let fraction = DOSE_FRACTION_WORDS.get(word);
+  const numeric = token.kind === LexKind.Number ? token.value : DOSE_NUMBER_WORDS.get(word);
+  if (fraction === undefined && numeric !== undefined) {
+    if (numeric > 0 && numeric < 1) fraction = numeric;
+    else {
+      const denominator = cursor + 1 < limit ? tokens[cursor + 1] : undefined;
+      const factor = denominator && DOSE_FRACTION_DENOMINATOR_WORDS.get(
+        denominator.canonical ?? denominator.lower);
+      if (factor !== undefined) { fraction = numeric * factor; cursor++; }
+    }
+  }
+  if (fraction === undefined || fraction <= 0 || fraction >= 1) return undefined;
+  const amount = whole + fraction;
+  // Both plain and comparator-qualified mixed numbers can be scaled:
+  // 'two and a half million units' is 2,500,000 units, not 0.5 or 2.5.
+  return (allowMillion ? millionDoseNumberAt(tokens, cursor, limit, amount) : undefined) ??
+    { value: amount, numericIndex: cursor };
+}
+
+/** A million is a numeric multiplier, never a medication unit.
+ * Shared by exact/comparative scalar and dimensional quantities. Source
+ * position advances past a separately spelled multiplier only when present. */
+export function millionDoseNumberAt(
+  tokens: readonly LexToken[], start: number, limit: number, value: number
+): { value: number; numericIndex: number } | undefined {
+  let index = start + 1;
+  let next = index < limit ? tokens[index] : undefined;
+  // Fractional multipliers share the quantity's optional partitive/article:
+  // "half a million" and "three quarters of a million" own the same scale.
+  if (value > 0 && value < 1) {
+    for (let count = 0; count < 2 && next &&
+        DOSE_UNIT_CONNECTORS.has(next.canonical ?? next.lower); count++)
+      next = ++index < limit ? tokens[index] : undefined;
+  }
+  // Most doses have no multiplier. Avoid allocating a placeholder result
+  // for every routine '1 tab' token on the phone parsing hot path.
+  return next && MILLION_DOSE_MULTIPLIER_TOKENS.has(next.canonical ?? next.lower)
+    ? { value: value * 1_000_000, numericIndex: index }
+    : undefined;
+}
+
+/** Numeric source token with an attached unit, e.g. 0.1mcg/kg.
+ * A prefix comparator is optional and remains owned by its outer lexeme.
+ * This is a bounded token form, never a second whole-SIG parser. */
+export function attachedNumberUnitAt(lower: string):
+  { value: number; rawUnit: string } | undefined {
+  if (!/^(?:\d|\.)/u.test(lower)) return undefined;
+  const matched = lower.match(/^((?:\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/(?:\d*\.\d+[a-z]+|[a-z0-9]+))*)$/u);
+  return matched ? { value: Number(matched[1]), rawUnit: matched[2] } : undefined;
+}
+
+/** A compact million suffix shares the attached-numeral decimal shape.
+ * The leading decimal point is numeric evidence, never punctuation. */
+export function compactMillionDoseNumber(lower: string): number | undefined {
+  const match = /^((?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))m$/u.exec(lower);
+  return match ? Number(match[1]) * 1_000_000 : undefined;
+}
+
+/** A denominator word belongs to the numeric head before its unit connector. */
+export function fractionalDoseNumberAt(
+  tokens: readonly LexToken[], start: number, limit: number, value: number, allowMillion = true
+): { value: number; numericIndex: number } | undefined {
+  const denominator = start + 1 < limit ? tokens[start + 1] : undefined;
+  const fraction = denominator && DOSE_FRACTION_DENOMINATOR_WORDS.get(
+    denominator.canonical ?? denominator.lower);
+  if (fraction === undefined) return undefined;
+  const amount = value * fraction, numericIndex = start + 1;
+  return (allowMillion ? millionDoseNumberAt(tokens, numericIndex, limit, amount) : undefined) ??
+    { value: amount, numericIndex };
+}
+
+/** One bounded quantity-prefix lexeme shared by scalar and dimensional
+ * rules. It identifies source tokens; it does not assign a unit or dose.
+ * Duration daughters disable medication scaling so m remains their unit. */
+export function doseComparatorNumberAt(
+  tokens: readonly LexToken[], start: number, limit: number, lower: string, allowMillion = true
+): { comparator: "<" | "<=" | ">" | ">=" | "~";
+  value: number; numericIndex: number; rawUnit?: string } | undefined {
+  if (!DOSE_COMPARATOR_PREFIXES.has(lower) &&
+      !DOSE_COMPARATOR_SYMBOLS[lower] && !/^[~≈<>≥≤]/u.test(lower)) return undefined;
+  const glued = lower.match(/^(~|≈|>=|≥|<=|≤|>|<)((?:\d+\/\d+|\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/(?:\d*\.\d+[a-z]+|[a-z0-9]+))*)?$/u);
+  if (glued) {
+    const slash = glued[2].indexOf("/");
+    const value = slash < 0 ? Number(glued[2]) :
+      Number(glued[2].slice(0, slash)) / Number(glued[2].slice(slash + 1));
+    // Never turn '≤1/0' into an infinite dose or numeric advice.
+    if (!Number.isFinite(value)) return undefined;
+    const compactMillion = allowMillion && glued[3] === "m";
+    const million = compactMillion
+      ? { value: value * 1_000_000, numericIndex: start }
+      : glued[3] || !allowMillion ? undefined : millionDoseNumberAt(tokens, start, limit, value);
+    const mixed = !glued[3] && !million
+      ? additiveDoseNumberAt(tokens, start, limit, value, allowMillion) : undefined;
+    const fraction = !glued[3] && !million && !mixed
+      ? fractionalDoseNumberAt(tokens, start, limit, value, allowMillion) : undefined;
+    return { comparator: DOSE_COMPARATOR_SYMBOLS[glued[1]],
+      value: million?.value ?? mixed?.value ?? fraction?.value ?? value,
+      numericIndex: million?.numericIndex ?? mixed?.numericIndex ?? fraction?.numericIndex ?? start,
+      ...(glued[3] && !compactMillion ? { rawUnit: glued[3] } : {}) };
+  }
+  let comparator = DOSE_COMPARATOR_SYMBOLS[lower];
+  let prefixLength = comparator ? 1 : 0;
+  if (!comparator) for (const candidate of DOSE_COMPARATOR_PREFIXES.get(lower) ?? []) {
+    if (candidate.words.length <= prefixLength || start + candidate.words.length >= limit) continue;
+    if (candidate.words.every((part, index) => {
+      const token = tokens[start + index];
+      return token && (token.canonical ?? token.lower) === part;
+    })) {
+      comparator = candidate.comparator;
+      prefixLength = candidate.words.length;
+    }
+  }
+  if (!comparator) return undefined;
+  let numericIndex = start + prefixLength;
+  // A dotted approximation is one lexical qualifier (e.g. "approx. 5 mg").
+  if (comparator === "~" && tokens[numericIndex]?.kind === LexKind.Separator &&
+      tokens[numericIndex].original === ".") numericIndex++;
+  const token = numericIndex < limit ? tokens[numericIndex] : undefined;
+  if (!token) return undefined;
+  const word = token.canonical ?? token.lower;
+  const attached = token.kind !== LexKind.Number ? attachedNumberUnitAt(word) : undefined;
+  let value = token.kind === LexKind.Number ? token.value :
+    attached?.value ?? DOSE_NUMBER_WORDS.get(word) ?? DOSE_FRACTION_WORDS.get(word);
+  const embeddedMillion = allowMillion ? compactMillionDoseNumber(word) : undefined;
+  // The million suffix belongs to the numeric head, not the unit slot.
+  if (embeddedMillion !== undefined) return { comparator, value: embeddedMillion, numericIndex };
+  if (value === undefined) return undefined;
+  if (attached) return { comparator, value, numericIndex, rawUnit: attached.rawUnit };
+  const million = allowMillion ? millionDoseNumberAt(tokens, numericIndex, limit, value) : undefined;
+  if (million) return { comparator, ...million };
+  const mixed = additiveDoseNumberAt(tokens, numericIndex, limit, value, allowMillion);
+  if (mixed) return { comparator, ...mixed };
+  // The existing fraction vocabulary also licenses "a quarter" or
+  // "two thirds". Keep those tokens within the qualified quantity head.
+  const fraction = fractionalDoseNumberAt(tokens, numericIndex, limit, value, allowMillion);
+  return { comparator, ...(fraction ?? { value, numericIndex }) };
+}
+
+export function normalizeTokenLower(token: LexToken): string {
+  const lower = (token.canonical ?? token.lower).replace(/[{};]/g, "");
+  let start = 0, end = lower.length;
+  while (lower.charCodeAt(start) === 46) start++;
+  while (end > start && lower.charCodeAt(end - 1) === 46) end--;
+  return start === 0 && end === lower.length ? lower : lower.slice(start, end);
+}
+
+function pad2(value: number): string {
+  return value < 10 ? `0${value}` : String(value);
+}
+
+export function parseClockToken<T extends LexToken>(
+  token: T | undefined,
+  meridiemToken?: T | undefined
+): { value: string; tokens: T[] } | undefined {
+  if (!token) {
+    return undefined;
+  }
+  let lower = normalizeTokenLower(token);
+  if (lower.startsWith("@")) {
+    lower = lower.slice(1);
+  }
+  if (token.derived && token.sourceText?.includes("/") && /^[0-9]+(?:\.[0-9]+)?$/.test(lower)) {
+    return undefined;
+  }
+  const meridiem = meridiemToken ? normalizeTokenLower(meridiemToken) : undefined;
+  let hour: number;
+  let minute = 0;
+  const compactMeridiem = lower.match(/^([0-9]{1,2})(?:[:.]([0-9]{2}))?\s*(am|pm)$/);
+  if (compactMeridiem) {
+    hour = parseInt(compactMeridiem[1], 10);
+    minute = compactMeridiem[2] === undefined ? 0 : parseInt(compactMeridiem[2], 10);
+    if (hour < 1 || hour > 12 || minute > 59) {
+      return undefined;
+    }
+    if (POST_MERIDIEM_TOKENS.has(compactMeridiem[3]) && hour !== 12) {
+      hour += 12;
+    }
+    if (ANTE_MERIDIEM_TOKENS.has(compactMeridiem[3]) && hour === 12) {
+      hour = 0;
+    }
+    return {
+      value: `${pad2(hour)}:${pad2(minute)}:00`,
+      tokens: [token]
+    };
+  }
+  const clock = lower.match(/^([0-9]{1,2})[:.]([0-9]{2})$/);
+  if (clock) {
+    hour = parseInt(clock[1], 10);
+    minute = parseInt(clock[2], 10);
+  } else if (/^[0-9]{1,2}$/.test(lower) && meridiem && MERIDIEM_TOKENS.has(meridiem)) {
+    hour = parseInt(lower, 10);
+  } else {
+    return undefined;
+  }
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute < 0 || minute > 59) {
+    return undefined;
+  }
+  if (meridiem && MERIDIEM_TOKENS.has(meridiem)) {
+    if (hour < 1 || hour > 12) {
+      return undefined;
+    }
+    if (POST_MERIDIEM_TOKENS.has(meridiem) && hour !== 12) {
+      hour += 12;
+    }
+    if (ANTE_MERIDIEM_TOKENS.has(meridiem) && hour === 12) {
+      hour = 0;
+    }
+    return {
+      value: `${pad2(hour)}:${pad2(minute)}:00`,
+      tokens: [token, meridiemToken as T]
+    };
+  }
+  if (hour < 0 || hour > 23) {
+    return undefined;
+  }
+  return {
+    value: `${pad2(hour)}:${pad2(minute)}:00`,
+    tokens: [token]
+  };
 }
