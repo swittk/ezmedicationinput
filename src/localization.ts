@@ -26,17 +26,20 @@ export function normalizeLocaleTag(locale: string | undefined): string | undefin
   return normalized || undefined;
 }
 
+function baseLanguageTagFromNormalized(locale: string): string {
+  const separator = locale.indexOf("-");
+  return separator < 0 ? locale : locale.slice(0, separator);
+}
+
 export function baseLanguageTag(locale: string | undefined): string | undefined {
   const normalized = normalizeLocaleTag(locale);
-  if (normalized === undefined) return undefined;
-  const separator = normalized.indexOf("-");
-  return separator < 0 ? normalized : normalized.slice(0, separator);
+  return normalized === undefined ? undefined : baseLanguageTagFromNormalized(normalized);
 }
 
 export function localeFallbackChain(locale: string | undefined): string[] {
   const exact = normalizeLocaleTag(locale);
   if (!exact) return [];
-  const base = baseLanguageTag(exact);
+  const base = baseLanguageTagFromNormalized(exact);
   return base && base !== exact ? [exact, base] : [exact];
 }
 
@@ -75,7 +78,7 @@ function localizedRecordEntry<T>(
     const exact = normalizedRecordExact(record, candidate);
     if (exact !== undefined) return exact;
   }
-  const target = normalizeLocaleTag(locale);
+  const target = chain[0];
   return target ? normalizedRecordCompatible(record, target) : undefined;
 }
 
@@ -84,14 +87,15 @@ export function localizedValue(
   locale: string | undefined
 ): string | undefined {
   if (!i18n) return undefined;
-  for (const candidate of localeFallbackChain(locale)) {
+  const chain = localeFallbackChain(locale);
+  for (const candidate of chain) {
     for (const key of Object.keys(i18n)) {
       if (normalizeLocaleTag(key) !== candidate) continue;
       const value = i18n[key]?.trim();
       if (value) return value;
     }
   }
-  const target = normalizeLocaleTag(locale);
+  const target = chain[0];
   if (!target) return undefined;
   for (const key of Object.keys(i18n)) {
     const normalizedKey = normalizeLocaleTag(key);
