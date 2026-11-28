@@ -6219,11 +6219,12 @@ describe("active course boundary composite annotations", () => {
     { name: "existing boundary text primitive", start: extension => ({ offsetDuration: ucum(1, "d"),
       text: "After one day", _text: { extension } }) }
   ];
-  function annotationsAt(value: unknown, url: string): FhirR6Extension[] {
+  function annotationsAt(value: unknown, url: string): Array<Record<string, unknown>> {
     if (!value || typeof value !== "object") return [];
     const record = value as Record<string, unknown>;
-    return [...(record.url === url ? [record as FhirR6Extension] : []),
-      ...Object.values(record).flatMap(child => annotationsAt(child, url))];
+    const annotations: Array<Record<string, unknown>> = record.url === url ? [record] : [];
+    for (const key of Object.keys(record)) annotations.push(...annotationsAt(record[key], url));
+    return annotations;
   }
   it.each(cases)("projects $name through the active R5 bridge without changing treatment", ({ start }) => {
     const source = "Take 2 tablets at 08:00 daily, beginning 1 day after treatment starts and ending 3 days after treatment starts.";
@@ -6234,6 +6235,8 @@ describe("active course boundary composite annotations", () => {
         timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } },
         extension: [{ url: "urn:clinic:component-note", valueString: "Current independent dosage" }] }]
     }] };
+    const inputStep = input.step?.[0];
+    if (!inputStep) throw new Error("Expected authored treatment step");
     const before = structuredClone(input), native = importCanonicalCourse(input);
     const strict = toFhirR5Dosages(input), freshR5 = JSON.parse(JSON.stringify(strict));
     const freshR6 = JSON.parse(JSON.stringify(toDosageDetails(freshR5)));
@@ -6241,16 +6244,18 @@ describe("active course boundary composite annotations", () => {
     for (const dosage of [input, native, freshR5, freshR6]) {
       const viewBefore = structuredClone(dosage), current = projectCanonicalCourse(importCanonicalCourse(dosage));
       const row = current.fhir![0], r6 = current.fhirNext!;
+      const currentStep = r6.step?.[0];
+      if (!currentStep) throw new Error("Expected projected treatment step");
       const bridge = row.modifierExtension!.find(item => item.url === DOSAGE_DETAILS_R5_URL)!;
       const boundary = bridge.extension!.find(item => item.url === "step")!.extension!.find(item => item.url === "start")!;
       expect(annotationsAt(boundary, annotation.url)).toEqual([expectedWire]);
       expect(annotationsAt(boundary, unknown.url)).toEqual([unknown]);
-      expect(r6.step[0].start).toEqual(input.step[0].start);
-      expect(r6.step[0].end).toEqual(input.step[0].end);
+      expect(currentStep.start).toEqual(inputStep.start);
+      expect(currentStep.end).toEqual(inputStep.end);
       expect(r6.renderedInstruction).toBe(source);
-      expect(r6.step[0].component[0].extension).toEqual(input.step[0].component[0].extension);
-      expect(r6.step[0].component[0].doseAndRate![0].doseQuantity).toMatchObject({ value: 2, unit: "tab" });
-      expect(r6.step[0].component[0].timing!.repeat).toMatchObject({ frequency: 1, period: 1,
+      expect(currentStep.component[0].extension).toEqual(inputStep.component[0].extension);
+      expect(currentStep.component[0].doseAndRate![0].doseQuantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(currentStep.component[0].timing!.repeat).toMatchObject({ frequency: 1, period: 1,
         periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] });
       expect(nextDueDoses(dosage, query)).toEqual(["2026-11-24T08:00:00+00:00", "2026-11-25T08:00:00+00:00"]);
       expect(calculateTotalUnits({ dosage, ...query, durationValue: 4, durationUnit: FhirPeriodUnit.Day }))
