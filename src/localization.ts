@@ -186,6 +186,7 @@ export interface CourseLanguage {
   readonly treatmentDayStart: string;
   readonly afterPreviousPhase: string;
   readonly nextDayAfterPreviousPhase: string;
+  readonly previousPhaseEnd?: string;
   readonly incompleteInterpretation: string;
   readonly retainedStructure: string;
   readonly maxAdministrationLabel: string;

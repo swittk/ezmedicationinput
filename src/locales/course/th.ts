@@ -82,6 +82,7 @@ export const THAI_COURSE: CourseLanguage = {
   treatmentDayStart: "ต้นวันแรกของการรักษา",
   afterPreviousPhase: "หลังขั้นตอนก่อนหน้า",
   nextDayAfterPreviousPhase: "วันถัดจากวันสุดท้ายของขั้นตอนก่อนหน้า",
+  previousPhaseEnd: "สิ้นสุดขั้นตอนก่อนหน้า",
   afterTreatmentStart: (offset) => `${offset}หลังเริ่มการรักษา`,
   relativeEvent: (offset, event, before) => `${offset}${before ? "ก่อน" : "หลัง"}${event ?? "เหตุการณ์"}`,
   calendarWindow: (start, end) =>

@@ -1,5 +1,5 @@
 import { precedingCalendarDay, orderedCalendarBounds } from '../canonical/compile';
-import { earliestCalendarOpening, compareRegimenPositions, type CanonicalBoundary, type RegimenPosition } from '../canonical/course';
+import { earliestCalendarOpening, compareRegimenPositions, isPreviousPhaseAnchor, type CanonicalBoundary, type RegimenPosition } from '../canonical/course';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan } from '../hpsg/signature';
 import { anchoredScheduleDurationEnd, hasExactScheduleDuration, type RegimenGraph } from './regimen';
@@ -158,7 +158,7 @@ function authoredPhaseStart(members: readonly CanonicalParallelComponent[]): Reg
   for (const member of members) {
     const schedule = member.clause.schedule;
     const onset = schedule?.treatmentStartOffsetDays;
-    if (onset === undefined || schedule?.phaseStartReference === "previous-phase-next-day") {
+    if (onset === undefined || isPreviousPhaseAnchor(schedule?.phaseStartReference)) {
       missing = true;
       continue;
     }
@@ -186,7 +186,7 @@ function partialParallelRegimen(
       let hasAuthoredDayStart = false, hasAuthoredElapsedStart = false, hasDependentStart = false;
       let members = phase.members.map(member => {
         const clause = clauses[member], schedule = clause.schedule;
-        if (schedule?.phaseStartReference === "previous-phase-next-day") hasDependentStart = true;
+        if (isPreviousPhaseAnchor(schedule?.phaseStartReference)) hasDependentStart = true;
         else if (schedule?.treatmentStartOffsetDays !== undefined) {
           if (schedule.phaseStartReference === "treatment-day-start") hasAuthoredDayStart = true;
           else hasAuthoredElapsedStart = true;

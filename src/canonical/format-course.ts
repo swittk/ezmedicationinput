@@ -15,7 +15,7 @@ import type {
   CanonicalSafety,
   RegimenPosition,
 } from "./course";
-import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole, administrationHasAmountFacts, administrationHasDatedStart, absoluteEventCycleDisplacement } from "./course";
+import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole, administrationHasAmountFacts, administrationHasDatedStart, absoluteEventCycleDisplacement, isPreviousPhaseAnchor } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
 import { preferredPreviewTimingCoding as preferredTimingCoding, isPreviewTimingCoding } from "../timing-summary";
 import { canonicalClauseHasAdministrationSemantics } from "../ir";
@@ -256,6 +256,7 @@ function boundaryEventText(
   const event = boundary.anchor === "treatment-start" ? cycleStart ?? words.treatmentStart
     : boundary.anchor === "treatment-day-start" ? words.treatmentDayStart
     : boundary.anchor === "previous-phase-next-day" ? words.nextDayAfterPreviousPhase
+    : boundary.anchor === "previous-phase-end" ? words.previousPhaseEnd ?? words.afterPreviousPhase
     : context ??
     boundary.contextReference?.display ?? boundary.contextReference?.reference ??
     boundary.contextReference?.identifier?.value ?? boundary.contextDefinition ?? boundary.contextPath;
@@ -1219,9 +1220,10 @@ export function formatCanonicalCourse(
             const point = treatmentBoundaryRangeText(boundary, words, cycleStart) ??
               courseBoundaryPoint(quantity, boundary.anchor, words, cycleStart) ?? boundaryEventText(boundary, words, cycleStart);
             const knownOrigin = boundary.anchor === "treatment-start" || boundary.anchor === "treatment-day-start" ||
-              (boundary.anchor === "previous-phase-next-day" && (index > 0 || Boolean(component.phasePredecessors?.length)));
+              (isPreviousPhaseAnchor(boundary.anchor) && (index > 0 || Boolean(component.phasePredecessors?.length)));
             const originText = boundary.anchor === "treatment-start" ? cycleStart ?? words.treatmentStart
-              : boundary.anchor === "previous-phase-next-day" ? words.nextDayAfterPreviousPhase : words.treatmentDayStart;
+              : boundary.anchor === "previous-phase-next-day" ? words.nextDayAfterPreviousPhase
+              : boundary.anchor === "previous-phase-end" ? words.previousPhaseEnd ?? words.afterPreviousPhase : words.treatmentDayStart;
             if (knownOrigin) memberStartPoint = point ??
               (!boundary.displacement && !boundary.displacementRange ? originText : undefined);
             memberTiming = knownOrigin && memberStartPoint
@@ -1315,8 +1317,8 @@ export function formatCanonicalCourse(
               courseBoundaryPoint(startQuantity, startAnchor, words, cycleStart) ?? step.start?.description;
             const end = endRange ?? boundaryEventText(displayEnd, words, cycleStart) ??
               courseBoundaryPoint(endQuantity, endAnchor, words, cycleStart) ?? displayEnd?.description;
-            const contextualStart = index > 0 && step.start?.anchor === "previous-phase-next-day";
-            const contextualEnd = index > 0 && displayEnd?.anchor === "previous-phase-next-day";
+            const contextualStart = index > 0 && isPreviousPhaseAnchor(step.start?.anchor);
+            const contextualEnd = index > 0 && isPreviousPhaseAnchor(displayEnd?.anchor);
             const unresolvedEnd = Boolean(displayEnd && !end);
             const window = unresolvedEnd ? [start, words.reviewTiming(undefined, "end")].filter(Boolean).join("; ")
               : words.calendarWindow(start, end);
@@ -1356,12 +1358,12 @@ export function formatCanonicalCourse(
     // Show the known origin as a point; do not invent an end that could
     // contradict the member's earlier duration/count completion.
     if (!displayEnd && index + 1 < oneOrCourse.stages.length &&
-        (index > 0 || step.start?.anchor !== "previous-phase-next-day")) {
+        (index > 0 || !isPreviousPhaseAnchor(step.start?.anchor))) {
       const quantity = step.start ? treatmentStepOffsetQuantity(step.start)
         : startDays === undefined ? undefined : { value: startDays, unit: "d" };
       const point = treatmentBoundaryRangeText(step.start, words, cycleStart) ??
         courseBoundaryPoint(quantity, startAnchor, words, cycleStart) ??
-        (step.start?.anchor === "previous-phase-next-day" ? boundaryEventText(step.start, words, cycleStart) : undefined);
+        (isPreviousPhaseAnchor(step.start?.anchor) ? boundaryEventText(step.start, words, cycleStart) : undefined);
       if (point) timing = point;
     }
     if (datedEnd && step.end) {

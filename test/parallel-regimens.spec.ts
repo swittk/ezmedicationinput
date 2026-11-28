@@ -6085,3 +6085,120 @@ describe("review125 timestamp replacement and shared period allowance", () => {
     expect(parsed).toEqual(original);
   });
 });
+
+describe("review867 selected dated alternatives", () => {
+  const saved = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const query = { from: "2026-12-01T08:00:00Z", orderedAt: "2026-12-01T08:00:00Z",
+    timeZone: "UTC", limit: 10, config: { frequencyDefaults: { byFrequency: { "freq:1/per:1d": ["08:00"] } } } };
+
+  it("defers the predecessor cutoff until the dated branch is selected", () => {
+    const source = "Take 1 tablet daily, then either take 2 tablets daily starting December 5, 2026 or take 3 tablets daily starting December 8, 2026";
+    const parsed = parseSig(source);
+    const wire = saved(parsed.fhirNext);
+    const note = { url: "urn:clinic:selected-dated-branch", valueString: "retain current source" };
+    wire.step[0].component[0].extension = [...(wire.step[0].component[0].extension ?? []), note];
+    const native = importCanonicalCourse(wire), projection = projectCanonicalCourse(native);
+    expect(native.stages[0].administrations[0].schedule?.recurrence?.calendarWindow?.end).toBeUndefined();
+    expect(native.stages[1].administrations.map(member => member.schedule?.recurrence?.calendarWindow?.start))
+      .toEqual(["2026-12-05", "2026-12-08"]);
+    for (const [branchId, betweenStarts] of [["branch-2", 6], ["branch-3", 3]] as const) {
+      for (const dosage of [native, saved(projection.fhir), saved(projection.fhirNext)]) {
+        const before = JSON.stringify(dosage);
+        const selected = { ...query, alternativeChoices: { "choice-1": branchId } };
+        expect(nextDueDoses(dosage, selected)).toEqual([
+          "2026-12-01T08:00:00+00:00", "2026-12-02T08:00:00+00:00", "2026-12-03T08:00:00+00:00",
+          "2026-12-04T08:00:00+00:00", "2026-12-05T08:00:00+00:00", "2026-12-06T08:00:00+00:00",
+          "2026-12-07T08:00:00+00:00", "2026-12-08T08:00:00+00:00", "2026-12-09T08:00:00+00:00",
+          "2026-12-10T08:00:00+00:00",
+        ]);
+        expect(calculateTotalUnits({ dosage, ...selected, durationValue: 10, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: 16, unit: "tab" });
+        expect(calculateTotalUnits({ dosage, ...selected, from: "2026-12-05T08:00:00Z", durationValue: 3, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: betweenStarts, unit: "tab" });
+        const current = importCanonicalCourse(dosage);
+        expect(current.stages[0].administrations[0].schedule?.recurrence?.calendarWindow?.end).toBeUndefined();
+        expect(current.stages[1].administrations.map(member => member.choice))
+          .toEqual([{ groupId: "choice-1", branchId: "branch-2", selectionBehavior: "exactly-one" }, { groupId: "choice-1", branchId: "branch-3", selectionBehavior: "exactly-one" }]);
+        expect(projectCanonicalCourse(current).fhirNext.step[0].component[0].extension).toContainEqual(note);
+        expect(projectCanonicalCourse(current).fhirNext.renderedInstruction).toBe(source);
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    }
+  });
+
+  it("retains a single unambiguous dated successor cutoff", () => {
+    const parsed = parseSig("Take 1 tablet daily, then take 2 tablets daily starting December 5, 2026");
+    const native = importCanonicalCourse(parsed), projection = projectCanonicalCourse(native);
+    expect(native.stages[0].administrations[0].schedule?.recurrence?.calendarWindow?.end).toBe("2026-12-04");
+    for (const dosage of [native, saved(projection.fhir), saved(projection.fhirNext)]) {
+      const before = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 10, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 16, unit: "tab" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+});
+
+
+describe("review867 pauses after exact elapsed phases", () => {
+  const save = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+  it.each([
+    { duration: "24 hours", amount: 24, unit: Unit.Hour, clock: "08:00", zone: "UTC",
+      start: "2026-12-01T08:00:00Z", expected: [
+        "2026-12-01T08:00:00+00:00", "2026-12-01T14:00:00+00:00",
+        "2026-12-01T20:00:00+00:00", "2026-12-02T02:00:00+00:00",
+        "2026-12-04T08:00:00+00:00", "2026-12-05T08:00:00+00:00",
+      ] },
+    { duration: "1440 minutes", amount: 1440, unit: Unit.Minute, clock: "08:00", zone: "UTC",
+      start: "2026-12-01T08:00:00Z", expected: [
+        "2026-12-01T08:00:00+00:00", "2026-12-01T14:00:00+00:00",
+        "2026-12-01T20:00:00+00:00", "2026-12-02T02:00:00+00:00",
+        "2026-12-04T08:00:00+00:00", "2026-12-05T08:00:00+00:00",
+      ] },
+    { duration: "24 hours", amount: 24, unit: Unit.Hour, clock: "10:00", zone: "America/New_York",
+      start: "2026-03-07T08:00:00-05:00", expected: [
+        "2026-03-07T08:00:00-05:00", "2026-03-07T14:00:00-05:00",
+        "2026-03-07T20:00:00-05:00", "2026-03-08T03:00:00-04:00",
+        "2026-03-10T10:00:00-04:00", "2026-03-11T10:00:00-04:00",
+      ] },
+  ])("applies the civil pause after $duration at the actual end in $zone", ({ duration, amount, unit, clock, zone, start, expected }) => {
+    const source = "Take 1 tablet every 6 hours for " + duration +
+      ", then stop for 2 days, then take 2 tablets daily at " + clock;
+    const parsed = parseSig(source), parsedBefore = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ duration: amount, durationUnit: unit });
+    expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.treatmentPause?.durationDays).toBe(2);
+    expect(parsed.meta.canonical.clauses[1].schedule).toMatchObject({
+      phaseStartReference: "previous-phase-end", treatmentStartOffsetDays: 2
+    });
+    const note = { url: "urn:clinic:elapsed-phase-pause", valueString: "preserve both authored units" };
+    const r6 = save(parsed.fhirNext);
+    r6.step![1].start!.extension = [note];
+    const projected = projectCanonicalCourse(importCanonicalCourse(r6));
+    for (const [form, input] of [["native", parsed.meta.canonical.course!],
+      ["r5", save(projected.fhir)], ["r6", save(projected.fhirNext)]] as const) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const loading = course.stages[0].administrations[0];
+      const retainedLength = loading.schedule?.recurrence?.courseLength ?? loading.anchoredLength?.quantity;
+      expect(retainedLength).toMatchObject({ value: amount });
+      expect(retainedLength?.code ?? retainedLength?.unit).toBe(unit);
+      expect(course.stages[1].start).toMatchObject({
+        anchor: "previous-phase-end", displacement: { value: 2 }
+      });
+      const pause = course.stages[1].start!.displacement!;
+      expect(pause.code ?? pause.unit).toBe("d");
+      const options = { from: start, orderedAt: start, timeZone: zone, limit: 6 };
+      expect(nextDueDoses(input, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 5, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 8, unit: "tab" });
+      const roundtrip = projectCanonicalCourse(course).fhirNext;
+      expect(roundtrip.renderedInstruction).toBe(source);
+      if (form !== "native") expect(roundtrip.step![1].start!.extension).toContainEqual(note);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toContain("2 days after the end of the previous phase");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toContain("2 วันหลังสิ้นสุดขั้นตอนก่อนหน้า");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(parsedBefore);
+  });
+});

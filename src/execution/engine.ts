@@ -28,6 +28,7 @@ import {
 } from "./calendar";
 import {
   DurationUnit,
+  isPreviousPhaseAnchor,
   TimingEvent,
   numericAdministrationLimits,
   administrationHasDatedStart,
@@ -199,6 +200,36 @@ const TOTAL_UNITS_PRECISION = 1000000000000;
 interface ExpandedTime {
   time: string;
   dayShift: number;
+  /** An authored event offset is elapsed from its resolved local event. */
+  eventTime?: string;
+  elapsedOffsetMinutes?: number;
+}
+function exactEventClock(time: string, minutes: number): ExpandedTime {
+  const shifted = applyOffset(time, minutes);
+  return minutes ? { ...shifted, eventTime: time, elapsedOffsetMinutes: minutes } : shifted;
+}
+/** Source-day ownership stays civil; only an authored event offset is elapsed. */
+function resolveExpandedTime(day: Date, entry: ExpandedTime, zone: string): Date | null {
+  if (entry.eventTime !== undefined) {
+    const event = makeZonedDateFromDay(day, zone, entry.eventTime);
+    return event ? new Date(event.getTime() + entry.elapsedOffsetMinutes! * 60000) : null;
+  }
+  const targetDay = entry.dayShift ? addLocalDays(day, entry.dayShift, zone) : day;
+  return makeZonedDateFromDay(targetDay, zone, entry.time);
+}
+/** Existing walkers invert this elapsed range to bound their source-day scan. */
+function clockOffsetRange(
+  entries: readonly (string | ExpandedTime)[]
+): { low: number; high: number; differingOffsets: boolean } | undefined {
+  let first: number | undefined, low = 0, high = 0, differingOffsets = false;
+  for (const entry of entries) {
+    const milliseconds = typeof entry === "string" ? 0 : (entry.elapsedOffsetMinutes ?? 0) * 60000;
+    if (first === undefined) first = milliseconds;
+    else if (milliseconds !== first) differingOffsets = true;
+    if (milliseconds < low) low = milliseconds;
+    if (milliseconds > high) high = milliseconds;
+  }
+  return low || high ? { low, high, differingOffsets } : undefined;
 }
 function doseUnitSupportsPerTargetMultiplication(
   doseUnit: string | undefined,
@@ -878,13 +909,7 @@ function expandTiming(code: string, config: NextDueDoseConfig, repeat: Canonical
     }
   }
   if (exactOffset !== undefined && normalized.length) {
-    return normalized.map((entry) => {
-      const adjusted = applyOffset(entry.time, signedEventOffset(code, exactOffset ?? 0));
-      return {
-        time: adjusted.time,
-        dayShift: entry.dayShift + adjusted.dayShift,
-      };
-    });
+    return normalized.map(entry => exactEventClock(entry.time, signedEventOffset(code, exactOffset)));
   }
   return normalized;
 }
@@ -904,7 +929,8 @@ function expandWhenCodes(
     let expansions = expandTiming(code, config, repeat);
     if (!expansions.length && allowFallback) expansions = inferWhenFallbackEntries(code, repeat);
     for (const expansion of expansions) {
-      const key = `${expansion.dayShift}|${expansion.time}`;
+      const key = expansion.eventTime === undefined ? `${expansion.dayShift}|${expansion.time}`
+        : `${expansion.dayShift}|${expansion.time}|${expansion.eventTime}|${expansion.elapsedOffsetMinutes}`;
       if (seen.has(key)) {
         continue;
       }
@@ -963,7 +989,7 @@ function inferWhenFallbackEntries(code: string, repeat: CanonicalRecurrence): Ex
   for (const clock of fallbackClocks ?? []) {
     const normalized = normalizeClock(clock);
     entries.push(exactOffset !== undefined
-      ? applyOffset(normalized, signedEventOffset(code, exactOffset))
+      ? exactEventClock(normalized, signedEventOffset(code, exactOffset))
       : { time: normalized, dayShift: 0 });
   }
   return entries;
@@ -1025,18 +1051,24 @@ function exactTimingEventOccurrences(
           if (!expanded.length && !calendarDays && !repeat?.dayOfWeek?.length && !eventStatus?.eligibleDate) partialEvent = end > begin &&
             (!queryEnd || start < queryEnd && begin < queryEnd);
           else for (const entry of expanded.length ? expanded : [undefined]) {
-            const opening = entry?.dayShift ? addLocalDays(start, entry.dayShift, timeZone) : start;
-            const closing = entry?.dayShift ? addLocalDays(end, entry.dayShift, timeZone) : end;
-            const stop = earlierDate(closing, queryEnd)!;
-            let day = begin > opening ? startOfLocalDay(begin, timeZone) : opening;
+            const elapsed = entry?.elapsedOffsetMinutes === undefined ? undefined : entry.elapsedOffsetMinutes * 60000;
+            const opening = elapsed !== undefined ? start
+              : entry?.dayShift ? addLocalDays(start, entry.dayShift, timeZone) : start;
+            const closing = elapsed !== undefined ? end
+              : entry?.dayShift ? addLocalDays(end, entry.dayShift, timeZone) : end;
+            const sourceBegin = elapsed === undefined ? begin : new Date(begin.getTime() - elapsed);
+            const sourceEnd = queryEnd && elapsed !== undefined ? new Date(queryEnd.getTime() - elapsed) : queryEnd;
+            const stop = earlierDate(closing, sourceEnd)!;
+            const actualStop = elapsed === undefined ? stop : new Date(stop.getTime() + elapsed);
+            let day = sourceBegin > opening ? startOfLocalDay(sourceBegin, timeZone) : opening;
             // Test possibility only: these clocks never become a selected
             // event date or spend a count. Reuse exact-event local resolution,
             // including skipped clocks, before declaring a window disjoint.
             while (day < stop) {
-              const possible = entry ? makeZonedDateFromDay(day, timeZone, entry.time) : day;
-              const nominalDay = repeat?.dayOfWeek?.length && entry?.dayShift
+              const nominalDay = elapsed === undefined && entry?.dayShift
                 ? addLocalDays(day, -entry.dayShift, timeZone) : day;
-              if (possible && (entry ? possible >= begin : stop > begin) && possible < stop &&
+              const possible = entry ? resolveExpandedTime(nominalDay, entry, timeZone) : day;
+              if (possible && (entry ? possible >= begin : actualStop > begin) && possible < actualStop &&
                   matchesCalendarDaySelection(possible, calendarDays, timeZone) &&
                   (!repeat?.dayOfWeek?.length || arrayIncludes(repeat.dayOfWeek, getLocalWeekday(nominalDay, timeZone))) &&
                   (!eventStatus?.eligibleDate || eventStatus.eligibleDate(possible))) {
@@ -1064,8 +1096,7 @@ function exactTimingEventOccurrences(
       if (!day) continue;
       if (expanded.length) {
         for (const entry of expanded) {
-          const targetDay = entry.dayShift === 0 ? day : addLocalDays(day, entry.dayShift, timeZone);
-          const target = makeZonedDateFromDay(targetDay, timeZone, entry.time);
+          const target = resolveExpandedTime(day, entry, timeZone);
           if (target) candidates.push(target);
         }
       } else {
@@ -1231,7 +1262,7 @@ function resolveFrequencyCadence(
         // resolution as an explicit timing anchor, retaining the cadence.
         if (descriptor?.when?.length && descriptor.frequency === undefined && descriptor.period === undefined) {
           const entries = expandWhenCodes(descriptor.when, config, effectiveRepeat, true);
-          if (entries.some(entry => entry.dayShift !== 0)) {
+          if (entries.some(entry => entry.dayShift !== 0 || entry.eventTime !== undefined)) {
             codeAnchors = descriptor.when;
             codeClocks = [];
           } else codeClocks = entries.map(entry => entry.time);
@@ -2479,7 +2510,7 @@ function treatmentRelativeInstant(
 /** A phase occupies instants strictly before its exclusive end. A point
  * completion already has the planner's +1ms fence; a duration ending at
  * midnight therefore opens that date, without inventing an empty extra day. */
-function previousPhaseNextDay(
+function previousPhaseInstant(
   boundary: CanonicalBoundary, previousEnd: Date | undefined, timeZone: string
 ): Date {
   if (!previousEnd)
@@ -2488,10 +2519,13 @@ function previousPhaseNextDay(
   if (boundary.displacement && boundary.displacementRange)
     throw new MedicationQuantityCalculationError("phase-boundary-displacement-conflict",
       "A phase boundary must select one displacement choice; the supplied quantity and range remain retained.");
-  const midnight = addLocalDays(new Date(previousEnd.getTime() - 1), 1, timeZone);
-  if (!boundary.displacement && !boundary.displacementRange) return midnight;
+  const nextDay = boundary.anchor === "previous-phase-next-day";
+  const origin = nextDay
+    ? addLocalDays(new Date(previousEnd.getTime() - 1), 1, timeZone)
+    : previousEnd;
+  if (!boundary.displacement && !boundary.displacementRange) return origin;
   return treatmentRelativeInstant({ ...boundary, anchor: "treatment-start" },
-    midnight, timeZone, LOCAL_DAY_START_CLOCK);
+    origin, timeZone, nextDay ? LOCAL_DAY_START_CLOCK : undefined);
 }
 /** A treatment stage has its own logical calendar clock. Calendar-relative
  * starts preserve the original prescribed wall clock across a DST gap;
@@ -2505,7 +2539,8 @@ function stageCalendarClock(
   anchor: Date,
   timeZone: string,
   sourceClock?: TreatmentWallClock,
-  predecessorClock?: TreatmentWallClock
+  predecessorClock?: TreatmentWallClock,
+  previousEnd?: Date
 ): TreatmentWallClock | undefined {
   const startBoundary = course.stages[index].start;
   const nextDay = startBoundary?.anchor === "previous-phase-next-day";
@@ -2522,6 +2557,7 @@ function stageCalendarClock(
       unit && (offset?.value ?? 0) > 0 && !normalizedCalendarInterval(offset?.value, unit))
     return getTimeParts(start, timeZone);
   return nextDay || dayStart ? LOCAL_DAY_START_CLOCK
+    : startBoundary?.anchor === "previous-phase-end" && previousEnd ? getTimeParts(previousEnd, timeZone)
     : sourceClock ?? getTimeParts(anchor, timeZone);
 }
 /** Each component phase marker owns BOTH its cadence start and the civil
@@ -2547,8 +2583,8 @@ function parallelComponentCadence(
   const boundary = dosage.phaseStart;
   if (!offset && !boundary) return { origin: fallback, capClock: stageClock, hasPhaseOrigin: false };
   const nextDay = boundary?.anchor === "previous-phase-next-day";
-  const origin = nextDay
-    ? previousPhaseNextDay(boundary, previousPhaseEnd, timeZone)
+  const origin = isPreviousPhaseAnchor(boundary?.anchor)
+    ? previousPhaseInstant(boundary!, previousPhaseEnd, timeZone)
     : treatmentRelativeInstant(
         boundary ?? { anchor: "treatment-start", displacement: offset },
         treatmentStart,
@@ -2566,6 +2602,7 @@ function parallelComponentCadence(
     capClock: elapsed
       ? getTimeParts(origin, timeZone)
       : nextDay || boundary?.anchor === "treatment-day-start" ? LOCAL_DAY_START_CLOCK
+      : boundary?.anchor === "previous-phase-end" && previousPhaseEnd ? getTimeParts(previousPhaseEnd, timeZone)
       : sourceClock ?? getTimeParts(treatmentStart, timeZone),
     hasPhaseOrigin: true,
   };
@@ -2980,8 +3017,8 @@ function treatmentStepWindow(
 ): TreatmentStepWindow {
   const stage = course.stages[index];
   let clinicalOpening = repetitionWindow ? repetitionWindow.start : stage.start
-    ? stage.start.anchor === "previous-phase-next-day"
-      ? previousPhaseNextDay(stage.start, index > 0 ? previousEnd : undefined, timeZone)
+    ? isPreviousPhaseAnchor(stage.start.anchor)
+      ? previousPhaseInstant(stage.start, index > 0 ? previousEnd : undefined, timeZone)
       : treatmentRelativeInstant(stage.start, anchor, timeZone, sourceClock)
     : predecessorPoint ?? previousEnd;
   // The query floor locates an otherwise undated plan; it is not evidence
@@ -3002,7 +3039,7 @@ function treatmentStepWindow(
     if (allDated && opening) clinicalOpening = start = opening;
   }
   const capClock = repetitionWindow ? repetitionWindow.capClock
-    : stageCalendarClock(course, index, start, anchor, timeZone, sourceClock, predecessorClock);
+    : stageCalendarClock(course, index, start, anchor, timeZone, sourceClock, predecessorClock, previousEnd);
   const administrations: ResolvedAdministrationWindow[] = [];
   let allFinite = stage.administrations.length > 0;
   let completionPending = false;
@@ -3122,7 +3159,7 @@ function treatmentStepWindow(
   if (!end) {
     const nextStart = nextStage?.start;
     // A predecessor-dependent start cannot prove its own predecessor's end.
-    if (nextStart && nextStart.anchor !== "previous-phase-next-day")
+    if (nextStart && !isPreviousPhaseAnchor(nextStart.anchor))
       end = treatmentRelativeInstant(nextStart, anchor, timeZone, sourceClock);
     else if (!nextStart && nextStage?.administrations.length === 1) {
       // A dated successor already owns an absolute boundary. It can close
@@ -3134,7 +3171,7 @@ function treatmentStepWindow(
       // A retained empty predecessor cannot block an independently anchored
       // member. Resolve its typed origin through the same cadence owner.
       if (!end && !stage.administrations.length &&
-          successor.phaseStart?.anchor !== "previous-phase-next-day" &&
+          !isPreviousPhaseAnchor(successor.phaseStart?.anchor) &&
           (successor.phaseStart || successor.phaseOrigin)) {
         end = parallelComponentCadence(successor, anchor, timeZone, start, sourceClock).origin;
         // This empty placeholder needs no elapsed time before the known origin.
@@ -6218,7 +6255,9 @@ function generateFrequencyPerPeriodSeries(
     latestDayShift = Math.max(latestDayShift, shift);
     interlacingClocks ||= shift !== firstShift;
   }
-  const pending = interlacingClocks ? new ChronologicalQueue<ChronologicalEvent>() : undefined;
+  const elapsedRange = clockOffsetRange(clocks);
+  const pending = interlacingClocks || elapsedRange?.differingOffsets
+    ? new ChronologicalQueue<ChronologicalEvent>() : undefined;
   let serial = 0;
   let cycleStart = baseTime;
   let elapsedClockOffsets: number[] | undefined;
@@ -6229,17 +6268,20 @@ function generateFrequencyPerPeriodSeries(
     if (configuredClock && clocks.length === frequency) {
       const offsets: number[] = [];
       for (const entry of clocks) {
-        const clock = typeof entry === "string" ? entry : entry.time;
-        const day = typeof entry === "object" && entry.dayShift ? addLocalDays(baseTime, entry.dayShift, timeZone) : baseTime;
-        let at = makeZonedDateFromDay(day, timeZone, clock);
-        if (at && at < baseTime) at = makeZonedDateFromDay(addLocalDays(day, 1, timeZone), timeZone, clock);
+        const clock = typeof entry === "string" ? { time: entry, dayShift: 0 } : entry;
+        let at = resolveExpandedTime(baseTime, clock, timeZone);
+        if (at && at < baseTime) at = resolveExpandedTime(addLocalDays(baseTime, 1, timeZone), clock, timeZone);
         if (!at || at < baseTime || at >= firstEnd) break;
         offsets.push(at.getTime() - baseTime.getTime());
       }
       // Select positions once, then retain the authored elapsed cycle across clock changes.
       if (offsets.length === frequency) elapsedClockOffsets = offsets.sort((a, b) => a - b);
     }
-    const seek = latestDayShift ? addLocalDays(from, -latestDayShift, timeZone) : from;
+    let seek = latestDayShift ? addLocalDays(from, -latestDayShift, timeZone) : from;
+    if (elapsedRange?.high) {
+      const eventFloor = new Date(from.getTime() - elapsedRange.high);
+      if (eventFloor < seek) seek = eventFloor;
+    }
     const periods = Math.max(0, Math.floor((seek.getTime() - baseTime.getTime()) / width));
     cycleStart = new Date(baseTime.getTime() + periods * width);
   }
@@ -6247,7 +6289,8 @@ function generateFrequencyPerPeriodSeries(
   while (true) {
     const next = advanceCycle(cycleStart);
     if (!next || next <= cycleStart) return results;
-    if ((latestDayShift ? addLocalDays(next, latestDayShift, timeZone) : next) > from) break;
+    if ((latestDayShift ? addLocalDays(next, latestDayShift, timeZone) : next) > from ||
+        elapsedRange && next.getTime() + elapsedRange.high > from.getTime()) break;
     cycleStart = next;
   }
   let guard = 0;
@@ -6256,7 +6299,8 @@ function generateFrequencyPerPeriodSeries(
     results.length < effectiveLimit &&
     guard < maxCycles &&
     (!upperBound ||
-      (earliestDayShift ? addLocalDays(cycleStart, earliestDayShift, timeZone) : cycleStart) < upperBound)
+      (earliestDayShift ? addLocalDays(cycleStart, earliestDayShift, timeZone) : cycleStart) < upperBound ||
+      elapsedRange && cycleStart.getTime() + elapsedRange.low < upperBound.getTime())
   ) {
     const cycleEnd = advanceCycle(cycleStart);
     if (!cycleEnd || cycleEnd <= cycleStart) break;
@@ -6276,6 +6320,7 @@ function generateFrequencyPerPeriodSeries(
     for (let index = 0; index < candidates && results.length < effectiveLimit; index++) {
       let candidate: Date | null;
       let shiftedClock = false;
+      let elapsedEvent = false;
       if (implicitClock && index === 0) {
         // Zero displacement already has an exact instant, including which
         // occurrence of a folded wall clock and its source milliseconds.
@@ -6284,13 +6329,13 @@ function generateFrequencyPerPeriodSeries(
         const entry = clocks[index % Math.max(1, clocks.length)];
         const dayShift = typeof entry === "object" ? entry.dayShift : 0;
         shiftedClock = dayShift !== 0;
+        elapsedEvent = typeof entry === "object" && entry.eventTime !== undefined;
         // Cross-midnight shifted clocks are already accounted for by their
         // source day; an extra shifted anchor could invent a next-cycle dose.
         if (index >= frequency && shiftedClock) continue;
         const day = addLocalDays(
           startOfLocalDay(cycleStart, timeZone),
-          (clockedDays ? Math.floor(index / clocks.length) : Math.floor((index * spanDays) / frequency)) +
-            dayShift,
+          (clockedDays ? Math.floor(index / clocks.length) : Math.floor((index * spanDays) / frequency)),
           timeZone
         );
         const clock = typeof entry === "string" ? entry : entry?.time ?? baseClock;
@@ -6322,7 +6367,9 @@ function generateFrequencyPerPeriodSeries(
             clockSeconds % 60
           );
         } else {
-          candidate = makeZonedDateFromDay(day, timeZone, clock);
+          candidate = typeof entry === "object"
+            ? resolveExpandedTime(day, entry, timeZone)
+            : makeZonedDateFromDay(day, timeZone, clock);
         }
         // Inferred calendar clocks inherit the source fractional second.
         // Authored/caller-configured clocks and elapsed distributions retain their own precision.
@@ -6338,7 +6385,10 @@ function generateFrequencyPerPeriodSeries(
       if (
         !candidate ||
         candidate < from ||
-        (!shiftedClock && (candidate < cycleStart || candidate >= cycleEnd)) ||
+        // An elapsed event offset may cross the actual cycle fence even
+        // when its nominal wall-clock dayShift is zero. The source-day
+        // extra-candidate rule above still uses only that nominal shift.
+        (!shiftedClock && !elapsedEvent && (candidate < cycleStart || candidate >= cycleEnd)) ||
         (orderedAt && candidate < orderedAt) ||
         (upperBound && candidate >= upperBound) ||
         (dayFilter && !dayFilter.has(getLocalWeekday(candidate, timeZone))) ||
@@ -6356,8 +6406,10 @@ function generateFrequencyPerPeriodSeries(
     if (pending) {
       // An unvisited cycle can only emit on or after its earliest shifted
       // anchor day. Drain proven earlier events before spending result slots.
-      const before = startOfLocalDay(earliestDayShift
+      let before = startOfLocalDay(earliestDayShift
         ? addLocalDays(cycleStart, earliestDayShift, timeZone) : cycleStart, timeZone).getTime();
+      if (elapsedRange) before = Math.min(before,
+        startOfLocalDay(cycleStart, timeZone).getTime() + elapsedRange.low);
       while (pending.first() && pending.first()!.at < before && results.length < effectiveLimit)
         results.push(pending.pop()!.iso);
     }
@@ -6489,15 +6541,20 @@ function generateDayFilteredPeriodSeries(options: DayFilteredPeriodSeriesOptions
 /** Resolved clock entries are sorted by dayShift. The last entry determines
  * how many earlier anchor dates may still yield an event inside this query. */
 function firstClockAnchorDay(
-  from: Date, entries: readonly ExpandedTime[], zone: string, orderedAt?: Date | null
+  from: Date, entries: readonly ExpandedTime[], zone: string, orderedAt?: Date | null,
+  elapsedRange?: { low: number; high: number }
 ): Date {
   const shift = entries[entries.length - 1]?.dayShift ?? 0;
   // Unshifted clocks need only the query's civil date. Their consumers bound
   // each instant and use addLocalDays to normalize the following date.
-  if (shift === 0 && entries[0]?.dayShift === 0) return from;
+  if (!elapsedRange && shift === 0 && entries[0]?.dayShift === 0) return from;
   const day = startOfLocalDay(from, zone);
-  if (shift <= 0) return day;
-  const first = addLocalDays(day, -shift, zone);
+  if (!elapsedRange && shift <= 0) return day;
+  let first = shift > 0 ? addLocalDays(day, -shift, zone) : day;
+  if (elapsedRange?.high) {
+    const eventDay = startOfLocalDay(new Date(from.getTime() - elapsedRange.high), zone);
+    if (eventDay < first) first = eventDay;
+  }
   const treatmentDay = orderedAt ? startOfLocalDay(orderedAt, zone) : undefined;
   return treatmentDay && treatmentDay > first ? treatmentDay : first;
 }
@@ -6514,7 +6571,8 @@ function visitClockOccurrences(
   const orderedTime = orderedAt?.getTime();
   const eligibleTime = eligibleFrom?.getTime();
   const endTime = courseEnd?.getTime();
-  let currentDay = firstClockAnchorDay(from, expanded, timeZone, orderedAt);
+  const elapsedRange = clockOffsetRange(expanded);
+  let currentDay = firstClockAnchorDay(from, expanded, timeZone, orderedAt, elapsedRange);
   const firstShift = expanded[0].dayShift;
   // The existing weekday-series allowance also owns explicit clocks: frequency
   // counts administrations across the selected weekday/clock opportunities.
@@ -6537,14 +6595,19 @@ function visitClockOccurrences(
   const selectedTimes = weeklyFrequency === undefined ? undefined : new Set<number>();
   // Shifted anchors can interlace adjacent source days. Keep their existing
   // chronological merge before the consumer spends an accepted-result limit.
-  const pending = firstShift !== expanded[expanded.length - 1].dayShift
+  const pending = firstShift !== expanded[expanded.length - 1].dayShift || elapsedRange?.differingOffsets
     ? new ChronologicalQueue<{ at: number; date: Date; serial: number }>() : undefined;
   let serial = 0;
   let iterations = 0;
-  const maxIterations = calendarScanLimit(currentDay, courseEnd, effectiveLimit, repeat) + Math.max(0, -firstShift);
+  const scanEnd = courseEnd && elapsedRange
+    ? new Date(courseEnd.getTime() - elapsedRange.low) : courseEnd;
+  const maxIterations = calendarScanLimit(currentDay, scanEnd, effectiveLimit, repeat) + Math.max(0, -firstShift);
   while (
     iterations < maxIterations &&
-    (endTime === undefined || (firstShift < 0 ? addLocalDays(currentDay, firstShift, timeZone) : currentDay).getTime() < endTime)
+    (endTime === undefined || (elapsedRange ? Math.min(
+      (firstShift < 0 ? addLocalDays(currentDay, firstShift, timeZone) : currentDay).getTime(),
+      currentDay.getTime() + elapsedRange.low
+    ) : (firstShift < 0 ? addLocalDays(currentDay, firstShift, timeZone) : currentDay).getTime()) < endTime)
   ) {
     if (selectedTimes) {
       const week = Math.floor((getLocalDayNumber(currentDay, timeZone) - anchorNumber) / 7);
@@ -6554,9 +6617,19 @@ function visitClockOccurrences(
       matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
       clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter)
     ) {
-      for (const entry of expanded) {
-        const targetDay = entry.dayShift === 0 ? currentDay : addLocalDays(currentDay, entry.dayShift, timeZone);
-        const zoned = makeZonedDateFromDay(targetDay, timeZone, entry.time);
+      // A resolved event offset can cross a gap/fold and change its order
+      // relative to another clock. Spend the existing allowance in actual order.
+      let resolved: Date[] | undefined;
+      if (elapsedRange?.differingOffsets) {
+        resolved = [];
+        for (const entry of expanded) {
+          const date = resolveExpandedTime(currentDay, entry, timeZone);
+          if (date) resolved.push(date);
+        }
+        resolved.sort((a, b) => a.getTime() - b.getTime());
+      }
+      for (let index = 0; index < (resolved?.length ?? expanded.length); index++) {
+        const zoned = resolved ? resolved[index] : resolveExpandedTime(currentDay, expanded[index], timeZone);
         if (!zoned) continue;
         const at = zoned.getTime();
         if (orderedTime !== undefined && at < orderedTime ||
@@ -6572,7 +6645,8 @@ function visitClockOccurrences(
     }
     currentDay = addLocalDays(currentDay, 1, timeZone);
     if (pending) {
-      const before = (firstShift === 0 ? currentDay : addLocalDays(currentDay, firstShift, timeZone)).getTime();
+      let before = (firstShift === 0 ? currentDay : addLocalDays(currentDay, firstShift, timeZone)).getTime();
+      if (elapsedRange) before = Math.min(before, currentDay.getTime() + elapsedRange.low);
       while (pending.first() && pending.first()!.at < before)
         if (emit(pending.pop()!.date)) return;
     }
@@ -6824,7 +6898,7 @@ function requireExecutableCourseContext(
   const checkBoundary = (boundary: CanonicalBoundary | undefined): void => {
     // Contextual NEXT still needs the actual preceding completion. All other
     // retained boundaries use the same resolver as the selected stage walk.
-    if (!boundary || boundary.anchor === "previous-phase-next-day") return;
+    if (!boundary || isPreviousPhaseAnchor(boundary.anchor)) return;
     const zone = options.timeZone ?? options.config?.timeZone;
     if (!zone) return; // The public entry point retains its time-zone diagnostic.
     anchor ??= coerceDate(options.orderedAt ?? options.from, options.orderedAt === undefined ? "from" : "orderedAt");
@@ -8849,10 +8923,7 @@ export function calculateTotalUnits(options: CanonicalSupplyOptions): TotalUnits
     }
   );
 }
-interface ClockEntry {
-  time: string;
-  dayShift: number;
-}
+type ClockEntry = ExpandedTime;
 /** Occurrence enumeration, historical caps and totals use exactly the same clock defaults. */
 function resolveExplicitClockEntries(
   repeat: CanonicalRecurrence,

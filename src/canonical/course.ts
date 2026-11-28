@@ -154,11 +154,12 @@ export interface CanonicalTiming {
 export interface CanonicalBoundary {
   /** The previous-phase-next-day anchor denotes local midnight following
    * the predecessor's final occupied day, derived from its exclusive end.
+   * previous-phase-end retains that exact exclusive end before a typed pause.
    * treatment-day-start denotes midnight of the order's local calendar day,
    * before applying its day displacement. treatment-start retains the clock.
    * Other non-treatment anchors need an external resolver; never reinterpret
    * them as treatment-relative dates. */
-  anchor: "treatment-start" | "treatment-day-start" | "previous-phase-next-day" | "coded-event" | "resource-reference" |
+  anchor: "treatment-start" | "treatment-day-start" | "previous-phase-next-day" | "previous-phase-end" | "coded-event" | "resource-reference" |
     "definition" | "path" | "unresolved";
   contextCode?: CanonicalConcept;
   contextReference?: CanonicalReference;
@@ -169,6 +170,12 @@ export interface CanonicalBoundary {
   displacementRange?: CanonicalRange;
   /** Uninterpreted external metadata, not an executable anchor. */
   provenance?: Record<string, unknown>;
+}
+/** The two contextual boundaries share predecessor dependency ownership. */
+export function isPreviousPhaseAnchor(
+  anchor: CanonicalBoundary["anchor"] | undefined
+): anchor is "previous-phase-next-day" | "previous-phase-end" {
+  return anchor === "previous-phase-next-day" || anchor === "previous-phase-end";
 }
 export interface CanonicalChoice {
   groupId: string;
@@ -200,7 +207,7 @@ export interface CanonicalAdministration {
    * participating nodes; an empty list retains a referenced root identity. */
   phasePredecessors?: number[];
   onsetDays?: number;
-  onsetReference?: "previous-phase-next-day" | "treatment-day-start";
+  onsetReference?: "previous-phase-next-day" | "previous-phase-end" | "treatment-day-start";
   asNeeded?: boolean;
   targetCount?: number;
   target?: CanonicalConcept;
@@ -345,6 +352,9 @@ export function earliestCalendarOpening(administrations: readonly CanonicalAdmin
   { start: string; deferred: boolean } | undefined {
   let opening: { start: string; deferred: boolean } | undefined;
   for (const administration of administrations) {
+    // Unselected alternatives cannot close the preceding course. Execution
+    // removes the choice marker only from its selected current members.
+    if (administration.choice || administration.choiceIssue) continue;
     const timing = administration.schedule;
     let start = timing?.recurrence?.calendarWindow?.start;
     if (!start) for (const event of timing?.explicitEvents ?? []) {

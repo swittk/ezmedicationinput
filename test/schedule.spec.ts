@@ -2511,6 +2511,11 @@ describe("civil boundaries retain the intended instant", () => {
     ] };
     expect(calculateTotalUnits({ ...options, dosage: input, from: "2026-01-01T12:00:00.500Z",
       durationValue: 1, durationUnit: unit }).totalUnits).toBe(1);
+    for (const [fraction, expected] of [["250", 1], ["500", 0]] as const) {
+      const single = { ...input, schedule: { explicitEvents: [day + "T12:00:00." + fraction + "Z"] } };
+      expect(calculateTotalUnits({ ...options, dosage: single, from: "2026-01-01T12:00:00.500Z",
+        durationValue: 1, durationUnit: unit }).totalUnits).toBe(expected);
+    }
   });
 });
 

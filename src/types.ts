@@ -1999,7 +1999,7 @@ export interface CanonicalScheduleExpr {
   treatmentStartOffsetDays?: number;
   /** Local-day origin or preceding-phase completion, never a guessed
    * count-to-treatment-day conversion. */
-  phaseStartReference?: "previous-phase-next-day" | "treatment-day-start";
+  phaseStartReference?: "previous-phase-next-day" | "previous-phase-end" | "treatment-day-start";
   /** Elapsed delay from each opportunity in this explicitly retained base schedule. */
   administrationOffsetMinutes?: number;
   timingCode?: string;

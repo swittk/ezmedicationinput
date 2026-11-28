@@ -39,7 +39,7 @@ import type {
   FhirR6Extension,
   FormatOptions,
 } from "../types";
-import { administrationHasAmountFacts } from "../canonical/course";
+import { administrationHasAmountFacts, isPreviousPhaseAnchor } from "../canonical/course";
 import { convertQuantityValue, getQuantityComparisonUnit, getUnitComparisonCategory, quantityUnitIdentityCode, sameCodedQuantityUnit } from "../utils/units";
 import type {
   CanonicalMeasure,
@@ -424,12 +424,13 @@ const PREVIOUS_PHASE_NEXT_DAY_CODE = "previous-phase-next-day";
 
 export function boundaryFromR6(b: FhirR6RelativeTime | undefined): CanonicalBoundary | undefined {
   if (!b) return undefined;
-  let recognized: "treatment-start" | "treatment-day-start" | "previous-phase-next-day" | undefined;
+  let recognized: "treatment-start" | "treatment-day-start" | "previous-phase-next-day" | "previous-phase-end" | undefined;
   if (!b.contextReference && !b.contextDefinition && !b.contextPath) {
     for (const coding of b.contextCode?.coding ?? []) {
       const event = coding.system === TREATMENT_START_SYSTEM && coding.code === "treatment-start"
         ? "treatment-start" : coding.system === COURSE_PHASE_EVENT_SYSTEM && coding.code === PREVIOUS_PHASE_NEXT_DAY_CODE
-        ? "previous-phase-next-day" : coding.system === COURSE_PHASE_EVENT_SYSTEM && coding.code === "treatment-day-start"
+        ? "previous-phase-next-day" : coding.system === COURSE_PHASE_EVENT_SYSTEM && coding.code === "previous-phase-end"
+        ? "previous-phase-end" : coding.system === COURSE_PHASE_EVENT_SYSTEM && coding.code === "treatment-day-start"
         ? "treatment-day-start" : undefined;
       if (!event) continue;
       // Conflicting understood anchors are retained as a coded event. Unknown
@@ -1065,14 +1066,14 @@ export function boundaryToWire(b: CanonicalBoundary | undefined): FhirR6Relative
       output.contextCode = {
         coding: [{ system: TREATMENT_START_SYSTEM, code: "treatment-start", display: "Start of Treatment" }],
       };
-    else if (b.anchor === "previous-phase-next-day" || b.anchor === "treatment-day-start")
+    else if (isPreviousPhaseAnchor(b.anchor) || b.anchor === "treatment-day-start")
       output.contextCode = {
         coding: [{ system: COURSE_PHASE_EVENT_SYSTEM, code: b.anchor }],
       };
   }
   // Understood external anchor types stay typed, including in native edits.
   // These are preserved but not considered executable without an event/source resolver.
-  if (b.anchor !== "treatment-start" && b.anchor !== "treatment-day-start" && b.anchor !== "previous-phase-next-day") {
+  if (b.anchor !== "treatment-start" && b.anchor !== "treatment-day-start" && !isPreviousPhaseAnchor(b.anchor)) {
     assign(output, "contextReference", b.anchor === "resource-reference" ? b.contextReference : undefined);
     assign(output, "contextDefinition", b.anchor === "definition" ? b.contextDefinition : undefined);
     assign(output, "contextPath",

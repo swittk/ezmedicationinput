@@ -331,7 +331,7 @@ export interface HpsgScheduleFeature {
   /** Source-relative phase onset; the reference distinguishes civil days. */
   treatmentStartOffsetDays?: number;
   /** Local civil-day origin or completion of the preceding phase. */
-  phaseStartReference?: "treatment-day-start" | "previous-phase-next-day";
+  phaseStartReference?: "treatment-day-start" | "previous-phase-next-day" | "previous-phase-end";
   attachmentClass?: "administration" | "procedure";
   /** Exact source owned by this schedule construction, retained for generic attachment arbitration. */
   sourceRanges?: TextRange[];

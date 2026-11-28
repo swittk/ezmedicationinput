@@ -1,3 +1,4 @@
+import { isPreviousPhaseAnchor } from "../canonical/course";
 import { DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_DAYPART_CLOCK_RANGES, isNextDayScheduleRule } from "../hpsg/lexical-classes";
 import { hasImplicitSingleCount, singleClockWithoutRecurrence, terminalAdministrationDelay } from "./grammar";
 import { applyAdministrationDurationSemantics } from "../hpsg/defaults";
@@ -383,7 +384,7 @@ export function scopeSequentialPhaseSemantics(
     const firstSchedule = schedules[0];
     // A NEXT displacement belongs to the preceding phase, not the order.
     // Keep that dependency until execution resolves its actual origin.
-    let priorStart: number | null = firstSchedule?.phaseStartReference === "previous-phase-next-day"
+    let priorStart: number | null = isPreviousPhaseAnchor(firstSchedule?.phaseStartReference)
       ? null : firstSchedule?.treatmentStartOffsetDays ?? inheritedStart;
     // An omitted member onset inherits the phase origin, not a sibling's
     // independently authored onset. Distinct origins keep their dependency
@@ -449,7 +450,7 @@ export function scopeSequentialPhaseSemantics(
         const displaced = schedules.some(value => Boolean(value?.administrationOffsetMinutes));
         contextualPredecessor = (!start || displaced) && (singleClockPredecessor !== undefined || priorStart === null ||
           schedules.some(value => value?.count !== undefined || value?.countMax !== undefined || value?.sharedCount ||
-            value?.phaseStartReference === 'previous-phase-next-day' ||
+            isPreviousPhaseAnchor(value?.phaseStartReference) ||
             value?.duration !== undefined || value?.durationUnit !== undefined ||
             // An unfiltered open phase keeps its shared civil origin. A day
             // selection leaves that date as a floor, not a known completion.
@@ -605,7 +606,27 @@ export function scopeSequentialPhaseSemantics(
             });
           }
         }
-      } else relativePhaseStarts.set(edge.to, null);
+      } else {
+        relativePhaseStarts.set(edge.to, null);
+        // An exact elapsed/calendar-unit phase cannot be collapsed into civil
+        // days. Its existing execution completion owns the following pause.
+        if (phasePauseDays && schedules.length && schedules.every(hasExactScheduleDuration)) {
+          for (const member of next) {
+            const clause = states[member]?.primaryClause;
+            const schedule = clause?.schedule;
+            if (!clause || !schedule || schedule.treatmentStartOffsetDays !== undefined ||
+                schedule.phaseStartReference || schedule.boundsStart || schedule.boundsEnd ||
+                schedule.calendarEvents?.length) continue;
+            schedule.phaseStartReference = "previous-phase-end";
+            schedule.treatmentStartOffsetDays = phasePauseDays;
+            clause.evidence.push({
+              rule: "hpsg.regimen.terminal-treatment-pause",
+              spans: [], scheduleFields: ["phaseStartReference", "treatmentStartOffsetDays"],
+              note: "The typed pause starts at the preceding phase's actual exclusive end."
+            });
+          }
+        }
+      }
     } else relativePhaseStarts.set(edge.to, null);
     const shared = schedules[0];
     // A recurring event and its offset form one donated anchor in both

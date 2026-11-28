@@ -82,6 +82,7 @@ export const ENGLISH_COURSE: CourseLanguage = {
   treatmentDayStart: "the start of the first treatment day",
   afterPreviousPhase: "After the previous phase",
   nextDayAfterPreviousPhase: "the day after the previous phase",
+  previousPhaseEnd: "the end of the previous phase",
   afterTreatmentStart: (offset) => `${offset} after treatment start`,
   relativeEvent: (offset, event, before) => `${offset} ${before ? "before" : "after"} ${event ?? "the event"}`,
   calendarWindow: (start, end) =>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateTotalUnits, formatSig, lintSig, nextDueDoses, parseSig, parseSigAsync, suggestSig, toDosageDetails,
-  MedicationQuantityCalculationError, importCanonicalCourse,
+  MedicationQuantityCalculationError, importCanonicalCourse, projectCanonicalCourse,
   toFhirR5Dosages, fromFhir, getDosageExcludedWeekdays,
   EventTiming, FhirDayOfWeek, FhirPeriodUnit, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL
 } from "../src";
@@ -4350,6 +4350,9 @@ describe("round50: explicit event quota and interval query ownership", () => {
       const week = due.filter(at => Date.parse(at) < Date.parse("2026-01-12T00:00:00Z"));
       expect(week).toHaveLength(frequency);
       expect(week.every(at => [1, 4].indexOf(new Date(at).getUTCDay()) >= 0)).toBe(true);
+      if (frequency === 2) expect(week).toEqual([
+        "2026-01-05T00:00:00+00:00", "2026-01-08T00:00:00+00:00",
+      ]);
       expect(calculateTotalUnits({ dosage, ...query, durationValue: 7, durationUnit: FhirPeriodUnit.Day }))
         .toMatchObject({ totalUnits: frequency, unit: "tab" });
       const later = nextDueDoses(dosage, { ...query, from: "2026-01-08T00:00:00Z" });
@@ -7393,6 +7396,123 @@ describe("review51 recorded counts and civil duration bounds", () => {
       expect(repeat.boundsPeriod).toEqual({ start });
       expect(repeat.boundsDuration).toBeUndefined();
       expect(repeat.boundsRange).toBeUndefined();
+    }
+  });
+});
+
+describe("review867 elapsed offsets from resolved event clocks", () => {
+  const saved = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([
+    ["spring lead", "HS", "03:30", 60, "2026-03-07T00:00:00-05:00",
+      ["2026-03-07T02:30:00-05:00", "2026-03-08T01:30:00-05:00", "2026-03-09T02:30:00-04:00"]],
+    ["spring lag", "PHS", "01:30", 60, "2026-03-07T00:00:00-05:00",
+      ["2026-03-07T02:30:00-05:00", "2026-03-08T03:30:00-04:00", "2026-03-09T02:30:00-04:00"]],
+    ["autumn lead", "HS", "02:30", 60, "2026-10-31T00:00:00-04:00",
+      ["2026-10-31T01:30:00-04:00", "2026-11-01T01:30:00-05:00", "2026-11-02T01:30:00-05:00"]],
+    ["zero", "HS", "03:30", 0, "2026-03-07T00:00:00-05:00",
+      ["2026-03-07T03:30:00-05:00", "2026-03-08T03:30:00-04:00", "2026-03-09T03:30:00-04:00"]],
+  ] as const)("keeps the exact %s event displacement across DST", (_name, when, clock, offset, from, expected) => {
+    const note = { url: "urn:clinic:event-offset-note", valueString: "keep event owner" };
+    const source: FhirR6DosageInstruction = { renderedInstruction: "one tablet at the current event offset",
+      step: [{ component: [{ id: "offset-dose", extension: [note],
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          when: [when as EventTiming], offset } },
+      }] }] };
+    const native = importCanonicalCourse(source), projection = projectCanonicalCourse(native);
+    const options = { from, orderedAt: from, timeZone: "America/New_York", eventClock: { [when]: clock }, limit: 3 };
+    for (const dosage of [native, saved(projection.fhir), saved(projection.fhirNext)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "tab" });
+      const retained = projectCanonicalCourse(importCanonicalCourse(dosage)).fhirNext;
+      expect(retained.step[0].component[0].timing?.repeat).toMatchObject({ when: [when], offset });
+      expect(retained.step[0].component[0].extension).toContainEqual(note);
+      expect(retained.renderedInstruction).toBe(source.renderedInstruction);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each([
+    { name: "actual order before the weekly allowance", when: ["PHS", "HS"], offset: 60,
+      clocks: { PHS: "00:45", HS: "03:30" }, frequency: 1, periodUnit: FhirPeriodUnit.Week,
+      weekdays: [FhirDayOfWeek.Sunday], from: "2026-03-08T00:00:00-05:00", days: 1,
+      expected: ["2026-03-08T01:30:00-05:00"], count: 1 },
+    { name: "distinct events with the same flattened clock", when: ["PHS", "HS"], offset: 60,
+      clocks: { PHS: "01:30", HS: "03:30" }, frequency: 2, periodUnit: FhirPeriodUnit.Day,
+      weekdays: undefined, from: "2026-03-08T00:00:00-05:00", days: 1,
+      expected: ["2026-03-08T01:30:00-05:00", "2026-03-08T03:30:00-04:00"], count: 2 },
+    { name: "a lead on the previous actual date", when: ["HS"], offset: 180,
+      clocks: { HS: "03:30" }, frequency: 1, periodUnit: FhirPeriodUnit.Day,
+      weekdays: undefined, from: "2026-03-07T23:00:00-05:00", days: 1 / 24,
+      expected: ["2026-03-07T23:30:00-05:00"], count: 1 },
+  ])("preserves $name", ({ when, offset, clocks, frequency, periodUnit, weekdays, from, days, expected, count }) => {
+    const source: FhirR6DosageInstruction = {
+      renderedInstruction: "the current event offset and selected cadence",
+      step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency, period: 1, periodUnit, when: when as EventTiming[], offset,
+          ...(weekdays ? { dayOfWeek: weekdays } : {}) } } }] }]
+    };
+    const native = importCanonicalCourse(source), projection = projectCanonicalCourse(native);
+    const options = { from, orderedAt: "2026-03-07T00:00:00-05:00",
+      timeZone: "America/New_York", eventClock: clocks, limit: expected.length };
+    for (const dosage of [native, saved(projection.fhir), saved(projection.fhirNext)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: days, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: count, unit: "tab" });
+      expect(projectCanonicalCourse(importCanonicalCourse(dosage)).fhirNext.step[0].component[0].timing?.repeat)
+        .toMatchObject({ frequency, period: 1, periodUnit, when, offset });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("preserves meal order when every entry has the same elapsed lead", () => {
+    const source: FhirR6DosageInstruction = {
+      step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Day,
+          when: [EventTiming["Before Meal"]], offset: 60 } } }] }]
+    };
+    const native = importCanonicalCourse(source), projection = projectCanonicalCourse(native);
+    const options = { from: "2026-03-08T00:00:00-05:00", orderedAt: "2026-03-08T00:00:00-05:00",
+      timeZone: "America/New_York", limit: 3, eventClock: {
+        [EventTiming.Breakfast]: "03:30", [EventTiming.Lunch]: "08:00", [EventTiming.Dinner]: "12:00"
+      } };
+    for (const dosage of [native, saved(projection.fhir), saved(projection.fhirNext)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual([
+        "2026-03-08T01:30:00-05:00", "2026-03-08T07:00:00-04:00", "2026-03-08T11:00:00-04:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "tab" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("keeps a distributed source-day event shifted before a midnight gap", () => {
+    const source: FhirR6DosageInstruction = {
+      renderedInstruction: "one tablet twice weekly, 60 minutes before the configured bedtime",
+      step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Week,
+          when: [EventTiming["Before Sleep"]], offset: 60 } } }] }]
+    };
+    const native = importCanonicalCourse(source), projection = projectCanonicalCourse(native);
+    const options = { from: "2026-09-05T23:00:00-04:00", orderedAt: "2026-08-30T00:00:00-04:00",
+      timeZone: "America/Santiago", eventClock: { [EventTiming["Before Sleep"]]: "01:30" }, limit: 2 };
+    for (const dosage of [native, saved(projection.fhir), saved(projection.fhirNext)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual([
+        "2026-09-05T23:30:00-04:00", "2026-09-09T00:30:00-03:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: FhirPeriodUnit.Hour }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
+      const retained = projectCanonicalCourse(importCanonicalCourse(dosage)).fhirNext;
+      expect(retained.step[0].component[0].timing?.repeat).toMatchObject({
+        frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Week, when: [EventTiming["Before Sleep"]], offset: 60
+      });
+      expect(retained.renderedInstruction).toBe(source.renderedInstruction);
+      expect(JSON.stringify(dosage)).toBe(before);
     }
   });
 });

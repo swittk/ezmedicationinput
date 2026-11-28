@@ -14,7 +14,7 @@ import type {
   CanonicalStage,
   CanonicalBoundary,
 } from "./course";
-import { hasAmountRole, administrationHasAmountFacts, administrationHasDatedStart, earliestCalendarOpening } from "./course";
+import { hasAmountRole, administrationHasAmountFacts, administrationHasDatedStart, earliestCalendarOpening, isPreviousPhaseAnchor } from "./course";
 import type { CanonicalParallelRegimen, RegimenPosition } from "../regimen/parallel-course";
 import { resolveBodySiteTargetText, getBodySiteAdministrationTargetCount } from "../body-site-target";
 import { getBodySiteText } from "../body-site-lookup";
@@ -390,7 +390,7 @@ export function courseFromPartialParallel(
         // receives the calendar end inferred within its independent track.
         applyParallelCalendarEnd(a, item.effectiveBoundsEnd);
         if (a.onsetReference === "treatment-day-start") a.phaseStart = boundaryForOnset(a);
-        else if (a.onsetReference === "previous-phase-next-day" && index > 0) {
+        else if (isPreviousPhaseAnchor(a.onsetReference) && index > 0) {
           a.phaseStart = boundaryForOnset(a);
           dependsOnPrevious = true;
         } else if (a.onsetDays !== undefined)

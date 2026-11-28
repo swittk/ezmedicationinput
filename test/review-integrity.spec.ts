@@ -2723,10 +2723,16 @@ describe("review source and interchange ownership", () => {
     const input: FhirR6DosageInstruction = {
       safety: { doseLimit: [{ scope: "lifetime", valueQuantity: measure(30) }] },
       step: [{ ...(withStage ? { safety: { doseLimit: [{ scope: "administration" as const,
-        valueQuantity: measure(8) }] } } : {}), component: (withStage ? [5, 7] : [5]).map(value => ({
+        valueQuantity: measure(8) }] }, end: {
+          contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+          offsetDuration: measure(1, "d"),
+        } } : {}), component: (withStage ? [5, 7] : [5]).map(value => ({
         doseAndRate: [{ doseQuantity: measure(value) }],
         timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
-      })) }],
+      })) }, ...(withStage ? [{ component: [{
+        doseAndRate: [{ doseQuantity: measure(9) }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      }] }] : [])],
     };
     const rows = toFhirR5Dosages(input), row = saved(rows[0]);
     const opened = fromFhirDosage(row);
@@ -3840,7 +3846,7 @@ describe("native timing realization uses selected language and event owners", ()
   it.each(["code", "event", "clock"] as const)("retains the %s event owner in a partial-period preview", owner => {
     const timing: NonNullable<FhirR6DosageInstruction["step"][number]["component"][number]["timing"]> = {
       code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "AM" }] },
-      repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
         endOffset: { value: 1, unit: "h", system: "http://unitsofmeasure.org", code: "h" },
         ...(owner === "event" ? { when: [EventTiming.Evening] } : owner === "clock" ? { timeOfDay: ["20:00:00"] } : {}) }
     };
@@ -4236,6 +4242,32 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(() => nextDueDoses(multi, opts)).toThrow(/Interlaced R6 offsets/);
     expect(() => calculateTotalUnits({ dosage: multi, ...opts,
       durationValue: 28, durationUnit: FhirPeriodUnit.Day })).toThrow(/Interlaced R6 offsets/);
+
+    const choice = (branchId: string) => ({
+      url: "urn:ezmedicationinput:StructureDefinition:medication-alternative-choice",
+      extension: [
+        { url: "groupId", valueString: "offset-or-daily" }, { url: "branchId", valueString: branchId },
+        { url: "selectionBehavior", valueCode: "exactly-one" },
+      ],
+    });
+    const alternatives: FhirR6DosageInstruction = { step: [{ component: [
+      { ...course.step[0].component[0], modifierExtension: [choice("offset")] },
+      { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] } },
+        modifierExtension: [choice("daily")] },
+    ] }] };
+    const selected = { ...opts, limit: 3, alternativeChoices: { "offset-or-daily": "daily" } };
+    for (const dosage of [importCanonicalCourse(alternatives), JSON.parse(JSON.stringify(alternatives)), JSON.parse(JSON.stringify(toFhirR5Dosages(alternatives)))]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, selected)).toEqual([
+        "2026-11-02T09:00:00+07:00", "2026-11-03T09:00:00+07:00", "2026-11-04T09:00:00+07:00",
+      ]);
+      expect(calculateTotalUnits({ dosage, ...selected, durationValue: 28, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 28, unit: "tab" });
+      expect(importCanonicalCourse(dosage).stages[0].administrations.map(member => member.choice))
+        .toEqual([{ groupId: "offset-or-daily", branchId: "offset", selectionBehavior: "exactly-one" }, { groupId: "offset-or-daily", branchId: "daily", selectionBehavior: "exactly-one" }]);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
   });
 
   it("imports current R6 offset timing with incomplete tim-11/tim-12 as an editable warning", () => {
