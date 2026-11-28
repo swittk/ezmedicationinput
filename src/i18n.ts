@@ -38,7 +38,8 @@ import { canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
   medicationInstructionActionLocaleRealizerConfig,
   getMedicationInstructionAction,
-  resolveMedicationInstructionAction
+  resolveMedicationInstructionAction,
+  resolveMedicationInstructionActionByMethod
 } from "./instruction-action-terminology";
 import { getMedicationInstructionConcept, resolveMedicationInstructionConcept } from "./instruction-concept-terminology";
 import {
@@ -882,17 +883,25 @@ function resolveThaiMethodVerb(
   const localizedManner = manner && localizedValue(manner.i18n, "th");
   if (localizedManner) return translatedDisplay ?? localizedManner;
 
-  if (translatedDisplay) return translatedDisplay;
   const unit = clause.dose?.unitIdentity ?? clause.dose?.unit;
+  const methodText = clause.method?.text?.trim();
+  const textAction = methodText ? resolveMedicationInstructionAction(methodText) : undefined;
+  const codedAction = textAction && resolveMedicationInstructionActionByMethod(clause.method?.coding);
+  // A current text selecting a different registered action (for example
+  // Reapply over an Apply coding) owns the verb. A derived/same-action text
+  // must not erase an explicitly translated coding display.
+  if (textAction && (!codedAction || textAction.code !== codedAction.code)) {
+    const label = THAI_METHOD_TEXT_VERBS[methodText!] ?? textAction.i18n?.th?.trim();
+    if (label) return selectThaiApplyLabel(textAction.code, label, unit) ?? label;
+  }
+  if (translatedDisplay) return translatedDisplay;
   if (resolvedMethod) {
     const label = localizedValue(resolvedMethod.i18n, "th") ?? resolvedMethod.display;
     return selectThaiApplyLabel(resolvedMethod.code, label, unit) ?? label;
   }
-  const methodText = clause.method?.text?.trim();
   if (methodText) {
-    const definition = resolveMedicationInstructionAction(methodText);
-    const label = THAI_METHOD_TEXT_VERBS[methodText] ?? definition?.i18n?.th?.trim();
-    if (label) return selectThaiApplyLabel(definition?.code, label, unit) ?? label;
+    const label = THAI_METHOD_TEXT_VERBS[methodText] ?? textAction?.i18n?.th?.trim();
+    if (label) return selectThaiApplyLabel(textAction?.code, label, unit) ?? label;
   }
 
   return grammar.verb;

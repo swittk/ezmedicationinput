@@ -564,10 +564,35 @@ describe("current coded patch Apply wording", () => {
     expect(row).toEqual(original);
   });
 
-  it.each(["text", "display", "configured"] as const)("preserves selected Thai Apply wording from %s", selected => {
+  it("retains current Reapply text ahead of a generic translated Apply coding", () => {
+    const note = { url: "urn:clinic:method-note", valueString: "Retain the current wording" };
+    const row: FhirDosage = {
+      text: "Reapply sunscreen every 2 hours.",
+      method: { text: "Reapply", coding: [{ system: SNOMED, code: "738991002", display: "Apply",
+        _display: buildTranslationPrimitiveElement({ th: "ทา" })! }], extension: [note] },
+      timing: { repeat: { frequency: 1, period: 2, periodUnit: FhirPeriodUnit.Hour } }
+    };
+    const before = structuredClone(row);
+    for (const input of currentViews(row)) {
+      const original = structuredClone(input);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("ปัจจุบัน: ทาซ้ำทุก 2 ชั่วโมง; ข้อความเดิม: Reapply sunscreen every 2 hours.");
+      const current = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(current.method).toMatchObject({ text: "Reapply" });
+      expect(current.schedule?.recurrence).toMatchObject({ frequency: 1, period: 2, periodUnit: FhirPeriodUnit.Hour });
+      const saved = projectCanonicalCourse(importCanonicalCourse(input)).fhir[0];
+      expect(saved.method).toEqual(row.method);
+      expect(saved.text).toBe(row.text);
+      expect(input).toEqual(original);
+    }
+    expect(row).toEqual(before);
+  });
+
+  it.each(["text", "display", "display with text", "configured"] as const)("preserves selected Thai Apply wording from %s", selected => {
     const translation = buildTranslationPrimitiveElement({ th: "ติด" })!;
-    const method: NonNullable<FhirDosage["method"]> = selected === "display"
-      ? { coding: [{ system: SNOMED, code: "738991002", display: "Apply", _display: translation }] }
+    const method: NonNullable<FhirDosage["method"]> = selected === "display" || selected === "display with text"
+      ? { ...(selected === "display with text" ? { text: "Apply" } : {}),
+        coding: [{ system: SNOMED, code: "738991002", display: "Apply", _display: translation }] }
       : { text: "Apply", ...(selected === "text" ? { _text: translation } : {}) };
     const row: FhirDosage = { method, doseAndRate: [{ doseQuantity: { value: 1, system: edqm, code: "15036000" } }],
       timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } } };
