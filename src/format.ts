@@ -1300,7 +1300,9 @@ export function timingCodeMatchesRecurrence(
       schedule.periodMax === undefined && schedule.periodUnit === undefined;
   }
   const hours = TIMING_CODE_HOURLY_PERIODS[code.toUpperCase()];
-  const codedCadence = hours ? 24 / hours : code === "QOD" ? daily : undefined;
+  const codedCadence = hours ? 24 / hours
+    : code === "QOD" && (schedule.periodUnit === FhirPeriodUnit.Day || schedule.periodUnit === FhirPeriodUnit.Week)
+      ? daily : undefined;
   if (codedCadence !== undefined && !schedule.when?.length && !schedule.timeOfDay?.length &&
       schedule.frequencyMax === undefined && schedule.periodMax === undefined &&
       matchesDailyCodeCadence(codedCadence, schedule)) return true;

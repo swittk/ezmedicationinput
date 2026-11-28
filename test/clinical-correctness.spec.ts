@@ -4130,3 +4130,60 @@ describe("reviewed coded aggregate and afternoon preview cadence", () => {
       .toEqual([EventTiming.Evening]);
   });
 });
+
+
+describe("QOD preview preserves civil versus elapsed cadence across DST", () => {
+  const gts = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+  const note = { url: "urn:clinic:qod-interval-note", valueString: "Keep the authored interval" };
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const origin = "2027-03-13T06:20:00-05:00";
+  const query = { orderedAt: origin, from: origin, timeZone: "America/New_York", limit: 3 };
+  it.each([
+    { label: "48 elapsed hours", frequency: 1, period: 48, periodUnit: FhirPeriodUnit.Hour,
+      elapsed: true, enShort: "Q48H", enLong: "every 48 hours", th: "ทุก 48 ชั่วโมง" },
+    { label: "2880 elapsed minutes", frequency: 1, period: 2880, periodUnit: FhirPeriodUnit.Minute,
+      elapsed: true, enShort: "Q2880MIN", enLong: "every 2880 minutes", th: "ทุก 2880 นาที" },
+    { label: "172800 elapsed seconds", frequency: 1, period: 172800, periodUnit: FhirPeriodUnit.Second,
+      elapsed: true, enShort: "Q172800S", enLong: "every 172800 seconds", th: "ทุก 172800 วินาที" },
+    { label: "two civil days", frequency: 1, period: 2, periodUnit: FhirPeriodUnit.Day,
+      elapsed: false, enShort: "QOD", enLong: "every other day", th: "วันเว้นวัน" },
+    { label: "aggregate civil days", frequency: 5, period: 10, periodUnit: FhirPeriodUnit.Day,
+      elapsed: false, enShort: "QOD", enLong: "every other day", th: "วันเว้นวัน" },
+    { label: "aggregate civil weeks", frequency: 7, period: 2, periodUnit: FhirPeriodUnit.Week,
+      elapsed: false, enShort: "QOD", enLong: "every other day", th: "วันเว้นวัน" }
+  ])("retains $label in all current input forms", ({ frequency, period, periodUnit, elapsed, enShort, enLong, th }) => {
+    const repeat = { frequency, period, periodUnit };
+    const amount = { value: 2, unit: "tab", _value: { id: "authored-dose" }, extension: [note] };
+    const row = { doseAndRate: [{ doseQuantity: amount }], extension: [note],
+      timing: { code: { coding: [{ system: gts, code: "QOD", _code: { id: "authored-code" }, extension: [note] }] }, repeat } };
+    const native = importCanonicalCourse(row), projection = projectCanonicalCourse(native);
+    for (const input of [row, native, fresh(projection.fhir), fresh(projection.fhirNext)]) {
+      const before = structuredClone(input);
+      expect(formatSig(input, "short", { locale: "en", realizationMode: "normalized" })).toBe(`2 tab ${enShort}`);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(`Use 2 tablets ${enLong}.`);
+      expect(formatSig(input, "short", { locale: "th", realizationMode: "normalized" })).toBe(`2 เม็ด ${th}`);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(`ใช้ครั้งละ 2 เม็ด ${th}.`);
+      expect(nextDueDoses(input, query)).toEqual(elapsed ? [
+        "2027-03-13T06:20:00-05:00", "2027-03-15T07:20:00-04:00", "2027-03-17T07:20:00-04:00"
+      ] : [
+        "2027-03-13T09:00:00-05:00", "2027-03-15T09:00:00-04:00", "2027-03-17T09:00:00-04:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 5, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 6, unit: "tab" });
+      const current = importCanonicalCourse(input);
+      expect(current.stages[0].administrations[0].schedule?.recurrence).toMatchObject(repeat);
+      const saved = projectCanonicalCourse(current);
+      for (const wire of [saved.fhir[0], saved.fhirNext.step![0].component![0]]) {
+        expect(wire.timing).toEqual(row.timing);
+        expect(wire.doseAndRate?.[0].doseQuantity).toEqual(amount);
+        expect(wire.extension).toEqual([note]);
+      }
+      expect(input).toEqual(before);
+    }
+    const authored = { ...row, text: "Use 2 tablets following the authored interval." };
+    const saved = projectCanonicalCourse(importCanonicalCourse(authored));
+    expect(saved.fhir[0].text).toBe(authored.text);
+    expect(projectCanonicalCourse(importCanonicalCourse(fresh(saved.fhirNext))).fhir[0].text).toBe(authored.text);
+    expect(saved.fhir[0].timing).toEqual(row.timing);
+  });
+});
