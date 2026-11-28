@@ -1319,9 +1319,12 @@ function resolveFrequencyCadence(
         // Event-only meanings without a clinic default use the same clock
         // resolution as an explicit timing anchor, retaining the cadence.
         if (descriptor?.when?.length && descriptor.frequency === undefined && descriptor.period === undefined) {
-          const entries = expandWhenCodes(descriptor.when, config, effectiveRepeat, true);
-          if (resolvedEventOffsetMinutes(effectiveRepeat) === null ||
-              entries.some(entry => entry.dayShift !== 0 || entry.eventTime !== undefined)) {
+          const offset = resolvedEventOffsetMinutes(effectiveRepeat);
+          // Nonzero or unresolved offsets already require the event owner;
+          // occurrence enumeration resolves their clocks with its own fallback policy.
+          const entries = offset === undefined || offset === 0
+            ? expandWhenCodes(descriptor.when, config, effectiveRepeat, true) : undefined;
+          if (!entries || entries.some(entry => entry.dayShift !== 0 || entry.eventTime !== undefined)) {
             codeAnchors = descriptor.when;
             codeClocks = [];
           } else codeClocks = entries.map(entry => entry.time);
