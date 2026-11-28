@@ -3812,7 +3812,14 @@ function scheduleTreatmentRelativeCourse(
     }
   };
   consume();
-  return collect ? [] : doses.sort((left, right) => Date.parse(left) - Date.parse(right)).slice(0, limit);
+  if (collect) return [];
+  const ordered: { iso: string; at: number }[] = [];
+  for (const iso of doses) ordered.push({ iso, at: Date.parse(iso) });
+  ordered.sort((left, right) => left.at - right.at);
+  const result: string[] = [];
+  const length = Math.min(limit, ordered.length);
+  for (let index = 0; index < length; index++) result.push(ordered[index].iso);
+  return result;
 }
 /** One clock-ownership decision for both repeated-course scheduling
  * and supply. Integral calendar day/week/month/year cycles keep the
