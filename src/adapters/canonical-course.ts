@@ -95,6 +95,7 @@ import {
   serializeCanonicalContext,
   independentGraphWarningAdvice,
   serializeCanonicalSchedule,
+  canUseCoreTimingOffset,
   getTimingClocks,
   getTimingEvents, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL,
   projectTimingClocks,
@@ -1117,14 +1118,12 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       unresolvedMarkerDuration ? prior?.durationMax : r.occurrenceDurationMax;
     const occurrenceDurationUnit = markerDuration ? undefined :
       unresolvedMarkerDuration ? prior?.durationUnit : r.occurrenceDurationUnit;
-    // An imported extension offset keeps its carrier when no core event is
-    // supplied. A Timing.code-derived anchor does not create repeat.when.
-    const offset = r.offset !== undefined && r.offset >= 0 && Number.isInteger(r.offset) &&
-      (prior?.offset !== undefined || r.anchors?.length) ? r.offset : undefined;
-    // Imported native facts are immutable; retain the original primitive slots
-    // and their annotations just as the event projection does below.
+    // Imported native facts retain the original primitive slots and annotations.
     const dayOfWeek = prior?.dayOfWeek ?? r.dayOfWeek;
     const when = prior?.when ?? r.anchors;
+    // Both wire writers use the same eligibility rule. A code-derived anchor
+    // does not invent repeat.when or displace its supplied exact-offset carrier.
+    const offset = canUseCoreTimingOffset(when, r.offset) ? r.offset : undefined;
     if (
       prior &&
       prior.count === r.count &&

@@ -1793,6 +1793,19 @@ export function serializeCanonicalContext(
   return dosage;
 }
 
+/** Core Timing offsets require a nonnegative integer and a qualified event anchor. */
+export function canUseCoreTimingOffset(when: readonly (string | null)[] | undefined, offset: number | undefined): boolean {
+  if (offset === undefined || offset < 0 || !Number.isInteger(offset) || !when?.length) return false;
+  let hasEvent = false;
+  for (const event of when) {
+    if (event === null) continue;
+    if (event === EventTiming.Meal || event === EventTiming.Breakfast ||
+        event === EventTiming.Lunch || event === EventTiming.Dinner) return false;
+    hasEvent = true;
+  }
+  return hasEvent;
+}
+
 /** Shared wire Timing/source metadata serializer. This projects the already
  * scoped canonical schedule; it never parses or interprets external dosage.
  * R5 and current-R6 adapters independently choose their Quantity encodings. */
@@ -1926,13 +1939,7 @@ export function serializeCanonicalSchedule(
     hasRepeat = true;
   }
   if (schedule?.offset !== undefined) {
-    let coreOffset = Boolean(schedule.when?.length) && Number.isInteger(schedule.offset);
-    // R5 tim-9 excludes unqualified meal anchors from the core offset slot.
-    for (const event of schedule.when ?? []) {
-      if (event === EventTiming.Meal || event === EventTiming.Breakfast ||
-          event === EventTiming.Lunch || event === EventTiming.Dinner) coreOffset = false;
-    }
-    if (coreOffset) {
+    if (canUseCoreTimingOffset(schedule.when, schedule.offset)) {
       repeat.offset = schedule.offset;
     } else {
       repeat.extension = [

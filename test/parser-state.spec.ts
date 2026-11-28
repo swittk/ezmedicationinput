@@ -738,3 +738,74 @@ describe("current FHIR timing, route, quantity and coverage ownership", () => {
     expect(input).toEqual(before);
   });
 });
+
+
+describe("current FHIR exact-offset projection", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const amount = { value: 1, unit: "g", id: "authored-dose" };
+  const extension = { url: TIMING_OFFSET_EXACT_EXTENSION_URL, valueInteger: 30,
+    id: "authored-offset", _valueInteger: { id: "offset-value-note" } };
+  it.each([
+    { when: [EventTiming.Meal] }, { when: [EventTiming.Breakfast] },
+    { when: [EventTiming.Lunch] }, { when: [EventTiming.Dinner] },
+    { when: [EventTiming["Before Breakfast"], EventTiming.Meal] }
+  ])("keeps a supplied extension without inventing a forbidden $when core offset", ({ when }) => {
+    const repeat = { when, _when: when.map(() => ({ id: "anchor-note" })),
+      extension: [extension, { url: "urn:clinic:timing-note", valueString: "Retain" }] };
+    const component = { id: "current-component", doseAndRate: [{ doseQuantity: amount }],
+      timing: { id: "current-timing", repeat } };
+    for (const input of [component, { step: [{ component: [component] }] }]) {
+      const original = fresh(input), native = importCanonicalCourse(input);
+      expect(native.stages[0].administrations[0].schedule?.recurrence?.offset).toBe(30);
+      const first = projectCanonicalCourse(native);
+      for (const value of [native, fresh(first.fhir), fresh(first.fhirNext)]) {
+        const current = projectCanonicalCourse(importCanonicalCourse(value));
+        expect(current.fhir[0].timing?.repeat).toEqual(repeat);
+        expect(current.fhirNext.step[0].component[0].timing?.repeat).toEqual(repeat);
+        expect(current.fhir[0].doseAndRate?.[0].doseQuantity).toEqual(amount);
+      }
+      expect(input).toEqual(original);
+    }
+  });
+  it.each([0, 30, 0.5])("preserves the exact permitted-event offset %s through both writers", offset => {
+    const marker = { url: TIMING_OFFSET_EXACT_EXTENSION_URL,
+      ...(Number.isInteger(offset) ? { valueInteger: offset } : { valueDecimal: offset }), id: "exact-value" };
+    const repeat = { when: [EventTiming["Before Breakfast"]], extension: [marker] };
+    const component = { doseAndRate: [{ doseQuantity: amount }], timing: { repeat } };
+    for (const input of [component, { step: [{ component: [component] }] }]) {
+      const original = fresh(input), projected = projectCanonicalCourse(importCanonicalCourse(input));
+      for (const row of [projected.fhir[0], projected.fhirNext.step[0].component[0]]) {
+        expect(getExactTimingOffsetMinutes(row.timing?.repeat)).toBe(offset);
+        expect(row.timing?.repeat?.offset).toBe(offset >= 0 && Number.isInteger(offset) ? offset : undefined);
+        expect(row.timing?.repeat?.extension).toContainEqual(marker);
+      }
+      expect(input).toEqual(original);
+    }
+  });
+  it.each([false, true])("retains primitive-only when slots with a usable anchor %s", usable => {
+    const when = usable ? [null, EventTiming["Before Breakfast"]] : [null];
+    const repeat = { when, _when: when.map((_, index) => index ? null : { id: "unknown-event", extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+    }] }), extension: [extension] };
+    const component = { doseAndRate: [{ doseQuantity: amount }], timing: { repeat } };
+    const input = { step: [{ component: [component] }] }, original = fresh(input);
+    const projected = projectCanonicalCourse(importCanonicalCourse(input));
+    for (const row of [projected.fhir[0], projected.fhirNext.step[0].component[0]]) {
+      expect(row.timing?.repeat?.when).toEqual(when);
+      expect(row.timing?.repeat?._when).toEqual(repeat._when);
+      expect(row.timing?.repeat?.extension).toContainEqual(extension);
+      expect(row.timing?.repeat?.offset).toBe(usable ? 30 : undefined);
+    }
+    expect(input).toEqual(original);
+  });
+  it("does not invent a core when anchor for an independently supplied exact offset", () => {
+    const repeat = { extension: [extension], id: "unanchored-repeat" };
+    const component = { doseAndRate: [{ doseQuantity: amount }], timing: { repeat } };
+    for (const input of [component, { step: [{ component: [component] }] }]) {
+      const original = fresh(input), projected = projectCanonicalCourse(importCanonicalCourse(input));
+      expect(projected.fhir[0].timing?.repeat).toEqual(repeat);
+      expect(projected.fhirNext.step[0].component[0].timing?.repeat).toEqual(repeat);
+      expect(input).toEqual(original);
+    }
+  });
+});
