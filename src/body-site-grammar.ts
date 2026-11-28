@@ -593,15 +593,36 @@ function parseBodySiteFeatures(
     };
   }
 
+  // A registered finer site can retain its part and coded nominal head
+  // without borrowing that head's code for the complete anatomical phrase.
+  const directDefinition = words.length > 1
+    ? lookupDefinitionForCanonical(normalized, customSiteMap) : undefined;
+  const partRelation = directDefinition && !directDefinition.coding?.code
+    ? normalizeBodySiteRelation(firstWord) : undefined;
+  if (directDefinition && partRelation &&
+      BODY_SITE_SPATIAL_RELATION_CODINGS.has(partRelation)) {
+    const wholeText = words.slice(1).join(" ");
+    const wholeCanonical = normalizeBodySiteKey(wholeText);
+    const wholeDefinition = lookupDefinitionForCanonical(wholeCanonical, customSiteMap);
+    if (wholeDefinition?.coding?.code) return {
+      kind: "partitive", part: partRelation, relationKey: partRelation,
+      whole: buildNominalFeatures(wholeText, wholeCanonical, undefined, customSiteMap),
+      attributive: true
+    };
+  }
+
   if (
     words.length > 1 &&
     (firstWord === "left" || firstWord === "right") &&
-    !lookupDefinitionForCanonical(normalized, customSiteMap)
+    !directDefinition?.coding?.code
   ) {
     const wholeText = words.slice(1).join(" ");
     const wholeCanonical = normalizeBodySiteKey(wholeText);
     const wholeDefinition = lookupDefinitionForCanonical(wholeCanonical, customSiteMap);
-    if (wholeDefinition?.coding?.code || wholeDefinition?.routeHint) {
+    const finer = directDefinition && wholeDefinition && !wholeDefinition.coding?.code
+      ? parseBodySiteFeatures(wholeText, undefined, customSiteMap) : undefined;
+    if (!directDefinition && (wholeDefinition?.coding?.code || wholeDefinition?.routeHint) ||
+        finer?.kind === "partitive" && finer.attributive && finer.whole.coding?.code) {
       return {
         kind: "partitive",
         part: `${firstWord} side`,
@@ -665,9 +686,8 @@ function resolveFeatureCoding(
     normalizeBodySiteKey(featureDisplayText(features)),
     customSiteMap
   );
-  const directCoding = cloneBodySiteCode(direct?.coding);
-  if (directCoding) {
-    return directCoding;
+  if (direct) {
+    return cloneBodySiteCode(direct.coding);
   }
   switch (features.kind) {
     case "locative":
@@ -700,9 +720,13 @@ function buildSpatialRelation(
       if (!relationCoding) {
         return undefined;
       }
+      const definition = features.attributive
+        ? lookupDefinitionForCanonical(normalizeBodySiteKey(sourceText), customSiteMap) : undefined;
       return {
         relationText: features.part,
-        relationCoding,
+        // A registered uncoded anatomical phrase licenses presentation of its
+        // parts, not a new postcoordinated identity for the complete phrase.
+        relationCoding: definition && !definition.coding?.code ? undefined : relationCoding,
         targetText: features.whole.text,
         targetCoding: cloneBodySiteCode(features.whole.coding),
         sourceText

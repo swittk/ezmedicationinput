@@ -725,6 +725,15 @@ export async function getBodySiteCodeAsync(
   );
 }
 
+/** Realize an already selected laterality with the existing anatomical text owner.
+ * Internal consumers must establish anatomical compatibility before calling. */
+export function bodySiteTextWithLaterality(text: string, lateralityCode: string): string | undefined {
+  const laterality = LATERALITY_TEXT_BY_CODE[lateralityCode];
+  return text && laterality
+    ? laterality === "both" ? `both ${pluralizeBodySiteText(text)}` : `${laterality} ${text}`
+    : undefined;
+}
+
 export function getBodySiteText(
   input: BodySiteCodeInput,
   options?: BodySiteTextOptions
@@ -761,10 +770,7 @@ export function getBodySiteText(
       },
       options?.siteCodeMap
     );
-    const lateralityText = LATERALITY_TEXT_BY_CODE[parsed.laterality.lateralityCode];
-    if (baseText && lateralityText) {
-      text = lateralityText === "both" ? `both ${pluralizeBodySiteText(baseText)}` : `${lateralityText} ${baseText}`;
-    }
+    if (baseText) text = bodySiteTextWithLaterality(baseText, parsed.laterality.lateralityCode);
   }
   return applySyncTextResolvers(
     text,

@@ -1,5 +1,5 @@
 import { resolveBodySitePhrase } from "./body-site-grammar";
-import { getBodySiteText } from "./body-site-lookup";
+import { bodySiteTextWithLaterality, getBodySiteText } from "./body-site-lookup";
 import { DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey } from "./maps";
 import { SNOMED_SYSTEM } from "./snomed";
 import { parseSnomedBodySiteLateralityPostcoordinationCode } from "./snomed-postcoordination";
@@ -79,6 +79,19 @@ function compatibleBodySiteText(text: string, coding: Pick<FhirCoding, "system" 
   const key = normalizeBodySiteKey(text);
   const definition = DEFAULT_BODY_SITE_SNOMED[key];
   const textCode = definition?.coding;
+  if (definition && !textCode?.code && (coding?.system ?? SNOMED_SYSTEM) === SNOMED_SYSTEM) {
+    const lateralized = parseSnomedBodySiteLateralityPostcoordinationCode(coding?.code);
+    if (lateralized) {
+      const refined = resolveBodySitePhrase(definition.text ?? text);
+      const features = refined?.features;
+      if (refined && features?.kind === "partitive" && features.attributive &&
+          features.whole.coding?.code === lateralized.siteCode &&
+          (features.whole.coding.system ?? SNOMED_SYSTEM) === SNOMED_SYSTEM) {
+        const combined = bodySiteTextWithLaterality(refined.displayText, lateralized.lateralityCode);
+        if (combined) return combined;
+      }
+    }
+  }
   if (!textCode?.code || !coding?.code || textCode.code === coding.code ||
       (textCode.system ?? SNOMED_SYSTEM) !== (coding.system ?? SNOMED_SYSTEM)) return text;
   const codedCode = bodySiteCodeForComparison(coding)!;

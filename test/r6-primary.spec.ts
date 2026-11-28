@@ -17,7 +17,7 @@ import {
   nextDueDoses, calculateTotalUnits, getEmaQuantityComparator,
   EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
-  getBodySiteText, buildBodySiteAdministrationTargetCountExtension, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
+  getBodySiteText, getBodySiteCode, getBodySiteCodeAsync, buildBodySiteAdministrationTargetCountExtension, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
   type FormatOptions, type FhirR6DoseLimit, type FhirR6Extension, type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
   EventTiming, FhirPeriodUnit, RouteCode, AdviceRelation, AdviceArgumentRole, AdviceForce, AdvicePolarity, type CanonicalInstructionGraph, parseInstructionActions, realizeInstructionGraph, cloneBodySiteSpatialRelation
 } from "../src/index";
@@ -8235,6 +8235,87 @@ describe("current annotated unit ceiling identity", () => {
       expect(toDosageDetails(fresh(rows)).step[0].component[0].safety?.doseLimit)
         .toEqual(input.step[0].component[0].safety!.doseLimit);
       expect(input).toEqual(before);
+    }
+  });
+});
+
+
+describe("current coded laterality with registered anatomical refinements", () => {
+  it.each([
+    { name: "right eyelid", siteText: "eyelid", base: "80243003", side: "24028007",
+      source: "Apply 1 g to the right eyelid daily.", method: "Apply", unit: "g", inputForm: "r5",
+      en: ["right", "eyelid"], th: ["ขวา", "เปลือกตา"] },
+    { name: "right lower eyelid", siteText: "lower eyelid", base: "80243003", side: "24028007",
+      source: "Apply 1 g to the right lower eyelid daily.", method: "Apply", unit: "g", inputForm: "r6",
+      en: ["right", "lower eyelid"], th: ["ขวา", "เปลือกตา", "ส่วนล่าง"] },
+    { name: "left lower eyelid alias", siteText: "lower lid", base: "80243003", side: "7771000",
+      source: "Apply 1 g to the left lower lid daily.", method: "Apply", unit: "g", inputForm: "r5",
+      en: ["left", "lower eyelid"], th: ["ซ้าย", "เปลือกตา", "ส่วนล่าง"] },
+    { name: "left ear canal", siteText: "ear canal", base: "117590005", side: "7771000",
+      source: "Instill 1 drop into the left ear canal daily.", method: "Instill", unit: "drop", inputForm: "r6",
+      en: ["left", "ear canal"], th: ["ซ้าย", "ช่องหู"] }
+  ] as const)("preserves the complete current target and annotations for $name", fixture => {
+    const note = (name: string): FhirExtension => ({ url: `urn:clinic:${name}`, valueString: `retain ${name}` });
+    const site: NonNullable<FhirDosage["site"]> = {
+      id: "selected-site", text: fixture.siteText,
+      _text: { extension: [note("site-text")] },
+      coding: [{ system: "http://snomed.info/sct", code: `${fixture.base}:272741003=${fixture.side}`,
+        version: "20250131", extension: [note("site-coding")] }],
+      extension: [note("site")]
+    };
+    const row: FhirDosage = {
+      id: "current-dosage", text: fixture.source, method: { text: fixture.method }, site,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: fixture.unit } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } },
+      extension: [note("dosage")]
+    };
+    const r6: FhirR6DosageInstruction = {
+      renderedInstruction: fixture.source,
+      step: [{ component: [{ ...row, site: { concept: site } }] }]
+    };
+    const input = fixture.inputForm === "r5" ? [row] : r6;
+    const inputBefore = JSON.parse(JSON.stringify(input));
+    const native = importCanonicalCourse(input);
+    const projected = projectCanonicalCourse(native);
+    const views = [native, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))];
+    for (const view of views) {
+      const before = JSON.parse(JSON.stringify(view));
+      const course = importCanonicalCourse(view);
+      expect(course.stages).toHaveLength(1);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      const member = course.stages[0].administrations[0];
+      expect(member.target).toEqual(site);
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts[0].quantity).toMatchObject({ value: 1, unit: fixture.unit });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      for (const locale of ["en", "th"] as const) {
+        for (const style of ["short", "long"] as const) {
+          const preview = formatSig(view, style, { locale, realizationMode: "normalized" });
+          // The selected target must carry its side and finer part itself;
+          // a separate original-directions annotation is not that target.
+          const selected = preview.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0];
+          for (const term of fixture[locale]) expect(selected).toContain(term);
+        }
+      }
+      const output = projectCanonicalCourse(course);
+      expect(output.fhir?.[0].site).toEqual(site);
+      expect(output.fhirNext?.step?.[0].component?.[0].site).toEqual({ concept: site });
+      expect(output.fhir?.[0].text).toBe(fixture.source);
+      expect(output.fhirNext?.step?.[0].component?.[0].text).toBe(fixture.source);
+      expect(output.fhir?.[0].extension?.filter(extension => extension.url.startsWith("urn:clinic:")))
+        .toEqual(row.extension);
+      expect(output.fhirNext?.step?.[0].component?.[0].extension?.filter(extension => extension.url.startsWith("urn:clinic:")))
+        .toEqual(row.extension);
+      expect(view).toEqual(before);
+    }
+    expect(input).toEqual(inputBefore);
+  });
+
+  it("keeps registered finer anatomy uncoded when realizing its constituent parts", async () => {
+    for (const text of ["lower eyelid", "lower lid", "right lower eyelid", "left lower eyelid",
+      "inside lower eyelid", "inside right lower eyelid"]) {
+      expect(getBodySiteCode(text)).toBeUndefined();
+      expect(await getBodySiteCodeAsync(text)).toBeUndefined();
     }
   });
 });
