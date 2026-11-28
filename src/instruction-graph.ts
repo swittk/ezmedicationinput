@@ -2254,10 +2254,10 @@ function actionCandidateBelongsToCurrentFrame(
   return false;
 }
 
+const ACTION_DIRECTIVE_BOUNDARY_PREFIXES = ACTION_DIRECTIVE_PREFIXES
+  .filter(prefix => prefix.force !== AdviceForce.Warning || prefix.polarity === AdvicePolarity.Negate);
 const ACTION_DIRECTIVE_BOUNDARIES = new Set(
-  ACTION_DIRECTIVE_PREFIXES
-    .filter(prefix => prefix.force !== AdviceForce.Warning || prefix.polarity === AdvicePolarity.Negate)
-    .map(prefix => prefix.parts[0])
+  ACTION_DIRECTIVE_BOUNDARY_PREFIXES.map(prefix => prefix.parts[0])
 );
 
 interface PreposedActionRelation {
@@ -2589,6 +2589,7 @@ export function parseInstructionActions(
       }
       if (
         ACTION_DIRECTIVE_BOUNDARIES.has(currentKey) &&
+        ACTION_DIRECTIVE_BOUNDARY_PREFIXES.some(prefix => directivePrefixMatches(parts, index, prefix)) &&
         !prefixedActionAt(parts, index, options) &&
         !actionMatchAt(parts, index, options) &&
         !resultativeLeadAt(parts, index, options)

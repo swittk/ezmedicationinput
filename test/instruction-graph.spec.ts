@@ -8216,3 +8216,31 @@ describe("review814 selected action arguments and occurrence scopes", () => {
     expect(realizeInstructionAction(translated, "th")).toBe("ปิดคลุมด้วยผ้าก๊อซปลอดเชื้อ");
   });
 });
+
+
+describe("complete modal directive boundaries", () => {
+  it.each(["may", "might", "can", "could"] as const)(
+    "retains an unmatched %s continuation while recognizing the complete negative prefix", modal => {
+      const warning = "Causes drowsiness which " + modal + " continue the next day";
+      const source = warning + ". Do not drive.";
+      const actions = parseInstructionActions(source);
+      expect(actions.map(action => action.predicate.lemma)).toEqual(["cause", "drive"]);
+      expect(actions[0]).toMatchObject({
+        force: AdviceForce.Warning,
+        sourceText: warning,
+        span: { start: 0, end: warning.length }
+      });
+      expect(source.slice(actions[0].span.start, actions[0].span.end)).toBe(warning);
+      expect(actions[1]).toMatchObject({ polarity: AdvicePolarity.Negate, sourceText: "Do not drive" });
+
+      const negative = modal[0].toUpperCase() + modal.slice(1) + " not cause drowsiness";
+      const matched = parseInstructionActions(negative + ". Do not drive.");
+      expect(matched.map(action => action.predicate.lemma)).toEqual(["cause", "drive"]);
+      expect(matched[0]).toMatchObject({
+        polarity: AdvicePolarity.Negate, modality: modal, force: AdviceForce.Warning,
+        sourceText: negative, span: { start: 0, end: negative.length }
+      });
+      expect(matched[1]).toMatchObject({ polarity: AdvicePolarity.Negate, sourceText: "Do not drive" });
+    }
+  );
+});
