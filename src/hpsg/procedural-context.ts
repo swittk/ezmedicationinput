@@ -264,6 +264,14 @@ export function sourceRangeAttachmentClass(
   if (enclosing.polarity === AdvicePolarity.Negate || isConditionalAdviceFrame(context, enclosing) ||
       isFixedClockMealCounsel(context, enclosing, frames)) return "procedure";
   const definition = frameActionDefinition(enclosing, context.options);
+  // A selected medication continuation keeps its registered Time daughter
+  // available to ordinary HPSG event/clock composition. The complete course
+  // valence already proves the target and Duration; a MealState is not Time.
+  if (definition?.semanticClass === "course" && !enclosing.modality &&
+      enclosing.args.some(arg => arg.role === AdviceArgumentRole.Duration && arg.quantity && arg.span &&
+        arg.span.end <= start) &&
+      enclosing.args.some(arg => arg.role === AdviceArgumentRole.Time && arg.span &&
+        start <= arg.span.start && end === arg.span.end)) return "administration";
   if (definition?.adviceClauseHead) return "procedure";
   if (definition?.semanticClass === "administration_pattern") return "administration";
   if (definition && !definition.procedural &&

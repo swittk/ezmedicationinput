@@ -1,8 +1,11 @@
+import { LexKind, type LexToken } from "../lexer/token-types";
 import { TIMING_ABBREVIATIONS } from "../maps";
 import { ParserState } from "../parser-state";
 import { FhirPeriodUnit } from "../types";
 import {
   COUNT_CONNECTOR_WORDS_DATA,
+  COURSE_CONTINUATION_MODIFIERS, DURATION_LEAD_TOKENS, EVENT_ARTICLE_TOKENS,
+  OCCURRENCE_COUNT_MODIFIERS, normalizeTokenLower,
   COUNT_MARKER_TOKENS_DATA,
   EVERY_INTERVAL_TOKENS_DATA,
   FREQUENCY_ADVERB_UNITS_DATA,
@@ -207,6 +210,35 @@ export function mapIntervalUnit(token: string):
     unit === FhirPeriodUnit.Month
     ? unit
     : undefined;
+}
+
+/** Bounded lexical constituent for a fronted following treatment course.
+ * The planner reuses its source extent; duration semantics remain owned by
+ * the ordinary duration lexical rule.
+ * @param tokens Source lexical tokens.
+ * @param start Candidate duration-lead index.
+ */
+export function followingCourseDurationHeaderAt(tokens: readonly LexToken[], start: number):
+  { valueIndex: number; tokenEnd: number; implicitSingle?: boolean } | undefined {
+  const lead = tokens[start];
+  if (!lead || !DURATION_LEAD_TOKENS.has(normalizeTokenLower(lead))) return undefined;
+  let cursor = start + 1;
+  if (tokens[cursor] && EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(tokens[cursor]))) cursor++;
+  const modifier = tokens[cursor];
+  if (!modifier || !COURSE_CONTINUATION_MODIFIERS.has(normalizeTokenLower(modifier))) return undefined;
+  const valueIndex = cursor + 1;
+  const value = tokens[valueIndex];
+  // "for the next week" names one week without repeating "one".
+  if (value && mapIntervalUnit(normalizeTokenLower(value))) {
+    return { valueIndex, tokenEnd: valueIndex + 1, implicitSingle: true };
+  }
+  if (!value || !(value.kind === LexKind.Number || value.kind === LexKind.NumberRange ||
+      FREQUENCY_NUMBER_WORDS[normalizeTokenLower(value)] !== undefined)) return undefined;
+  let unitIndex = valueIndex + 1;
+  if (tokens[unitIndex] && OCCURRENCE_COUNT_MODIFIERS.has(normalizeTokenLower(tokens[unitIndex]))) unitIndex++;
+  const unit = tokens[unitIndex];
+  if (!unit || !mapIntervalUnit(normalizeTokenLower(unit))) return undefined;
+  return { valueIndex, tokenEnd: unitIndex + 1 };
 }
 
 export function mapFrequencyAdverb(token: string): FhirPeriodUnit | undefined {

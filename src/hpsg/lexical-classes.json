@@ -1415,6 +1415,7 @@
     "administer": "give",
     "give": "give"
   },
+  "medicationObjectModifiers": ["this", "same"],
   "medicationObjectFillers": [
     "medication",
     "medicine",

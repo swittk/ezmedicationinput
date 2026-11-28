@@ -203,8 +203,21 @@ export function proceduralActionLexicalRule(): HpsgLexicalRule<HpsgClauseContext
     const signs = [];
     for (const frame of proceduralFrames(context)) {
       if (frame.span.start !== startToken.sourceStart) continue;
-      const tokens = frameTokens(context, frame);
+      let tokens = frameTokens(context, frame);
       if (!tokens.length || tokens.some((token) => context.state.consumed.has(token.index))) continue;
+      // Keep a selected course Time as an ordinary event/clock daughter.
+      // The instruction retains its complete authored frame/text, while its
+      // head tokens no longer hide the independently scoped temporal sign.
+      if (frame.predicate.semanticClass === "course") for (const argument of frame.args) {
+        if (argument.role !== AdviceArgumentRole.Time || !argument.span || !argument.relation) continue;
+        const nominalStart = tokens.findIndex(token => token.sourceStart === argument.span!.start);
+        const relation = tokens[nominalStart - 1];
+        if (relation && resolveActionRelationSurface(normalizeTokenLower(relation)) === argument.relation &&
+            sourceRangeAttachmentClass(context, relation.sourceStart, argument.span.end) === "administration") {
+          tokens = tokens.slice(0, nominalStart - 1);
+          break;
+        }
+      }
       const text = context.state.input.slice(frame.span.start, frame.span.end).trim();
       if (!text) continue;
       const directiveInstructions = frame.polarity === AdvicePolarity.Negate

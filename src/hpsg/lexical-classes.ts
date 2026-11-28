@@ -459,6 +459,8 @@ export const CLINICAL_RATE_ADMINISTRATION_HEADS = new Map(
   stringEntries(source.clinicalRateAdministrationHeads)
 );
 export const MEDICATION_OBJECT_FILLERS = setOf(source.medicationObjectFillers);
+export const MEDICATION_OBJECT_MODIFIERS = setOf(source.medicationObjectModifiers);
+export const COURSE_CONTINUATION_MODIFIERS = setOf(source.courseContinuationModifiers);
 /** Typed resultative adjustment leads; the following cadence owns the new phase. */
 export const PHASE_ADJUSTMENT_LEAD_SEQUENCES =
   source.phaseAdjustmentLeadSequences.map(parts => [...parts]);

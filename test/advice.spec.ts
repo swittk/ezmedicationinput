@@ -809,7 +809,8 @@ describe("detached Continue complement ownership", () => {
     "Continue 10 minutes of deep breathing.",
     "Continue to walk for 10 minutes.",
     "Continue breathing exercises for 5 minutes.",
-    "Continue to stretch for 5 minutes daily."
+    "Continue to stretch for 5 minutes daily.",
+    "Continue taking a walk for 10 minutes."
   ])("keeps the whole activity separate from the medication course: %s", instruction => {
     const source = "Take 2 tablets daily. " + instruction;
     const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
@@ -863,6 +864,165 @@ describe("detached Continue complement ownership", () => {
       expect(JSON.stringify(input)).toBe(before);
     }
     expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([
+    { instruction: "Continue for the next 5 days.", duration: "for the next 5 days", target: undefined, concept: undefined, meal: false },
+    { instruction: "Continue taking the medication for 5 days.", duration: "for 5 days", target: "taking the medication", concept: "medication-administration", meal: false },
+    { instruction: "Continue this medication for 5 days.", duration: "for 5 days", target: "this medication", concept: "product", meal: false },
+    { instruction: "Continue the same dose for 5 days.", duration: "for 5 days", target: "the same dose", concept: "medication-dose", meal: false },
+    { instruction: "Continue for 5 days on an empty stomach.", duration: "for 5 days", target: undefined, concept: undefined, meal: true }
+  ])("retains the complete current medication continuation: $instruction", fixture => {
+    const source = "Take 2 tablets daily. " + fixture.instruction;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ duration: 5, durationUnit: "d" });
+    for (const input of [parsed.meta.canonical.course!,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages.flatMap(stage => stage.administrations)).toHaveLength(1);
+      const member = course.stages[0].administrations[0];
+      expect(member.amounts![0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d",
+        courseLength: { value: 5 } });
+      const action = member.syntax?.instructionGraph?.actions.find(frame => frame.predicate.lemma === "continue-treatment");
+      expect(action).toBeDefined();
+      expect(action?.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Duration,
+        text: fixture.duration, quantity: { value: 5, unit: "d" },
+        span: { start: source.indexOf(fixture.duration), end: source.indexOf(fixture.duration) + fixture.duration.length } }));
+      if (fixture.target) expect(action?.args).toContainEqual(expect.objectContaining({
+        text: fixture.target, conceptId: fixture.concept,
+        span: { start: source.indexOf(fixture.target), end: source.indexOf(fixture.target) + fixture.target.length } }));
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("Continue taking medication for 5 days");
+      expect(th).toContain("กินต่อเนื่อง5 วัน");
+      if (fixture.meal) {
+        expect(member.schedule?.recurrence?.anchors ?? []).toEqual([]);
+        expect(action?.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.MealState,
+          text: "an empty stomach", conceptId: "empty_stomach", relation: AdviceRelation.On,
+          span: { start: source.indexOf("an empty stomach"), end: source.indexOf("an empty stomach") + 16 } }));
+        expect(en).toContain("on an empty stomach");
+        expect(th).toContain("an empty stomach");
+      }
+      expect(nextDueDoses(input, query)).toEqual(dates.slice(0, 5));
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 10, unit: "tab" });
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([
+    { duration: "for the next week", quantity: { value: 1, unit: "wk" }, schedule: { duration: 1, durationUnit: "wk" } },
+    { duration: "for the following week", quantity: { value: 1, unit: "wk" }, schedule: { duration: 1, durationUnit: "wk" } },
+    { duration: "for the next two weeks", quantity: { value: 2, unit: "wk" }, schedule: { duration: 2, durationUnit: "wk" } },
+    { duration: "for the next 5 d", quantity: { value: 5, unit: "d" }, schedule: { duration: 5, durationUnit: "d" } },
+    { duration: "for the next mo", quantity: { value: 1, unit: "mo" }, schedule: { duration: 1, durationUnit: "mo" } },
+    { duration: "for the following 2–3 weeks", quantity: { range: { low: 2, high: 3 }, unit: "wk" },
+      schedule: { duration: 2, durationMax: 3, durationUnit: "wk" } }
+  ])("keeps the complete registered qualified duration: $duration", fixture => {
+    const source = `Take 2 tablets daily. Continue ${fixture.duration}.`;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject(fixture.schedule);
+    for (const input of [parsed.meta.canonical.course!,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const member = course.stages[0].administrations[0];
+      const action = member.syntax?.instructionGraph?.actions.find(frame => frame.predicate.lemma === "continue-treatment");
+      expect(action?.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Duration,
+        text: fixture.duration, quantity: fixture.quantity,
+        span: { start: source.indexOf(fixture.duration), end: source.indexOf(fixture.duration) + fixture.duration.length } }));
+      expect(member.amounts![0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([
+    ["Continue for the next 5 days after breakfast.", "PCM", "11:00:00"],
+    ["Continue for 5 days after breakfast.", "PCM", "11:00:00"],
+    ["Continue for 5 days with food.", "C", "12:00:00"]
+  ])("retains the selected medication event companion: %s", (instruction, anchor, clock) => {
+    const source = "Take 2 tablets daily. " + instruction, parsed = parsePublicSig(source);
+    const options = { ...query, eventClock: { PCM: "11:00:00", C: "12:00:00" } };
+    const expected = [10, 11, 12, 13, 14].map(day => `2027-02-${day}T${clock}+00:00`);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    for (const input of [parsed.meta.canonical.course!,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const member = course.stages[0].administrations[0];
+      expect(member.amounts![0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d",
+        anchors: [anchor], courseLength: { value: 5 } });
+      expect(nextDueDoses(input, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 8, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 10, unit: "tab" });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toContain(instruction.includes("breakfast") ? "after breakfast" : "with food");
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("uses a registered course provider with the same complete qualified header", () => {
+    const source = "Take 2 tablets daily. Persist for the following week.";
+    const parsed = parsePublicSig(source, { instructionActionMap: { persist: {
+      code: "continue-treatment", semanticClass: "course", display: "Continue treatment",
+      procedural: true, argumentParser: "duration", realizer: "duration"
+    } } });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ duration: 1, durationUnit: "wk" });
+    for (const input of [parsed.meta.canonical.course!,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(nextDueDoses(input, query)).toEqual(dates.slice(0, 7));
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 14, unit: "tab" });
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each(["May continue the same dose for 5 days with food.",
+    "Continue for the next 5 days after breakfast if dizziness recurs."])(
+    "keeps a qualified medication continuation conditional: %s", instruction => {
+      const source = "Take 2 tablets daily. " + instruction, parsed = parsePublicSig(source);
+      for (const input of [parsed.meta.canonical.course!,
+        JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const before = JSON.stringify(input), course = importCanonicalCourse(input);
+        expect(course.stages[0].administrations[0].schedule?.recurrence?.courseLength).toBeUndefined();
+        expect(course.stages[0].administrations[0].schedule?.recurrence?.anchors ?? []).toEqual([]);
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("5 days");
+        expect(nextDueDoses(input, { ...query, eventClock: { PCM: "11:00:00", C: "12:00:00" } })).toEqual(dates);
+        expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Day }))
+          .toMatchObject({ totalUnits: 16, unit: "tab" });
+        expect(course.instruction).toBe(source);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    });
+
+  it.each(["r5", "r6"])("preserves current continuation source and unknown annotations in %s", form => {
+    const source = "Take 2 tablets daily. Continue for 5 days on an empty stomach.";
+    const parsed = parsePublicSig(source);
+    const input = JSON.parse(JSON.stringify(form === "r5" ? parsed.fhir : parsed.fhirNext));
+    const row = form === "r5" ? input[0] : input.step[0].component[0];
+    const submittedText = row.text;
+    const note = { url: "https://example.test/current-continuation-note", valueString: "retain current source" };
+    row.extension = [...(row.extension ?? []), note];
+    const before = JSON.stringify(input), projected = projectCanonicalCourse(importCanonicalCourse(input));
+    expect(projected.fhir[0].extension).toContainEqual(note);
+    expect(projected.fhirNext.step![0].component![0].extension).toContainEqual(note);
+    expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+      .toContain("Continue taking medication for 5 days on an empty stomach");
+    expect(nextDueDoses(input, query)).toEqual(dates.slice(0, 5));
+    expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Day }))
+      .toMatchObject({ totalUnits: 10, unit: "tab" });
+    if (form === "r5") expect(input[0].text).toBe(submittedText);
+    else expect(input.renderedInstruction).toBe(source);
+    expect(JSON.stringify(input)).toBe(before);
   });
 
   it("retains a targetless medication duration in minutes", () => {

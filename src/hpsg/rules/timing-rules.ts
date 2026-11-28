@@ -4,6 +4,7 @@ import { joinLocalizedTokens, localizedTimeArgument } from "../../locale-realiza
 import { clinicalRateHeadAt, clinicalRatePeriodUnit, volumeOrMassTerm } from "./clinical-quantity-rules";
 import { frameActionDefinition } from "../../instruction-graph";
 import { courseContinuationDurationAt } from "../lexical-classes";
+import { followingCourseDurationHeaderAt } from "../timing-lexicon";
 import { parseMedicationDateListAt, type MedicationDateListMatch } from "../../date-interpretation";
 import { inferMedicationLocale } from "../../locale-detection";
 import { lexInput } from "../../lexer/lex";
@@ -146,36 +147,7 @@ const MONTHLY_WEEKDAY_ORDINALS: Readonly<Record<string, 1 | 2 | 3 | 4 | -1>> = {
   last: -1
 };
 
-const COURSE_CONTINUATION_MODIFIERS = new Set(lexicalClasses.courseContinuationModifiers);
-
-/** Bounded lexical constituent for a fronted following treatment course.
- * The planner reuses its source extent; duration semantics remain owned by
- * the ordinary duration lexical rule.
- * @param tokens Source lexical tokens.
- * @param start Candidate duration-lead index.
- */
-export function followingCourseDurationHeaderAt(tokens: readonly Token[], start: number):
-  { valueIndex: number; tokenEnd: number; implicitSingle?: boolean } | undefined {
-  const lead = tokens[start];
-  if (!lead || !DURATION_LEAD_TOKENS.has(normalizeTokenLower(lead))) return undefined;
-  let cursor = start + 1;
-  if (tokens[cursor] && EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(tokens[cursor]))) cursor++;
-  const modifier = tokens[cursor];
-  if (!modifier || !COURSE_CONTINUATION_MODIFIERS.has(normalizeTokenLower(modifier))) return undefined;
-  const valueIndex = cursor + 1;
-  const value = tokens[valueIndex];
-  // "for the next week" names one week without repeating "one".
-  if (value && mapIntervalUnit(normalizeTokenLower(value))) {
-    return { valueIndex, tokenEnd: valueIndex + 1, implicitSingle: true };
-  }
-  if (!value || !(value.kind === LexKind.Number || value.kind === LexKind.NumberRange ||
-      FREQUENCY_NUMBER_WORDS[normalizeTokenLower(value)] !== undefined)) return undefined;
-  let unitIndex = valueIndex + 1;
-  if (tokens[unitIndex] && OCCURRENCE_COUNT_MODIFIERS.has(normalizeTokenLower(tokens[unitIndex]))) unitIndex++;
-  const unit = tokens[unitIndex];
-  if (!unit || !mapIntervalUnit(normalizeTokenLower(unit))) return undefined;
-  return { valueIndex, tokenEnd: unitIndex + 1 };
-}
+export { followingCourseDurationHeaderAt } from "../timing-lexicon";
 
 const ORDINAL_WEEK_STAGE_HEADERS = lexicalClasses.ordinalWeekStageHeaders;
 const ORDINAL_WEEK_STAGE_UNITS = new Set(ORDINAL_WEEK_STAGE_HEADERS.unitTokens);

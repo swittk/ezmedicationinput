@@ -80,6 +80,7 @@ import {
   INSTRUCTION_DURATION_APPROXIMATION_LEADS,
   INSTRUCTION_START_WORDS,
   INSTRUCTION_NOMINAL_ARTICLES,
+  MEDICATION_OBJECT_FILLERS, MEDICATION_OBJECT_MODIFIERS,
   INSTRUCTION_DURATION_UNITS,
   INSTRUCTION_QUANTITY_UNIT_LABELS,
   MEAL_TIMING_BY_RELATION,
@@ -90,7 +91,7 @@ import {
   SITE_RELATIVE_MARKERS,
   methodAuxiliaryVerbsForLocale
 } from "./hpsg/lexical-classes";
-import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, FREQUENCY_SIMPLE_WORDS } from "./hpsg/timing-lexicon";
+import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, FREQUENCY_SIMPLE_WORDS, followingCourseDurationHeaderAt, mapIntervalUnit } from "./hpsg/timing-lexicon";
 import {
   cloneMedicationInstructionConceptComponents,
   medicationInstructionConceptCodings,
@@ -990,7 +991,19 @@ function durationArgumentAt(
     quantity: { value: compact.value, unit: compactUnit },
     span: { start: offset + compactToken.sourceStart, end: offset + compactToken.sourceEnd }
   };
-  let cursor = start;
+  const following = followingCourseDurationHeaderAt(parts, start);
+  if (following && following.tokenEnd > endExclusive) return undefined;
+  if (following?.implicitSingle) {
+    const unit = mapIntervalUnit(key(parts[following.valueIndex]));
+    if (!unit) return undefined;
+    return { role: AdviceArgumentRole.Duration,
+      text: sourceFor(parts, start, following.tokenEnd, input), normalized: `1 ${unit}`,
+      quantity: { value: 1, unit }, span: {
+        start: offset + parts[start].sourceStart,
+        end: offset + parts[following.tokenEnd - 1].sourceEnd
+      } };
+  }
+  let cursor = following?.valueIndex ?? start;
   // A licensed duration lead belongs to the same source-backed constituent
   // as its numeric daughter. Keeping `for` with article, word-number, and
   // numeric quantities prevents regimen timing from reclaiming only part of
@@ -1023,14 +1036,14 @@ function durationArgumentAt(
       span: { start: offset + parts[start].sourceStart, end: offset + rangeUnitToken.sourceEnd }
     };
   }
-  let unitIndex = cursor + 1;
+  let unitIndex = following ? following.tokenEnd - 1 : cursor + 1;
   const possibleArticle = parts[unitIndex];
   if (possibleArticle && EVENT_OFFSET_ARTICLES.has(key(possibleArticle))) {
     unitIndex += 1;
   }
   const unitToken = parts[unitIndex];
   if (!unitToken || unitIndex >= endExclusive) return undefined;
-  const unit = durationUnitFromKey(key(unitToken));
+  const unit = following ? mapIntervalUnit(key(unitToken)) : durationUnitFromKey(key(unitToken));
   if (!unit) return undefined;
 
   let quantity: AdviceArgument["quantity"] | undefined;
@@ -1586,6 +1599,30 @@ const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   }
   return { args };
 };
+function medicationCourseTargetFromParts(
+  parts: Lexeme[], start: number, end: number, input: string, offset: number, options?: ParseOptions
+): AdviceArgument | undefined {
+  const bounds = semanticArgumentBounds(parts, start, end);
+  if (bounds.start >= bounds.endExclusive) return undefined;
+  const text = sourceFor(parts, bounds.start, bounds.endExclusive, input);
+  const complete = internalArgument(parts.slice(bounds.start, bounds.endExclusive).map(key).join(" "), text, options);
+  if (complete && (complete.conceptId === "product" || complete.conceptId === "medication-dose" ||
+      complete.conceptId === "medication-administration"))
+    return { ...complete, span: rangeFor(parts, bounds.start, bounds.endExclusive, offset) };
+  let cursor = bounds.start;
+  const administration = internalArgument(key(parts[cursor]), parts[cursor].original, options);
+  const activity = administration?.conceptId === "medication-administration" ? administration : undefined;
+  if (activity) cursor++;
+  while (cursor < bounds.endExclusive && (INSTRUCTION_NOMINAL_ARTICLES.has(key(parts[cursor])) ||
+      MEDICATION_OBJECT_MODIFIERS.has(key(parts[cursor])))) cursor++;
+  const canonical = parts.slice(cursor, bounds.endExclusive).map(key).join(" ");
+  let nominal = cursor < bounds.endExclusive ? internalArgument(canonical, text, options) : undefined;
+  if (!nominal && cursor + 1 === bounds.endExclusive && MEDICATION_OBJECT_FILLERS.has(canonical))
+    nominal = internalArgument("product", text, options);
+  if (nominal?.conceptId !== "product" && nominal?.conceptId !== "medication-dose") return undefined;
+  return { ...(activity ?? nominal), text, span: rangeFor(parts, bounds.start, bounds.endExclusive, offset) };
+}
+
 const RESULT_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { definition, parts, argumentStart, segmentEnd, input, options } = c;
   // A temporal result boundary is its own typed daughter. "Until finished"
@@ -1638,16 +1675,19 @@ const RESULT_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       return { args };
     }
   }
-  if (resultIndex < 0) return {
-    // A source-backed quantified duration is a different valence daughter
-    // from the outcome/result of a procedure. Do not relabel its elapsed
-    // time as an opaque "result", nor lose an already-composed duration.
-    args: c.duration?.quantity
-      ? [c.duration]
-      : parsedArgs(argumentFromParts(
-        parts, resultStart, segmentEnd, input, AdviceArgumentRole.Result, options
-      ))
-  };
+  if (resultIndex < 0) {
+    // A quantified Duration and an explicit medication target are separate
+    // valence daughters; neither is an opaque procedural Result.
+    const args = c.duration?.quantity ? [c.duration] : parsedArgs(argumentFromParts(
+      parts, resultStart, segmentEnd, input, AdviceArgumentRole.Result, options
+    ));
+    if (definition.semanticClass === "course" && c.duration?.span) {
+      const durationStart = partIndexForAbsoluteSourceStart(parts, c.duration.span.start, c.offset);
+      if (durationStart !== undefined && durationStart > argumentStart)
+        pushArgument(args, medicationCourseTargetFromParts(parts, argumentStart, durationStart, input, c.offset, options));
+    }
+    return { args };
+  }
   const part = parts[resultIndex];
   return { args: parsedArgs(internalArgument(key(part), part.sourceText ?? part.original, options)) };
 };
@@ -1947,7 +1987,9 @@ function buildActionFrame(
   // Not every temporal/conditional connector licenses an Activity.
   // PRN WHEN is a condition daughter, never a "when symptoms" executable
   // activity that can duplicate medication dose and schedule realization.
-  const temporalIndex = parsed.tailRelationIndex ?? nextRelationIndex;
+  const courseTemporalIndex = definition.semanticClass === "course" && duration?.span && relIndex >= 0 &&
+    duration.span.end <= offset + parts[relIndex].sourceStart ? relIndex : nextRelationIndex;
+  const temporalIndex = parsed.tailRelationIndex ?? courseTemporalIndex;
   const temporalRelation = temporalIndex === nextRelationIndex ? nextRelation
     : actionArgumentRelation(key(parts[temporalIndex]), definition.preferredRelationSemanticClasses);
   // A multi-complement valence can discover a condition after its second
@@ -1965,22 +2007,33 @@ function buildActionFrame(
     : temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "timeComplement")
       ? timeArgumentsFromParts(parts, temporalIndex + 1, semanticEnd, input, offset, temporalRelation, semanticEnd, options,
           false, definition.semanticClass === "course") : undefined;
+  const courseCompanion = !nextTimes && definition.semanticClass === "course" && temporalIndex >= 0
+    ? argumentFromParts(parts, temporalIndex + 1, semanticEnd, input,
+        temporalRelation === AdviceRelation.Until ? AdviceArgumentRole.Result
+          : nextTemporal ? AdviceArgumentRole.Activity : undefined, options) : undefined;
   if (nextTimes) {
     const bounds = semanticArgumentBounds(parts, temporalIndex + 1, semanticEnd);
     const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
     for (const time of nextTimes) pushArgument(args, { ...time, relation: time.relation ?? temporalRelation,
       span: time.span ?? (first && last ? { start: offset + first.sourceStart, end: offset + last.sourceEnd } : undefined)
     });
+  } else if (courseCompanion?.role === AdviceArgumentRole.MealState && courseCompanion.conceptId &&
+      (relationHasSemanticClass(temporalRelation, "temporal") || relationHasSemanticClass(temporalRelation, "locative") ||
+        relationHasSemanticClass(temporalRelation, "accompaniment"))) {
+    pushArgument(args, { ...courseCompanion, relation: temporalRelation,
+      span: rangeFor(parts, temporalIndex + 1, semanticEnd, offset) });
   } else if (temporalIndex >= 0 && temporalRelation === AdviceRelation.Until) {
-    const result = argumentFromParts(parts, temporalIndex + 1, segmentEnd, input, AdviceArgumentRole.Result, options);
+    const result = courseCompanion ?? argumentFromParts(parts, temporalIndex + 1, segmentEnd, input, AdviceArgumentRole.Result, options);
     if (result) {
       result.relation = temporalRelation;
+      if (definition.semanticClass === "course" && duration?.quantity)
+        result.span = rangeFor(parts, temporalIndex + 1, semanticEnd, offset);
       pushArgument(args, result);
     }
   } else if (nextTemporal && temporalIndex >= 0) {
     const eventStart = temporalIndex + 1;
     const sourceEvent = trimSemanticText(sourceFor(parts, eventStart, segmentEnd, input));
-    let event = argumentFromParts(
+    let event = courseCompanion ?? argumentFromParts(
       parts, eventStart, segmentEnd, input, AdviceArgumentRole.Activity, options
     );
     if ((event?.role !== AdviceArgumentRole.Activity && event?.role !== AdviceArgumentRole.Time) ||
@@ -2043,13 +2096,25 @@ function buildActionFrame(
   if (definition.semanticClass === "course" && duration?.span) {
     const bounds = semanticArgumentBounds(parts, argumentStart, semanticEnd);
     const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
-    if (!first || !last || duration.span.start !== offset + first.sourceStart) return undefined;
+    if (!first || !last) return undefined;
+    if (duration.span.start !== offset + first.sourceStart) {
+      const durationStart = partIndexForAbsoluteSourceStart(parts, duration.span.start, offset);
+      const prefix = durationStart === undefined ? undefined : semanticArgumentBounds(parts, argumentStart, durationStart);
+      if (!prefix || !args.some(arg => arg !== duration && arg.span?.start === offset + first.sourceStart &&
+          arg.span.end === offset + parts[prefix.endExclusive - 1].sourceEnd &&
+          (arg.conceptId === "product" || arg.conceptId === "medication-dose" ||
+            arg.conceptId === "medication-administration"))) return undefined;
+    }
     if (duration.span.end !== offset + last.sourceEnd) {
       const afterDuration = partIndexAfterAbsoluteSourceEnd(parts, duration.span.end, offset);
       if (afterDuration === undefined) return undefined;
       const tail = semanticArgumentBounds(parts, afterDuration, semanticEnd);
-      if (tail.start !== temporalIndex || !nextTimes?.length ||
-          nextTimes[nextTimes.length - 1].span?.end !== offset + last.sourceEnd) return undefined;
+      const completeTimes = nextTimes?.length && nextTimes[nextTimes.length - 1].span?.end === offset + last.sourceEnd;
+      const companionStart = parts[temporalIndex + 1];
+      const completeCompanion = courseCompanion?.conceptId && companionStart && args.some(arg =>
+        arg.conceptId === courseCompanion.conceptId && arg.relation === temporalRelation &&
+        arg.span?.start === offset + companionStart.sourceStart && arg.span?.end === offset + last.sourceEnd);
+      if (tail.start !== temporalIndex || !(completeTimes || completeCompanion)) return undefined;
     }
   }
   pushArgument(args, amount);
@@ -4363,6 +4428,8 @@ const RESULT_REALIZER: ActionRealizer = (c) => {
       joinLocalizedTokens(c.locale, [profile.durationPrefix || undefined, c.duration])
     ]);
   }
+  for (const argument of c.frame.args) if (argument.role === AdviceArgumentRole.MealState)
+    text = joinLocalizedTokens(c.locale, [text, defaultActionAccompaniment(c, argument)]);
   return joinLocalizedTokens(c.locale, [text, realizeTimeArgument(c)]);
 };
 
