@@ -8,6 +8,7 @@ import conditionLogicDefinition from "../fhir/r6/medication-r6-condition-logic.j
 import {
   formatSig,
   calculateTotalUnits,
+  evaluateMedicationCondition,
   getDosageAlternativeChoice,
   getDosageCondition,
   nextDueDoses,
@@ -1091,6 +1092,51 @@ describe("typed additive doses", () => {
 });
 
 describe("typed conditional dosage alternatives", () => {
+  it.each([
+    "If SBP > 160, take 2 tablets daily for 2 days; otherwise take 1 tablet daily for 2 days",
+    "If SBP > 160, take 2 tablets daily for 2 days, otherwise take 1 tablet daily for 2 days"
+  ])("retains both manual-choice branches after a fronted guard: %s", source => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(parsed.input).toBe(source);
+    const dates = ["2026-03-06T09:00:00+00:00", "2026-03-07T09:00:00+00:00"];
+    for (const dosage of [parsed.meta.canonical.course!,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = structuredClone(dosage);
+      const course = importCanonicalCourse(dosage);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(2);
+      expect(members.map(member => member.amounts[0].quantity))
+        .toMatchObject([{ value: 2, unit: "tab" }, { value: 1, unit: "tab" }]);
+      expect(members.map(member => member.schedule?.recurrence))
+        .toMatchObject([{ frequency: 1, period: 1, periodUnit: "d", courseLength: { value: 2 } },
+          { frequency: 1, period: 1, periodUnit: "d", courseLength: { value: 2 } }]);
+      expect(members[0].predicate).toMatchObject({ kind: "measurement", name: "sbp", operation: "gt", value: 160 });
+      expect(members[1].predicate).toBeUndefined();
+      expect(members[0].choice?.groupId).toBeTruthy();
+      expect(members[1].choice?.groupId).toBe(members[0].choice?.groupId);
+      expect(members[1].choice?.branchId).not.toBe(members[0].choice?.branchId);
+      const clock = { orderedAt: "2026-03-06T00:00:00Z", from: "2026-03-06T00:00:00Z", timeZone: "UTC", limit: 8 };
+      expect(() => nextDueDoses(dosage, clock)).toThrow(/alternativeChoices/u);
+      expect(() => calculateTotalUnits({ ...clock, dosage, durationValue: 2, durationUnit: "d" }))
+        .toThrow(/alternativeChoices/u);
+      for (const [index, sbp, total] of [[0, 170, 4], [0, 150, 0], [1, 170, 2], [1, 150, 2]] as const) {
+        const choice = members[index].choice!;
+        const selected = { ...clock, alternativeChoices: { [choice.groupId]: choice.branchId },
+          evaluateCondition: (condition: Parameters<typeof evaluateMedicationCondition>[0]) =>
+            evaluateMedicationCondition(condition, { sbp }) };
+        expect(nextDueDoses(dosage, selected)).toEqual(total ? dates : []);
+        expect(calculateTotalUnits({ ...selected, dosage, durationValue: 2, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: total, unit: "tab" });
+      }
+      for (const locale of ["en", "th"] as const) {
+        const preview = formatCanonicalCourse(course, "long", { locale, realizationMode: "normalized" });
+        expect(preview).toContain(locale === "en" ? "Choose one:" : "เลือกอย่างใดอย่างหนึ่ง");
+      }
+      expect(dosage).toEqual(before);
+    }
+  });
+
   it.each([
     "Take 2 tablets daily if weight above 70kg; otherwise 1 tablet daily",
     "Take 2 tablets daily if weight above 70kg; otherwise take 1 tablet daily",

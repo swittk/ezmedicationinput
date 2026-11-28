@@ -554,16 +554,6 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   // The conditional grammar is the sole producer of ELSE scope. Ask for it
   // only when the lexical scan already found a plausible multi-clause seam.
   const hasCoordinationCandidate = sites.some(site => site.kind === 'coordination');
-  // A terminal full stop is a sentence boundary, not an independent dose.
-  // It must not prevent the existing typed ELSE grammar from seeing two
-  // explicit administration candidates.
-  const lastSite = sites[sites.length - 1];
-  const lastDoseSite = lastSite?.kind === 'punctuation' &&
-    !input.slice(lastSite.end).trim()
-    ? sites[sites.length - 2] : lastSite;
-  const hasDoseCandidateEnvelope = sites.length > 1 &&
-    sites[0]?.kind === 'adjacent-dose' &&
-    lastDoseSite?.kind === 'adjacent-dose';
   let guardEvaluated = false;
   let guard: ReturnType<typeof parseMedicationGuard>;
   const guardForInput = () => {
@@ -575,7 +565,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   };
   const clinicalGuard = hasCoordinationCandidate
     ? guardForInput()
-    : hasDoseCandidateEnvelope ? medicationGuardWithMultipleDoseCandidates(sites, guardForInput) : undefined;
+    : medicationGuardWithMultipleDoseCandidates(sites, guardForInput);
   const alternative = clinicalGuard?.alternative;
   if (alternative) sites = withAlternativeBoundary(input, tokens, sites, alternative);
   const dateSpans = findMedicationDateListSpans(input, options);
