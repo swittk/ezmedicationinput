@@ -6100,3 +6100,91 @@ describe("current opaque components and UCUM identity", () => {
     expect(JSON.stringify([left, right])).toBe(before);
   });
 });
+
+
+describe("supported quantity-bearing annotation choices", () => {
+  const unknown: FhirR6Extension = { url: "urn:clinic:retain-note", valueString: "Keep the authored annotation" };
+  const nested = (quantity: FhirR6Quantity) => ({
+    id: "annotated-primitive", extension: [unknown, { url: "urn:clinic:estimate", valueQuantity: quantity }]
+  });
+  const choices: Array<{ name: keyof FhirR6Extension; wrap: (quantity: FhirR6Quantity) => Partial<FhirR6Extension> }> = [
+    { name: "valueQuantity", wrap: quantity => ({ valueQuantity: quantity }) },
+    { name: "valueDuration", wrap: quantity => ({ valueDuration: quantity }) },
+    { name: "valueRatio", wrap: quantity => ({ valueRatio: {
+      numerator: quantity, denominator: { value: 1, unit: "d", system: "http://unitsofmeasure.org", code: "d", _value: nested(quantity) }, extension: [unknown]
+    } }) },
+    { name: "valueRange", wrap: quantity => ({ valueRange: {
+      low: { value: 1, unit: "min", _value: nested(quantity) }, high: { value: 5, unit: "min", _value: nested(quantity) }, extension: [unknown]
+    } }) },
+    { name: "valuePeriod", wrap: quantity => ({ valuePeriod: {
+      start: "2027-01-01", end: "2027-01-03", _end: nested(quantity), extension: [unknown]
+    } }) },
+    { name: "valueReference", wrap: quantity => ({ valueReference: {
+      reference: "Observation/clinic-review", display: "Clinic review", _display: nested(quantity), extension: [unknown]
+    } }) },
+    { name: "valueCodeableReference", wrap: quantity => ({ valueCodeableReference: {
+      reference: { reference: "Observation/clinic-review", display: "Clinic review", _display: nested(quantity) },
+      concept: { text: "Review window", _text: nested(quantity) }, extension: [unknown]
+    } }) },
+    { name: "valueCoding", wrap: quantity => ({ valueCoding: {
+      system: "urn:clinic:annotation", code: "review-window", display: "Review window", _display: nested(quantity), extension: [unknown]
+    } }) },
+    { name: "valueCodeableConcept", wrap: quantity => ({ valueCodeableConcept: {
+      text: "Review window", _text: nested(quantity), extension: [unknown],
+      coding: [{ system: "urn:clinic:annotation", code: "review-window", _code: nested(quantity) }]
+    } }) },
+    { name: "_valueCode", wrap: quantity => ({ valueCode: "review", _valueCode: nested(quantity) }) },
+    { name: "_valueString", wrap: quantity => ({ valueString: "Review window", _valueString: nested(quantity) }) },
+    { name: "_valueMarkdown", wrap: quantity => ({ valueMarkdown: "Review **window**", _valueMarkdown: nested(quantity) }) },
+    { name: "_valueDecimal", wrap: quantity => ({ valueDecimal: 2.5, _valueDecimal: nested(quantity) }) },
+    { name: "_valueTime", wrap: quantity => ({ valueTime: "08:00:00", _valueTime: nested(quantity) }) },
+    { name: "_valueInteger", wrap: quantity => ({ valueInteger: 2, _valueInteger: nested(quantity) }) },
+    { name: "_valueBoolean", wrap: quantity => ({ valueBoolean: true, _valueBoolean: nested(quantity) }) }
+  ];
+  for (const comparator of [undefined, "~"] as const) {
+    it.each(choices)("retains " + (comparator ? "approximate" : "exact") + " $name annotations through native and fresh FHIR", ({ name, wrap }) => {
+      // Independent wire expectations, without calling the codec under test.
+      const ema: FhirR6Extension = { url: "http://ema.europa.eu/fhir/extension/comparator",
+        valueCoding: { system: "http://spor.ema.europa.eu/v1/lists/100000000008", code: "100000000055" } };
+      const inner: FhirR6Quantity = { value: 3, unit: "min", system: "http://unitsofmeasure.org", code: "min",
+        _value: { id: "nested-authored-value" }, extension: [unknown], ...(comparator ? { comparator } : {}) };
+      const innerWire: FhirR6Quantity = { value: 3, unit: "min", system: "http://unitsofmeasure.org", code: "min",
+        _value: { id: "nested-authored-value" }, extension: comparator ? [unknown, ema] : [unknown] };
+      const quantity: FhirR6Quantity = { value: 2.5, unit: "min", system: "http://unitsofmeasure.org", code: "min",
+        _value: nested(inner), extension: [unknown], ...(comparator ? { comparator } : {}) };
+      const quantityWire: FhirR6Quantity = { value: 2.5, unit: "min", system: "http://unitsofmeasure.org", code: "min",
+        _value: nested(innerWire), extension: comparator ? [unknown, ema] : [unknown] };
+      const annotation: FhirR6Extension = { url: "urn:clinic:choice:" + name, id: "authored-choice", ...wrap(quantity) };
+      const expectedWire: FhirR6Extension = { url: annotation.url, id: "authored-choice", ...wrap(quantityWire) };
+      const opaque: FhirR6Extension = { url: "urn:clinic:opaque-review-timing", valueTiming: {
+        code: { text: "Clinic-owned annotation" }, repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Hour }
+      } };
+      const sourceText = "Take 2 tablets daily";
+      const input: FhirR6DosageInstruction = { renderedInstruction: sourceText, step: [{ component: [{
+        text: sourceText, doseAndRate: [{ doseQuantity: { value: 2, unit: "tab",
+          _value: { id: "authored-dose", extension: [annotation, unknown, opaque] }
+        } }], timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+      }] }] };
+      const before = JSON.parse(JSON.stringify(input));
+      const native = importCanonicalCourse(input), projected = projectCanonicalCourse(native);
+      for (const view of [native, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+        const viewBefore = JSON.parse(JSON.stringify(view));
+        const current = projectCanonicalCourse(importCanonicalCourse(view));
+        const row = current.fhir![0], component = current.fhirNext!.step![0].component![0];
+        expect(row.doseAndRate![0].doseQuantity!._value).toEqual({ id: "authored-dose", extension: [expectedWire, unknown, opaque] });
+        expect(component.doseAndRate![0].doseQuantity!._value).toEqual({ id: "authored-dose", extension: [annotation, unknown, opaque] });
+        expect(row.doseAndRate![0].doseQuantity).toMatchObject({ value: 2, unit: "tab" });
+        expect(component.doseAndRate![0].doseQuantity).toMatchObject({ value: 2, unit: "tab" });
+        expect(row.text).toBe(sourceText);
+        expect(component.text).toBe(sourceText);
+        expect(component.timing!.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day });
+        expect(component.timing!.repeat!.duration).toBeUndefined();
+        expect(component.timing!.repeat!.boundsDuration).toBeUndefined();
+        expect(calculateTotalUnits({ dosage: view, orderedAt: "2027-01-01T08:00:00Z", from: "2027-01-01T08:00:00Z",
+          timeZone: "UTC", durationValue: 3, durationUnit: "d" }).totalUnits).toBe(6);
+        expect(view).toEqual(viewBefore);
+      }
+      expect(input).toEqual(before);
+    });
+  }
+});

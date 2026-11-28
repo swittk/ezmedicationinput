@@ -123,8 +123,8 @@ function editedOperator(
   } };
 }
 
-/** Quantity/Duration annotations and typed Ratio/Range endpoints share their owner's operator bridge.
- * Coding and CodeableConcept annotations use that bridge without interpreting their terminology.
+/** Quantity/Duration, Ratio/Range, Period, Reference/CodeableReference, Coding/Concept
+ * and their declared primitive annotations share the existing operator bridge.
  * Other Extension value choices remain opaque. */
 const codingPrimitiveFields = ["_system", "_version", "_code", "_display", "_userSelected"] as const;
 const extensionPrimitiveFields = ["_valueCode", "_valueString", "_valueMarkdown", "_valueDecimal", "_valueTime", "_valueInteger", "_valueBoolean"] as const;
@@ -338,7 +338,7 @@ function recognizedEmaOperatorCoding(extension: FhirR6Extension): FhirR6Extensio
 function simpleQuantityForWire(quantity: FhirR6Quantity | undefined, target: "r5" | "r6"):
   FhirR6SimpleQuantity | undefined {
   if (!quantity) return undefined;
-  if (target === "r5") quantity = quantityMetadataForWire(quantity, "r5");
+  quantity = quantityMetadataForWire(quantity, target);
   const comparator = quantity.comparator;
   if (!comparator && quantity._comparator === undefined) return quantity as FhirR6SimpleQuantity;
   const { comparator: _r6Comparator, _comparator, ...numeric } = quantity;
