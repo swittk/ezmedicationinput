@@ -1017,6 +1017,11 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
 
     const bodyStart = cursor;
+    // A rejected course valence is still a complete detached instruction.
+    // Keep its temporal words with that source body rather than exposing an
+    // unrelated activity's duration as medication timing.
+    const unresolvedCourseBody = firstBodyAction?.semanticClass === "course" &&
+      !getProceduralFrames(context).some(frame => frame.span.start === firstBodyToken?.sourceStart);
     const bodyTokens: Token[] = [];
     let completeInstructions: CanonicalAdditionalInstructionExpr[] | undefined;
     for (; cursor < context.limit; cursor += 1) {
@@ -1035,10 +1040,8 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       // may still consume the complete phrase; free advice must not swallow it.
       if (context.clinicalCache.quantityTokenIndices?.has(token.index) ||
           context.clinicalCache.unlicensedRateTokenIndices?.has(token.index)) break;
-      if (!bodyTokens.length && isScheduleLead(context, cursor)) {
-        return [];
-      }
-      if (bodyTokens.length && isScheduleLead(context, cursor)) {
+      if (!unresolvedCourseBody && isScheduleLead(context, cursor)) {
+        if (!bodyTokens.length) return [];
         break;
       }
       // A complete coded adjunct and a following accompaniment are separate

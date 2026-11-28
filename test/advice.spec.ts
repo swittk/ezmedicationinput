@@ -789,3 +789,119 @@ describe("review cbb complete relation and directive ownership", () => {
       }
     });
 });
+
+
+describe("detached Continue complement ownership", () => {
+  const query = {
+    orderedAt: "2027-02-10T00:00:00Z", from: "2027-02-10T00:00:00Z",
+    timeZone: "UTC", limit: 8
+  };
+  const dates = [
+    "2027-02-10T09:00:00+00:00", "2027-02-11T09:00:00+00:00",
+    "2027-02-12T09:00:00+00:00", "2027-02-13T09:00:00+00:00",
+    "2027-02-14T09:00:00+00:00", "2027-02-15T09:00:00+00:00",
+    "2027-02-16T09:00:00+00:00", "2027-02-17T09:00:00+00:00"
+  ];
+
+  it.each([
+    "Continue 10 minutes of walking.",
+    "Continue 5 minutes of stretching.",
+    "Continue 10 minutes of deep breathing.",
+    "Continue to walk for 10 minutes.",
+    "Continue breathing exercises for 5 minutes.",
+    "Continue to stretch for 5 minutes daily."
+  ])("keeps the whole activity separate from the medication course: %s", instruction => {
+    const source = "Take 2 tablets daily. " + instruction;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const member = course.stages[0].administrations[0];
+      expect(course.stages.flatMap(stage => stage.administrations)).toHaveLength(1);
+      expect(member.amounts![0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
+      expect(member.anchoredLength).toBeUndefined();
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Take 2 tablets orally once daily. " + instruction);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("รับประทานครั้งละ 2 เม็ด วันละครั้ง. " + instruction);
+      expect(nextDueDoses(input, query)).toEqual(dates);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 16, unit: "tab" });
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([
+    "Continue taking medication for 5 days.",
+    "Continue taking medicine for 5 days.",
+    "Continue for 5 days after breakfast."
+  ])("retains a complete medication course and its selected companion: %s", instruction => {
+    const source = "Take 2 tablets daily. " + instruction;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages[0].administrations[0].schedule?.recurrence?.courseLength)
+        .toMatchObject({ value: 5 });
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("Continue taking medication for 5 days");
+      expect(th).toContain("กินต่อเนื่อง5 วัน");
+      if (instruction.includes("after breakfast")) {
+        expect(en).toContain("after breakfast");
+        expect(th).toContain("หลังอาหารเช้า");
+      }
+      expect(nextDueDoses(input, query)).toEqual(dates.slice(0, 5));
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 10, unit: "tab" });
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it("retains a targetless medication duration in minutes", () => {
+    const source = "Take 2 tablets daily. Continue for 10 minutes.";
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ duration: 10, durationUnit: "min" });
+    for (const input of [parsed.meta.canonical.course!,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages[0].administrations[0].schedule?.recurrence?.courseLength).toMatchObject({ value: 10 });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toContain("Continue taking medication for 10 minutes");
+      expect(nextDueDoses(input, query)).toEqual([]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 0, unit: "tab" });
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each(["r5", "r6"])("preserves current activity source and unknown annotations in %s", form => {
+    const source = "Take 2 tablets daily. Continue 10 minutes of walking.";
+    const parsed = parsePublicSig(source);
+    const input = JSON.parse(JSON.stringify(form === "r5" ? parsed.fhir : parsed.fhirNext));
+    const row = form === "r5" ? input[0] : input.step[0].component[0];
+    const submittedText = row.text;
+    const note = { url: "https://example.test/current-exercise-note", valueString: "retain current source" };
+    row.extension = [...(row.extension ?? []), note];
+    const before = JSON.stringify(input), projected = projectCanonicalCourse(importCanonicalCourse(input));
+    expect(projected.fhir[0].extension).toContainEqual(note);
+    expect(projected.fhirNext.step![0].component![0].extension).toContainEqual(note);
+    expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+      .toBe("Take 2 tablets orally once daily. Continue 10 minutes of walking.");
+    expect(nextDueDoses(input, query)).toEqual(dates);
+    if (form === "r5") {
+      expect(input[0].text).toBe(submittedText);
+      expect(input[0].text).toContain("Continue 10 minutes of walking.");
+    } else expect(input.renderedInstruction).toBe(source);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+});

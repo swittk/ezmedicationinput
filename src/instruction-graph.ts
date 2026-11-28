@@ -647,7 +647,7 @@ function argumentCoordinationMembers(parts: Lexeme[], start: number, endExclusiv
 function timeArgumentsFromParts(
   parts: Lexeme[], start: number, endExclusive: number, input: string,
   offset: number, relation: AdviceRelation | undefined, singleEnd = endExclusive, options?: ParseOptions,
-  nominalComplement = false
+  nominalComplement = false, complete = false
 ): AdviceArgument[] | undefined {
   const members = argumentCoordinationMembers(parts, start, endExclusive);
   const alternative = members.some(member => coordinationConnectorKind(member.connector) === "disjunction");
@@ -688,7 +688,7 @@ function timeArgumentsFromParts(
   if (!member) return undefined;
   const bounds = semanticArgumentBounds(parts, member.start, Math.min(member.end, singleEnd));
   const single = timeArgumentFromParts(parts, bounds.start, bounds.endExclusive,
-    input, false, options, nominalComplement);
+    input, complete, options, nominalComplement);
   return single ? [{ ...single, relation, span: {
     start: offset + parts[bounds.start].sourceStart,
     end: offset + parts[bounds.endExclusive - 1].sourceEnd
@@ -1963,7 +1963,8 @@ function buildActionFrame(
   // earlier complement, including a material amount or procedure duration.
   const nextTimes = relationTimes && relationTimes.length > 1 ? relationTimes
     : temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "timeComplement")
-      ? timeArgumentsFromParts(parts, temporalIndex + 1, semanticEnd, input, offset, temporalRelation, semanticEnd, options) : undefined;
+      ? timeArgumentsFromParts(parts, temporalIndex + 1, semanticEnd, input, offset, temporalRelation, semanticEnd, options,
+          false, definition.semanticClass === "course") : undefined;
   if (nextTimes) {
     const bounds = semanticArgumentBounds(parts, temporalIndex + 1, semanticEnd);
     const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
@@ -2036,6 +2037,21 @@ function buildActionFrame(
     return undefined;
   }
   if (parsed.semanticEnd !== undefined) semanticEnd = parsed.semanticEnd;
+  // A medication-course head owns its complete Duration and any selected
+  // temporal companion. An unresolved activity cannot donate its duration
+  // to that medication merely because it follows the same lexical head.
+  if (definition.semanticClass === "course" && duration?.span) {
+    const bounds = semanticArgumentBounds(parts, argumentStart, semanticEnd);
+    const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
+    if (!first || !last || duration.span.start !== offset + first.sourceStart) return undefined;
+    if (duration.span.end !== offset + last.sourceEnd) {
+      const afterDuration = partIndexAfterAbsoluteSourceEnd(parts, duration.span.end, offset);
+      if (afterDuration === undefined) return undefined;
+      const tail = semanticArgumentBounds(parts, afterDuration, semanticEnd);
+      if (tail.start !== temporalIndex || !nextTimes?.length ||
+          nextTimes[nextTimes.length - 1].span?.end !== offset + last.sourceEnd) return undefined;
+    }
+  }
   pushArgument(args, amount);
   // A registered relational compound can entail a second typed daughter
   // even when a language realizes both meanings as ONE lexical constituent.
