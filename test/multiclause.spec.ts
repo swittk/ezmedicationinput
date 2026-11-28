@@ -5584,6 +5584,20 @@ describe("review125 shared totals across selectable paths", () => {
         if (placement !== "absent") expect(text).toContain(locale === "en" && style === "long" ? "8:00 am" : "08:00");
         expect(text).toContain(locale === "en" && style === "long" ? "8:00 pm" : "20:00");
         expect(text).toContain(locale === "en" && style === "long" ? "6:00 pm" : "18:00");
+        const shared = locale === "en" ? "Schedule sharing its limits and a total of 4 administrations: "
+          : "ตารางให้ยาที่ใช้ข้อจำกัดร่วมกัน และให้ยา 4 ครั้งรวมทั้งชุด: ";
+        const choose = locale === "en" ? "Choose one: " : "เลือกอย่างใดอย่างหนึ่ง: ";
+        const either = locale === "en" ? " or " : " หรือ ";
+        const doses = locale === "en"
+          ? style === "short" ? ["1 tab 1x/d 08:00", "1 tab 1x/d 20:00", "1 tab 1x/d 18:00"]
+            : ["Use 1 tablet once daily at 8:00 am", "Use 1 tablet once daily at 8:00 pm", "Use 1 tablet once daily at 6:00 pm"]
+          : style === "short" ? ["1 เม็ด วันละครั้ง 08:00", "1 เม็ด วันละครั้ง 20:00", "1 เม็ด วันละครั้ง 18:00"]
+            : ["ใช้ครั้งละ 1 เม็ด วันละครั้ง เวลา 08:00", "ใช้ครั้งละ 1 เม็ด วันละครั้ง เวลา 20:00", "ใช้ครั้งละ 1 เม็ด วันละครั้ง เวลา 18:00"];
+        const alternatives = choose + doses[1] + either + doses[2];
+        expect(text).toContain(placement === "absent"
+          ? choose + shared + doses[1] + either + shared + doses[2]
+          : placement === "first" ? shared + doses[0] + "; " + alternatives
+          : alternatives + "; " + shared + doses[0]);
       }
       expect(courseToR6(imported).extension).toContainEqual(note);
       expect(JSON.stringify(input)).toBe(before);

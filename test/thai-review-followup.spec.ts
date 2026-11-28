@@ -453,9 +453,11 @@ describe("round78 saved action and cycle locale ownership", () => {
         expect(th).toContain("ใช้แผนการใช้ยานี้รวม 1 รอบ (ระยะรอบการใช้ยา: 28 วัน).");
         expect(th).not.toContain("ทำซ้ำ");
         expect(th).not.toContain("ทุก 28 วัน");
+      } else if (count === 2) {
+        expect(th).toContain("ทำซ้ำแผนการใช้ยานี้ทุก 28 วัน จำนวน 2 รอบ (นับระยะเวลาจากจุดเริ่มต้นของแต่ละรอบ).");
       } else {
-        expect(th).toContain("ทำซ้ำแผนการใช้ยานี้ทุก 28 วัน");
-        expect(th.includes("จำนวน 2 รอบ")).toBe(count === 2);
+        expect(th).toContain("ทำซ้ำแผนการใช้ยานี้ทุก 28 วัน (นับระยะเวลาจากจุดเริ่มต้นของแต่ละรอบ).");
+        expect(th).not.toMatch(/จำนวน\s*\d+\s*รอบ|รวม\s*\d+\s*รอบ/u);
       }
       expect(getCourseCycleCount(Array.isArray(input) ? toDosageDetails(input) : input)).toBe(count);
     }

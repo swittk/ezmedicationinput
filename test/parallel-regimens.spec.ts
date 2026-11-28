@@ -4221,7 +4221,9 @@ describe("round55 execution preserves authored calendar and terminology meaning"
     expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ duration, durationUnit: Unit.Day });
     expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.treatmentPause?.durationDays).toBe(2);
     expect(parsed.meta.canonical.clauses[1].dose).toMatchObject({ value: 2, unit: "tab" });
-    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBe(duration + 2);
+    expect(parsed.meta.canonical.clauses[1].schedule).toMatchObject(duration === 1.5
+      ? { phaseStartReference: "previous-phase-end", treatmentStartOffsetDays: 2 }
+      : { treatmentStartOffsetDays: duration + 2 });
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     for (const version of ["r5", "r6"] as const) {
       const input = wire(parsed.fhirNext, version), saved = JSON.stringify(input);
@@ -6161,7 +6163,16 @@ describe("review867 pauses after exact elapsed phases", () => {
         "2026-03-07T20:00:00-05:00", "2026-03-08T03:00:00-04:00",
         "2026-03-10T10:00:00-04:00", "2026-03-11T10:00:00-04:00",
       ] },
-  ])("applies the civil pause after $duration at the actual end in $zone", ({ duration, amount, unit, clock, zone, start, expected }) => {
+    ...["1.5 days", "36 hours"].map(duration => ({ duration,
+      amount: duration === "1.5 days" ? 1.5 : 36, unit: duration === "1.5 days" ? Unit.Day : Unit.Hour,
+      clock: "12:30", zone: "America/New_York", start: "2026-03-06T00:00:00-05:00", total: 10, expected: [
+        "2026-03-06T00:00:00-05:00", "2026-03-06T06:00:00-05:00",
+        "2026-03-06T12:00:00-05:00", "2026-03-06T18:00:00-05:00",
+        "2026-03-07T00:00:00-05:00", "2026-03-07T06:00:00-05:00",
+        "2026-03-09T12:30:00-04:00", "2026-03-10T12:30:00-04:00",
+      ] })),
+  ])("applies the civil pause after $duration at the actual end in $zone", row => {
+    const { duration, amount, unit, clock, zone, start, expected } = row;
     const source = "Take 1 tablet every 6 hours for " + duration +
       ", then stop for 2 days, then take 2 tablets daily at " + clock;
     const parsed = parseSig(source), parsedBefore = JSON.stringify(parsed);
@@ -6186,10 +6197,10 @@ describe("review867 pauses after exact elapsed phases", () => {
       });
       const pause = course.stages[1].start!.displacement!;
       expect(pause.code ?? pause.unit).toBe("d");
-      const options = { from: start, orderedAt: start, timeZone: zone, limit: 6 };
+      const options = { from: start, orderedAt: start, timeZone: zone, limit: expected.length };
       expect(nextDueDoses(input, options)).toEqual(expected);
       expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 5, durationUnit: Unit.Day }))
-        .toMatchObject({ totalUnits: 8, unit: "tab" });
+        .toMatchObject({ totalUnits: "total" in row ? row.total : 8, unit: "tab" });
       const roundtrip = projectCanonicalCourse(course).fhirNext;
       expect(roundtrip.renderedInstruction).toBe(source);
       if (form !== "native") expect(roundtrip.step![1].start!.extension).toContainEqual(note);

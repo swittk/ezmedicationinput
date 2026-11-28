@@ -571,6 +571,13 @@ function prepareTimingCodeCadence(dosage: CanonicalAdministration): CanonicalAdm
     } else {
       const descriptor = isStandardTimingCoding(coding) && coding?.code
         ? timingPreviewDescriptor(coding.code) : undefined;
+      if (!repeat && descriptor?.when?.length && descriptor.frequency === undefined &&
+          descriptor.period === undefined) {
+        // The existing frequency resolver owns configured clocks and event
+        // anchors. Give a code-only event its execution recurrence without
+        // turning the preserved source code into authored repeat fields.
+        return Object.assign({}, dosage, { schedule: Object.assign({}, timing, { recurrence: {} }) });
+      }
       if (!descriptor?.period || (descriptor.periodUnit !== DurationUnit.Week &&
           descriptor.periodUnit !== DurationUnit.Month)) return dosage;
       frequency = descriptor.frequency ?? 1;
@@ -7224,9 +7231,12 @@ function measureRangedSchedule(
   return { count: selected.length, quantity, times };
 }
 function hasTimedRangedCaps(course: CanonicalCourse): boolean {
-  for (const stage of course.stages) for (const member of stage.administrations)
-    if (member.amounts?.[0]?.range && (hasPeriodLimits(member) || hasLifetimeLimit(member)) && !unscheduledOccurrenceCapacity(member))
-      return true;
+  for (const stage of course.stages) for (const member of stage.administrations) {
+    if (!(hasPeriodLimits(member) || hasLifetimeLimit(member)) || unscheduledOccurrenceCapacity(member)) continue;
+    const amount = member.amounts?.[0];
+    if (amount?.range || (amount?.rate || amount?.rateRatio) &&
+        prepareMaximumSupplyTiming(member).infusionDurationMaximum) return true;
+  }
   return false;
 }
 /** The ordinary schedule remains the clinician's CONCRETE clocks. Numeric

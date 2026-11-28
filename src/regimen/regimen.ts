@@ -158,8 +158,11 @@ function materializeAnchoredScheduleWindow(schedule: CanonicalSigClause['schedul
 /** An exact fixed-day phase can establish a later relative origin. */
 function exactPhaseDurationDays(schedule: CanonicalSigClause["schedule"]): number | undefined {
   if (!hasExactScheduleDuration(schedule)) return undefined;
-  return schedule.durationUnit === "d" ? schedule.duration :
+  const days = schedule.durationUnit === "d" ? schedule.duration :
     schedule.durationUnit === "wk" ? schedule.duration * 7 : undefined;
+  // Only whole local days compose with a civil-day pause. Fractional days
+  // retain their elapsed endpoint through the existing predecessor-end owner.
+  return days !== undefined && Number.isInteger(days) ? days : undefined;
 }
 
 /** Half-open phase endpoint derived from explicit dates, end bounds, or anchored duration. */
