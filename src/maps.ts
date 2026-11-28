@@ -91,14 +91,17 @@ export const ROUTE_BY_SNOMED = objectFromEntries(
   ROUTE_SNOMED_ENTRIES.map(([routeCode, meta]) => [meta.code, routeCode])
 ) as Record<SNOMEDCTRouteCodes, RouteCode>;
 
-/** Select the first registered route, retaining all original Codings on their owner. */
+/** Prefer the first explicitly identified route; keep a systemless legacy fallback. */
 export function routeCodeFromCodings(codings: readonly Pick<FhirCoding, "system" | "code">[] | undefined): RouteCode | undefined {
+  let fallback: RouteCode | undefined;
   for (const coding of codings ?? []) {
     if (!coding.code || coding.system && coding.system !== SNOMED_SYSTEM) continue;
     const route = ROUTE_BY_SNOMED[coding.code as SNOMEDCTRouteCodes];
-    if (route) return route;
+    if (!route) continue;
+    if (coding.system === SNOMED_SYSTEM) return route;
+    fallback ??= route;
   }
-  return undefined;
+  return fallback;
 }
 
 export interface RouteSynonym {

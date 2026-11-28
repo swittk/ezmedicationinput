@@ -1926,7 +1926,13 @@ export function serializeCanonicalSchedule(
     hasRepeat = true;
   }
   if (schedule?.offset !== undefined) {
-    if (schedule.when?.length && Number.isInteger(schedule.offset)) {
+    let coreOffset = Boolean(schedule.when?.length) && Number.isInteger(schedule.offset);
+    // R5 tim-9 excludes unqualified meal anchors from the core offset slot.
+    for (const event of schedule.when ?? []) {
+      if (event === EventTiming.Meal || event === EventTiming.Breakfast ||
+          event === EventTiming.Lunch || event === EventTiming.Dinner) coreOffset = false;
+    }
+    if (coreOffset) {
       repeat.offset = schedule.offset;
     } else {
       repeat.extension = [

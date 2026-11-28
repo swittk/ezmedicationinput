@@ -143,9 +143,12 @@ export function getQuantityComparisonUnit(quantity: QuantityUnit | undefined): s
         // are licensed for authored unit labels, not for coded quantities.
         const code = stripUcumAnnotations(quantity.code);
         const supported = getStandardDoseUnitCoding(unit);
+        // Annotation-only UCUM counts may use a registered presentation label.
+        // A substantive UCUM expression still owns its case-sensitive identity.
+        const presentation = !code && supported && supported.system !== quantity.system;
         // UCUM permits both l and L for litre; SI prefix case stays significant.
-        if (supported?.system !== quantity.system || supported.code !== code &&
-            supported.code !== code.replace(/l(?=\/|$)/g, "L")) return "";
+        if (!presentation && (supported?.system !== quantity.system || supported.code !== code &&
+            supported.code !== code.replace(/l(?=\/|$)/g, "L"))) return "";
     }
     return normalizeQuantityCapUnit(unit);
 }

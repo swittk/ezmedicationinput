@@ -1020,12 +1020,14 @@ export function parseInstructionGraphExtension<T extends Pick<FhirExtension,"url
     default:(sourceExtensions??=[]).push(field);
   }
   if(!actions.length&&!opaque.length)return undefined;
+  const parsedCoverage = coverage ? parseGraphCoverage(coverage) : undefined;
+  if (coverage && !parsedCoverage) (sourceExtensions ??= []).push(coverage);
   const result:CanonicalInstructionGraph={actions,...(sourceExtensions ? {sourceExtensions} : {}),
     ...(ownership ? {primaryOwnership:parsePrimaryOwnership(ownership)} : {}),
     primaryAdministrationSpan:start?.valueInteger!==undefined&&end?.valueInteger!==undefined
     ?{start:start.valueInteger,end:end.valueInteger}:undefined,
     relations:relations.length?relations:undefined,opaqueSpans:opaque.length?opaque:undefined,
-    coverage:coverage?parseGraphCoverage(coverage):undefined,sourceText:source?.valueString??"",sourceLocale:locale?.valueCode};
+    coverage:parsedCoverage,sourceText:source?.valueString??"",sourceLocale:locale?.valueCode};
   if(graph.id!==undefined)result.sourceId=graph.id;
   return result;
 }

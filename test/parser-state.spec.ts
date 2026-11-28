@@ -1,7 +1,9 @@
-import { formatSig, importCanonicalCourse, projectCanonicalCourse, toDosageDetails, toFhirR5Dosages, type FhirDosage } from "../src/index";
+import { convertQuantityValue } from "../src/utils/units";
+import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../src/instruction-graph-fhir";
+import { formatSig, importCanonicalCourse, projectCanonicalCourse, toDosageDetails, toFhirR5Dosages, type FhirDosage, type FhirExtension, FhirPeriodUnit, EventTiming, RouteCode, calculateTotalUnits, nextDueDoses, buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/index";
 import { describe, expect, it } from "vitest";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
-import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir } from "../src/fhir";
+import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_OFFSET_EXACT_EXTENSION_URL, getExactTimingOffsetMinutes } from "../src/fhir";
 import { ParserState } from "../src/parser-state";
 import { applySiteCoding } from "../src/site-coding";
 import { applyPrnReasonCoding } from "../src/prn-reason-coding";
@@ -608,5 +610,131 @@ describe("review814 authored coded advice in Thai", () => {
         expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(expected);
       expect(JSON.stringify(row)).toBe(before);
     }
+  });
+});
+
+describe("current FHIR timing, route, quantity and coverage ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const ucum = "http://unitsofmeasure.org";
+
+  it.each([false, true])("prefers the explicit route terminology in either coding order (%s)", reversed => {
+    const legacy = { code: "26643006", display: "Legacy route", id: "legacy-coding" };
+    const explicit = { system: "http://snomed.info/sct", code: "54485002", id: "explicit-ophthalmic" };
+    const route = { coding: reversed ? [explicit, legacy] : [legacy, explicit],
+      extension: [{ url: "urn:clinic:route-note", valueString: "Keep both codings" }] };
+    const row: FhirDosage = { text: "Instill one drop by the supplied ophthalmic route.", route,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }] };
+    const before = fresh(row);
+    expect(canonicalFromFhir(row).route?.code).toBe(RouteCode["Ophthalmic route"]);
+    expect(parserStateFromFhir(row).primaryClause.route?.code).toBe(RouteCode["Ophthalmic route"]);
+    const native = importCanonicalCourse(row), projected = projectCanonicalCourse(native);
+    for (const input of [native, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      const current = projectCanonicalCourse(importCanonicalCourse(input));
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("ophthalmic");
+      expect(current.fhir[0].route).toEqual(route);
+      expect(current.fhirNext.step[0].component[0].route).toEqual(route);
+    }
+    expect(canonicalFromFhir({ route: { coding: [legacy] } }).route?.code).toBe(RouteCode["Oral route"]);
+    expect(row).toEqual(before);
+  });
+
+  it.each([EventTiming.Meal, EventTiming.Breakfast, EventTiming.Lunch, EventTiming.Dinner])(
+    "keeps a thirty-minute %s offset in the typed extension when R5 forbids the core slot", event => {
+      const clause = { ...canonicalFromFhir({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }),
+        schedule: { when: [event], offset: 30 } };
+      const before = fresh(clause), row = canonicalToFhir(clause);
+      expect(row.timing?.repeat?.when).toEqual([event]);
+      expect(row.timing?.repeat?.offset).toBeUndefined();
+      expect(row.timing?.repeat?.extension).toContainEqual({ url: TIMING_OFFSET_EXACT_EXTENSION_URL, valueInteger: 30 });
+      expect(getExactTimingOffsetMinutes(row.timing?.repeat)).toBe(30);
+      expect(canonicalFromFhir(fresh(row)).schedule).toMatchObject({ when: [event], offset: 30 });
+      expect(clause).toEqual(before);
+    }
+  );
+
+  it("keeps a permitted before-breakfast offset in the core slot", () => {
+    const clause = { ...canonicalFromFhir({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }),
+      schedule: { when: [EventTiming["Before Breakfast"]], offset: 30 } };
+    const row = canonicalToFhir(clause);
+    expect(row.timing?.repeat).toMatchObject({ when: [EventTiming["Before Breakfast"]], offset: 30 });
+    expect(row.timing?.repeat?.extension?.some(value => value.url === TIMING_OFFSET_EXACT_EXTENSION_URL)).not.toBe(true);
+  });
+
+  it.each([undefined, 20])("retains a thirty-minute upper duration with lower value %s", duration => {
+    const absent = { id: "unknown-lower-duration", extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+    }] };
+    const repeat = { durationMax: 30, durationUnit: FhirPeriodUnit.Minute,
+      ...(duration === undefined ? { _duration: absent } : { duration }) };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }], timing: { repeat } };
+    const before = fresh(row);
+    for (const clause of [canonicalFromFhir(row)]) {
+      expect(clause.schedule?.administrationDuration).toBe(duration);
+      expect(clause.schedule?.administrationDurationMax).toBe(30);
+      expect(clause.schedule?.administrationDurationUnit).toBe(FhirPeriodUnit.Minute);
+    }
+    const projected = projectCanonicalCourse(importCanonicalCourse(row));
+    expect(projected.fhir[0].timing?.repeat).toEqual(repeat);
+    expect(projected.fhirNext.step[0].component[0].timing?.repeat).toEqual(repeat);
+    expect(row).toEqual(before);
+  });
+
+  it("applies a tablet ceiling to an annotation-only UCUM presentation", () => {
+    const dose = { value: 1, unit: "tablet", system: ucum, code: "{tbl}", _code: { id: "authored-tablet-code" } };
+    const cap = { numerator: { value: 2, unit: "tablets", id: "authored-ceiling" },
+      denominator: { value: 48, unit: "h", system: ucum, code: "h" } };
+    const input: FhirDosage = { text: "Take one tablet at 08:00 and 20:00, maximum two tablets in 48 hours.",
+      doseAndRate: [{ doseQuantity: dose }], maxDosePerPeriod: [cap],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00", "20:00:00"] } } };
+    const before = fresh(input), native = importCanonicalCourse(input), projected = projectCanonicalCourse(native);
+    const query = { from: "2026-01-01T00:00:00Z", orderedAt: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+    for (const value of [native, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      expect(nextDueDoses(value, { ...query, limit: 3 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00", "2026-01-03T08:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: value, ...query, durationValue: 2, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      const current = projectCanonicalCourse(importCanonicalCourse(value));
+      expect(current.fhir[0].doseAndRate![0].doseQuantity).toEqual(dose);
+      expect(current.fhir[0].maxDosePerPeriod).toEqual([cap]);
+      expect(current.fhirNext.step[0].component[0].doseAndRate![0].doseQuantity).toEqual(dose);
+    }
+    expect(input).toEqual(before);
+  });
+
+  it("keeps substantive UCUM identity and unlabeled count annotations separate from presentation labels", () => {
+    const substantive = { value: 1, unit: "mL", system: ucum, code: "ML{solution}" };
+    const unlabeled = { value: 1, system: ucum, code: "{tbl}" };
+    const before = fresh([substantive, unlabeled]);
+    expect(convertQuantityValue(1, substantive, { unit: "mL" })).toBeNull();
+    expect(convertQuantityValue(1, unlabeled, { unit: "tablets" })).toBeNull();
+    expect([substantive, unlabeled]).toEqual(before);
+  });
+
+  it.each([undefined, 0])("retains supplied coverage with ratio %s without inventing a value", ratio => {
+    const source = "Follow the supplied plan.";
+    const coverage: FhirExtension = { url: "coverage", id: "coverage-source", extension: [
+      { url: "understoodCharacters", valueInteger: 0 },
+      { url: "opaqueCharacters", valueInteger: source.length },
+      { url: "ratio", ...(ratio === undefined ? {} : { valueDecimal: ratio }),
+        _valueDecimal: { id: "ratio-note", extension: [{ url: "urn:clinic:coverage-note", valueString: "Retain" }] } },
+      { url: "complete", valueBoolean: false }
+    ] };
+    const input: FhirExtension = { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: [
+      { url: "sourceText", valueString: source },
+      { url: "opaque", extension: [
+        { url: "start", valueInteger: 0 }, { url: "end", valueInteger: source.length },
+        { url: "text", valueString: source }
+      ] },
+      coverage
+    ] };
+    const before = fresh(input), graph = parseInstructionGraphExtension([input])!;
+    expect(graph.sourceText).toBe(source);
+    expect(graph.opaqueSpans).toEqual([{ start: 0, end: source.length, text: source }]);
+    if (ratio === undefined) expect(graph.coverage).toBeUndefined();
+    else expect(graph.coverage).toMatchObject({ ratio: 0, complete: false, understoodCharacters: 0, opaqueCharacters: source.length });
+    const output = buildInstructionGraphExtension(graph)!;
+    expect(output.extension?.filter(value => value.url === "coverage")).toEqual([coverage]);
+    expect(input).toEqual(before);
   });
 });
