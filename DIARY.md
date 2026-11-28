@@ -16661,3 +16661,10 @@ The existing quantity codec projects supported annotation choices and their prim
 ## 2026-11-28 — Avoid repeated event expansion
 
 An event-only timing code with a nonzero or unresolved offset already selects its event anchor. Cadence selection now leaves clock expansion to occurrence enumeration in that case. Configured-clock precedence, zero and absent offsets, elapsed day shifts and the existing fallback policy remain unchanged.
+
+
+## 2026-11-28 — Preserve complete medication continuations
+
+Qualified course durations reuse the existing lexical header proof, retaining their complete source spans, registered units, ranges and implicit single units. Medication continuation selects its complete medication target, Duration and typed companions without borrowing an independent activity's duration.
+
+The selected Time daughter remains available to ordinary HPSG event and clock composition while the instruction retains its full authored frame. Registered meal anchors therefore keep their configured clocks. MealState companions retain their existing relation and realization without acquiring an event anchor. Negative, conditional and modal instructions keep their existing scope. Regression coverage checks exact dates, supply, current native and FHIR facts, source and unknown annotations.
