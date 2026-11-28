@@ -2008,7 +2008,9 @@ function buildActionFrame(
       ? timeArgumentsFromParts(parts, temporalIndex + 1, semanticEnd, input, offset, temporalRelation, semanticEnd, options,
           false, definition.semanticClass === "course") : undefined;
   const courseCompanion = !nextTimes && definition.semanticClass === "course" && temporalIndex >= 0
-    ? argumentFromParts(parts, temporalIndex + 1, semanticEnd, input,
+    ? nominalAccompanimentArgument(parts, temporalIndex + 1, semanticEnd,
+        input, offset, temporalRelation, options, duration) ??
+      argumentFromParts(parts, temporalIndex + 1, semanticEnd, input,
         temporalRelation === AdviceRelation.Until ? AdviceArgumentRole.Result
           : nextTemporal ? AdviceArgumentRole.Activity : undefined, options) : undefined;
   if (nextTimes) {
@@ -2017,9 +2019,10 @@ function buildActionFrame(
     for (const time of nextTimes) pushArgument(args, { ...time, relation: time.relation ?? temporalRelation,
       span: time.span ?? (first && last ? { start: offset + first.sourceStart, end: offset + last.sourceEnd } : undefined)
     });
-  } else if (courseCompanion?.role === AdviceArgumentRole.MealState && courseCompanion.conceptId &&
-      (relationHasSemanticClass(temporalRelation, "temporal") || relationHasSemanticClass(temporalRelation, "locative") ||
-        relationHasSemanticClass(temporalRelation, "accompaniment"))) {
+  } else if (courseCompanion?.conceptId &&
+      (relationHasSemanticClass(temporalRelation, "accompaniment") ||
+        courseCompanion.role === AdviceArgumentRole.MealState &&
+          (relationHasSemanticClass(temporalRelation, "temporal") || relationHasSemanticClass(temporalRelation, "locative")))) {
     pushArgument(args, { ...courseCompanion, relation: temporalRelation,
       span: rangeFor(parts, temporalIndex + 1, semanticEnd, offset) });
   } else if (temporalIndex >= 0 && temporalRelation === AdviceRelation.Until) {
@@ -4428,7 +4431,10 @@ const RESULT_REALIZER: ActionRealizer = (c) => {
       joinLocalizedTokens(c.locale, [profile.durationPrefix || undefined, c.duration])
     ]);
   }
-  for (const argument of c.frame.args) if (argument.role === AdviceArgumentRole.MealState)
+  // The selected Site is already realized above. Other nominal companions
+  // retain their own relation, role and quantity through the shared owner.
+  const realizedSite = c.site ? c.frame.args.find(argument => argument.role === AdviceArgumentRole.Site) : undefined;
+  for (const argument of c.frame.args) if (argument !== realizedSite)
     text = joinLocalizedTokens(c.locale, [text, defaultActionAccompaniment(c, argument)]);
   return joinLocalizedTokens(c.locale, [text, realizeTimeArgument(c)]);
 };

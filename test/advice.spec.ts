@@ -1127,4 +1127,75 @@ describe("detached Continue complement ownership", () => {
     expect(JSON.stringify(parsed)).toBe(saved);
   });
 
+
+  it.each([
+    { instruction: "Continue for 5 days with water.", companion: "water", measured: false, modal: false },
+    { instruction: "Continue taking the medication for 5 days with water.", companion: "water", measured: false, modal: false },
+    { instruction: "Continue for 5 days with 200 mL water.", companion: "200 mL water", measured: true, modal: false },
+    { instruction: "May continue for 5 days with water.", companion: "water", measured: false, modal: true }
+  ])("keeps the complete course accompaniment: $instruction", fixture => {
+    const source = "Take 2 tablets daily. " + fixture.instruction;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    for (const input of [parsed.meta.canonical.course!,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages.flatMap(stage => stage.administrations)).toHaveLength(1);
+      const member = course.stages[0].administrations[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(member.schedule?.recurrence?.anchors ?? []).toEqual([]);
+      if (fixture.modal) expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
+      else expect(member.schedule?.recurrence?.courseLength).toMatchObject({ value: 5 });
+      const action = member.syntax?.instructionGraph?.actions.find(frame => frame.predicate.lemma === "continue-treatment");
+      expect(action?.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Duration,
+        text: "for 5 days", quantity: { value: 5, unit: "d" },
+        span: { start: source.indexOf("for 5 days"), end: source.indexOf("for 5 days") + 10 } }));
+      const companion = action?.args.find(arg => arg.conceptId === "water");
+      expect(companion).toMatchObject({ role: AdviceArgumentRole.Substance, relation: AdviceRelation.With,
+        text: fixture.companion, conceptId: "water",
+        span: { start: source.indexOf(fixture.companion), end: source.indexOf(fixture.companion) + fixture.companion.length } });
+      if (fixture.measured) expect(companion?.quantity).toMatchObject({ value: 200, unit: "mL" });
+      else expect(companion?.quantity).toBeUndefined();
+      if (fixture.modal) expect(action?.modality).toBe(AdviceModality.May);
+      const expectedDays = fixture.modal ? 8 : 5;
+      expect(nextDueDoses(input, query)).toEqual(dates.slice(0, expectedDays));
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 2 * expectedDays, unit: "tab" });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe(`Take 2 tablets orally once daily${fixture.modal ? "" : " for 5 days"}. ${fixture.modal ? "May continue" : "Continue"} taking medication for 5 days with ${fixture.companion}.`);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe(`รับประทานครั้งละ 2 เม็ด วันละครั้ง${fixture.modal ? "" : " เป็นเวลา 5 วัน"}. ${fixture.modal ? "อาจ" : ""}กินต่อเนื่อง5 วันร่วมกับ${fixture.measured ? "200 มิลลิลิตร" : ""}น้ำ.`);
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each(["r5", "r6"])("preserves independently supplied water-accompaniment source and annotations in %s", form => {
+    const tail = "Continue for 5 days with 200 mL water.";
+    const source = "Take 2 tablets daily. " + tail;
+    const note = { url: "https://example.test/current-water-note", valueString: "retain companion annotations" };
+    const row = { text: source, doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        boundsDuration: { value: 5, unit: "d", code: "d" } } },
+      additionalInstruction: [{ text: tail }], extension: [note] };
+    const input = JSON.parse(JSON.stringify(form === "r5" ? [row]
+      : { renderedInstruction: source, step: [{ component: [row] }] }));
+    const before = JSON.stringify(input), course = importCanonicalCourse(input), projected = projectCanonicalCourse(course);
+    expect(projected.fhir[0].extension).toContainEqual(note);
+    expect(projected.fhirNext.step![0].component![0].extension).toContainEqual(note);
+    expect(course.stages[0].administrations[0].amounts![0].quantity).toMatchObject({ value: 2, unit: "tab" });
+    expect(nextDueDoses(input, query)).toEqual(dates.slice(0, 5));
+    expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Day }))
+      .toMatchObject({ totalUnits: 10, unit: "tab" });
+    for (const locale of ["en", "th"])
+      expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toContain(tail);
+    expect(projected.fhir[0].text).toBe(source);
+    expect(projected.fhirNext.step[0].component[0].text).toBe(source);
+    expect(projected.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
 });
