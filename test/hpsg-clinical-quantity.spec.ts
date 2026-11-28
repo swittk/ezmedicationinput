@@ -5793,6 +5793,8 @@ describe("authored divided totals beside independent rates", () => {
     "Infuse a total of 100 mL every 12 hours in 2 divided doses at 30 mL/hr",
     "Infuse a total of 100 mL at 30 mL/hr every 12 hours in 2 divided doses",
     "Infuse at 30 mL/hr a total of 100 mL every 12 hours in 2 divided doses",
+    "Infuse at 30 mL/hr, a total of 100 mL every 12 hours in 2 divided doses",
+    "Infuse at 30 mL/hr; a total of 100 mL every 12 hours in 2 divided doses",
     "At 30 mL/hr, infuse a total of 100 mL every 12 hours in 2 divided doses",
     "Infuse 100 mL in 2 divided doses every 12 hours at 30 mL/hr"
   ])("projects the total's period while retaining its separate rate: %s", source => {
@@ -5816,6 +5818,53 @@ describe("authored divided totals beside independent rates", () => {
       expect(JSON.stringify(input)).toBe(before);
     }
     expect(parsed.fhir[0].text).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([
+    ["Infuse at 30 mL/hr, avoid alcohol",
+      "Infuse the medication; then avoid alcohol; Rate: 30 mL/h",
+      "ให้ยา จากนั้นงดแอลกอฮอล์; อัตราการให้ยา: 30 mL/h",
+      { rate: { value: 30, unit: "mL/h" } }],
+    ["Take 1 tablet, swallow whole", "Take 1 tablet orally; then swallow whole.",
+      "รับประทานครั้งละ 1 เม็ด จากนั้นกลืนทั้งเม็ด.", { quantity: { value: 1, unit: "tab" } }],
+    ["Take 1 tablet, gently with water", "Take 1 tablet orally. Gently with water.",
+      "รับประทานครั้งละ 1 เม็ด. gently with water.", { quantity: { value: 1, unit: "tab" } }]
+  ] as const)("retains actual advice after a constituent separator: %s", (source, en, th, amount) => {
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts).toHaveLength(1);
+      expect(members[0].amounts![0]).toMatchObject(amount);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(en);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(th);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it("keeps a quantity in an opaque retrospective guard outside the current amount", () => {
+    const source = "Take 1 tablet daily only if you took a total of 2 tablets yesterday";
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts).toHaveLength(1);
+      expect(members[0].amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(members[0].predicate).toEqual({ kind: "state", expected: true,
+        name: "you took a total of 2 tablets yesterday", text: "you took a total of 2 tablets yesterday" });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Take 1 tablet orally once daily only if you took a total of 2 tablets yesterday.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("รับประทานครั้งละ 1 เม็ด วันละครั้ง เฉพาะเมื่อ you took a total of 2 tablets yesterday.");
+      expect(JSON.stringify(input)).toBe(before);
+    }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(saved);
   });

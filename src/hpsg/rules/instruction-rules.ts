@@ -40,6 +40,7 @@ import {
   EVENT_PREPOSITIONS,
   FREE_TEXT_DIRECTIVE_STARTS,
   CONDITIONAL_INSTRUCTION_EXCLUSIVE_LEADS,
+  COUNT_CONNECTOR_WORDS_DATA,
   INSTRUCTION_LEADING_SEPARATORS,
   INSTRUCTION_START_WORDS,
   LIST_SEPARATORS,
@@ -56,6 +57,7 @@ import { isMedicationAdministrationMethod } from "../method-lexicon";
 import {
   HpsgClauseContext,
   maximumCountLeadAt,
+  medicationAmountAt,
   sourceRangeOverlapsContextDate,
   joinTokenText,
   lexicalRule,
@@ -111,6 +113,18 @@ function isExplicitDoseLead(context: HpsgClauseContext, index: number): boolean 
 
 function startsTypedAdministrationComplement(context: HpsgClauseContext, start: number): boolean {
   if (isExplicitDoseLead(context, start)) return true;
+  // Registered quantity connectors retain the following medication amount
+  // as a typed daughter; they do not turn it into unstructured advice.
+  let amountStart = start;
+  while (amountStart < context.limit) {
+    const token = context.tokens[amountStart];
+    if (!token || context.state.consumed.has(token.index) ||
+        !COUNT_CONNECTOR_WORDS_DATA.has(normalizeTokenLower(token))) break;
+    amountStart++;
+  }
+  const amountToken = context.tokens[amountStart];
+  if (amountStart > start && amountStart < context.limit && amountToken &&
+      !context.state.consumed.has(amountToken.index) && medicationAmountAt(context, amountStart)) return true;
   let cursor = start;
   const first = context.tokens[cursor];
   if (!first || context.state.consumed.has(first.index)) return false;
@@ -936,8 +950,8 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!instructionStartIsLicensed(context, cursor, consumed.length > 0)) {
       return [];
     }
-    // A separator alone does not turn a typed medication amount into advice.
-    if (consumed.length > 0 && isExplicitDoseLead(context, cursor)) return [];
+    // A separator alone does not turn a typed medication complement into advice.
+    if (consumed.length > 0 && startsTypedAdministrationComplement(context, cursor)) return [];
     // A separator before "up to 3 doses" is not a license to swallow a
     // clinically meaningful maximum count as unstructured advice.
     // Leave the marker for the typed timing-limit construction; the
