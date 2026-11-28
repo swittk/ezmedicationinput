@@ -16616,3 +16616,10 @@ Previews preserve complete current restrictions, guarded labelled amounts, inlin
 FHIR conversion preserves coded measurement identity, strict dose limits, primitive annotations, anatomical refinements and nested Reference annotations. Generated condition bridges use their declared field order so unchanged conversions remain stable. Regression coverage checks current native and fresh wire forms, independent clinical outcomes and input immutability.
 
 Current method text that selects a different registered action takes precedence over a generic coded verb; same-action custom translations retain their selected wording. Code-only compact intervals retain their authored shorthand alongside expanded cadence until an independently typed period replaces it.
+
+
+## 2026-11-28 — Preserve mixed warning conditions and simplify shared work
+
+Postfix warnings reuse the selected HPSG guard, keeping measurement comparisons inside mixed Boolean conditions while independent medication limits retain their existing boundary. Regression coverage checks the complete warning condition, dose and cap ownership, authored source, and current native and wire forms.
+
+Locale lookup reuses normalized tags through one base-language owner. Typed FHIR bridge encoding avoids temporary scalar objects and singleton arrays while retaining primitive annotations, unknown fields and declared ordering. Bounded member supply calculations use fresh copies with direct overrides; clinical preflight, chronology and input immutability remain intact.
