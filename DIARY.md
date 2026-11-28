@@ -16685,3 +16685,8 @@ Current FHIR imports use recognized observation codes while retaining authored l
 Shifted event opportunities retain their source-week allowance through the existing chronological queue. Scheduling and supply spend that allowance when actual instants are admitted, so a shorter horizon or later query does not select a different earlier dose. Ordinary unshifted clocks retain their direct path.
 
 Known treatment-relative boundaries accept an explicit zero offset without requiring a unit. The supplied quantity remains unchanged. Regression coverage checks exact dates and supply, retained earlier allowance, current native and fresh wire forms, authored source and unknown annotations.
+
+
+## 2026-11-28 — Visit present primitive annotations
+
+The existing Extension and Coding annotation visitors now inspect present primitive companion fields using their declared field inventories. This avoids scanning absent companions on ordinary composite values. Nested Quantity roles, unknown choices, and inactive source data retain their existing conversion behavior. The annotation suites and complete conversion comparisons preserve authored values, input immutability, and the resulting FHIR structure.
