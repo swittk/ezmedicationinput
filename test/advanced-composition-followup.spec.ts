@@ -4914,9 +4914,13 @@ describe("course locale boundary", () => {
       weekdayName: () => "lundi",
       joinList: (items: readonly string[]) => items.join(" et "),
     };
+    const calls: (number | undefined)[] = [];
     registerSigLocalization({
       locale: "choice-inherit",
-      formatLong: ({ clause }) => "Dose " + clause.dose?.value + ".",
+      formatLong: ({ clause }) => {
+        calls.push(clause.dose?.value);
+        return "Dose " + clause.dose?.value + ".";
+      },
       course: inherited,
     });
     const rows: FhirDosage[] = [1, 2].map(value => ({
@@ -4929,7 +4933,8 @@ describe("course locale boundary", () => {
         selectionBehavior: "exactly-one",
       });
     const options = { i18n: { locale: "unregistered-output-tag", inherit: "choice-inherit" } };
-    expect(formatSigBatch(rows, "long", options)).toBe("Sélection: Dose 1 ou Dose 2.");
+    expect(formatSigBatch(rows, "long", options)).toBe("Sélection: Dose 1. ou Dose 2.");
+    expect(calls).toEqual([1, 2]);
     expect(appendMedicationExcludedWeekdaysText("Dose.", ["mon"], options)).toBe("Dose sauf lundi.");
   });
   it("keeps a course-only override even when no clause callbacks are registered", () => {

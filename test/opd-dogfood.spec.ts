@@ -1,5 +1,5 @@
 import { describe,expect,it } from "vitest";
-import { formatSig,fromFhirDosage,importCanonicalCourse,nextDueDoses,projectCanonicalCourse,RouteCode } from "../src";
+import { evaluateMedicationCondition,formatSig,fromFhirDosage,importCanonicalCourse,nextDueDoses,projectCanonicalCourse,RouteCode } from "../src";
 import { boundaryToWire,courseFromR6,courseToR6,R5_SOURCE_ONLY_MAXIMUM_URL } from "../src/adapters/canonical-course";
 import { courseFromR5 } from "../src/adapters/r5-course";
 import { R6_DRAFT_STEPS_SOURCE_URL,R6_SCOPED_SAFETY_MODIFIER_URL,R6_SINGLE_STEP_SAFETY_SOURCE_URL } from "../src/adapters/canonical-course";
@@ -1185,7 +1185,10 @@ describe("round28 live interchange authority and retained clinical identity", ()
     raw.modifierExtension![0].id = "external-condition-source";
     let wire = course({ modifierExtension: persist(raw.modifierExtension) });
     for (let save = 0; save < 3; save++) {
-      expect(importCanonicalCourse(wire).stages[0].administrations[0].predicate).toEqual(predicate);
+      const current = importCanonicalCourse(wire).stages[0].administrations[0].predicate!;
+      expect(current).toEqual(save === 0 ? predicate : { ...predicate, name: "sbp", unit: undefined });
+      expect(evaluateMedicationCondition(current, { [save === 0 ? "SBP" : "sbp"]: 170 })).toBe(true);
+      expect(evaluateMedicationCondition(current, { [save === 0 ? "SBP" : "sbp"]: 160 })).toBe(false);
       wire = r6Save(wire);
       expect(wire.step![0].component[0].condition).toHaveLength(1);
       expect(JSON.stringify(wire)).toContain("external-condition-source");
@@ -5759,7 +5762,13 @@ describe("round80 interchange ownership", () => {
     expect(row).toEqual(before);
     const noMinimum = persist(row);
     noMinimum.timing!.repeat!.extension!.shift();
-    expect(parserStateToFhir(parserStateFromFhir(noMinimum)).timing!.repeat!.frequency).toBe(2);
+    const noMinimumState = parserStateFromFhir(noMinimum);
+    expect(noMinimumState.frequency).toBeUndefined();
+    const maximumOnly = parserStateToFhir(noMinimumState).timing!.repeat!;
+    expect(maximumOnly.frequency).toBeUndefined();
+    expect(maximumOnly.frequencyMax).toBe(2);
+    expect(getTimingClocks(maximumOnly)).toEqual(["08:00:00", "20:00:00"]);
+    expect(maximumOnly.extension?.some(item => item.url === TIMING_FREQUENCY_MIN_EXTENSION_URL)).not.toBe(true);
   });
 
   it.each(["unchanged", "changed", "cleared"] as const)(
