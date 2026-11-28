@@ -63,12 +63,17 @@ export interface FhirExtension {
   valueCoding?: FhirCoding;
   valueCodeableConcept?: FhirCodeableConcept;
   valueUri?: string;
+  _valueUri?: FhirPrimitiveElement;
   valueCanonical?: string;
+  _valueCanonical?: FhirPrimitiveElement;
   valueDateTime?: string;
+  _valueDateTime?: FhirPrimitiveElement;
   valueTime?: string;
   _valueTime?: FhirPrimitiveElement;
   valuePositiveInt?: number;
+  _valuePositiveInt?: FhirPrimitiveElement;
   valueUnsignedInt?: number;
+  _valueUnsignedInt?: FhirPrimitiveElement;
   valueRange?: FhirRange;
   valueRatio?: FhirRatio;
   valuePeriod?: FhirPeriod;
@@ -81,7 +86,8 @@ export interface FhirExtension {
 /** R6 Extension values retain their native datatype contracts. */
 export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity" | "valueDuration" | "valueRatio" | "valueTiming" | "valueReference" | "valueCodeableReference" |
   "valueCoding" | "valueCodeableConcept" | "valueRange" | "valueExpression" | "valuePeriod" |
-  "_valueCode" | "_valueString" | "_valueMarkdown" | "_valueDecimal" | "_valueDate" | "_valueTime" | "_valueInteger" | "_valueBoolean"> {
+  "_valueCode" | "_valueString" | "_valueMarkdown" | "_valueDecimal" | "_valueDate" | "_valueTime" | "_valueInteger" | "_valueBoolean" |
+  "_valueUri" | "_valueCanonical" | "_valueDateTime" | "_valuePositiveInt" | "_valueUnsignedInt"> {
   _valueBoolean?: FhirR6PrimitiveElement;
   _valueCode?: FhirR6PrimitiveElement;
   _valueString?: FhirR6PrimitiveElement;
@@ -90,6 +96,11 @@ export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valu
   _valueDate?: FhirR6PrimitiveElement;
   _valueTime?: FhirR6PrimitiveElement;
   _valueInteger?: FhirR6PrimitiveElement;
+  _valueUri?: FhirR6PrimitiveElement;
+  _valueCanonical?: FhirR6PrimitiveElement;
+  _valueDateTime?: FhirR6PrimitiveElement;
+  _valuePositiveInt?: FhirR6PrimitiveElement;
+  _valueUnsignedInt?: FhirR6PrimitiveElement;
   extension?: FhirR6Extension[];
   valueQuantity?: FhirR6Quantity;
   valueDuration?: FhirR6Quantity;

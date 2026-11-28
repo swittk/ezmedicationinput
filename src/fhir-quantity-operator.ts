@@ -127,7 +127,11 @@ function editedOperator(
  * and their declared primitive annotations share the existing operator bridge.
  * Other Extension value choices remain opaque. */
 const codingPrimitiveFields = ["_system", "_version", "_code", "_display", "_userSelected"] as const;
-const extensionPrimitiveFields = ["_valueCode", "_valueString", "_valueMarkdown", "_valueDecimal", "_valueDate", "_valueTime", "_valueInteger", "_valueBoolean"] as const;
+const extensionPrimitiveFields = [
+  "_valueCode", "_valueString", "_valueMarkdown", "_valueDecimal", "_valueDate", "_valueTime",
+  "_valueInteger", "_valueBoolean", "_valueUri", "_valueCanonical", "_valueDateTime",
+  "_valuePositiveInt", "_valueUnsignedInt"
+] as const;
 export function quantityAnnotationExtensions(
   source: FhirR6Extension[], target: "r5" | "r6"
 ): FhirR6Extension[] {

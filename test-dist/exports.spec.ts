@@ -260,7 +260,21 @@ it("accepts typed current duration annotations and literal weekday codes from th
         _valueDate: { id: "r5-review-date", extension: [{ url: "urn:clinic:note", valueString: "Review in clinic" }] } };
       const r6Date: FhirR6Extension = { url: "urn:clinic:review-date", valueDate: "2026-12-15",
         _valueDate: { id: "r6-review-date", extension: [annotation] } };
-      void [current, r5, invalidWeekday, invalidR5, r5Date, r6Date];
+      const r5PrimitiveAnnotations: FhirExtension[] = [
+        { url: "urn:clinic:Uri", valueUri: "urn:clinic:review", _valueUri: r5Date._valueDate },
+        { url: "urn:clinic:Canonical", valueCanonical: "https://clinic.example/PlanDefinition/review", _valueCanonical: r5Date._valueDate },
+        { url: "urn:clinic:DateTime", valueDateTime: "2026-12-15T08:00:00Z", _valueDateTime: r5Date._valueDate },
+        { url: "urn:clinic:PositiveInt", valuePositiveInt: 2, _valuePositiveInt: r5Date._valueDate },
+        { url: "urn:clinic:UnsignedInt", valueUnsignedInt: 0, _valueUnsignedInt: r5Date._valueDate },
+      ];
+      const r6PrimitiveAnnotations: FhirR6Extension[] = [
+        { url: "urn:clinic:Uri", valueUri: "urn:clinic:review", _valueUri: r6Date._valueDate },
+        { url: "urn:clinic:Canonical", valueCanonical: "https://clinic.example/PlanDefinition/review", _valueCanonical: r6Date._valueDate },
+        { url: "urn:clinic:DateTime", valueDateTime: "2026-12-15T08:00:00Z", _valueDateTime: r6Date._valueDate },
+        { url: "urn:clinic:PositiveInt", valuePositiveInt: 2, _valuePositiveInt: r6Date._valueDate },
+        { url: "urn:clinic:UnsignedInt", valueUnsignedInt: 0, _valueUnsignedInt: r6Date._valueDate },
+      ];
+      void [current, r5, invalidWeekday, invalidR5, r5Date, r6Date, r5PrimitiveAnnotations, r6PrimitiveAnnotations];
     `);
     execFileSync(process.execPath, [join(ROOT_DIR, "node_modules/typescript/bin/tsc"), "--noEmit", "--strict",
       "--skipLibCheck", "false", "--target", "ES2022", "--module", "ESNext", "--moduleResolution", "Bundler", entry],
