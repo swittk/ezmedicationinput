@@ -8173,3 +8173,94 @@ describe("finite event-anchored successors after counted loading doses", () => {
     expect(JSON.stringify(native)).toBe(saved);
   });
 });
+
+
+describe("shifted weekly queue admission", () => {
+  const note = { url: "https://example.org/current-weekly-note", valueString: "Retain current meal schedule" };
+  const query = { orderedAt: "2026-11-29T00:00:00Z", from: "2026-11-29T00:00:00Z", timeZone: "UTC",
+    eventClock: { ACM: "00:30", PCV: "23:45" }, limit: 4 };
+  const fixture = (frequency: number, offset: number, end?: string,
+    weekdays = [FhirDayOfWeek.Monday, FhirDayOfWeek.Tuesday]): FhirR6DosageInstruction => ({
+    renderedInstruction: "Take one tablet " + frequency + " times per source week around the selected meals.",
+    extension: [note],
+    step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab", extension: [note] } }],
+      timing: { repeat: { frequency, period: 1, periodUnit: FhirPeriodUnit.Week,
+        dayOfWeek: weekdays, when: [EventTiming["Before Breakfast"], EventTiming["After Dinner"]], offset,
+        ...(end ? { boundsPeriod: { end } } : {}) } } }] }],
+  });
+  const views = (wire: FhirR6DosageInstruction) => {
+    const native = importCanonicalCourse(wire), projection = projectCanonicalCourse(native);
+    return [wire, native, JSON.parse(JSON.stringify(projection.fhir)), JSON.parse(JSON.stringify(projection.fhirNext))];
+  };
+  const retained = (input: Parameters<typeof importCanonicalCourse>[0], source: FhirR6DosageInstruction) => {
+    const wire = projectCanonicalCourse(importCanonicalCourse(input)).fhirNext;
+    expect(wire.renderedInstruction).toBe(source.renderedInstruction);
+    expect(wire.extension).toEqual(source.extension);
+    expect(wire.step![0].component[0].timing?.repeat).toEqual(source.step![0].component[0].timing?.repeat);
+    expect(wire.step![0].component[0].doseAndRate![0].doseQuantity).toEqual(source.step![0].component[0].doseAndRate![0].doseQuantity);
+  };
+  const cases = [
+    { name: "binding shifted quota", frequency: 2, offset: 60, dinner: "23:45", total: 2, lateTotal: 1,
+      expected: ["2026-11-29T23:30:00+00:00", "2026-11-30T23:30:00+00:00", "2026-12-06T23:30:00+00:00", "2026-12-07T23:30:00+00:00"],
+      late: ["2026-11-30T23:30:00+00:00", "2026-12-06T23:30:00+00:00"] },
+    { name: "nonbinding shifted quota", frequency: 4, offset: 60, dinner: "23:45", total: 4, lateTotal: 2,
+      expected: ["2026-11-29T23:30:00+00:00", "2026-11-30T23:30:00+00:00", "2026-12-01T00:45:00+00:00", "2026-12-02T00:45:00+00:00"],
+      late: ["2026-11-30T23:30:00+00:00", "2026-12-01T00:45:00+00:00"] },
+    { name: "unshifted quota", frequency: 2, offset: 0, dinner: "23:45", total: 2, lateTotal: 1,
+      expected: ["2026-11-30T00:30:00+00:00", "2026-11-30T23:45:00+00:00", "2026-12-07T00:30:00+00:00", "2026-12-07T23:45:00+00:00"],
+      late: ["2026-11-30T23:45:00+00:00", "2026-12-07T00:30:00+00:00"] },
+    { name: "convergent shifted clocks", frequency: 2, offset: 60, dinner: "22:30", total: 2, lateTotal: 1,
+      expected: ["2026-11-29T23:30:00+00:00", "2026-11-30T23:30:00+00:00", "2026-12-06T23:30:00+00:00", "2026-12-07T23:30:00+00:00"],
+      late: ["2026-11-30T23:30:00+00:00", "2026-12-06T23:30:00+00:00"] },
+  ];
+
+  it.each(cases)("keeps full, clipped and later queries consistent for $name", ({ frequency, offset, dinner, total, lateTotal, expected, late }) => {
+    const options = { ...query, eventClock: { ...query.eventClock, PCV: dinner } };
+    const source = fixture(frequency, offset), beforeSource = JSON.stringify(source);
+    for (const input of views(source)) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, options)).toEqual(expected);
+      expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual(expected.slice(0, 1));
+      expect(nextDueDoses(input, { ...options, from: "2026-11-30T23:00:00Z", limit: 2 })).toEqual(late);
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 2, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab", quantityKind: "scheduled" });
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 4, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: total, unit: "tab", quantityKind: "scheduled" });
+      expect(calculateTotalUnits({ dosage: input, ...options, from: "2026-11-30T23:00:00Z", durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: lateTotal, unit: "tab", quantityKind: "scheduled" });
+      retained(input, source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const clipped = fixture(frequency, offset, "2026-12-01T00:00:00Z");
+    for (const input of views(clipped)) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, options)).toEqual(expected.slice(0, 2));
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 4, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab", quantityKind: "scheduled" });
+      retained(input, clipped);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(source)).toBe(beforeSource);
+  });
+
+  it("keeps the queued Sunday allowance separate from the following source week", () => {
+    const source = fixture(2, 60, undefined, [FhirDayOfWeek.Sunday, FhirDayOfWeek.Monday]);
+    const options = { ...query, orderedAt: "2026-11-30T00:00:00Z", from: "2026-11-30T00:00:00Z" };
+    // Nov30 dinner and Dec6 breakfast fill the first source week. Dec7's
+    // shifted breakfast belongs to the next week even though it occurs Dec6;
+    // Dec6's later dinner cannot borrow that new week's remaining allowance.
+    const expected = ["2026-12-01T00:45:00+00:00", "2026-12-05T23:30:00+00:00",
+      "2026-12-06T23:30:00+00:00", "2026-12-08T00:45:00+00:00"];
+    for (const input of views(source)) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, options)).toEqual(expected);
+      expect(nextDueDoses(input, { ...options, from: "2026-12-06T23:00:00Z", limit: 2 })).toEqual(expected.slice(2));
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 7, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "tab", quantityKind: "scheduled" });
+      expect(calculateTotalUnits({ dosage: input, ...options, from: "2026-12-06T23:00:00Z", durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: "scheduled" });
+      retained(input, source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+});

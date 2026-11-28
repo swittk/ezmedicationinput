@@ -6671,11 +6671,18 @@ function visitClockOccurrences(
     currentDay = addLocalDays(cadenceAnchor, week * 7, timeZone);
   }
   let selectedWeek = -1;
-  const selectedTimes = weeklyFrequency === undefined ? undefined : new Set<number>();
+  let selectedTimes: Set<number> | undefined;
   // Shifted anchors can interlace adjacent source days. Keep their existing
-  // chronological merge before the consumer spends an accepted-result limit.
+  // chronological merge before either the weekly allowance or result limit.
   const pending = firstShift !== expanded[expanded.length - 1].dayShift || elapsedRange?.differingOffsets
-    ? new ChronologicalQueue<{ at: number; date: Date; serial: number }>() : undefined;
+    ? new ChronologicalQueue<{ at: number; date: Date; serial: number; allowance?: Set<number> }>() : undefined;
+  const admit = (date: Date, at: number, allowance?: Set<number>): boolean => {
+    if (allowance) {
+      if (allowance.has(at) || allowance.size >= weeklyFrequency!) return false;
+      allowance.add(at);
+    }
+    return at >= fromTime && emit(date);
+  };
   let serial = 0;
   let iterations = 0;
   const scanEnd = courseEnd && elapsedRange
@@ -6688,9 +6695,15 @@ function visitClockOccurrences(
       currentDay.getTime() + elapsedRange.low
     ) : (firstShift < 0 ? addLocalDays(currentDay, firstShift, timeZone) : currentDay).getTime()) < endTime)
   ) {
-    if (selectedTimes) {
+    if (weeklyFrequency !== undefined) {
       const week = Math.floor((getLocalDayNumber(currentDay, timeZone) - anchorNumber) / 7);
-      if (week !== selectedWeek) { selectedWeek = week; selectedTimes.clear(); }
+      if (week !== selectedWeek) {
+        selectedWeek = week;
+        // Pending events retain their source week's allowance across the next
+        // source-week boundary. The direct chronological path reuses one Set.
+        if (!selectedTimes || pending) selectedTimes = new Set<number>();
+        else selectedTimes.clear();
+      }
     }
     if (
       matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
@@ -6718,25 +6731,28 @@ function visitClockOccurrences(
         }
         if (orderedTime !== undefined && at < orderedTime ||
             eligibleTime !== undefined && at < eligibleTime) continue;
-        if (selectedTimes) {
-          if (selectedTimes.has(at) || selectedTimes.size >= weeklyFrequency!) continue;
-          selectedTimes.add(at);
-        }
-        if (at < fromTime) continue;
-        if (pending) pending.push({ at, date: zoned, serial: serial++ });
-        else if (emit(zoned)) return;
+        if (pending) {
+          // Pre-query opportunities still spend the same source-week allowance.
+          if (!selectedTimes && at < fromTime) continue;
+          pending.push({ at, date: zoned, serial: serial++, allowance: selectedTimes });
+        } else if (admit(zoned, at, selectedTimes)) return;
       }
     }
     currentDay = addLocalDays(currentDay, 1, timeZone);
     if (pending) {
       let before = (firstShift === 0 ? currentDay : addLocalDays(currentDay, firstShift, timeZone)).getTime();
       if (elapsedRange) before = Math.min(before, currentDay.getTime() + elapsedRange.low);
-      while (pending.first() && pending.first()!.at < before)
-        if (emit(pending.pop()!.date)) return;
+      while (pending.first() && pending.first()!.at < before) {
+        const next = pending.pop()!;
+        if (admit(next.date, next.at, next.allowance)) return;
+      }
     }
     iterations += 1;
   }
-  while (pending?.first()) if (emit(pending.pop()!.date)) return;
+  while (pending?.first()) {
+    const next = pending.pop()!;
+    if (admit(next.date, next.at, next.allowance)) return;
+  }
 }
 
 /**
