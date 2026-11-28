@@ -5984,6 +5984,69 @@ describe("review125 timestamp replacement and shared period allowance", () => {
     expect(clauses).toEqual(originalClauses);
   });
 
+  it.each([
+    [-60, "19:00:00", 9, 3], [0, "20:00:00", 9, 5], [60, "21:00:00", 10, 6]
+  ] as const)("keeps a signed exact-event replacement's nominal origin (%s minutes)", (delayMinutes, actualClock, total, lateTotal) => {
+    const source = "1 drop OD twice daily at 08:00 and 20:00, then 2 drops OD on 5 December 2026 at 20:00; 3 drops OS BID";
+    const plan = createBoundaryPlan(source), states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, source);
+    const clauses = fresh(states.map(state => state.primaryClause));
+    clauses[1].schedule = { calendarEvents: clauses[1].schedule!.calendarEvents!.map(event => ({
+      ...event, fhirDateTime: "2026-12-05T20:00:00Z"
+    })) };
+    const originalClauses = fresh(clauses);
+    const parallel = buildCanonicalParallelRegimen(clauses, plan.segments, plan, graph);
+    const course = parallel.kind === "resolved" ? courseFromParallel(parallel, plan.segments.map(segment => segment.text), source)
+      : parallel.kind === "unresolved" ? courseFromPartialParallel(parallel, plan.segments.map(segment => segment.text), source)
+        : undefined;
+    expect(course).toBeDefined();
+    const members = course!.stages.reduce<CanonicalAdministration[]>((all, stage) => all.concat(stage.administrations), []);
+    const successor = members.find(member => member.amounts?.[0].quantity?.value === 2)!;
+    // The signed displacement and Quantity annotation are independently supplied
+    // current native facts before the first execution or wire conversion.
+    successor.delayMinutes = delayMinutes;
+    const note = { url: "https://clinic.example/current-dose-note", valueString: "retain exact dose annotation" };
+    successor.amounts![0].quantity = { ...successor.amounts![0].quantity!,
+      system: "http://standardterms.edqm.eu", code: "15022000", id: "successor-dose", extension: [note] };
+    const originalCourse = fresh(course), projected = projectCanonicalCourse(course!);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC" };
+    const expected = delayMinutes > 0 ? [
+      "2026-12-05T08:00:00+00:00", "2026-12-05T08:00:00+00:00",
+      "2026-12-05T20:00:00+00:00", "2026-12-05T20:00:00+00:00", "2026-12-05T21:00:00+00:00",
+      "2026-12-06T08:00:00+00:00", "2026-12-06T20:00:00+00:00", "2026-12-07T08:00:00+00:00"
+    ] : [
+      "2026-12-05T08:00:00+00:00", "2026-12-05T08:00:00+00:00",
+      "2026-12-05T" + actualClock + "+00:00", "2026-12-05T20:00:00+00:00",
+      "2026-12-06T08:00:00+00:00", "2026-12-06T20:00:00+00:00",
+      "2026-12-07T08:00:00+00:00", "2026-12-07T20:00:00+00:00"
+    ];
+    for (const input of [course!, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      const before = fresh(input), current = importCanonicalCourse(input);
+      const currentMembers = current.stages.reduce<CanonicalAdministration[]>((all, stage) => all.concat(stage.administrations), []);
+      const first = currentMembers.find(member => member.amounts?.[0].quantity?.value === 1)!;
+      const selected = currentMembers.find(member => member.amounts?.[0].quantity?.value === 2)!;
+      const left = currentMembers.find(member => member.amounts?.[0].quantity?.value === 3)!;
+      expect(selected.delayMinutes).toBe(delayMinutes);
+      expect(selected.phasePredecessors).toEqual([first.sourceMember]);
+      expect(selected.schedule?.explicitEvents).toEqual(["2026-12-05T20:00:00Z"]);
+      expect(selected.amounts?.[0].quantity).toEqual({ value: 2, unit: "drop",
+        system: "http://standardterms.edqm.eu", code: "15022000", id: "successor-dose", extension: [note] });
+      expect(first.schedule?.recurrence).toMatchObject({ frequency: 2, period: 1, periodUnit: Unit.Day,
+        clocks: ["08:00:00", "20:00:00"] });
+      expect(left.target?.coding).toContainEqual(expect.objectContaining({ code: "1290031003" }));
+      expect(nextDueDoses(input, { ...query, limit: 8 })).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: total, unit: "drop" });
+      expect(calculateTotalUnits({ dosage: input, ...query, from: "2026-12-05T20:00:00Z",
+        durationValue: 4, durationUnit: Unit.Hour })).toMatchObject({ totalUnits: lateTotal, unit: "drop" });
+      expect(current.instruction).toBe(source);
+      expect(input).toEqual(before);
+    }
+    expect(clauses).toEqual(originalClauses);
+    expect(course).toEqual(originalCourse);
+  });
+
   it.each([false, true])("shares one period quantity allowance after a clock-specific hold (morning admitted=%s)", accepted => {
     const source = "Take 1 tablet BID at 08:00 and 20:00, maximum 1 tablet per day. Hold the 08:00 dose if dizzy.";
     const parsed = parseSig(source), original = fresh(parsed);

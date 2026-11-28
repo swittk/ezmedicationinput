@@ -2723,7 +2723,12 @@ function resolveAdministrationWindow(
     : successorIntervalStart(administration, implicitPredecessor ? implicitPredecessor.point : predecessorPoint,
         implicitPredecessor ? implicitPredecessor.point ?? implicitPredecessor.end : start,
         timeZone, displacement, options, calendar.nominalEnd);
-  const implicitStart = implicitWindow.recurrenceOrigin;
+  // A linked explicit-event successor inherits an actual predecessor endpoint.
+  // Keep its origin nominal for the existing displacement wrapper; the window's
+  // separate eligibility floor still owns actual-time admission.
+  const implicitStart = implicitPredecessor && displacement && administration.schedule?.explicitEvents?.length
+    ? new Date(implicitWindow.recurrenceOrigin.getTime() - displacement)
+    : implicitWindow.recurrenceOrigin;
   const componentClock = implicitStart > start ? getTimeParts(implicitStart, timeZone) : capClock;
   // A calendar end only clips the window; an authored start can own cadence.
   const cadence = absoluteStart && !administration.phaseStart
