@@ -16656,3 +16656,8 @@ Meal timing uses complete registered event nominals, including their licensed ar
 Preview composition retains stage windows, selected dose ownership, individual rate carriers, typed advice relations and compatible finer anatomy. Civil day/week cadence wording stays distinct from elapsed hours, minutes and seconds. Scheduling preserves code-derived event clocks, bounded infusion supply, fractional predecessor ends and uncertain event-offset ranges without inventing precise administrations.
 
 The existing quantity codec projects supported annotation choices and their primitive companions to the requested FHIR version, including nested Range and Ratio endpoint annotations. SimpleQuantity remains comparator-free, Duration annotations remain non-executing, and opaque choices, authored quantities, units, source and unknown siblings remain preserved. Regression coverage checks the same current facts through native and fresh R5/R6 inputs.
+
+
+## 2026-11-28 — Avoid repeated event expansion
+
+An event-only timing code with a nonzero or unresolved offset already selects its event anchor. Cadence selection now leaves clock expansion to occurrence enumeration in that case. Configured-clock precedence, zero and absent offsets, elapsed day shifts and the existing fallback policy remain unchanged.
