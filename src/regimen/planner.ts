@@ -24,7 +24,7 @@ import { ACTION_DISCOURSE_CONNECTORS, ACTION_COORDINATION_CONNECTORS, ACTION_SEQ
   DOSE_ADDITIVE_QUANTITY_CONNECTORS, DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS, DOSE_FRACTION_WORDS, DOSE_NUMBER_WORDS,
   HARD_SEGMENT_BOUNDARY_TOKENS, sequenceConnectorEnd,
-  TREATMENT_PERIOD_START_LEADS,
+  TREATMENT_PERIOD_START_LEADS, RELATIVE_INTERVAL_TRAILING_RELATIONS,
   LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
   coordinationConnectorKind } from '../hpsg/lexical-classes';
 import { AdviceForce, AdvicePolarity, EventTiming, type ParseOptions, type AdviceFrame } from '../types';
@@ -143,15 +143,16 @@ function connectorKind(token: Token | undefined): 'coordination' | 'sequence' | 
   return ACTION_SEQUENCE_MARKERS.has(text) ? 'sequence' : ACTION_COORDINATION_CONNECTORS.has(text) ? 'coordination' : undefined;
 }
 /** Consume an already registered two-word coordinator as one source seam. */
-function coordinationEnd(tokens: Token[], start: number): number {
-  const following = lexeme(tokens[start + 1]);
-  return following && coordinationConnectorKind(`${lexeme(tokens[start])} ${following}`) !== 'unknown'
-    ? start + 2 : start + 1;
+function coordinationAt(tokens: Token[], start: number): { end: number; kind: CoordinationConnectorKind } {
+  const first = lexeme(tokens[start]), following = lexeme(tokens[start + 1]);
+  const paired = following ? coordinationConnectorKind(`${first} ${following}`) : 'unknown';
+  return paired !== 'unknown' ? { end: start + 2, kind: paired }
+    : { end: start + 1, kind: coordinationConnectorKind(first) };
 }
 function semanticConnectorKind(site: BoundarySite): CoordinationConnectorKind {
   return site.kind === 'alternative'
     ? 'disjunction'
-    : site.kind === 'coordination' ? coordinationConnectorKind(site.surface) : 'unknown';
+    : site.kind === 'coordination' ? site.connectorKind ?? coordinationConnectorKind(site.surface) : 'unknown';
 }
 function isHard(token: Token): boolean {
   return HARD_SEGMENT_BOUNDARY_TOKENS.has(token.original.trim().toLowerCase()) || token.original === '\n' || token.original === '\r';
@@ -259,10 +260,11 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
     if (followingConnector && (token.original === ',' ||
         ((token.original === ';' || token.original === '.') &&
           followingConnector === 'sequence'))) {
-      const rightIndex = followingConnector === 'coordination' ? coordinationEnd(tokens, i + 1) : i + 2;
+      const coordination = followingConnector === 'coordination' ? coordinationAt(tokens, i + 1) : undefined;
+      const rightIndex = coordination?.end ?? i + 2;
       const end = tokens[rightIndex - 1].sourceEnd;
       sites.push({ start: token.sourceStart, end, tokenIndex: i, lastTokenIndex: rightIndex - 1, rightIndex,
-        kind: followingConnector, surface: input.slice(token.sourceStart, end) });
+        kind: followingConnector, connectorKind: coordination?.kind, surface: input.slice(token.sourceStart, end) });
       i = rightIndex - 1; continue;
     }
     const punctuation = token.original === '.' || token.original === ';' || token.original === '!' || token.original === '?';
@@ -271,12 +273,12 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
     const boundaryKind = kind ?? (token.original === ',' ? 'comma' : isHard(token) ? 'hard' : slash ? 'slash' :
       punctuation ? 'punctuation' : adjacent ? 'adjacent-dose' : undefined);
     if (!boundaryKind) continue;
-    const rightIndex = boundaryKind === 'coordination' ? coordinationEnd(tokens, i)
-      : boundaryKind === 'adjacent-dose' ? i : i + 1;
+    const coordination = boundaryKind === 'coordination' ? coordinationAt(tokens, i) : undefined;
+    const rightIndex = coordination?.end ?? (boundaryKind === 'adjacent-dose' ? i : i + 1);
     const lastTokenIndex = boundaryKind === 'coordination' ? rightIndex - 1 : i;
     const end = boundaryKind === 'adjacent-dose' ? token.sourceStart : tokens[lastTokenIndex].sourceEnd;
     sites.push({ start: token.sourceStart, end, tokenIndex: i, lastTokenIndex,
-      rightIndex, kind: boundaryKind, surface: input.slice(token.sourceStart, end) });
+      rightIndex, kind: boundaryKind, connectorKind: coordination?.kind, surface: input.slice(token.sourceStart, end) });
     i = lastTokenIndex;
   }
   return sites;
@@ -1060,6 +1062,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
             token.kind === LexKind.TimeLike ||
             mapFrequencyAdverb(lexeme(token)) !== undefined ||
             FREQUENCY_SIMPLE_WORDS[lexeme(token)] !== undefined ||
+            RELATIVE_INTERVAL_TRAILING_RELATIONS.has(lexeme(token)) ||
             resolveActionRelationSurface(lexeme(token)) !== undefined)
         );
         const adjustment = phaseAdjustmentAt(tokens, site.rightIndex);

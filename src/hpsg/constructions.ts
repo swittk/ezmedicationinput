@@ -650,17 +650,20 @@ export function guardHasMeasurement(value: MedicationCondition): boolean {
 }
 
 /** Only the final predicate daughter can license a following bare limit. */
-function guardFinalPredicateLicensesLimit(value: HpsgGuardExpression, options?: ParseOptions): boolean {
+function guardFinalPredicateLicensesLimit(value: HpsgGuardExpression, options?: ParseOptions): boolean | "measurement" {
   if (value.kind === "coordination") {
     const last = value.parts[value.parts.length - 1];
     return last !== undefined && guardFinalPredicateLicensesLimit(last, options);
   }
   if (value.kind === "negation") return guardFinalPredicateLicensesLimit(value.operand, options);
-  return value.kind === "predicate" && (value.value.kind === "measurement" ||
-    value.value.kind === "state" && Boolean(resolveSymptomDefinition(
+  if (value.kind !== "predicate") return false;
+  // A measurement owns its completed value; retain that typed completion
+  // when the following count uses a generic occurrence noun.
+  if (value.value.kind === "measurement") return "measurement";
+  return value.value.kind === "state" && Boolean(resolveSymptomDefinition(
       value.value.name, options?.prnReasonMap, options?.symptomMap)) ||
     value.dayInvariant === true || value.value.kind === "text" &&
-      medicationConditionAtomLexeme(value.value.text).licensesBareIf === true);
+      medicationConditionAtomLexeme(value.value.text).licensesBareIf === true;
 }
 
 /** Create a binary feature-structure derivation from already licensed daughters. */
@@ -950,7 +953,7 @@ export function parseMedicationGuard(
       // independent limit ownership; a period can still belong to history.
       const expression = predicate?.synsem.cont.guard?.expression;
       if (!isIndependentMaximum(lexicalContext, index, maximum,
-          Boolean(expression && guardFinalPredicateLicensesLimit(expression, options)))) continue;
+          expression ? guardFinalPredicateLicensesLimit(expression, options) : false)) continue;
       end = capStart;
       scopedGuard = guard;
       break;

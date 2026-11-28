@@ -110,6 +110,7 @@ function applySchedule(
   if (schedule.boundsStart !== undefined || schedule.boundsEnd !== undefined) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     if (schedule.boundsStart !== undefined) target.boundsStart = schedule.boundsStart;
+    if (schedule.openEndedStart) target.openEndedStart = true;
     if (schedule.boundsEnd !== undefined) target.boundsEnd = schedule.boundsEnd;
   }
   if (schedule.repeatCycle !== undefined) {
@@ -293,7 +294,8 @@ export function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined, 
 export function hasRecurringAdministrationSchedule(
   schedule: HpsgScheduleFeature | undefined, positionsRepeat = true
 ): boolean {
-  const datedPoint = schedule?.boundsStart?.length === 10 && schedule.timeOfDay?.length === 1 &&
+  const datedPoint = schedule?.boundsStart?.length === 10 && !schedule.openEndedStart &&
+    schedule.timeOfDay?.length === 1 &&
     !schedule.when?.length && !schedule.boundsEnd && schedule.duration === undefined &&
     schedule.durationMax === undefined && schedule.durationUnit === undefined;
   return hasRecurringSchedule(schedule, positionsRepeat && !datedPoint);

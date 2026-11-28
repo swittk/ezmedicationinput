@@ -315,6 +315,10 @@ declare module "../types" {
   interface CanonicalSigClause {
     clinicalQuantity?: HpsgClinicalQuantityFeature;
   }
+  interface CanonicalScheduleExpr {
+    /** Grammar-owned continuing onset, distinct from one dated occurrence. */
+    openEndedStart?: true;
+  }
 }
 
 export interface HpsgScheduleFeature {
@@ -344,6 +348,8 @@ export interface HpsgScheduleFeature {
   /** Elapsed delay before one administration, not a course duration. */
   administrationOffsetMinutes?: number;
   boundsStart?: string;
+  /** The selected start construction explicitly continues beyond its date. */
+  openEndedStart?: true;
   boundsEnd?: string;
   frequency?: number;
   frequencyMax?: number;
@@ -481,7 +487,7 @@ export function lexicalSign(args: {
   } else if (schedule) {
     const fields: CanonicalScheduleSemanticField[] = [];
     for (const key of Object.keys(schedule)) {
-      if (key === "attachmentClass" || key === "sourceRanges") continue;
+      if (key === "attachmentClass" || key === "sourceRanges" || key === "openEndedStart") continue;
       const field = key as keyof HpsgScheduleFeature;
       // Optional undefined values contribute no feature to the lexical sign.
       if (schedule[field] !== undefined) fields.push(key as CanonicalScheduleSemanticField);
@@ -521,6 +527,8 @@ export interface BoundarySite extends Range {
   lastTokenIndex: number;
   rightIndex: number;
   kind: BoundaryKind;
+  /** Selected lexical relation; surface remains the authored source. */
+  connectorKind?: CoordinationConnectorKind;
   surface: string;
 }
 export interface Evidence {

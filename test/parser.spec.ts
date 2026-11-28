@@ -6156,7 +6156,7 @@ describe("round77 independent advice and selected Time ownership", () => {
   it.each([
     { suffix: "at bedtime", events: ["HS"], en: "Rub to form foam at bedtime", th: "ถูให้เกิดฟองก่อนนอน" },
     { suffix: "before breakfast and before dinner", events: ["CM", "CV"],
-      en: "Rub to form foam before breakfast before dinner", th: "ถูให้เกิดฟองก่อนอาหารเช้าก่อนอาหารเย็น" }
+      en: "Rub to form foam before breakfast and before dinner", th: "ถูให้เกิดฟองก่อนอาหารเช้า และ ก่อนอาหารเย็น" }
   ])("realizes a result action's typed Time: $suffix", fixture => {
     const source = "Rub to form foam " + fixture.suffix;
     const parsed = parsePublicSig(source);

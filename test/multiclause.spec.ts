@@ -5611,3 +5611,33 @@ describe("review125 shared totals across selectable paths", () => {
     expect(JSON.stringify(input)).toBe(before);
   });
 });
+
+
+describe("reviewed dotted-unit sentence onset", () => {
+  it.each([{ punctuation: ".", once: false }, { punctuation: ";", once: false }, { punctuation: ".", once: true }])(
+    "preserves a following delayed administration after a dose ($punctuation, once=$once)", ({ punctuation, once }) => {
+    const source = "Give 5 mL" + (once ? " once" : "") + punctuation + " 2 hours later give 10 mL.";
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members.map(member => member.amounts?.[0].quantity?.value)).toEqual([5, 10]);
+      for (const member of members) expect(member.amounts?.[0].quantity?.unit).toBe("mL");
+      expect(members[0].delayMinutes).toBeUndefined();
+      expect(members[0].schedule?.recurrence?.count).toBe(once ? 1 : undefined);
+      expect(members[1].delayMinutes).toBe(120);
+      expect(members[1].schedule?.recurrence?.count).toBe(1);
+      expect(nextDueDoses(input, { orderedAt: "2026-11-22T08:00:00Z", from: "2026-11-22T08:00:00Z", timeZone: "UTC", limit: 3 }))
+        .toEqual(once ? ["2026-11-22T08:00:00+00:00", "2026-11-22T10:00:00+00:00"] : ["2026-11-22T10:00:00+00:00"]);
+      const supply = () => calculateTotalUnits({ dosage: input, orderedAt: "2026-11-22T08:00:00Z", from: "2026-11-22T08:00:00Z",
+        timeZone: "UTC", durationValue: 1, durationUnit: "d" });
+      if (once) expect(supply()).toMatchObject({ totalUnits: 15, unit: "mL" });
+      else expect(supply).toThrow(expect.objectContaining({ code: "timing-required" }));
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+});

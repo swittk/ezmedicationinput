@@ -1,6 +1,7 @@
 import { DAY_OF_WEEK_TOKENS } from "../maps";
 import lexicalVocabulary from "../hpsg/lexical-classes.json";
-import { DURATION_LEAD_TOKENS, INSTRUCTION_DURATION_UNITS } from "../hpsg/lexical-classes";
+import { doseComparatorNumberAt, DURATION_LEAD_TOKENS, INSTRUCTION_DURATION_UNITS,
+  RELATIVE_INTERVAL_TRAILING_RELATIONS } from "../hpsg/lexical-classes";
 import { LexKind, LexToken, SurfaceToken, SurfaceTokenKind } from "./token-types";
 import { scanSurfaceTokens } from "./surface";
 import { applyLocaleLexicon } from "./locale";
@@ -558,10 +559,15 @@ function mergeDottedDoseUnitContinuations(tokens: LexToken[], input: string): Le
         ? cursor + 3 : cursor + 2;
       const duration = tokens[durationIndex];
       const durationUnit = tokens[durationIndex + 1];
+      const relativeEnd = tokens[durationIndex + 2];
+      const qualified = quantity && doseComparatorNumberAt(tokens, cursor - 1, cursor,
+        quantity.canonical ?? quantity.lower);
       if (canonical && quantity &&
-          (quantity.kind === LexKind.Number || quantity.kind === LexKind.NumberRange) &&
+          (quantity.kind === LexKind.Number || quantity.kind === LexKind.NumberRange ||
+            qualified?.numericIndex === cursor - 1 && !qualified.rawUnit) &&
           duration && (duration.kind === LexKind.Number || duration.kind === LexKind.NumberRange) &&
-          durationUnit && INSTRUCTION_DURATION_UNITS.has(durationUnit.canonical ?? durationUnit.lower)) {
+          durationUnit && INSTRUCTION_DURATION_UNITS.has(durationUnit.canonical ?? durationUnit.lower) &&
+          !(relativeEnd && RELATIVE_INTERVAL_TRAILING_RELATIONS.has(relativeEnd.canonical ?? relativeEnd.lower))) {
         const original = input.slice(token.sourceStart, dot.sourceEnd);
         token = { ...token, original, lower: original.toLowerCase(), canonical,
           sourceEnd: dot.sourceEnd, sourceText: original,

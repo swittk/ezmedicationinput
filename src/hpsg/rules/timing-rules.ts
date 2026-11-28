@@ -827,7 +827,8 @@ export function maximumOccurrenceAt(
   const countTokens = explicitOccurrence ? [valueToken, occurrenceToken] : [valueToken];
   const period = compact?.period ?? maximumDosePeriodAt(context, valueIndex + countTokens.length);
   return { tokens: [...lead.tokens, ...countTokens, ...(period?.tokens ?? [])],
-    headStart: lead.headStart, count, implicitOccurrence: fusedCount !== undefined && !explicitOccurrence,
+    headStart: lead.headStart, count, implicitOccurrence: fusedCount !== undefined && !explicitOccurrence ||
+      Boolean(explicitOccurrence && FREQUENCY_TIMES_WORDS.has(compact?.unitSurface ?? occurrenceSurface!)),
     ...(period ? { period } : {}) };
 }
 
@@ -838,14 +839,15 @@ export function maximumOccurrenceAt(
 export function isIndependentMaximum(
   context: Parameters<typeof maximumCountLeadAt>[0], start: number,
   maximum: NonNullable<ReturnType<typeof maximumOccurrenceAt> | ReturnType<typeof maximumDosePerPeriodAt>>,
-  completePredicate = false
+  completePredicate: boolean | "measurement" = false
 ): boolean {
   if (MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[maximum.headStart])) ||
       context.tokens.slice(start, maximum.headStart).some(token =>
         INSTRUCTION_LEADING_SEPARATORS.has(token.original))) return true;
-  // An implicit count can still qualify episodes of the predicate. Only an
-  // explicit maximum head or separator above establishes its own dose scope.
-  if (!completePredicate || "implicitOccurrence" in maximum && maximum.implicitOccurrence) return false;
+  // A fused count or generic occurrence noun can qualify episodes of a state.
+  // A completed measurement has already supplied its own numeric complement.
+  if (!completePredicate || "implicitOccurrence" in maximum && maximum.implicitOccurrence &&
+      completePredicate !== "measurement") return false;
   const nextIndex = maximum.headStart + maximum.tokens.length;
   const next = nextIndex < (context.limit ?? context.tokens.length) ? context.tokens[nextIndex] : undefined;
   return !next || isPunctuation(normalizeTokenLower(next)) ||
@@ -3465,8 +3467,9 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
   const trailingLead = context.tokens[endIndex];
   const clockLeadLength = trailingLead && CLOCK_LEAD_TOKENS.has(normalizeTokenLower(trailingLead)) ? 1 : 0;
   const clockStart = endIndex + clockLeadLength;
-  const candidateClock = courseEndClockAt(context.tokens, clockStart, context.limit);
-  const trailingClock = candidateClock && (!candidateClock.event || clockLeadLength) ? candidateClock : undefined;
+  const candidateClock = courseEndClockAt(context.tokens, clockStart, context.limit, lead);
+  const trailingClock = candidateClock && (!candidateClock.event || clockLeadLength || candidateClock.relation)
+    ? candidateClock : undefined;
   if (trailingClock) endIndex += clockLeadLength + trailingClock.tokens.length;
   const tokens = tokensAvailable(context, start, endIndex - start);
   if (!tokens) return undefined;
@@ -3555,6 +3558,7 @@ export function openEndedScheduleRule() {
         head: {
           schedule: {
             boundsStart: event.isoDate,
+            openEndedStart: true,
             sourceRanges: [{ start: match.start, end: match.end }]
           }
         },

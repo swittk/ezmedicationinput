@@ -2067,7 +2067,7 @@ export interface CanonicalScheduleExpr {
 }
 
 /** Schedule fields explicitly contributed by typed grammar evidence. */
-export type CanonicalScheduleSemanticField = Exclude<keyof CanonicalScheduleExpr, "evidence" | "timingTextIsLiteral">;
+export type CanonicalScheduleSemanticField = Exclude<keyof CanonicalScheduleExpr, "evidence" | "timingTextIsLiteral" | "openEndedStart">;
 
 export interface CanonicalPrnReasonExpr {
   text?: string;

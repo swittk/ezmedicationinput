@@ -4553,6 +4553,7 @@ function realizeAction(
       if (implication) (entailed ??= new Set()).add(
         implication.role + "\0" + implication.conceptId + "\0" + implication.relation);
     }
+    const temporalPhrases: string[] = [];
     for (const adjunct of temporalAdjuncts) {
       if (entailed?.has(adjunct.role + "\0" + adjunct.conceptId + "\0" + adjunct.relation)) continue;
       const value = translatedArgument(adjunct, locale);
@@ -4562,10 +4563,12 @@ function realizeAction(
         localizeAdviceRelation(adjunct.relation!, locale) ?? adjunct.relation, value
       ]);
       if (!temporalPhrase) continue;
-      complete = joinLocalizedTokens(locale, [complete, temporalPhrase]);
+      temporalPhrases.push(temporalPhrase);
       if (coverage && clause && timeArgumentCoversSingleScheduledEvent(frame, adjunct, clause))
         coverage.singleScheduledEvent = true;
     }
+    if (temporalPhrases.length) complete = joinLocalizedTokens(locale, [complete,
+      temporalPhrases.length === 1 ? temporalPhrases[0] : getAdviceLocaleAdapter(locale).joinArguments(temporalPhrases)]);
   }
   if (!negated) complete = adapter.applyPositiveModality(complete, frame);
   return retainedMeasuredSource

@@ -4881,6 +4881,9 @@ describe("postfix clinical guards beside typed dose limits", () => {
     { locale: language.locale, kind, source: language.prefix + " " + language[kind] }
   ]));
 
+  cases.push({ locale: "en", kind: "occurrence",
+    source: "Take 2 tablets q4h if SBP > 160 and no more than 4 times per day" });
+
   it.each(cases)("keeps $locale $kind ownership in $source", ({ locale, kind, source }) => {
     const parsed = parsePublicSig(source, { locale });
     expect(parsed.input).toBe(source);
@@ -6314,5 +6317,72 @@ describe("review867 canonical attached carrier quantities", () => {
       registerMedicationLexerLocalePack(original ?? { locale: "en", apply: tokens =>
         tokens.map((token, index) => ({ ...token, index })) });
     }
+  });
+});
+
+
+describe("reviewed continuing onset and dotted infusion quantities", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each(["from 2026-11-22 onward", "on 2026-11-22 onwards"])(
+    "retains open-ended dated clock recurrence: %s", onset => {
+    const source = "Infuse 100 mL over 2 hours " + onset + " at 08:00";
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    const query = { orderedAt: "2026-11-22T00:00:00Z", from: "2026-11-22T00:00:00Z", timeZone: "UTC", limit: 3 };
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input), member = course.stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 100, unit: "mL" });
+      expect(member.schedule?.recurrence).toMatchObject({ occurrenceDuration: 2, occurrenceDurationUnit: "h", clocks: ["08:00:00"] });
+      expect(member.schedule?.recurrence?.count).toBeUndefined();
+      expect(member.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00", "2026-11-24T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 300, unit: "mL" });
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each(["~25", "approximately 25"])("retains dotted-unit administration duration for %s", amount => {
+    const source = "Infuse " + amount + " mL. for 60 min", parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input), member = course.stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 25, unit: "mL", comparator: "~" });
+      expect(member.amounts?.[0].rateRatio).toMatchObject({ numerator: { value: 25, unit: "mL", comparator: "~" },
+        denominator: { value: 60, unit: "min" } });
+      expect(member.schedule?.recurrence).toMatchObject({ count: 1, occurrenceDuration: 60, occurrenceDurationUnit: "min" });
+      expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
+      expect(member.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(nextDueDoses(input, { orderedAt: "2026-11-22T08:00:00Z", from: "2026-11-22T08:00:00Z", timeZone: "UTC", limit: 3 }))
+        .toEqual(["2026-11-22T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, orderedAt: "2026-11-22T08:00:00Z",
+        from: "2026-11-22T08:00:00Z", timeZone: "UTC", durationValue: 2, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 25, unit: "mL" });
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each(["until before breakfast the next morning", "until the next morning before breakfast"])(
+    "keeps the whole unresolved end complement: %s", end => {
+    const source = "Take 1 tablet every 6 hours " + end, parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input), member = course.stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ period: 6, periodUnit: "h" });
+      expect(member.schedule?.recurrence?.anchors).toBeUndefined();
+      expect(member.schedule?.recurrence?.clocks).toBeUndefined();
+      expect(member.additionalInstructions?.map(instruction => instruction.text)).toContain(end);
+      expect(course.stages[0].end).toBeUndefined();
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain(end);
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
   });
 });

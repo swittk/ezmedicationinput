@@ -398,10 +398,12 @@ function withholdingDoseTarget(
       const token = context.tokens[index];
       if (token.sourceStart < span.start || token.sourceEnd > span.end || eventTokens.has(index)) continue;
       const word = words[index];
-      if (token.kind === LexKind.TimeLike) {
-        const next = context.tokens[token.index + 1];
-        const clock = parseClockToken(token, next && next.sourceEnd <= span.end ? next : undefined);
-        if (clock) target.timeOfDay = [...new Set([...(target.timeOfDay ?? []), clock.value])];
+      const next = context.tokens[index + 1];
+      const clock = parseClockToken(token, next && next.sourceEnd <= span.end ? next : undefined);
+      if (clock) {
+        target.timeOfDay = [...new Set([...(target.timeOfDay ?? []), clock.value])];
+        for (let offset = 0; offset < clock.tokens.length; offset++) eventTokens.add(index + offset);
+        continue;
       }
       const meridiemRange = DOSE_TARGET_MERIDIEM_CLOCK_RANGES.get(word);
       if (meridiemRange) target.clockRange = { ...meridiemRange };

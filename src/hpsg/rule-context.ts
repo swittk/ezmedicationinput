@@ -568,22 +568,22 @@ export function maximumDosePerPeriodAt(
 }
 
 /** Numeric and locale-licensed named clocks share one end complement owner. */
-export function courseEndClockAt(tokens: readonly Token[], start: number, limit = tokens.length):
-  { tokens: Token[]; value?: string; event?: EventTiming } | undefined {
+export function courseEndClockAt(tokens: readonly Token[], start: number, limit = tokens.length,
+  endLead = tokens[start - 1]):
+  { tokens: Token[]; value?: string; event?: EventTiming; relation?: ReturnType<typeof MEAL_RELATION_BY_TOKEN.get> } | undefined {
   const first = start < limit ? tokens[start] : undefined;
   if (!first) return undefined;
   const next = start + 1 < limit ? tokens[start + 1] : undefined;
   const numeric = parseClockToken(first, next);
   if (numeric) return numeric;
   const relation = MEAL_RELATION_BY_TOKEN.get(normalizeTokenLower(first));
-  const endLead = tokens[start - 1];
   if (relation && endLead && RELATIVE_TIME_END_LEADS.has(normalizeTokenLower(endLead))) {
     const eventParts: string[] = [];
     for (let index = start + 1; index < limit && eventParts.length < MAX_EVENT_TIMING_EXPRESSION_PARTS; index++)
       eventParts.push(normalizeTokenLower(tokens[index]));
     const event = resolveEventTimingExpression(eventParts);
     const timing = event && MEAL_TIMING_BY_RELATION.get(relation)?.get(event.timing);
-    if (event && timing) return { tokens: tokens.slice(start, start + 1 + event.length), event: timing };
+    if (event && timing) return { tokens: tokens.slice(start, start + 1 + event.length), event: timing, relation };
   }
   const parts: string[] = [];
   for (let index = start; index < limit && parts.length < MAX_EVENT_TIMING_EXPRESSION_PARTS; index++)

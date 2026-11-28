@@ -4868,8 +4868,9 @@ describe("review867 complete guards and negative meal complements", () => {
     expect(JSON.stringify(parsed)).toBe(saved);
   });
 
-  it.each([false, true])("retains a symptom-history count beside a separately stated cap (%s)", capped => {
-    const condition = "vomiting no more than twice within 24 hours";
+  it.each(["twice", "2 times"].flatMap(count => [false, true].map(capped => ({ count, capped }))))(
+    "retains a symptom-history count beside a separately stated cap ($count, $capped)", ({ count, capped }) => {
+    const condition = "vomiting no more than " + count + " within 24 hours";
     const source = "Take 1 tablet only if " + condition + (capped ? ", maximum 4 doses per day" : "");
     const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
     expect(parsed.meta.canonical.clauses).toHaveLength(1);
@@ -4891,7 +4892,7 @@ describe("review867 complete guards and negative meal complements", () => {
       const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
       expect(en).toContain("only if " + condition);
       expect(th).toContain("เฉพาะเมื่อ " + condition);
-      expect(en.match(/twice within 24 hours/g)).toHaveLength(1);
+      expect(en.split(count + " within 24 hours")).toHaveLength(2);
       expect(course.instruction).toBe(source);
       expect(JSON.stringify(input)).toBe(before);
     }
@@ -5023,4 +5024,67 @@ describe("guarded rate administration duration ownership", () => {
       expect(JSON.stringify(parsed)).toBe(saved);
     }
   );
+});
+
+
+describe("reviewed explicit clock and canonical connector ownership", () => {
+  it.each(["8 PM", "20:00", "PM"])("retains the complete withholding clock: %s", target => {
+    const source = "Take 1 tablet daily at 18:00 and 20:00. If dizzy, hold the " + target + " dose.";
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    const query = { orderedAt: "2026-11-22T00:00:00Z", from: "2026-11-22T00:00:00Z", timeZone: "UTC", limit: 2 };
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      const guarded = members.filter(member => member.predicate);
+      expect(guarded.flatMap(member => member.schedule?.recurrence?.clocks ?? [])).toEqual(
+        target === "PM" ? ["18:00:00", "20:00:00"] : ["20:00:00"]);
+      for (const member of members) {
+        expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      }
+      for (const member of guarded) expect(member.predicate).toMatchObject(target === "PM"
+        ? { kind: "text", text: source }
+        : { kind: "not", condition: { kind: "state", name: "dizzy", expected: true } });
+      expect(nextDueDoses(input, { ...query, evaluateCondition: () => false })).toEqual(target === "PM" ? [] : [
+        "2026-11-22T18:00:00+00:00", "2026-11-23T18:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d", evaluateCondition: () => false }))
+        .toMatchObject({ totalUnits: target === "PM" ? 0 : 1, unit: "tab" });
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it("retains a registered two-word conjunction and its shared cadence", () => {
+    const original = getMedicationLexerLocalePack("en");
+    registerMedicationLexerLocalePack({ locale: "en", apply: (tokens, input) =>
+      (original?.apply(tokens, input) ?? tokens).map((token, index) => ({ ...token, index,
+        ...(token.lower === "encore" ? { canonical: "again" } : {}) })) });
+    try {
+      for (const conjunction of ["and again", "and encore", ", and encore"]) {
+        const source = "Instill 1 drop in left eye " + conjunction + " 2 drops in right eye twice daily";
+        const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+        for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+          const before = JSON.stringify(input), course = importCanonicalCourse(input);
+          const members = course.stages.flatMap(stage => stage.administrations);
+          expect(members).toHaveLength(2);
+          expect(members.map(member => member.amounts?.[0].quantity?.value)).toEqual([1, 2]);
+          expect(members.map(member => member.target?.text)).toEqual(["left eye", "right eye"]);
+          for (const member of members) expect(member.schedule?.recurrence)
+            .toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+          expect(calculateTotalUnits({ dosage: input, orderedAt: "2026-11-22T00:00:00Z",
+            from: "2026-11-22T00:00:00Z", timeZone: "UTC", durationValue: 1, durationUnit: "d" }))
+            .toMatchObject({ totalUnits: 6, unit: "drop" });
+          expect(course.instruction).toBe(source);
+          expect(JSON.stringify(input)).toBe(before);
+        }
+        expect(parsed.fhirNext.renderedInstruction).toBe(source);
+        expect(JSON.stringify(parsed)).toBe(saved);
+      }
+    } finally {
+      registerMedicationLexerLocalePack(original ?? { locale: "en",
+        apply: tokens => tokens.map((token, index) => ({ ...token, index })) });
+    }
+  });
 });

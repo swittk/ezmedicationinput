@@ -716,6 +716,7 @@ function mergeSchedule(
       left.administrationOffsetMinutes, right.administrationOffsetMinutes
     ),
     boundsStart: mergeOptionalScalar(left.boundsStart, right.boundsStart),
+    openEndedStart: left.openEndedStart ?? right.openEndedStart,
     boundsEnd: mergeOptionalScalar(left.boundsEnd, right.boundsEnd),
     frequency: mergeOptionalScalar(left.frequency, right.frequency),
     frequencyMax: mergeOptionalScalar(left.frequencyMax, right.frequencyMax),
