@@ -8625,28 +8625,23 @@ function calculateCourseTotalUnits(
       // A delayed member may open at or after the actual query cutoff.
       // Clip that empty nominal window before constructing local bounds.
       if (nominalEnd <= member.recurrenceOrigin.getTime()) continue;
-      const bounded: CanonicalAdministration = {
-        ...dosage,
-        phaseOrigin: undefined,
-        phaseStart: undefined,
-        phaseEnd: undefined,
-        phaseOriginIssue: undefined,
-        phasePredecessors: undefined,
-        schedule: {
-          ...dosage.schedule,
-          recurrence: {
-            ...dosage.schedule.recurrence,
-            // The resolved plan already owns the cap. This local copy
-            // clips accounting without changing the recurrence origin.
-            courseLength: undefined,
-            courseLengthRange: undefined,
-            calendarWindow: {
-              start: member.recurrenceOrigin.toISOString(),
-              end: new Date(nominalEnd - 1).toISOString(),
-            },
-          },
-        },
+      const bounded: CanonicalAdministration = { ...dosage };
+      bounded.phaseOrigin = undefined;
+      bounded.phaseStart = undefined;
+      bounded.phaseEnd = undefined;
+      bounded.phaseOriginIssue = undefined;
+      bounded.phasePredecessors = undefined;
+      bounded.schedule = { ...dosage.schedule };
+      const boundedRepeat: CanonicalRecurrence = { ...dosage.schedule.recurrence };
+      // The resolved plan already owns the cap. This local copy
+      // clips accounting without changing the recurrence origin.
+      boundedRepeat.courseLength = undefined;
+      boundedRepeat.courseLengthRange = undefined;
+      boundedRepeat.calendarWindow = {
+        start: member.recurrenceOrigin.toISOString(),
+        end: new Date(nominalEnd - 1).toISOString(),
       };
+      bounded.schedule.recurrence = boundedRepeat;
       const key = rollingCycleKey(index, member.sourceIndex ?? memberIndex);
       const weighted = rangeUsage && dosage.amounts?.[0]?.range && unscheduledOccurrenceCapacity(dosage);
       const rangeAccepted: SupplyAllocation[] | undefined = weighted ? [] : undefined;
@@ -8655,19 +8650,19 @@ function calculateCourseTotalUnits(
           (hasPeriodLimits(dosage) || getTimingOccurrenceCap(dosage.schedule?.recurrence))
         ? [] : undefined;
       const measuredUnit: SupplyUnitResult = {};
-      const total = calculateTotalUnitsSingle({
-        ...options,
-        dosage: bounded,
-        from: begin > queryStart ? begin : queryStart,
-        orderedAt: member.recurrenceOrigin,
-        eligibleFrom: member.allowanceStart,
-        priorCount: member.priorCount,
-        roundToMultiple: undefined,
-        ...(rollingUsage && !weighted ? { priorDoseTimes: rollingPriorTimes(
-          rollingUsage, key, options.priorDoseTimes
-        ) } : {}),
-        ...(member.countEligibilityStart ? { countEligibilityStart: member.countEligibilityStart } : {}),
-      } as CanonicalSupplyOptions & PhaseCountOptions & { dosage: CanonicalAdministration },
+      const memberOptions = { ...options } as CanonicalSupplyOptions & PhaseCountOptions & {
+        dosage: CanonicalAdministration;
+      };
+      memberOptions.dosage = bounded;
+      memberOptions.from = begin > queryStart ? begin : queryStart;
+      memberOptions.orderedAt = member.recurrenceOrigin;
+      memberOptions.eligibleFrom = member.allowanceStart;
+      memberOptions.priorCount = member.priorCount;
+      memberOptions.roundToMultiple = undefined;
+      if (rollingUsage && !weighted)
+        memberOptions.priorDoseTimes = rollingPriorTimes(rollingUsage, key, options.priorDoseTimes);
+      if (member.countEligibilityStart) memberOptions.countEligibilityStart = member.countEligibilityStart;
+      const total = calculateTotalUnitsSingle(memberOptions,
         undefined, lifetimeUsage || acceptedTimes || rangeAccepted || (options as PhaseCountOptions).roundingLimits ? {
           usedQuantity: lifetimeUsage?.get(key) ?? 0,
           actualPriorCount: options.priorDoseTimes?.length ?? 0,
