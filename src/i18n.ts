@@ -2328,7 +2328,7 @@ function formatLongThai(
     clause, timingText, graphRepresentsDose, richPrimaryGraphAction,
     wholeGraphInstruction, primaryConditions
   );
-  if (graphCanStandAlone && !authoredPrimary) {
+  if (graphCanStandAlone && !authoredPrimary && !deferredDirections?.current) {
     const text = [graphInstructionText, fallbackPatientInstruction]
       .filter(Boolean).join(" ").trim();
     return clause.clinicalAdjuncts?.condition
@@ -2381,7 +2381,9 @@ function translateCoordinatedActivityWindowThai(text: string): string | undefine
 
 function realizeAdviceFramesThai(frames: AdviceFrame[]): string | undefined {
   const selected = frames.length === 1 ? frames[0] : undefined;
-  if (selected && (selected.predicate.realizer || selected.predicate.realizerConfig))
+  if (selected && (selected.predicate.realizer || selected.predicate.realizerConfig ||
+      selected.polarity === AdvicePolarity.Negate && relationHasGrammarFeature(selected.relation, "conditionScope") &&
+        selected.args.some(arg => arg.role === AdviceArgumentRole.Free)))
     return realizeInstructionAction(selected, "th");
   let localizedFrames: AdviceFrame[] | undefined;
   for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {

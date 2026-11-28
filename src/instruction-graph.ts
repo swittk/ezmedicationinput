@@ -1,4 +1,5 @@
 import { equalStructuredValues } from "./stable-structure";
+import { getAdviceLocaleAdapter } from "./advice-locale-adapter";
 import { objectValues } from "./utils/object";
 import { courseContinuationDurationAt, doseComparatorNumberAt, DOSE_COMPARATOR_PREFIXES } from "./hpsg/lexical-classes";
 import { composeCoordinatedActionDirective, composePreposedContactTheme, licensesPreposedContactTheme } from "./hpsg/constructions";
@@ -4573,21 +4574,23 @@ export function realizeInstructionAction(
   frame: AdviceFrame, locale = "en", graph?: CanonicalInstructionGraph
 ): string {
   const text = realizeAction(frame, locale);
-  if (!graph?.relations?.length) return text;
-  let actionIndex = graph.actions.indexOf(frame);
-  if (actionIndex < 0) {
+  let actionIndex = graph?.relations?.length ? graph.actions.indexOf(frame) : -1;
+  if (graph?.relations?.length && actionIndex < 0) {
     for (let index = 0; index < graph.actions.length; index++) {
       const action = graph.actions[index];
       if (action.span.start !== frame.span.start || action.span.end !== frame.span.end ||
           action.predicate.lemma !== frame.predicate.lemma) continue;
       // A detached occurrence can inherit scope only when its correspondence
       // is unique; equal or absent source ranges do not identify a graph node.
-      if (actionIndex >= 0) return text;
+      if (actionIndex >= 0) { actionIndex = -1; break; }
       actionIndex = index;
     }
-    if (actionIndex < 0) return text;
   }
-  const conditions: InstructionGraphPrimaryCondition[] = [];
+  const inline = inlineInstructionCondition(frame, graph?.sourceLocale ?? "en", locale,
+    graph?.relations, actionIndex >= 0 ? actionIndex : undefined);
+  if (!graph?.relations?.length || actionIndex < 0)
+    return inline ? attachInstructionGraphPrimaryConditions(text, [inline], locale) : text;
+  const conditions: InstructionGraphPrimaryCondition[] = inline ? [inline] : [];
   for (const relation of graph.relations) {
     if (relation.fromActionIndex !== undefined || relation.toActionIndex !== actionIndex) continue;
     const condition = instructionGraphCondition(relation, frame, graph.sourceLocale ?? "en", locale);
@@ -5462,6 +5465,35 @@ export interface InstructionGraphPrimaryCondition {
   imperative: boolean;
 }
 
+/** A negated action's inline condition uses the same condition realizer as edges.
+ * A corresponding selected edge retains its own source placement and wording. */
+function inlineInstructionCondition(
+  frame: AdviceFrame, sourceLocale: string, targetLocale: string,
+  relations?: readonly CanonicalInstructionRelation[], actionIndex?: number
+): InstructionGraphPrimaryCondition | undefined {
+  const kind = frame.relation;
+  if (frame.polarity !== AdvicePolarity.Negate || !kind || !relationHasGrammarFeature(kind, "conditionScope")) return undefined;
+  const arguments_ = frame.args.filter(arg => arg.role === AdviceArgumentRole.Free && arg.text.trim());
+  if (!arguments_.length) return undefined;
+  const body = getAdviceLocaleAdapter(sourceLocale).joinArguments(arguments_.map(arg => arg.text.trim()));
+  if (!body) return undefined;
+  if (actionIndex !== undefined && relations?.some(relation =>
+      relation.fromActionIndex === undefined && relation.toActionIndex === actionIndex && relation.kind === kind &&
+      conditionRelationBody(relation.text ?? "", kind) === body)) return undefined;
+  const lead = localizeAdviceRelation(kind, sourceLocale) ?? kind;
+  const relation: CanonicalInstructionRelation = { kind, toActionIndex: actionIndex ?? 0,
+    text: getInstructionActionLocaleAdapter(sourceLocale).joinConditionLead(lead, body),
+    ...(arguments_.length === 1 && arguments_[0].span ? { span: arguments_[0].span } : {}) };
+  const selectedBodies = arguments_.map(arg => localizedValue(arg.i18n, targetLocale));
+  if (selectedBodies.every((value): value is string => Boolean(value))) {
+    const selected = getAdviceLocaleAdapter(targetLocale).joinArguments(selectedBodies)!;
+    relation.text = getInstructionActionLocaleAdapter(targetLocale).joinConditionLead(
+      localizeAdviceRelation(kind, targetLocale) ?? kind, selected);
+    sourceLocale = targetLocale;
+  }
+  return instructionGraphCondition(relation, frame, sourceLocale, targetLocale);
+}
+
 /** Resolve the same typed external relation for complete graph or scoped
  * instruction realization. Unknown condition wording stays source-preserved. */
 function instructionGraphCondition(
@@ -5965,7 +5997,11 @@ function realizeInstructionGraphInternal(
     }
     const direct = explicitWording ?? (binding && !graphOwnsWording
       ? preview!.render(binding.instruction) : undefined);
-    const graphText = direct ? undefined : sourceFaithful || realizeAction(frame, locale, options?.roundtripSafe === true);
+    let graphText = direct ? undefined : sourceFaithful || realizeAction(frame, locale, options?.roundtripSafe === true);
+    if (graphText && !sourceFaithful) {
+      const inline = inlineInstructionCondition(frame, graph.sourceLocale ?? "en", locale, graph.relations, actionIndex);
+      if (inline) graphText = attachInstructionGraphPrimaryConditions(graphText, [inline], locale);
+    }
     const text = direct ? direct.trim().replace(/[.!?]+$/u, "") : graphText;
     if (text) {
       if (binding) renderedRows!.add(binding.rowIndex);

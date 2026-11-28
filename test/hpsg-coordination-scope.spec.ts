@@ -629,21 +629,21 @@ describe('HPSG coordination cadence scope', () => {
   });
 
   it.each([
-    "Take 1 tablet if SBP > 160",
-    "Swallow 1 tablet if SBP > 160",
-    "Chew 1 tablet if SBP > 160",
-    "If SBP > 160, swallow 1 tablet",
-    "If SBP > 160, chew 1 tablet",
-    "If SBP > 160 swallow 1 tablet",
-    "If SBP > 160 chew 1 tablet",
-    "If SBP > 160, swallow 1 tablet then call clinic",
-    "กลืน 1 เม็ด ถ้า SBP > 160",
-    "เคี้ยว 1 เม็ด ถ้า SBP > 160",
-    "ถ้า SBP > 160, กลืน 1 เม็ด",
-    "ถ้า SBP > 160, เคี้ยว 1 เม็ด",
-    "ถ้า SBP > 160 ให้กลืน 1 เม็ด",
-    "ถ้า SBP > 160 ให้เคี้ยว 1 เม็ด"
-  ])("keeps an admitted guard on its registered administration: %s", input => {
+    ["Take 1 tablet if SBP > 160", "738990001"],
+    ["Swallow 1 tablet if SBP > 160", "738995006"],
+    ["Chew 1 tablet if SBP > 160", "738992009"],
+    ["If SBP > 160, swallow 1 tablet", "738995006"],
+    ["If SBP > 160, chew 1 tablet", "738992009"],
+    ["If SBP > 160 swallow 1 tablet", "738995006"],
+    ["If SBP > 160 chew 1 tablet", "738992009"],
+    ["If SBP > 160, swallow 1 tablet then call clinic", "738995006"],
+    ["กลืน 1 เม็ด ถ้า SBP > 160", "738995006"],
+    ["เคี้ยว 1 เม็ด ถ้า SBP > 160", "738992009"],
+    ["ถ้า SBP > 160, กลืน 1 เม็ด", "738995006"],
+    ["ถ้า SBP > 160, เคี้ยว 1 เม็ด", "738992009"],
+    ["ถ้า SBP > 160 ให้กลืน 1 เม็ด", "738995006"],
+    ["ถ้า SBP > 160 ให้เคี้ยว 1 เม็ด", "738992009"]
+  ] as const)("keeps an admitted guard on its registered administration: %s", (input, methodCode) => {
     const condition = { kind: "measurement", name: "sbp", operation: "gt", value: 160 };
     expect(parseMedicationGuard(input)?.condition).toMatchObject(condition);
     const sign = parseClauseSign(input);
@@ -653,17 +653,26 @@ describe('HPSG coordination cadence scope', () => {
     expect(parsed.meta.canonical.clauses).toHaveLength(1);
     expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
     expect(parsed.meta.canonical.clauses[0].clinicalAdjuncts?.condition).toMatchObject(condition);
+    expect(parsed.meta.canonical.clauses[0].method?.coding).toMatchObject({
+      system: "http://snomed.info/sct", code: methodCode
+    });
     expect(parsed.fhir).toHaveLength(1);
     const converted = toFhirR5Dosages(parsed.fhirNext);
     expect(converted).toHaveLength(1);
     for (const row of [parsed.fhir[0], converted[0]]) {
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
       expect(getDosageCondition(row)).toMatchObject(condition);
+      expect(row.method?.coding).toContainEqual(expect.objectContaining({
+        system: "http://snomed.info/sct", code: methodCode
+      }));
       expect(row.asNeeded).not.toBe(true);
     }
     expect(parsed.fhirNext.step[0].component[0].condition?.[0]).toMatchObject({
       operation: "gt", valueQuantity: { value: 160 }
     });
+    expect(parsed.fhirNext.step[0].component[0].method?.coding).toContainEqual(expect.objectContaining({
+      system: "http://snomed.info/sct", code: methodCode
+    }));
     expect(parsed.input).toBe(input);
     expect(parsed.fhirNext.renderedInstruction).toBe(input);
   });
@@ -807,6 +816,9 @@ describe('HPSG coordination cadence scope', () => {
       const graph = members[0].syntax?.instructionGraph;
       expect(graph?.actions).toHaveLength(1);
       expect(graph!.actions[0]).toMatchObject({ predicate: { lemma: "chew" }, polarity: "negate" });
+      expect(graph!.actions[0].args).toContainEqual(expect.objectContaining({
+        role: AdviceArgumentRole.Amount, quantity: expect.objectContaining({ value: 1, unit: "tab" })
+      }));
       expect(graph!.relations).toContainEqual(expect.objectContaining({
         kind: "if", toActionIndex: 0, text: expect.stringContaining(symptom)
       }));
@@ -3378,7 +3390,7 @@ describe("withholding target identity", () => {
       en: formatSig(parsed.meta.canonical.course!, "long", { locale: "en", realizationMode: "normalized" }),
       th: formatSig(parsed.meta.canonical.course!, "long", { locale: "th", realizationMode: "normalized" })
     };
-    expect(previews.en.match(/withhold administration/gi)).toHaveLength(2);
+    expect(previews.en.match(/withhold\b/gi)).toHaveLength(2);
     expect(previews.th.match(/Skip the drops/g)).toHaveLength(2);
     for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
       JSON.parse(JSON.stringify(parsed.fhirNext))]) {
@@ -3444,8 +3456,8 @@ describe("withholding target identity", () => {
       }));
       for (const locale of ["en", "th"] as const) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase();
-        const left = locale === "en" ? "withhold administration the drops in the left eye on monday" : "skip the drops in the left eye on mondays";
-        const right = locale === "en" ? "withhold administration the drops in the right eye on friday" : "skip the drops in the right eye on fridays";
+        const left = locale === "en" ? "withhold the drops in the left eye on monday" : "skip the drops in the left eye on mondays";
+        const right = locale === "en" ? "withhold the drops in the right eye on friday" : "skip the drops in the right eye on fridays";
         const cause = locale === "en" ? "may cause drowsiness" : "อาจทำให้ง่วงซึม";
         expect(text.split(left)).toHaveLength(2);
         expect(text.split(right)).toHaveLength(2);
@@ -3504,8 +3516,8 @@ describe("withholding target identity", () => {
         }
         for (const locale of ["en", "th"] as const) {
           const text = formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase();
-          const left = locale === "en" ? "withhold administration the drops in the left eye on monday" : "skip the drops in the left eye on mondays";
-          const right = locale === "en" ? "withhold administration the drops in the right eye on friday" : "skip the drops in the right eye on fridays";
+          const left = locale === "en" ? "withhold the drops in the left eye on monday" : "skip the drops in the left eye on mondays";
+          const right = locale === "en" ? "withhold the drops in the right eye on friday" : "skip the drops in the right eye on fridays";
           const prohibition = locale === "en" ? "do not drive" : "ห้าม";
           expect(text.split(left)).toHaveLength(2);
           expect(text.split(right)).toHaveLength(2);
@@ -3556,7 +3568,7 @@ describe("withholding target identity", () => {
       expect(member.patientInstruction).toBe(source.slice(source.indexOf("Skip"), -1));
       for (const locale of ["en", "th"] as const) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase();
-        const hold = locale === "en" ? "withhold administration the drops in the left eye on monday" : "skip the drops in the left eye on mondays";
+        const hold = locale === "en" ? "withhold the drops in the left eye on monday" : "skip the drops in the left eye on mondays";
         const cause = locale === "en" ? "may cause drowsiness" : "อาจทำให้ง่วงซึม";
         expect(text.split(hold)).toHaveLength(3);
         expect(text.split(cause)).toHaveLength(2);
@@ -3608,7 +3620,7 @@ describe("withholding target identity", () => {
       const projected = projectCanonicalCourse(importCanonicalCourse(input));
       for (const current of [projected.fhir, projected.fhirNext]) {
         const normalized = formatSig(current, "long", { locale: "en", realizationMode: "normalized" });
-        expect(normalized.match(/withhold administration/gi)).toHaveLength(2);
+        expect(normalized.match(/withhold\b/gi)).toHaveLength(2);
         const rebuilt = projectCanonicalCourse(importCanonicalCourse(JSON.parse(JSON.stringify(current))));
         const rebuiltRows = rebuilt.fhir.flatMap(row => row.additionalInstruction ?? []);
         expect(rebuiltRows).toHaveLength(2);
@@ -3716,8 +3728,8 @@ describe("withholding target identity", () => {
       expect(warnings[0].sourceText).toBe(advice.slice(0, -1));
       const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
       const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
-      expect(en.match(/\b(?:skip|withhold administration)\b/gi)).toHaveLength(1);
-      expect(en).toMatch(/(?:Skip the drops in the left eye on Mondays|On Mondays skip the drops in the left eye|Withhold administration the drops in the left eye on Monday)\.$/);
+      expect(en.match(/\b(?:skip|withhold)\b/gi)).toHaveLength(1);
+      expect(en).toMatch(/(?:Skip the drops in the left eye on Mondays|On Mondays skip the drops in the left eye|Withhold the drops in the left eye on Monday)\.$/);
       expect(th.split(advice).length - 1).toBe(1);
       expect(nextDueDoses(input, query)).toEqual(expected);
       expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))

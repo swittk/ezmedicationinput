@@ -752,7 +752,13 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
       localizedValue(input.frame.predicate.i18n, input.locale) === undefined
       ? medicationInstructionActionLocaleRealizerConfig(input.realizerConfig, input.locale)?.finiteUnmodalLabel
       : undefined;
-    return finiteLabel ? { ...input, label: finiteLabel } : input;
+    const transitiveWithhold = (input.theme || input.site || input.amount) &&
+      input.frame.predicate.lemma === "withhold-administration" &&
+      localizedValue(input.frame.predicate.i18n, input.locale) === undefined &&
+      input.label === getMedicationInstructionAction("withhold-administration")?.display
+      ? "Withhold" : undefined;
+    const label = finiteLabel ?? transitiveWithhold;
+    return label ? { ...input, label } : input;
   },
   render: renderEnglish,
   renderNegated(c, completeAction) {

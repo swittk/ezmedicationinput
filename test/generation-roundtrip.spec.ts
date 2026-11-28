@@ -2812,17 +2812,28 @@ describe("round36 external policy ownership and current source replay", () => {
     }
   });
 
-  it("uses a newly submitted site restriction without changing the source wording", () => {
-    const source = "Apply 1 g to skin where skin is red daily max 2 g/day";
-    let row = parseSig(source).fhir[0];
-    formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" });
-    row = persist(row);
-    const restriction = row.site!.extension!.find(item => item.url.endsWith("medication-body-site-restriction"))!;
-    restriction.extension!.find(item => item.url === "predicateText")!.valueString = "skin is itchy";
-    const text = formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" });
-    expect(text).toContain("itchy");
-    expect(text).not.toContain("skin is red");
-    expect(row.text).toBe(source);
+  it("uses a current site restriction while preserving its coherent authored source", () => {
+    const source = "Apply 1 g to skin where skin is itchy daily max 2 g/day";
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext)]) {
+      const original = JSON.stringify(input);
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const text = formatSig(input, "long", { locale: "en", realizationMode });
+        expect(text).toContain("itchy");
+        expect(text).not.toContain("skin is red");
+      }
+      const row = projectCanonicalCourse(importCanonicalCourse(input)).fhir[0];
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "g" });
+      expect(row.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(row.maxDosePerPeriod).toContainEqual(expect.objectContaining({
+        numerator: expect.objectContaining({ value: 2, unit: "g" }),
+        denominator: expect.objectContaining({ value: 1, unit: "d" })
+      }));
+      expect(JSON.stringify(input)).toBe(original);
+    }
+    expect(parsed.fhir[0].text).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
   });
 
   it.each(["dose", "rate"] as const)("uses newly submitted %s expressions instead of former scalar source text", dimension => {

@@ -2,6 +2,7 @@ import { resolveBodySitePhrase } from "./body-site-grammar";
 import { getBodySiteText } from "./body-site-lookup";
 import { DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey } from "./maps";
 import { SNOMED_SYSTEM } from "./snomed";
+import { parseSnomedBodySiteLateralityPostcoordinationCode } from "./snomed-postcoordination";
 import {
   BodySiteCode,
   BodySiteDefinition,
@@ -65,9 +66,13 @@ export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirC
   const textCode = definition?.coding;
   if (!textCode?.code || !coding?.code || textCode.code === coding.code ||
       (textCode.system ?? SNOMED_SYSTEM) !== (coding.system ?? SNOMED_SYSTEM)) return false;
+  const postcoordinated = parseSnomedBodySiteLateralityPostcoordinationCode(coding.code);
+  const codedText = postcoordinated ? getBodySiteText(coding as BodySiteCode) : undefined;
+  const codedCode = codedText ? DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(codedText)]?.coding?.code ?? coding.code : coding.code;
+  if (textCode.code === codedCode) return false;
   const textRefinement = BODY_SITE_REFINEMENTS[textCode.code];
-  const codedRefinement = BODY_SITE_REFINEMENTS[coding.code];
-  if (refinesBodySite(textCode.code, coding.code)) return false;
+  const codedRefinement = BODY_SITE_REFINEMENTS[codedCode];
+  if (refinesBodySite(textCode.code, codedCode)) return false;
   if (textRefinement && codedRefinement && textRefinement.broader === codedRefinement.broader) {
     if (!codedRefinement.lateralized) return false;
     // A paired refinement can agree with the registered paired broader site.
@@ -80,7 +85,7 @@ export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirC
   const unqualified = canonical?.replace(/^(?:left|right|both) /u, "");
   if (unqualified && unqualified !== canonical) {
     const baseCode = DEFAULT_BODY_SITE_SNOMED[unqualified]?.coding;
-    if (baseCode?.code && (baseCode.code === coding.code || refinesBodySite(baseCode.code, coding.code) ||
+    if (baseCode?.code && (baseCode.code === codedCode || refinesBodySite(baseCode.code, codedCode) ||
         !codedRefinement?.lateralized && baseCode.code === codedRefinement?.broader) &&
         (baseCode.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM)) return false;
   }

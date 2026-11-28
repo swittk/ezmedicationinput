@@ -1106,7 +1106,7 @@ describe("qualified non-executable counseling remains source-faithful", () => {
       arg.text?.includes("dialysis days"))).toBe(true);
     const en = formatSig(parsed.fhir, "long", { locale: "en" });
     expect(en).toContain("dialysis days");
-    expect(en).not.toMatch(/withhold administration (?:the )?morning dose\.(?!.*dialysis days)/i);
+    expect(en).not.toMatch(/withhold(?: administration)? (?:the )?morning dose\.(?!.*dialysis days)/i);
     expect(fromFhirDosage(parsed.fhir).meta.normalized.instructionGraph?.sourceText)
       .toBe(source);
   });
@@ -1291,7 +1291,7 @@ describe("qualified medication withholding remains source-faithful", () => {
     expect(graph?.actions.some(a => a.sourceText.includes("on dialysis days"))).toBe(true);
     const displayed = formatSig(parsed.fhir, "long", { locale: "en" });
     expect(displayed).toContain("on dialysis days");
-    expect(displayed).not.toMatch(/withhold administration morning dose\.$/i);
+    expect(displayed).not.toMatch(/withhold(?: administration)? morning dose\.$/i);
     expect(parsed.input).toBe(source);
   });
 });
@@ -2221,7 +2221,7 @@ describe("selected optional action meaning", () => {
     const graph = clause.instructionGraph!;
     const render = (value: CanonicalAdditionalInstructionExpr) => formatCanonicalClause(
       { ...clause, additionalInstructions: [value] }, "long", { locale: "en" }, { realizationMode: "normalized" });
-    expect(render(instruction).match(/(?:Skip|Withhold administration)\b/gu)).toHaveLength(1);
+    expect(render(instruction).match(/(?:Skip|Withhold)\b/gu)).toHaveLength(1);
     const frame = instruction.frames![0];
     const opaqueText = `${instruction.text}; follow the supplied clinic card`;
     const partial: CanonicalAdditionalInstructionExpr = {
@@ -2233,7 +2233,7 @@ describe("selected optional action meaning", () => {
     };
     const rendered = render(partial);
     expect(rendered).toContain("follow the supplied clinic card");
-    expect(rendered.match(/(?:Skip|Withhold administration)\b/gu)).toHaveLength(1);
+    expect(rendered.match(/(?:Skip|Withhold)\b/gu)).toHaveLength(1);
     const other = { ...frame, span: { start: frame.span.end + 1, end: frame.span.end + 1 + frame.sourceText.length } };
     const selected: CanonicalAdditionalInstructionExpr = {
       text: frame.sourceText, frames: [other], evidence: [{
@@ -2242,13 +2242,13 @@ describe("selected optional action meaning", () => {
         }]
       }]
     };
-    expect(render(selected).match(/(?:Skip|Withhold administration)\b/gu)).toHaveLength(2);
+    expect(render(selected).match(/(?:Skip|Withhold)\b/gu)).toHaveLength(2);
     for (const distinct of [
       { ...frame, force: AdviceForce.Caution },
       { ...frame, predicate: { ...frame.predicate, codings: [{ system: "urn:clinic:actions", code: "independent" }] } },
       { ...frame, predicate: { ...frame.predicate, display: "Clinic-selected holding instruction" } },
       { ...frame, predicate: { ...frame.predicate, i18n: { en: "Clinic-selected holding instruction" } } }
-    ]) expect(render({ ...instruction, frames: [distinct] }).match(/(?:Skip|Withhold administration)\b/gu)).toHaveLength(2);
+    ]) expect(render({ ...instruction, frames: [distinct] }).match(/(?:Skip|Withhold)\b/gu)).toHaveLength(2);
     expect(clause.instructionGraph).toBe(graph);
   });
 
@@ -6760,26 +6760,26 @@ describe("current graph realization families", () => {
 
   it.each([
     { name: "weekday and site", relation: AdviceRelation.On, time: "Mondays", site: true,
-      en: "Withhold administration the drops in the left eye on Monday",
+      en: "Withhold the drops in the left eye on Monday",
       th: "งดการให้ยายาหยอดในตาซ้ายเมื่อวันจันทร์" },
     { name: "clock", relation: AdviceRelation.On, time: "08:00",
-      en: "Withhold administration the drops at 08:00",
+      en: "Withhold the drops at 08:00",
       th: "งดการให้ยายาหยอด เวลา 08:00" },
     { name: "Before clock", relation: AdviceRelation.Before, time: "08:00",
-      en: "Withhold administration the drops before 08:00",
+      en: "Withhold the drops before 08:00",
       th: "งดการให้ยายาหยอดก่อน08:00" },
     { name: "duration", duration: true,
-      en: "Withhold administration the drops for 2 hours",
+      en: "Withhold the drops for 2 hours",
       th: "งดการให้ยายาหยอด 2 ชั่วโมง" },
     { name: "opaque Time", relation: AdviceRelation.Before, time: "the next dressing change",
-      en: "Withhold administration the drops before the next dressing change",
+      en: "Withhold the drops before the next dressing change",
       th: "งดการให้ยายาหยอดก่อนthe next dressing change" },
     { name: "opaque On", relation: AdviceRelation.On, time: "fasting days",
-      en: "Withhold administration the drops on fasting days",
+      en: "Withhold the drops on fasting days",
       th: "งดการให้ยายาหยอดเมื่อfasting days" },
     { name: "selected custom Time", relation: AdviceRelation.On, time: "clinic opening",
       conceptId: "clinic-opening", i18n: { en: "clinic opening", th: "เวลาคลินิกเปิด" },
-      en: "Withhold administration the drops at clinic opening",
+      en: "Withhold the drops at clinic opening",
       th: "งดการให้ยายาหยอดเวลาคลินิกเปิด" }
   ])("realizes object-duration Time through its selected relation: $name", fixture => {
     const args: AdviceFrame["args"] = [
@@ -6820,6 +6820,73 @@ describe("current graph realization families", () => {
         url: "urn:clinic:instruction-note", valueString: "Keep supplied graph"
       });
       expect(JSON.stringify(value)).toBe(inputBefore);
+    }
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it.each([
+    { display: "Withhold administration", args: false, en: "Withhold administration" },
+    { display: "Skip", args: true, en: "Skip the drops" },
+    { display: "Withhold administration", args: true, i18n: { en: "Omit" }, en: "Omit the drops" }
+  ])("preserves bare and selected Withhold labels ($en)", fixture => {
+    const action: AdviceFrame = { force: AdviceForce.Sequence, polarity: AdvicePolarity.Affirm,
+      predicate: { lemma: "withhold-administration", display: fixture.display,
+        semanticClass: "withhold-administration", realizer: "object-duration", i18n: fixture.i18n },
+      sourceText: "", span: { start: 0, end: 0 },
+      args: fixture.args ? [{ role: AdviceArgumentRole.Object, text: "the drops" }] : [] };
+    expect(realizeInstructionAction(action, "en")).toBe(fixture.en);
+  });
+
+  it.each([
+    { name: "inline affected", condition: "affected", inline: true, external: false, object: true },
+    { name: "inline plus edge", condition: "affected", inline: true, external: true, object: true },
+    { name: "edge only", condition: "affected", inline: false, external: true, object: true },
+    { name: "bare drive", condition: undefined, inline: false, external: false, object: false },
+    { name: "inline dizzy", condition: "dizzy", inline: true, external: false, object: true }
+  ])("retains the selected conditional prohibition ($name)", fixture => {
+    // The current standard machinery warning carries its condition as If + Free.
+    const action: AdviceFrame = {
+      force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "drive", semanticClass: "activity" },
+      ...(fixture.inline ? { relation: AdviceRelation.If } : {}),
+      sourceText: "", span: { start: 0, end: 0 },
+      args: [
+        ...(fixture.object ? [{ role: AdviceArgumentRole.Object,
+          text: "or operate machinery", normalized: "or operate machinery" }] : []),
+        ...(fixture.inline ? [{ role: AdviceArgumentRole.Free,
+          text: fixture.condition!, normalized: fixture.condition! }] : [])
+      ]
+    };
+    const graph: CanonicalInstructionGraph = { sourceText: "", sourceLocale: "en", actions: [action],
+      ...(fixture.external ? { relations: [{ kind: AdviceRelation.If,
+        toActionIndex: 0, text: "if " + fixture.condition }] } : {}) };
+    const before = JSON.stringify(graph), views = publicViews(graph);
+    for (const locale of ["en", "th"] as const) {
+      const check = (text: string): void => {
+        expect(text).toContain(locale === "en" ? "Do not drive" : "ห้ามขับรถ");
+        expect(text.split("or operate machinery")).toHaveLength(fixture.object ? 2 : 1);
+        if (fixture.condition) {
+          const condition = locale === "th" && fixture.condition === "dizzy" ? "เวียนศีรษะ" : "if " + fixture.condition;
+          expect(text.split(condition)).toHaveLength(2);
+        } else expect(text).not.toMatch(/affected|dizzy|เวียนศีรษะ/u);
+      };
+      check(realizeInstructionAction(action, locale, graph));
+      for (const value of [views.native, JSON.parse(JSON.stringify([views.row])),
+        JSON.parse(JSON.stringify(views.course))]) {
+        const inputBefore = JSON.stringify(value);
+        check(formatSig(value, "long", { locale, realizationMode: "normalized" }));
+        const current = importCanonicalCourse(value);
+        const saved = current.stages[0].administrations[0].syntax!.instructionGraph!;
+        expect(saved.actions[0]).toMatchObject({ polarity: AdvicePolarity.Negate, args: action.args });
+        expect(saved.actions[0].relation).toBe(fixture.inline ? AdviceRelation.If : undefined);
+        if (fixture.external) expect(saved.relations).toContainEqual(expect.objectContaining({
+          kind: AdviceRelation.If, toActionIndex: 0, text: "if " + fixture.condition
+        }));
+        expect(projectCanonicalCourse(current).fhir[0].extension).toContainEqual({
+          url: "urn:clinic:instruction-note", valueString: "Keep supplied graph"
+        });
+        expect(JSON.stringify(value)).toBe(inputBefore);
+      }
     }
     expect(JSON.stringify(graph)).toBe(before);
   });

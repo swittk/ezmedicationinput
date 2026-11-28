@@ -1215,12 +1215,14 @@ export function formatCanonicalCourse(
               courseBoundaryPoint(quantity, boundary.anchor, words, cycleStart) ?? boundaryEventText(boundary, words, cycleStart);
             const knownOrigin = boundary.anchor === "treatment-start" || boundary.anchor === "treatment-day-start" ||
               (boundary.anchor === "previous-phase-next-day" && (index > 0 || Boolean(component.phasePredecessors?.length)));
+            const originText = boundary.anchor === "treatment-start" ? cycleStart ?? words.treatmentStart
+              : boundary.anchor === "previous-phase-next-day" ? words.nextDayAfterPreviousPhase : words.treatmentDayStart;
             if (knownOrigin) memberStartPoint = point ??
-              (boundary.anchor === "treatment-start" ? cycleStart ?? words.treatmentStart : words.treatmentDayStart);
-            memberTiming = knownOrigin
+              (!boundary.displacement && !boundary.displacementRange ? originText : undefined);
+            memberTiming = knownOrigin && memberStartPoint
               ? component.phaseEnd ? memberStartPoint
                 : days !== undefined ? words.fromDay(days + 1) : words.calendarWindow(memberStartPoint)
-              : words.reviewTiming(point ?? boundary.description);
+              : words.reviewTiming(point ?? boundary.description ?? (knownOrigin ? originText : undefined));
           }
           if (!memberTiming && origin && origin.value !== undefined && origin.value !== 0) {
             const stageOrigin = treatmentStepOffsetQuantity(step.start);

@@ -5818,6 +5818,8 @@ describe("compatible anatomical refinements", () => {
   it.each([
     ["117590005", "left ear canal", "ช่องหูซ้าย"],
     ["89644007", "left ear canal", "ช่องหูซ้าย"],
+    ["117590005:272741003=7771000", "left ear canal", "ช่องหูซ้าย"],
+    ["117590005:272741003=24028007", "right ear", "หูขวา"],
     ["25577004", "right ear", "หูขวา"]
   ])("preserves a current refined label beside code %s", (code, english, thai) => {
     const site = { concept: { text: "left ear canal", coding: [{ system: SNOMED, code }] } };
@@ -6450,7 +6452,11 @@ describe("current medication calendar exclusions precede independent advice", ()
         expect(text.indexOf(qualifier)).toBeLessThan(text.indexOf(warningStart));
         expect(text.slice(text.indexOf(warningStart))).not.toContain(qualifier);
         expect(text).toContain(authoredDose ? "Swallow 1 tablet whole" : locale === "en" ? "1 tablet" : "1 เม็ด");
-        if (kind === "date") expect(text.indexOf("SBP > 160")).toBeLessThan(text.indexOf(warningStart));
+        if (kind === "date") {
+          const guardStart = text.indexOf("SBP > 160");
+          expect(guardStart).toBeGreaterThanOrEqual(0);
+          expect(guardStart).toBeLessThan(text.indexOf(warningStart));
+        }
         if (kind === "sparse graph") {
           const roundtrip = render({ ...options, realizationMode: "roundtrip" });
           expect(roundtrip).toContain(qualifier);
@@ -7203,7 +7209,12 @@ describe("review51 current single-row and locale defaults", () => {
     { name: "complete ranged predicate", sourceText: "where the skin directly beneath the dressing is intact",
       predicateText: "the skin directly beneath the dressing is intact", predicateStart: 6 },
     { name: "partial final-word predicate", sourceText: "where the skin is intact and dry",
-      predicateText: "dry", predicateStart: 29 }
+      predicateText: "dry", predicateStart: 29 },
+    { name: "partial predicate and independent dressing qualifier", sourceText: "where the skin feels warm and the dressing has lifted",
+      predicateText: "the skin feels warm", predicateStart: undefined },
+    { name: "leading independent context", sourceText: "where the dressing has lifted and the skin feels warm",
+      predicateText: "the skin feels warm" },
+    { name: "exact raw predicate", sourceText: "where the skin feels warm", predicateText: "the skin feels warm" }
   ])("retains an untranslated raw site restriction's complete authored source: $name", ({ sourceText, predicateText, predicateStart }) => {
     const note: FhirExtension = { url: "urn:clinic:restriction-note", valueString: "Independent annotation" };
     const restriction: FhirExtension = { id: "selected-restriction", url: BODY_SITE_RESTRICTION_EXTENSION_URL, extension: [
@@ -7219,8 +7230,10 @@ describe("review51 current single-row and locale defaults", () => {
       site: { text: "skin", extension: [restriction] }
     };
     if (predicateStart !== undefined) expect(sourceText.slice(predicateStart)).toBe(predicateText);
-    for (const input of [fresh(row), fresh([row]), fresh(toDosageDetails([row]))]) {
+    for (const input of [importCanonicalCourse([row]), fresh(row), fresh([row]), fresh(toDosageDetails([row]))]) {
       const before = fresh(input);
+      for (const style of ["short", "long"] as const)
+        expect(formatSig(input, style, { locale: "en", realizationMode: "normalized" }).split(sourceText)).toHaveLength(2);
       expect(formatSig(input, "long", { locale: "th" })).toContain("(" + sourceText + ")");
       const wire = projectCanonicalCourse(importCanonicalCourse(input)).fhir[0];
       expect(wire.site!.extension).toContainEqual(restriction);
@@ -7844,5 +7857,76 @@ describe("unchanged condition bridge cycles", () => {
       rows = next;
     }
     expect(input).toEqual(before);
+  });
+});
+
+
+describe("review d41 current primary and event offset previews", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([1, 2])("keeps %s labelled amounts before an independent warning within a bounded week", count => {
+    const graph: CanonicalInstructionGraph = { sourceText: "Do not crush", sourceLocale: "en",
+      actions: parseInstructionActions("Do not crush") };
+    const note: FhirExtension = { url: "urn:clinic:current-note", valueString: "retain" };
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [
+        { type: { coding: [{ code: "ordered" }] }, doseQuantity: { value: 1, unit: "tab" } },
+        { type: { coding: [{ code: "calculated" }] }, doseQuantity: { value: 2, unit: "tab" } }
+      ],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Week,
+        endOffset: { value: 1, unit: "d" } } },
+      safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 4, unit: "tab" }, period: { value: 1, unit: "d" } }] },
+      extension: [buildInstructionGraphExtension(graph)!, note]
+    }] }] };
+    source.step[0].component[0].doseAndRate = source.step[0].component[0].doseAndRate!.slice(0, count);
+    const before = fresh(source), native = importCanonicalCourse(source), projected = projectCanonicalCourse(native);
+    for (const input of [native, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      const original = fresh(input);
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        const ordered = locale === "en" ? "Dose (ordered): 1 tablet" : "ขนาดยา (ordered): ครั้งละ 1 เม็ด";
+        const calculated = locale === "en" ? "Dose (calculated): 2 tablets" : "ขนาดยา (calculated): ครั้งละ 2 เม็ด";
+        const warning = locale === "en" ? "Do not crush" : "ห้ามบด";
+        expect(text).toContain(ordered);
+        if (count === 2) expect(text).toContain(calculated);
+        else expect(text).not.toContain(calculated);
+        expect(text.split(warning)).toHaveLength(2);
+        expect(text.indexOf(ordered)).toBeLessThan(text.indexOf(warning));
+        if (count === 2) expect(text.indexOf(calculated)).toBeLessThan(text.indexOf(warning));
+        expect(text).toContain("4 tab / 1 d");
+        expect(text).toContain(locale === "en" ? "1 administration per 1 week" : "ให้ยา 1 ครั้งต่อช่วง 1 สัปดาห์");
+        expect(text).toContain(locale === "en" ? "No doses during the final 1 day" : "งดยาในช่วง 1 วันสุดท้าย");
+      }
+      const current = importCanonicalCourse(input), row = projectCanonicalCourse(current).fhirNext.step[0].component[0];
+      expect(row.doseAndRate).toEqual(source.step[0].component[0].doseAndRate);
+      expect(row.timing?.repeat).toMatchObject(source.step[0].component[0].timing!.repeat!);
+      expect(row.safety?.doseLimit).toEqual(source.step[0].component[0].safety!.doseLimit);
+      expect(row.extension).toContainEqual(note);
+      expect(input).toEqual(original);
+    }
+    expect(source).toEqual(before);
+  });
+
+  it("keeps both event-offset bounds in a code-only BED short preview", () => {
+    const source: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: {
+        code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BED" }] },
+        recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, offsetMin: 15, offsetMax: 30 }
+      }
+    }] }] };
+    const before = fresh(source), projected = projectCanonicalCourse(source);
+    for (const input of [source, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      const original = fresh(input);
+      expect(formatSig(input, "short", { locale: "en", realizationMode: "normalized" })).toContain("15–30 minutes at bedtime");
+      expect(formatSig(input, "short", { locale: "th", realizationMode: "normalized" })).toContain("ก่อนนอน 15–30 นาที");
+      const current = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(current.schedule?.recurrence).toMatchObject({ offsetMin: 15, offsetMax: 30 });
+      expect(current.schedule?.recurrence?.anchors).toBeUndefined();
+      expect(current.schedule?.code).toEqual(source.stages[0].administrations[0].schedule!.code);
+      const output = projectCanonicalCourse(importCanonicalCourse(input));
+      expect(output.fhir[0].timing?.repeat?.when).toBeUndefined();
+      expect(output.fhirNext.step[0].component[0].timing?.repeat?.when).toBeUndefined();
+      expect(input).toEqual(original);
+    }
+    expect(source).toEqual(before);
   });
 });

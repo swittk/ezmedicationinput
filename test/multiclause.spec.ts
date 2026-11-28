@@ -4903,10 +4903,11 @@ describe("round62 active range beside a scalar infusion carrier", () => {
         const short = formatCanonicalCourse(course, "short", { locale, realizationMode: "normalized" });
         const activeUnitText = unit === "mg" && locale === "th" ? "มก." : unit;
         const escapedUnit = activeUnitText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const completeRange = new RegExp("(?:^|[^0-9.])" + String(low).replace(/[.]/g, "[.]") +
+        const completeRange = new RegExp("(?:^|[^0-9.-])" + String(low).replace(/[.]/g, "[.]") +
           "-" + String(high).replace(/[.]/g, "[.]") + " " + escapedUnit + "(?!\\s*/)(?=$|[\\s,;.)])", "u");
         expect(short).toMatch(completeRange);
         expect("1" + low + "-" + high + " " + activeUnitText).not.toMatch(completeRange);
+        expect("-" + low + "-" + high + " " + activeUnitText).not.toMatch(completeRange);
         expect(low + "-" + high + " " + activeUnitText + "/h; 50 mL / 1 h").not.toMatch(completeRange);
         expect(low + "-" + high + " " + activeUnitText + " / h").not.toMatch(completeRange);
         expect(short).toMatch(/50 mL(?: normal saline)? \/ 1 h/);
@@ -5373,6 +5374,12 @@ describe("selected branch preview and cadence ownership", () => {
     for (const input of [course, fresh(projected.fhir), fresh(projected.fhirNext)]) {
       const before = JSON.stringify(input), text = formatSig(input, "long", { locale: "en" });
       expect(text.match(/3 administrations/gu)).toHaveLength(2);
+      const branches = text.split(" or ");
+      expect(branches).toHaveLength(2);
+      for (const [index, clocks] of [[0, ["8:00 am", "8:00 pm"]], [1, ["9:00 am", "9:00 pm"]]] as const) {
+        expect(branches[index].match(/3 administrations/gu)).toHaveLength(1);
+        for (const clock of clocks) expect(branches[index]).toContain(clock);
+      }
       for (const branchId of ["A", "B"]) {
         const times = branchId === "A" ? ["08:00:00", "20:00:00"] : ["09:00:00", "21:00:00"];
         expect(nextDueDoses(input, { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
@@ -5389,8 +5396,13 @@ describe("selected branch preview and cadence ownership", () => {
     const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
     for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
       const course = importCanonicalCourse(input);
-      expect(course.stages.flatMap(stage => stage.administrations)).toHaveLength(2);
-      for (const member of course.stages.flatMap(stage => stage.administrations)) {
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(2);
+      expect(members.map(member => member.schedule?.recurrence?.clocks?.[0]).sort()).toEqual(["08:00:00", "20:00:00"]);
+      expect(members.find(member => member.schedule?.recurrence?.clocks?.[0] === "08:00:00")?.predicate)
+        .toMatchObject({ kind: "not", condition: { kind: "state", name: "dizzy", expected: true } });
+      expect(members.find(member => member.schedule?.recurrence?.clocks?.[0] === "20:00:00")?.predicate).toBeUndefined();
+      for (const member of members) {
         expect(member.schedule?.recurrence?.frequency).toBe(1);
         expect(member.schedule?.recurrence?.clocks).toHaveLength(1);
         expect(member.schedule?.code?.coding?.some(code => code.code === "BID")).not.toBe(true);
@@ -5423,8 +5435,10 @@ describe("selected branch preview and cadence ownership", () => {
       expect(member.schedule?.recurrence).toMatchObject({ period, periodUnit, periodMax, monthDays: [15], clocks: ["08:00:00"] });
       for (const locale of ["en", "th"]) {
         const text = formatSig(input, "long", { locale });
-        expect(text).toContain(locale === "en" && !eachMonth ? "on day 15" : "15");
+        expect(text).toContain(locale === "en" && !eachMonth ? "on day 15" : locale === "th" ? "วันที่ 15" : "15");
         expect(text.includes(locale === "en" ? "of each month" : "ของทุกเดือน")).toBe(eachMonth);
+        if (_name === "weekly") expect(text).toContain(locale === "en" ? "once weekly" : "สัปดาห์ละครั้ง");
+        if (_name === "alternate-day") expect(text).toContain(locale === "en" ? "every other day" : "วันเว้นวัน");
         if (_name === "yearly") expect(text).toContain(locale === "en" ? "once yearly" : "ปีละครั้ง");
         if (_name === "one-to-two-day range")
           expect(text).toContain(locale === "en" ? "once every 1 to 2 days" : "1 ครั้ง ทุก 1 ถึง 2 วัน");
@@ -5493,4 +5507,43 @@ describe("ordinal weekday cadence wording", () => {
     }
     expect(JSON.stringify(course)).toBe(before);
   });
+});
+
+
+it.each([
+  { name: "missing value", boundary: { displacement: { unit: "d" } }, review: true },
+  { name: "zero", boundary: { displacement: { value: 0, unit: "d" } }, review: false },
+  { name: "equal range", boundary: { displacementRange: {
+    low: { value: 2, unit: "d" }, high: { value: 2, unit: "d" }
+  } }, review: false }
+])("keeps an incomplete member offset under timing review while preserving an independent end ($name)", fixture => {
+  const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+    phaseStart: { anchor: "treatment-start", ...fixture.boundary, description: "from treatment start" },
+    phaseEnd: { anchor: "treatment-start", displacement: { value: 3, unit: "d" } },
+    amounts: [{ quantity: { value: 1, unit: "tab" } }],
+    schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+  }] }] };
+  const before = JSON.stringify(course), projected = projectCanonicalCourse(course);
+  for (const input of [course, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+    const original = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+    expect(member.phaseStart).toMatchObject(fixture.boundary);
+    if (fixture.review) expect(member.phaseStart?.displacement?.value).toBeUndefined();
+    expect(member.phaseEnd?.displacement).toMatchObject({ value: 3, unit: "d" });
+    for (const locale of ["en", "th"] as const) {
+      const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain(locale === "en" ? "3 days after treatment start" : "3 วันหลังเริ่มการรักษา");
+      expect(text).toContain(locale === "en" ? "1 tablet once daily" : "1 เม็ด วันละครั้ง");
+      if (fixture.review) {
+        expect(text).toContain(locale === "en" ? "Timing requires review: from treatment start" : "ต้องตรวจสอบช่วงเวลา: from treatment start");
+        expect(text).not.toContain(locale === "en" ? "From treatment start until" : "ตั้งแต่เริ่มการรักษาจนถึง");
+      } else {
+        expect(text).not.toContain(locale === "en" ? "requires review" : "ต้องตรวจสอบ");
+        expect(text).toContain(fixture.name === "zero"
+          ? locale === "en" ? "From treatment start until" : "ตั้งแต่เริ่มการรักษาจนถึง"
+          : locale === "en" ? "2 days – 2 days" : "2 วัน – 2 วัน");
+      }
+    }
+    expect(JSON.stringify(input)).toBe(original);
+  }
+  expect(JSON.stringify(course)).toBe(before);
 });

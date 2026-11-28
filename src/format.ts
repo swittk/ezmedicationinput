@@ -894,9 +894,8 @@ function appendSiteRestrictionsEnglish(
   if (!restrictions?.length) return sitePhrase;
   const parts = [sitePhrase];
   for (const restriction of restrictions) {
-    // Source wording remains provenance; the live predicate owns this preview.
-    const relative = realizeBodySiteRestriction(restriction.predicate.text.trim()
-      ? { ...restriction, sourceText: "" } : restriction, "en");
+    // The selected predicate may cover only part of the authored restriction.
+    const relative = realizeBodySiteRestriction(restriction, "en");
     if (relative && !parts.some((part) => part.toLowerCase().includes(relative.toLowerCase()))) {
       parts.push(relative);
     }
@@ -1398,7 +1397,8 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage, resolved
     parts.push(`${count}x`);
   }
   if (timingText) parts.push(timingText);
-  const eventSchedule = codeEmitted ? schedule : timingEventPreviewSchedule(schedule)!;
+  const hasEventOffset = schedule.offset !== undefined || schedule.offsetMin !== undefined || schedule.offsetMax !== undefined;
+  const eventSchedule = codeEmitted && !hasEventOffset ? schedule : timingEventPreviewSchedule(schedule)!;
   if (eventSchedule.when?.length) {
     parts.push(eventSchedule.offset !== undefined || eventSchedule.offsetMin !== undefined || eventSchedule.offsetMax !== undefined
       ? collectWhenPhrases(eventSchedule).join(" ") : eventSchedule.when.join(" "));
@@ -1894,7 +1894,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     clause, timingText, graphRepresentsDose, richPrimaryGraphAction,
     trailingInstructionText, primaryConditions
   );
-  if (graphCanStandAlone && !authoredPrimary) return condition
+  if (graphCanStandAlone && !authoredPrimary && !deferredDirections?.current) return condition
     ? appendClinicalConditionText(trailingInstructionText as string, condition, words)
     : trailingInstructionText as string;
   const primarySourceSentence = primaryGraphAction && !needsCurrentPrimary
