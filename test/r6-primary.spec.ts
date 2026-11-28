@@ -8180,3 +8180,61 @@ describe("current prohibition and recurring Time ownership", () => {
     expect(graph).toEqual(before);
   });
 });
+
+describe("current annotated unit ceiling identity", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const ucum = "http://unitsofmeasure.org";
+
+  it.each(["administration", "lifetime"] as const)(
+    "keeps the tighter annotated body-surface %s ceiling when an absolute limit intervenes", scope => {
+      const loose = { id: "body-surface-loose", value: 200, unit: "mg/m2", system: ucum, code: "mg/m2",
+        _value: { id: "authored-loose-limit" } };
+      const tight = { id: "body-surface-tight", value: 150, unit: "mg per square metre",
+        system: ucum, code: "mg{active}/m2",
+        extension: [{ url: "urn:clinic:quantity-note", valueString: "Keep the supplied quantity" }] };
+      const absolute = { id: "absolute-limit", value: 400, unit: "mg", system: ucum, code: "mg",
+        _code: { id: "authored-absolute-unit" } };
+      const orders = [[loose, tight], [tight, loose], [loose, absolute, tight],
+        [tight, absolute, loose], [absolute, loose, tight], [absolute, tight, loose]];
+      for (const quantities of orders) {
+        const input: FhirR6DosageInstruction = {
+          renderedInstruction: "Administer 100 mg/m2 with the supplied body-surface and absolute limits.",
+          step: [{ component: [{
+            doseAndRate: [{ doseQuantity: { value: 100, unit: "mg/m2", system: ucum, code: "mg/m2" } }],
+            safety: { doseLimit: quantities.map(valueQuantity => ({ scope, valueQuantity })) }
+          }] }]
+        };
+        const before = fresh(input), native = importCanonicalCourse(input), projected = projectCanonicalCourse(native);
+        for (const value of [native, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+          const current = projectCanonicalCourse(importCanonicalCourse(value));
+          const row = current.fhir[0];
+          expect(scope === "administration" ? row.maxDosePerAdministration : row.maxDosePerLifetime).toEqual(tight);
+          expect(current.fhirNext.step[0].component[0].safety?.doseLimit).toEqual(input.step[0].component[0].safety!.doseLimit);
+          expect(current.fhirNext.step[0].component[0].doseAndRate).toEqual(input.step[0].component[0].doseAndRate);
+          expect(current.fhirNext.renderedInstruction).toBe(input.renderedInstruction);
+        }
+        expect(input).toEqual(before);
+      }
+    }
+  );
+
+  it.each([
+    ["foreign coding", { system: ucum, code: "mg/m2" }, { system: "urn:clinic:unit", code: "mg/m2" }],
+    ["UCUM case", { system: ucum, code: "mU" }, { system: ucum, code: "MU" }],
+    ["annotation-only counts", { system: ucum, code: "{puff}" }, { system: ucum, code: "{dose}" }]
+  ] as const)("keeps distinct %s limits in their own coded group", (_label, doseUnit, otherUnit) => {
+    const compatible = { value: 3, ...doseUnit, id: "compatible-limit" };
+    const independent = { value: 1, ...otherUnit, id: "independent-limit" };
+    for (const quantities of [[compatible, independent], [independent, compatible]]) {
+      const input: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 2, ...doseUnit } }],
+        safety: { doseLimit: quantities.map(valueQuantity => ({ scope: "administration", valueQuantity })) }
+      }] }] };
+      const before = fresh(input), rows = toFhirR5Dosages(input);
+      expect(rows[0].maxDosePerAdministration).toEqual(compatible);
+      expect(toDosageDetails(fresh(rows)).step[0].component[0].safety?.doseLimit)
+        .toEqual(input.step[0].component[0].safety!.doseLimit);
+      expect(input).toEqual(before);
+    }
+  });
+});

@@ -40,7 +40,7 @@ import type {
   FormatOptions,
 } from "../types";
 import { administrationHasAmountFacts } from "../canonical/course";
-import { convertQuantityValue, getQuantityComparisonUnit, getUnitComparisonCategory, sameCodedQuantityUnit } from "../utils/units";
+import { convertQuantityValue, getQuantityComparisonUnit, getUnitComparisonCategory, quantityUnitIdentityCode, sameCodedQuantityUnit } from "../utils/units";
 import type {
   CanonicalMeasure,
   CanonicalAmount,
@@ -1390,7 +1390,7 @@ function unitKeyPart(value: string | undefined): string {
 }
 function maximumUnitKey(quantity: CanonicalMeasure): string | undefined {
   return quantity.system && quantity.code
-    ? "c" + unitKeyPart(quantity.system) + unitKeyPart(quantity.code)
+    ? "c" + unitKeyPart(quantity.system) + unitKeyPart(quantityUnitIdentityCode(quantity))
     : quantity.unit !== undefined || !quantity.system && !quantity.code
       ? "u" + unitKeyPart(quantity.system) + unitKeyPart(quantity.code) + unitKeyPart(quantity.unit)
       : undefined;

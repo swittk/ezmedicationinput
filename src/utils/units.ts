@@ -120,13 +120,19 @@ export function normalizeQuantityCapUnit(unit: string): string {
     }
 }
 
+/** Coded identity ignores non-dimensional UCUM annotations, retaining annotation-only counts. */
+export function quantityUnitIdentityCode(quantity: QuantityUnit): string | undefined {
+    const code = quantity.code;
+    return code && quantity.system === "http://unitsofmeasure.org"
+        ? stripUcumAnnotations(code) || code : code;
+}
+
 /** Exact coding compares quantities without assigning an opaque code a dimension. */
 export function sameCodedQuantityUnit(left: QuantityUnit | undefined, right: QuantityUnit | undefined): boolean {
     if (!left?.system || !left.code || left.system !== right?.system || !right.code) return false;
     if (left.code === right.code) return true;
     if (left.system !== "http://unitsofmeasure.org") return false;
-    const leftCode = stripUcumAnnotations(left.code), rightCode = stripUcumAnnotations(right.code);
-    return Boolean(leftCode && rightCode && leftCode === rightCode);
+    return quantityUnitIdentityCode(left) === quantityUnitIdentityCode(right);
 }
 
 /** The calculation unit shared by numeric comparison and compatible-unit indexing. */
