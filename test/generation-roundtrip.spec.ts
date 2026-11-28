@@ -7,7 +7,7 @@ import { ADMINISTRATION_OFFSET_EXTENSION_URL,ANCHORED_COURSE_DURATION_EXTENSION_
 import { EMA_QUANTITY_COMPARATOR_EXTENSION_URL,EMA_QUANTITY_OPERATOR_SYSTEM,getQuantityComparator,QUANTITY_OPERATOR_SOURCE_URL,quantityForR5,quantityFromR5,simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 import { AdviceArgumentRole,AdviceForce,AdvicePolarity,buildInstructionGraphExtension,calculateTotalUnits,EventTiming,FhirDayOfWeek,FhirPeriodUnit,formatCanonicalAdministration,formatCanonicalCourse,formatParseBatch,formatSig,formatSigBatch,fromDosageDetails,fromFhir,fromFhirDosage,getMedicationInstructionAction,importCanonicalCourse,nextDueDoses,parseInstructionGraphExtension,parseSig as parsePublicSig,projectCanonicalCourse,toDosageDetails,toFhirR5Dosages,type CanonicalInstructionGraph,type EzDosage,type FhirDosage,type FhirElement,type FhirExtension,type FhirR6Dosage,type FhirR6DosageCondition,type FhirR6DosageInstructionInput,type FhirR6DosageStep,type FhirR6Quantity,type FhirR6Timing,type FhirRatio } from "../src/index";
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../src/instruction-graph-fhir";
-import type { AdviceArgument,AdviceFrame,CanonicalSigClause,FhirCoding,FhirR6Coding,FhirR6DosageInstruction,FhirR6Extension,FhirR6Range } from "../src/types";
+import type { AdviceArgument,AdviceFrame,CanonicalSigClause,FhirCoding,FhirR6Coding,FhirR6DosageInstruction,FhirR6Extension,FhirR6Range,FhirR6RelativeTime } from "../src/types";
 import { type FhirR6DosageSafety,type FhirR6DoseLimit,type FormatOptions,type ParseOptions } from "../src/types";
 import { convertQuantityValue } from "../src/utils/units";
 import crossLanguageCases from "./generation-cross-language-cases.json";
@@ -6193,4 +6193,70 @@ describe("supported quantity-bearing annotation choices", () => {
       expect(input).toEqual(before);
     });
   }
+});
+
+
+describe("active course boundary composite annotations", () => {
+  const ucum = (value: number, unit: string) => ({ value, unit, code: unit, system: "http://unitsofmeasure.org" });
+  const contextCode = { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+    extension: [{ url: "urn:clinic:context-note", valueString: "Current treatment context" }] }] };
+  const unknown: FhirR6Extension = { url: "urn:clinic:boundary-unknown", valueString: "Keep this sibling" };
+  const quantityNote: FhirR6Extension = { url: "urn:clinic:quantity-note", valueString: "Annotation only" };
+  const baseQuantity = { ...ucum(5, "mg"), id: "annotation-quantity", extension: [quantityNote],
+    _code: { extension: [{ url: "urn:clinic:code-note", valueString: "Authored mg" }] } };
+  const annotation: FhirR6Extension = { url: "urn:clinic:boundary-estimate", valueQuantity: { ...baseQuantity, comparator: "~" } };
+  const expectedWire: FhirR6Extension = { url: annotation.url, valueQuantity: { ...baseQuantity,
+    extension: [quantityNote, { url: "http://ema.europa.eu/fhir/extension/comparator",
+      valueCoding: { system: "http://spor.ema.europa.eu/v1/lists/100000000008", code: "100000000055" } }] } };
+  const cases: Array<{ name: string; start: (annotations: FhirR6Extension[]) => Partial<FhirR6RelativeTime> }> = [
+    { name: "Range endpoint primitive", start: extension => ({ offsetRange: {
+      low: { ...ucum(1, "d"), _value: { extension } }, high: ucum(1, "d") } }) },
+    { name: "Range extension", start: extension => ({ offsetRange: {
+      low: ucum(1, "d"), high: ucum(1, "d"), extension } }) },
+    { name: "context CodeableConcept", start: extension => ({ offsetDuration: ucum(1, "d"),
+      contextCode: { ...contextCode, extension } }) },
+    { name: "existing Duration primitive", start: extension => ({ offsetDuration: { ...ucum(1, "d"), _value: { extension } } }) },
+    { name: "existing boundary text primitive", start: extension => ({ offsetDuration: ucum(1, "d"),
+      text: "After one day", _text: { extension } }) }
+  ];
+  function annotationsAt(value: unknown, url: string): FhirR6Extension[] {
+    if (!value || typeof value !== "object") return [];
+    const record = value as Record<string, unknown>;
+    return [...(record.url === url ? [record as FhirR6Extension] : []),
+      ...Object.values(record).flatMap(child => annotationsAt(child, url))];
+  }
+  it.each(cases)("projects $name through the active R5 bridge without changing treatment", ({ start }) => {
+    const source = "Take 2 tablets at 08:00 daily, beginning 1 day after treatment starts and ending 3 days after treatment starts.";
+    const input: FhirR6DosageInstruction = { renderedInstruction: source, step: [{
+      start: { contextCode, ...start([annotation, unknown]) },
+      end: { contextCode, offsetDuration: ucum(3, "d") },
+      component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } },
+        extension: [{ url: "urn:clinic:component-note", valueString: "Current independent dosage" }] }]
+    }] };
+    const before = structuredClone(input), native = importCanonicalCourse(input);
+    const strict = toFhirR5Dosages(input), freshR5 = JSON.parse(JSON.stringify(strict));
+    const freshR6 = JSON.parse(JSON.stringify(toDosageDetails(freshR5)));
+    const query = { orderedAt: "2026-11-23T00:00:00Z", from: "2026-11-23T00:00:00Z", timeZone: "UTC", limit: 8 };
+    for (const dosage of [input, native, freshR5, freshR6]) {
+      const viewBefore = structuredClone(dosage), current = projectCanonicalCourse(importCanonicalCourse(dosage));
+      const row = current.fhir![0], r6 = current.fhirNext!;
+      const bridge = row.modifierExtension!.find(item => item.url === DOSAGE_DETAILS_R5_URL)!;
+      const boundary = bridge.extension!.find(item => item.url === "step")!.extension!.find(item => item.url === "start")!;
+      expect(annotationsAt(boundary, annotation.url)).toEqual([expectedWire]);
+      expect(annotationsAt(boundary, unknown.url)).toEqual([unknown]);
+      expect(r6.step[0].start).toEqual(input.step[0].start);
+      expect(r6.step[0].end).toEqual(input.step[0].end);
+      expect(r6.renderedInstruction).toBe(source);
+      expect(r6.step[0].component[0].extension).toEqual(input.step[0].component[0].extension);
+      expect(r6.step[0].component[0].doseAndRate![0].doseQuantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(r6.step[0].component[0].timing!.repeat).toMatchObject({ frequency: 1, period: 1,
+        periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] });
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-11-24T08:00:00+00:00", "2026-11-25T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 4, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 4, unit: "tab" });
+      expect(dosage).toEqual(viewBefore);
+    }
+    expect(input).toEqual(before);
+  });
 });

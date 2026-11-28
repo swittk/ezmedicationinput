@@ -2687,11 +2687,13 @@ function encodeFields(
       } else if (field.value) {
         let child: FhirExtension = item === undefined ? { url: key }
           : { url: key, [field.value]: item };
-        if (companion !== undefined) {
-          child = { ...child, [primitiveField!]: companion };
-          if (!preserveQuantityWire)
-            child = quantityAnnotationExtensions([child], "r5")[0] as FhirExtension;
-        }
+        if (companion !== undefined) child = { ...child, [primitiveField!]: companion };
+        // The shared visitor owns declared composite annotations; unfamiliar
+        // choices stay opaque. Direct valueQuantity slots retain their
+        // existing SimpleQuantity role rather than becoming general Quantity.
+        if (!preserveQuantityWire && (companion !== undefined ||
+          field.value !== "valueQuantity" && typeof item === "object"))
+          child = quantityAnnotationExtensions([child], "r5")[0] as FhirExtension;
         children.push(snapshot ? cloneStructuredValue(child) : child);
       }
     }
@@ -2756,12 +2758,14 @@ function decodeFields(
       const primaryCompanion = !field.repeated ? bridgePrimitiveCompanion(field.value) : undefined;
       const selected = child[field.value] !== undefined || primaryCompanion && child[primaryCompanion] !== undefined
         ? field.value : field.legacyValue ?? field.value;
-      value = cloneStructuredValue(child[selected]);
       const primitiveField = !field.repeated ? bridgePrimitiveCompanion(selected) : undefined;
-      if (primitiveField && child[primitiveField] !== undefined) {
-        const current = preserveQuantityWire ? child : quantityAnnotationExtensions([child], "r6")[0];
+      const composite = selected !== "valueQuantity" && typeof child[selected] === "object";
+      const current = (composite ? preserveQuantityWire !== true :
+        !preserveQuantityWire && primitiveField && child[primitiveField] !== undefined)
+        ? quantityAnnotationExtensions([child], "r6")[0] : child;
+      value = cloneStructuredValue(current[selected]);
+      if (primitiveField && child[primitiveField] !== undefined)
         result[`_${child.url}`] = cloneStructuredValue(current[primitiveField]);
-      }
     }
     if (value === undefined) continue;
     if (field.repeated) ((result[child.url] ??= []) as unknown[]).push(value);
