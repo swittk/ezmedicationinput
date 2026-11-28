@@ -67,7 +67,7 @@ import {
 } from "../rule-context";
 import { HpsgLexicalRule, type HpsgSign, lexicalSign } from "../signature";
 import { combineSignFeatureStructures } from "../feature-structure";
-import { finiteTreatmentPauseAt, isScheduleLead } from "./timing-rules";
+import { finiteTreatmentPauseAt, isScheduleLead, qualifiedEventAdviceAt } from "./timing-rules";
 import { productLexicalRule } from "./core-rules";
 
 const PRODUCT_COMPLEMENT_RULE = productLexicalRule();
@@ -342,6 +342,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
 
+    const bodyStart = cursor;
     const bodyTokens: Token[] = [];
     for (; cursor < context.limit; cursor += 1) {
       const token = context.tokens[cursor];
@@ -397,6 +398,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!bodyTokens.length) {
       return [];
     }
+    const qualifiedNominal = qualifiedEventAdviceAt(context, cursor - 1)?.start === bodyStart;
     const range = rangeFromTokens(bodyTokens);
     const text = range
       ? context.state.input.slice(range.start, range.end).trim()
@@ -407,12 +409,16 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     return [
       lexicalSign({
         type: "instruction-sign",
-        rule: "hpsg.lex.patientInstruction.workflow",
-        lexicalCategory: "workflow",
+        rule: qualifiedNominal ? "hpsg.lex.instruction.qualifiedNominal" : "hpsg.lex.patientInstruction.workflow",
+        lexicalCategory: qualifiedNominal ? "instruction" : "workflow",
         tokens: [...consumed, ...bodyTokens],
         synsem: {
           head: {},
-          valence: { patientInstruction: { text } },
+          // The complete lexical nominal enters the existing typed advice
+          // owner once; ordinary workflow source keeps its opaque fallback.
+          valence: qualifiedNominal && range
+            ? { instructions: parseInstructionCandidates(text, range) }
+            : { patientInstruction: { text } },
           cont: { clauseKind: "administration" }
         },
         score: 12 + bodyTokens.length

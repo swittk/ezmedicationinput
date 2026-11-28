@@ -723,7 +723,7 @@ describe("selected advice evidence and supporting occurrences", () => {
 
 
 describe("review cbb complete relation and directive ownership", () => {
-  it.each(["a meal", "a light meal"])("keeps %s as a complete typed meal-state daughter", meal => {
+  it.each([["a meal", "meal"], ["a light meal", "light_meal"]])("keeps %s as a complete typed meal-state daughter", (meal, conceptId) => {
     const source = `After ${meal}`;
     for (const allowFreeTextFallback of [false, true]) {
       const rows = parseAdditionalInstructions(source, { start: 17, end: 17 + source.length }, { allowFreeTextFallback });
@@ -731,7 +731,7 @@ describe("review cbb complete relation and directive ownership", () => {
       expect(rows[0].frames).toEqual([expect.objectContaining({
         relation: AdviceRelation.After, sourceText: source,
         span: { start: 17, end: 17 + source.length },
-        args: [expect.objectContaining({ role: AdviceArgumentRole.MealState, text: meal, conceptId: "meal" })]
+        args: [expect.objectContaining({ role: AdviceArgumentRole.MealState, text: meal, conceptId })]
       })]);
     }
     const unknown = "After a light meal instruction that remains opaque";

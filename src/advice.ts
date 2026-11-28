@@ -409,6 +409,7 @@ const EMBEDDED_AVOIDANCE_TRIGGER_CONCEPT_IDS = new Set(
 const LEXEMES_BY_SURFACE: Record<string, AdviceLexemeEntry[]> = Object.create(null);
 const CONCEPTS_BY_SURFACE: Record<string, AdviceConceptEntry[]> = Object.create(null);
 const CONCEPT_KEYS_BY_ID: Record<string, string[]> = Object.create(null);
+const COMPOUND_CONCEPTS_BY_LAST_WORD: Record<string, Array<{ parts: string[]; surface: string }>> = Object.create(null);
 const LEXEME_LIST: AdviceLexemeEntry[] = [];
 const CONCEPT_LIST: AdviceConceptEntry[] = [];
 let MAX_LEXEME_WORDS = 1;
@@ -503,6 +504,14 @@ for (const entry of ADVICE_TERMINOLOGY.concepts) {
   if (wordCount > MAX_CONCEPT_WORDS) {
     MAX_CONCEPT_WORDS = wordCount;
   }
+  if (wordCount > 1) {
+    const parts = surfaceKey.split(" ");
+    const last = parts[parts.length - 1];
+    (COMPOUND_CONCEPTS_BY_LAST_WORD[last] ??= []).push({ parts, surface: surfaceKey });
+  }
+}
+for (const last of Object.keys(COMPOUND_CONCEPTS_BY_LAST_WORD)) {
+  COMPOUND_CONCEPTS_BY_LAST_WORD[last].sort((left, right) => right.parts.length - left.parts.length);
 }
 
 function collapseWhitespace(value: string): string {
@@ -1311,6 +1320,28 @@ export function resolveAdviceNominalArgument(surface: string, sourceText = surfa
       sourceText, normalized, concept.conceptId);
   }
   return symptomAdviceArgument(normalized, sourceText);
+}
+
+
+/** A complete compound nominal retains its lexical owner when its final word
+ * also names a generic event. Only declared compounds ending at that word are checked. */
+export function resolveCompoundAdviceNominalEndingAt(
+  tokens: readonly Pick<LexToken, "canonical" | "lower">[], endExclusive: number
+): { start: number; argument: AdviceArgument } | undefined {
+  const last = tokens[endExclusive - 1];
+  const candidates = last && COMPOUND_CONCEPTS_BY_LAST_WORD[last.canonical ?? last.lower];
+  if (!candidates) return undefined;
+  for (const candidate of candidates) {
+    const start = endExclusive - candidate.parts.length;
+    if (start < 0) continue;
+    let index = 0;
+    while (index < candidate.parts.length &&
+      (tokens[start + index].canonical ?? tokens[start + index].lower) === candidate.parts[index]) index++;
+    if (index !== candidate.parts.length) continue;
+    const argument = resolveAdviceNominalArgument(candidate.surface);
+    if (argument) return { start, argument };
+  }
+  return undefined;
 }
 
 function bodySiteAdviceArgument(text: string): AdviceArgument | undefined {

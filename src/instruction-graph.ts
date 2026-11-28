@@ -8,6 +8,7 @@ import {
   buildAdditionalInstructionFramesFromCoding,
   resolveAdviceMannerModifier,
   resolveAdviceNominalArgument,
+  resolveCompoundAdviceNominalEndingAt,
   matchComposedAdviceCodings,
   preservesAdviceFrameFacts,
   preservesAdviceArgumentFacts,
@@ -78,6 +79,7 @@ import {
   EVENT_OFFSET_FRACTIONS,
   INSTRUCTION_DURATION_APPROXIMATION_LEADS,
   INSTRUCTION_START_WORDS,
+  INSTRUCTION_NOMINAL_ARTICLES,
   INSTRUCTION_DURATION_UNITS,
   INSTRUCTION_QUANTITY_UNIT_LABELS,
   MEAL_TIMING_BY_RELATION,
@@ -461,6 +463,15 @@ function timeArgumentFromParts(
   for (let index = first; index < canonicalParts.length; index += 1) {
     const candidate = resolveEventTimingExpression(canonicalParts, index);
     if (candidate && (!complete || index + candidate.length === canonicalParts.length)) {
+      // A contained generic event cannot replace the complete declared nominal.
+      if (index > first) {
+        const nominal = resolveCompoundAdviceNominalEndingAt(parts, endExclusive);
+        if (nominal?.argument.role === AdviceArgumentRole.MealState) {
+          let nominalStart = start;
+          while (nominalStart < nominal.start && INSTRUCTION_NOMINAL_ARTICLES.has(key(parts[nominalStart]))) nominalStart++;
+          if (nominal.start === nominalStart) return undefined;
+        }
+      }
       event = candidate.timing;
       break;
     }
@@ -4205,6 +4216,7 @@ function defaultActionArguments(frame: AdviceFrame) {
       // is implicit. A bare substance without that relation can be the object.
       if (arg.role === AdviceArgumentRole.MealState &&
             (relationHasGrammarFeature(arg.relation ?? frame.relation, "mealStateComplement") ||
+              relationHasSemanticClass(arg.relation ?? frame.relation, "temporal") ||
               relationHasSemanticClass(arg.relation ?? frame.relation, "accompaniment")) ||
           arg.relation && relationHasSemanticClass(arg.relation, "accompaniment") ||
           !explicitAccompaniment && arg.role === AdviceArgumentRole.Substance &&
@@ -4230,7 +4242,8 @@ function defaultActionAccompaniment(c: ActionRealizationContext, arg: AdviceArgu
     ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme ||
       arg.role === AdviceArgumentRole.Site) && relationHasSemanticClass(relation, "accompaniment"));
   if (!materialArgument || !relation ||
-      !(relationHasSemanticClass(relation, "accompaniment") || relationHasSemanticClass(relation, "locative")))
+      !(relationHasSemanticClass(relation, "accompaniment") || relationHasSemanticClass(relation, "locative") ||
+        arg.role === AdviceArgumentRole.MealState && relationHasSemanticClass(relation, "temporal")))
     return undefined;
   const target = translatedArgument(arg, c.locale);
   if (!target) return undefined;

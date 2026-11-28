@@ -62,7 +62,7 @@
     { "surface": "food", "lemma": "food", "semanticClass": "meal_state", "conceptId": "food" },
     { "surface": "meal", "lemma": "meal", "semanticClass": "meal_state", "conceptId": "meal" },
     { "surface": "meals", "lemma": "meal", "semanticClass": "meal_state", "conceptId": "meal" },
-    { "surface": "light meal", "lemma": "meal", "semanticClass": "meal_state", "conceptId": "meal" },
+    { "surface": "light meal", "lemma": "light meal", "semanticClass": "meal_state", "conceptId": "light_meal" },
     {
       "surface": "empty stomach",
       "lemma": "empty stomach",

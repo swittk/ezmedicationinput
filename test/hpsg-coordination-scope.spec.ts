@@ -5166,3 +5166,139 @@ describe("article-scoped clinical meal events", () => {
     }
   });
 });
+
+
+describe("qualified meal-state adjunct ownership", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const cases = [false, true].flatMap(daily => ["before", "after", "with"].flatMap(relation =>
+    [false, true].map(article => ({ daily, relation, article,
+      source: `Take 1 tablet ${daily ? "daily " : ""}${relation} ${article ? "a " : ""}light meal` }))));
+
+  it.each(cases)("keeps the complete qualified nominal: $source", ({ source, daily, relation, article }) => {
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence?.anchors).toBeUndefined();
+      if (daily) expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      else {
+        expect(member.schedule?.recurrence?.frequency).toBeUndefined();
+        expect(member.schedule?.recurrence?.period).toBeUndefined();
+      }
+      const projection = projectCanonicalCourse(course);
+      const row = projection.fhir[0];
+      const frames = [parseInstructionGraphExtension(row.extension),
+        ...(row.additionalInstruction ?? []).map(instruction => parseInstructionGraphExtension(instruction.extension))]
+        .flatMap(graph => graph?.actions ?? []);
+      const nominal = frames.flatMap(frame => frame.args.map(argument => ({ frame, argument })))
+        .find(({ argument }) => argument.role === AdviceArgumentRole.MealState);
+      expect(nominal?.frame.relation).toBe(relation);
+      expect(nominal?.argument).toMatchObject({
+        role: AdviceArgumentRole.MealState, conceptId: "light_meal",
+        text: `${article ? "a " : ""}light meal`, normalized: `${article ? "a " : ""}light meal`
+      });
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text.toLowerCase().split("light meal")).toHaveLength(2);
+        if (locale === "en") {
+          expect(text.toLowerCase()).toContain(`${relation} ${article ? "a " : ""}light meal`);
+          expect(text).not.toContain("with meals");
+        }
+      }
+      expect(course.instruction).toBe(source);
+      expect(projection.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([
+    { nominal: "an evening meal", role: AdviceArgumentRole.Time, conceptId: "evening" },
+    { nominal: "the morning meal", role: AdviceArgumentRole.Time, conceptId: "morning" },
+    { nominal: "a light meal", role: AdviceArgumentRole.MealState, conceptId: "light_meal" }
+  ])(
+    "retains the complete negative meal nominal: $nominal", ({ nominal, role, conceptId }) => {
+      const source = `Take 2 tablets daily without ${nominal}`, parsed = parsePublicSig(source);
+      const saved = JSON.stringify(parsed);
+      for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+        const before = JSON.stringify(input), course = importCanonicalCourse(input);
+        const member = course.stages[0].administrations[0];
+        expect(member.amounts![0].quantity).toMatchObject({ value: 2, unit: "tab" });
+        expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+        expect(member.schedule?.recurrence?.anchors).toBeUndefined();
+        const row = projectCanonicalCourse(course).fhir[0];
+        const frames = (row.additionalInstruction ?? []).flatMap(instruction =>
+          parseInstructionGraphExtension(instruction.extension)?.actions ?? []);
+        const frame = frames.find(candidate => candidate.relation === AdviceRelation.Without);
+        expect(frame?.args).toContainEqual(expect.objectContaining({
+          role, conceptId, text: nominal, normalized: nominal
+        }));
+        expect(frame?.sourceText).toBe(`without ${nominal}`);
+        const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        expect(en).toContain(`without ${nominal}`);
+        expect(en).not.toContain("with meals");
+        const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+        expect(th).toContain(nominal);
+        expect(th).toContain("โดยไม่");
+        expect(course.instruction).toBe(source);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(parsed.input).toBe(source);
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(parsed)).toBe(saved);
+    }
+  );
+
+  it.each([
+    ["after meal", EventTiming["After Meal"]],
+    ["before meal", EventTiming["Before Meal"]],
+    ["with food", EventTiming.Meal],
+    ["after breakfast", EventTiming["After Breakfast"]],
+    ["without food", undefined],
+    ["without any food", undefined],
+    ["on an empty stomach", undefined]
+  ])("retains the independent ordinary event or advice: %s", (tail, event) => {
+    const source = `Take 1 tablet daily ${tail}`, parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(members[0].schedule?.recurrence?.anchors).toEqual(event ? [event] : undefined);
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      if (!event) expect(en.toLowerCase()).toContain(tail);
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each(["r5", "r6"] as const)("preserves independent current annotations with the qualified advice in %s", form => {
+    const source = "Take 1 tablet daily after a light meal", parsed = parsePublicSig(source);
+    const input = form === "r5" ? fresh(parsed.fhir) : fresh(parsed.fhirNext);
+    const row = Array.isArray(input) ? input[0] : input.step![0].component![0];
+    const note = { url: "https://example.test/meal-review", valueString: "retain this current annotation" };
+    const amountNote = { id: "authored-dose", extension: [{ url: "https://example.test/dose-review", valueBoolean: true }] };
+    row.extension = [...(row.extension ?? []), note];
+    row.doseAndRate![0].doseQuantity!._value = amountNote;
+    const before = JSON.stringify(input), course = importCanonicalCourse(input), projected = projectCanonicalCourse(course);
+    expect(projected.fhir[0].extension).toContainEqual(note);
+    expect(projected.fhirNext.step![0].component![0].extension).toContainEqual(note);
+    expect(projected.fhir[0].doseAndRate![0].doseQuantity!._value).toEqual(amountNote);
+    expect(projected.fhirNext.step![0].component![0].doseAndRate![0].doseQuantity!._value).toEqual(amountNote);
+    expect(course.stages[0].administrations[0].schedule?.recurrence?.anchors).toBeUndefined();
+    expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("after a light meal");
+    const frame = projected.fhir[0].additionalInstruction?.flatMap(instruction =>
+      parseInstructionGraphExtension(instruction.extension)?.actions ?? [])[0];
+    expect(frame?.sourceText).toBe("after a light meal");
+    if (form === "r6") expect(projected.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+});

@@ -1,3 +1,4 @@
+import { resolveCompoundAdviceNominalEndingAt } from "../../advice";
 import { getInstructionActionLocaleAdapter } from "../../instruction-action-locale-adapter";
 import { joinLocalizedTokens, localizedTimeArgument } from "../../locale-realization";
 import { clinicalRateHeadAt, clinicalRatePeriodUnit, volumeOrMassTerm } from "./clinical-quantity-rules";
@@ -1568,7 +1569,8 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const when = EVENT_TIMING_TOKENS[lower];
     if (when) {
-      if (isEndBoundDaypartAt(context.tokens, start) || isNegatedEventComplement(context, start)) return [];
+      if (isEndBoundDaypartAt(context.tokens, start) || isNegatedEventComplement(context, start) ||
+          qualifiedEventAdviceAt(context, start)) return [];
       // The same immediate lexeme cannot simultaneously schedule the whole
       // medication STAT and modify an explicit relative event. A typed
       // before/after + event daughter owns that atom compositionally.
@@ -1631,16 +1633,48 @@ function mealRelationFromToken(lower: string): "before" | "after" | "with" | und
 /** A negative accompaniment owns its event noun as advice, not a positive
  * administration anchor. Keep the same admission in the chart and boundary reader. */
 function isNegatedEventComplement(context: HpsgClauseContext, index: number): boolean {
-  let relation = context.tokens[index - 1];
-  if (!relation) return false;
-  let lower = normalizeTokenLower(relation);
-  if (EVENT_ARTICLE_TOKENS.has(lower) || DOSE_FRACTION_ARTICLES.has(lower) ||
-      INSTRUCTION_NOMINAL_ARTICLES.has(lower)) {
-    relation = context.tokens[index - 2];
-    if (!relation) return false;
-    lower = normalizeTokenLower(relation);
+  const firstPossible = Math.max(0, index - MAX_EVENT_TIMING_EXPRESSION_PARTS + 1);
+  for (let start = index; start >= firstPossible; start--) {
+    let relation = context.tokens[start - 1];
+    if (!relation) continue;
+    let lower = normalizeTokenLower(relation);
+    if (EVENT_ARTICLE_TOKENS.has(lower) || DOSE_FRACTION_ARTICLES.has(lower) ||
+        INSTRUCTION_NOMINAL_ARTICLES.has(lower)) {
+      relation = context.tokens[start - 2];
+      if (!relation) continue;
+      lower = normalizeTokenLower(relation);
+    }
+    if (resolveAdviceRelationSurface(lower) === AdviceRelation.Without) {
+      if (start === index) return true;
+      // The declared event nominal remains one daughter under WITHOUT;
+      // its final generic noun cannot independently schedule an administration.
+      const expression = eventExpressionPartsAt(context, start);
+      const event = resolveEventTimingExpression(expression.parts);
+      if (event && start + event.length > index) return true;
+    }
+    // Ordinary non-event tokens keep the existing immediate relation lookup.
+    if (start === index && !EVENT_TIMING_TOKENS[normalizeTokenLower(context.tokens[index])]) return false;
   }
-  return resolveAdviceRelationSurface(lower) === AdviceRelation.Without;
+  return false;
+}
+
+
+/** A relation selecting a declared compound MealState owns its complete
+ * nominal, including a final noun which independently names an event. */
+export function qualifiedEventAdviceAt(context: HpsgClauseContext, index: number):
+  { start: number; end: number } | undefined {
+  const last = context.tokens[index];
+  if (!last || !EVENT_TIMING_TOKENS[normalizeTokenLower(last)]) return undefined;
+  const nominal = resolveCompoundAdviceNominalEndingAt(context.tokens, index + 1);
+  if (nominal?.argument.role !== AdviceArgumentRole.MealState) return undefined;
+  let start = nominal.start - 1;
+  if (context.tokens[start] && INSTRUCTION_NOMINAL_ARTICLES.has(normalizeTokenLower(context.tokens[start]))) start--;
+  const relation = context.tokens[start];
+  if (!relation || !(mealRelationFromToken(normalizeTokenLower(relation)) ||
+      resolveAdviceRelationSurface(normalizeTokenLower(relation)) === AdviceRelation.Without)) return undefined;
+  for (let cursor = start; cursor <= index; cursor++)
+    if (context.state.consumed.has(context.tokens[cursor].index)) return undefined;
+  return { start, end: index + 1 };
 }
 
 const BASE_MEAL_EVENTS = new Set<EventTiming>([
@@ -2235,7 +2269,7 @@ export function eventOffsetRule(): HpsgLexicalRule<HpsgClauseContext> {
 export function eventTimingPhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.eventPhrase", (context, start) => {
     const first = tokensAvailable(context, start, 1)?.[0];
-    if (!first || isNegatedEventComplement(context, start)) {
+    if (!first || isNegatedEventComplement(context, start) || qualifiedEventAdviceAt(context, start)) {
       return [];
     }
     const firstLower = normalizeTokenLower(first);
@@ -3306,7 +3340,8 @@ export function isScheduleLead(context: HpsgClauseContext, index: number): boole
     return false;
   }
   const lower = normalizeTokenLower(token);
-  if (EVENT_TIMING_TOKENS[lower]) return !isNegatedEventComplement(context, index);
+  if (EVENT_TIMING_TOKENS[lower]) return !isNegatedEventComplement(context, index) &&
+    !qualifiedEventAdviceAt(context, index);
   if (monthlyOrdinalWeekdaySign(context, index)) return true;
   // A licensed IN + measured interval locates the omitted-unit dose.
   // The existing timing sign still excludes procedure-owned durations.
