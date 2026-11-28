@@ -108,7 +108,8 @@ export function standardTimingCodingFromSig(code: string | undefined): { system:
 }
 
 const AFTERNOON_TIMING_PREVIEW: typeof TIMING_ABBREVIATIONS[string] = {
-  code: EventTiming.Afternoon, when: [EventTiming.Afternoon]
+  // Standard PM combines the existing daily cadence with its afternoon anchor.
+  code: TIMING_ABBREVIATIONS.qd.code, when: [EventTiming.Afternoon]
 };
 
 const BEDTIME_TIMING_PREVIEW: typeof TIMING_ABBREVIATIONS[string] = {

@@ -417,6 +417,12 @@ interface FrequencyDisplay {
   codePeriod?: { period: number; periodUnit: FhirPeriodUnit };
 }
 
+/** A composed code supplies its cadence label only in the absence of selected positions. */
+function timingPreviewCadenceCode(code: string, schedule: CanonicalScheduleExpr): string {
+  return !schedule.when?.length && !schedule.timeOfDay?.length
+    ? timingPreviewDescriptor(code)?.code ?? code : code;
+}
+
 /** Select clinical display meaning once; each locale retains its wording. */
 export function frequencyDisplay(
   schedule: CanonicalScheduleExpr | undefined, uppercaseTimingCode = false
@@ -427,7 +433,9 @@ export function frequencyDisplay(
   const period = schedule?.period;
   const periodMax = schedule?.periodMax;
   const periodUnit = schedule?.periodUnit;
-  const timingCode = uppercaseTimingCode ? schedule?.timingCode?.toUpperCase() : schedule?.timingCode;
+  let timingCode = uppercaseTimingCode ? schedule?.timingCode?.toUpperCase() : schedule?.timingCode;
+  if (timingCode?.toUpperCase() === "QOD" && timingCodeMatchesRecurrence(schedule!))
+    return { mode: "alternate-days", countPrefix: "none" };
   const hours = timingCode ? TIMING_CODE_HOURLY_PERIODS[timingCode.toUpperCase()] : undefined;
   if (hours && !schedule?.when?.length && !schedule?.timeOfDay?.length &&
       frequencyMax === undefined && periodMax === undefined &&
@@ -479,6 +487,7 @@ export function frequencyDisplay(
       if (periodMax !== undefined && periodMax !== period) rangeEnd = periodMax;
     }
   } else if (timingCode && timingCodeMatchesRecurrence(schedule!)) {
+    timingCode = timingPreviewCadenceCode(timingCode, schedule!);
     switch (timingCode.toUpperCase()) {
       case "BID": case "TID": case "QID": case "QD": case "QOD": case "WK": case "MO":
         mode = "code";
@@ -1291,9 +1300,10 @@ export function timingCodeMatchesRecurrence(
       schedule.periodMax === undefined && schedule.periodUnit === undefined;
   }
   const hours = TIMING_CODE_HOURLY_PERIODS[code.toUpperCase()];
-  if (hours && !schedule.when?.length && !schedule.timeOfDay?.length &&
+  const codedCadence = hours ? 24 / hours : code === "QOD" ? daily : undefined;
+  if (codedCadence !== undefined && !schedule.when?.length && !schedule.timeOfDay?.length &&
       schedule.frequencyMax === undefined && schedule.periodMax === undefined &&
-      matchesDailyCodeCadence(24 / hours, schedule)) return true;
+      matchesDailyCodeCadence(codedCadence, schedule)) return true;
   const frequency = code === "QOD" ? 1 : daily ?? interval!.frequency ?? 1;
   const period = code === "QOD" ? 2 : interval?.period ?? 1;
   const unit = interval?.periodUnit ?? FhirPeriodUnit.Day;
@@ -1348,8 +1358,10 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage, resolved
   } else if (hasDailyRecurrenceAcrossClocks(schedule)) {
     parts.push("daily");
   } else if (schedule.timingCode && !codeText && timingCodeMatchesRecurrence(schedule)) {
-    parts.push(schedule.timingCode);
-    codeEmitted = true;
+    const previewCode = timingPreviewCadenceCode(schedule.timingCode, schedule);
+    parts.push(previewCode);
+    // A composed descriptor still owns its independently selected event anchor.
+    codeEmitted = previewCode === schedule.timingCode;
   } else if (
     schedule.frequency === undefined && schedule.frequencyMax !== undefined &&
     schedule.periodUnit === FhirPeriodUnit.Day &&

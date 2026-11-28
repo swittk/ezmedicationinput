@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FhirR6DosageInstruction } from "../src";
-import { formatParseBatch, parseInstructionActions, importCanonicalCourse, FhirPeriodUnit, EventTiming } from "../src";
+import { formatParseBatch, parseInstructionActions, importCanonicalCourse, projectCanonicalCourse, FhirPeriodUnit, EventTiming } from "../src";
 import { buildInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { retainDraftSteps } from "../src/adapters/canonical-course";
 import { AdviceArgumentRole, AdvicePolarity } from "../src/types";
@@ -3868,7 +3868,7 @@ describe("independent coded timing previews", () => {
 
   it.each([
     ["AM", "in the morning", "ตอนเช้า"],
-    ["PM", "in the afternoon", "ตอนบ่าย"],
+    ["PM", "once daily in the afternoon", "วันละครั้ง ตอนบ่าย"],
     ["BED", "at bedtime", "ก่อนนอน"],
     ["bed", "at bedtime", "ก่อนนอน"],
   ])("retains the event in code-only %s long previews", (value, english, thai) => {
@@ -4032,4 +4032,101 @@ describe("independent cadence display ownership", () => {
       expect(projected?.repeat).toEqual(repeat);
       expect(projected?.repeat?.periodUnit).toBeUndefined();
     });
+});
+
+
+describe("reviewed coded aggregate and afternoon preview cadence", () => {
+  const gts = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+  const note = { url: "urn:clinic:timing-preview-note", valueString: "retained" };
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const query = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z",
+    timeZone: "UTC", limit: 3 };
+
+  it.each([
+    { label: "coded aggregate", coding: { system: gts, code: "QOD" }, frequency: 7, period: 14, alternate: true },
+    { label: "coded literal", coding: { system: gts, code: "QOD" }, frequency: 1, period: 2, alternate: true },
+    { label: "uncoded aggregate", coding: undefined, frequency: 7, period: 14, alternate: false },
+    { label: "foreign aggregate", coding: { system: "urn:clinic:timing", code: "QOD" }, frequency: 7, period: 14, alternate: false },
+    { label: "incompatible aggregate", coding: { system: gts, code: "QOD" }, frequency: 3, period: 14, alternate: false },
+    { label: "explicit clock aggregate", coding: { system: gts, code: "QOD" }, frequency: 7, period: 14,
+      alternate: false, clocks: ["08:00:00"] }
+  ])("selects the owned cadence for $label", ({ coding, frequency, period, alternate, ...fixture }) => {
+    const row = { extension: [note], doseAndRate: [{ doseQuantity: { value: 1, unit: "tab", extension: [note] } }],
+      timing: { ...(coding ? { code: { coding: [{ ...coding, extension: [note] }] } } : {}),
+        repeat: { frequency, period, periodUnit: FhirPeriodUnit.Day,
+          ...("clocks" in fixture ? { timeOfDay: fixture.clocks } : {}) } } };
+    const native = importCanonicalCourse(row), projection = projectCanonicalCourse(native);
+    for (const input of [native, fresh(projection.fhir), fresh(projection.fhirNext)]) {
+      const before = fresh(input), current = importCanonicalCourse(input).stages[0].administrations[0];
+      const enShort = formatSig(input, "short", { locale: "en", realizationMode: "normalized" });
+      const enLong = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const thShort = formatSig(input, "short", { locale: "th", realizationMode: "normalized" });
+      const thLong = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      if (alternate) {
+        expect(enShort).toBe("1 tab QOD");
+        expect(enLong).toBe("Use 1 tablet every other day.");
+        expect(thShort).toBe("1 เม็ด วันเว้นวัน");
+        expect(thLong).toBe("ใช้ครั้งละ 1 เม็ด วันเว้นวัน.");
+        expect(nextDueDoses(input, query)).toEqual([
+          "2027-01-01T09:00:00+00:00", "2027-01-03T09:00:00+00:00", "2027-01-05T09:00:00+00:00"
+        ]);
+        expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 4, durationUnit: FhirPeriodUnit.Day }))
+          .toMatchObject({ totalUnits: 2, unit: "tab" });
+      } else {
+        expect(enShort).toContain(frequency + "x/" + period + "d");
+        expect(enLong).toContain(frequency + " times every " + period + " days");
+        expect(thLong).toContain(frequency + " ครั้ง ทุก " + period + " วัน");
+        expect(enLong).not.toContain("every other day");
+        expect(thShort).not.toContain("วันเว้นวัน");
+      }
+      expect(current.schedule?.recurrence).toMatchObject({ frequency, period, periodUnit: "d" });
+      expect(current.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab", extension: [note] });
+      const wire = projectCanonicalCourse(importCanonicalCourse(input)).fhir[0];
+      expect(wire.timing).toEqual(row.timing);
+      expect(wire.extension).toContainEqual(note);
+      expect(input).toEqual(before);
+    }
+    const authored = { ...row, text: "One tablet according to the supplied timing." };
+    const saved = projectCanonicalCourse(importCanonicalCourse(authored));
+    expect(saved.fhir[0].text).toBe(authored.text);
+    expect(saved.fhir[0].timing).toEqual(row.timing);
+    expect(projectCanonicalCourse(importCanonicalCourse(fresh(saved.fhirNext))).fhir[0].text).toBe(authored.text);
+  });
+
+  it("retains both daily cadence and afternoon for current standard PM without inventing repeat fields", () => {
+    const row = { extension: [note], doseAndRate: [{ doseQuantity: { value: 1, unit: "tab", extension: [note] } }],
+      timing: { code: { coding: [{ system: gts, code: "PM", extension: [note] }] } } };
+    const native = importCanonicalCourse(row), projection = projectCanonicalCourse(native);
+    for (const input of [native, fresh(projection.fhir), fresh(projection.fhirNext)]) {
+      const before = fresh(input), current = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(formatSig(input, "short", { locale: "en", realizationMode: "normalized" })).toBe("1 tab QD AFT");
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Use 1 tablet once daily in the afternoon.");
+      expect(formatSig(input, "short", { locale: "th", realizationMode: "normalized" })).toBe("1 เม็ด วันละครั้ง ตอนบ่าย");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("ใช้ครั้งละ 1 เม็ด วันละครั้ง ตอนบ่าย.");
+      expect(current.schedule?.recurrence).toBeUndefined();
+      expect(current.schedule?.code).toEqual(row.timing.code);
+      expect(nextDueDoses(input, query)).toEqual([
+        "2027-01-01T15:00:00+00:00", "2027-01-02T15:00:00+00:00", "2027-01-03T15:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 4, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 4, unit: "tab" });
+      const wire = projectCanonicalCourse(importCanonicalCourse(input)).fhir[0];
+      expect(wire.timing).toEqual(row.timing);
+      expect(wire.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab", extension: [note] });
+      expect(wire.extension).toContainEqual(note);
+      expect(input).toEqual(before);
+    }
+    const authored = { ...row, text: "One tablet every afternoon." };
+    const saved = projectCanonicalCourse(importCanonicalCourse(authored));
+    expect(saved.fhir[0].text).toBe(authored.text);
+    expect(saved.fhir[0].timing).toEqual(row.timing);
+    expect(projectCanonicalCourse(importCanonicalCourse(fresh(saved.fhirNext))).fhir[0].text).toBe(authored.text);
+    const bare = parseBatch("Take 1 tablet PM");
+    expect(formatSig(bare.meta.canonical.course!, "long", { locale: "en", realizationMode: "normalized" }))
+      .toContain("in the evening");
+    expect(bare.meta.canonical.course?.stages[0].administrations[0].schedule?.recurrence?.anchors)
+      .toEqual([EventTiming.Evening]);
+  });
 });
