@@ -16623,3 +16623,16 @@ Current method text that selects a different registered action takes precedence 
 Postfix warnings reuse the selected HPSG guard, keeping measurement comparisons inside mixed Boolean conditions while independent medication limits retain their existing boundary. Regression coverage checks the complete warning condition, dose and cap ownership, authored source, and current native and wire forms.
 
 Locale lookup reuses normalized tags through one base-language owner. Typed FHIR bridge encoding avoids temporary scalar objects and singleton arrays while retaining primitive annotations, unknown fields and declared ordering. Bounded member supply calculations use fresh copies with direct overrides; clinical preflight, chronology and input immutability remain intact.
+
+
+## 2026-11-28 — Preserve quantity ranges and selected clinical ownership
+
+Clinical quantity composition retains real range endpoints through weight and time denominators. Division applies once at the existing complement owner, preserving independent infusion rates and authored denominator values. Explicit range rates retain their known facts without inventing an administered dose, cadence or duration.
+
+Fronted measurement conditions and retrospective dose-count conditions keep their selected guard extent. Complete independent maxima, registered early-morning phrases and anchored anatomical phrases retain their existing grammar boundaries. Lexical readers honor the exclusive chart window.
+
+Exact successor phases use the selected replacement relationship. Signed event offsets preserve the nominal recurrence origin and the separate actual eligibility boundary. Registered weekly and monthly timing codes reuse calendar cadence and configured clocks; partial event weekday checks use the nominal anchor while actual instants retain query and exclusion boundaries.
+
+Current FHIR conversion preserves periodMax-only units, nested Quantity annotations, uninterpreted component occurrences, compatible anatomical refinements and recoverable route codings. Annotated UCUM identities compare without changing the supplied quantities.
+
+Preview composition retains ordered doses, localized appointment times, recurring weekdays and independent dilution roles. Object attachment follows the selected Site relation, and definite warning matching requires an affirmative unmodal cause on that same frame. Shared allowances appear once on each selectable path. Meaningful tests retain authored source, current structured facts and independent native and wire outcomes.
