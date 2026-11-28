@@ -1325,3 +1325,58 @@ describe("reviewed current amount coverage after object reconciliation", () => {
     }
   });
 });
+
+
+describe("scoped alcohol compound warning evidence", () => {
+  const prefix = "Take 1 tablet daily. May cause drowsiness. If affected do not drive or operate machinery. ";
+  const query = { from: "2026-11-23T00:00:00Z", orderedAt: "2026-11-23T00:00:00Z", timeZone: "UTC", limit: 2 };
+  it.each([
+    { tail: "Avoid alcohol if dizzy.", compound: false, conditional: true },
+    { tail: "If dizzy, avoid alcohol.", compound: false, conditional: true },
+    { tail: "Avoid alcohol before bed.", compound: false, conditional: false },
+    { tail: "Do not drink alcohol if dizzy.", compound: false, conditional: true },
+    { tail: "Avoid alcohol.", compound: true, conditional: false },
+    { tail: "Avoid alcohol if dizzy. Avoid alcohol.", compound: true, conditional: true }
+  ])("requires an unscoped alcohol witness for $tail", ({ tail, compound, conditional }) => {
+    const source = prefix + tail, parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input), projected = projectCanonicalCourse(course);
+      const member = course.stages[0].administrations[0], graph = member.syntax?.instructionGraph;
+      expect(member.amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day });
+      for (const rows of [projected.fhir[0].additionalInstruction ?? [],
+        projected.fhirNext.step![0].component![0].additionalInstruction ?? []]) {
+        const codes = rows.flatMap(row => row.coding?.map(coding => coding.code) ?? []);
+        expect(codes.includes("418914006")).toBe(compound);
+        expect(codes.includes("419822006")).toBe(compound);
+        expect(codes).toContain("418954008");
+        expect(codes).not.toContain("418071006");
+      }
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(english).toMatch(/May cause drowsiness/i);
+      expect(english).toMatch(/if affected,? (?:do not|don't) drive or operate machinery/i);
+      if (conditional) {
+        const edge = graph?.relations?.find(relation => /if dizzy/i.test(relation.text ?? ""));
+        expect(edge?.kind).toBe(AdviceRelation.If);
+        expect(graph?.actions[edge!.toActionIndex].predicate.lemma).toBe(tail.startsWith("Do not") ? "drink" : "avoid");
+        expect(source.slice(edge!.span!.start, edge!.span!.end)).toMatch(/if dizzy/i);
+        expect(english).toMatch(/if dizzy/i);
+        expect(thai).toContain("ถ้าเวียนศีรษะ");
+      }
+      if (tail === "Avoid alcohol before bed.") {
+        expect(english).toContain("avoid alcohol before bedtime");
+        expect(thai).toContain("ก่อนนอน");
+      }
+      if (!compound) expect(english.match(/alcohol/gi)).toHaveLength(1);
+      expect(nextDueDoses(input, query)).toEqual(["2026-11-23T09:00:00+00:00", "2026-11-24T09:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      expect(course.instruction).toBe(source);
+      expect(projected.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+});

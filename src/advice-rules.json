@@ -931,7 +931,8 @@
                   "role": "substance"
                 }
               ],
-              "polarity": "affirm"
+              "polarity": "affirm",
+              "relations": null
             }
           }
         ]
