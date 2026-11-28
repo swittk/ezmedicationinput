@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const ROOT_DIR = fileURLToPath(new URL("..", import.meta.url));
 const TAB_CONTEXT_LITERAL =
-  "{ tab: { singular: 'tablet', plural: 'tablets' } }";
+  "{ dosageForm: 'tablet' }";
 
 function runNode(args: string[], code: string): {
   parseSigType: string;
