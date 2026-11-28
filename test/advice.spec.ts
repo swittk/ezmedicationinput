@@ -1064,4 +1064,67 @@ describe("detached Continue complement ownership", () => {
     } else expect(input.renderedInstruction).toBe(source);
     expect(JSON.stringify(input)).toBe(before);
   });
+
+  it.each([
+    { instruction: "Continue taking medicine for another 5 days.", duration: "for another 5 days",
+      quantity: { value: 5, unit: "d" }, days: 5, kind: "medication", enDuration: "5 days", thDuration: "5 วัน" },
+    { instruction: "Continue for another week.", duration: "for another week",
+      quantity: { value: 1, unit: "wk" }, days: 7, kind: "medication", enDuration: "1 week", thDuration: "1 สัปดาห์" },
+    { instruction: "Continue for an additional week.", duration: "for an additional week",
+      quantity: { value: 1, unit: "wk" }, days: 7, kind: "medication", enDuration: "1 week", thDuration: "1 สัปดาห์" },
+    { instruction: "Continue for 5 more days.", duration: "for 5 more days",
+      quantity: { value: 5, unit: "d" }, days: 5, kind: "medication", enDuration: "5 days", thDuration: "5 วัน" },
+    { instruction: "กินต่อเนื่องเป็นเวลาอีก 5 วัน.", duration: "เป็นเวลาอีก 5 วัน",
+      quantity: { value: 5, unit: "d" }, days: 5, kind: "thai", enDuration: "5 days", thDuration: "5 วัน" },
+    { instruction: "Continue for the next 5 days.", duration: "for the next 5 days",
+      quantity: { value: 5, unit: "d" }, days: 5, kind: "medication", enDuration: "5 days", thDuration: "5 วัน" },
+    { instruction: "Continue doing breathing exercises for another 5 minutes.", duration: undefined,
+      quantity: undefined, days: 8, kind: "activity", enDuration: undefined, thDuration: undefined },
+    { instruction: "May continue for another 5 days.", duration: "for another 5 days",
+      quantity: { value: 5, unit: "d" }, days: 8, kind: "modal", enDuration: "5 days", thDuration: "5 วัน" }
+  ])("retains count-modified Continue ownership: $instruction", fixture => {
+    const source = (fixture.kind === "thai" ? "รับประทาน 2 เม็ด วันละครั้ง. " : "Take 2 tablets daily. ") + fixture.instruction;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    for (const input of [parsed.meta.canonical.course!,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages.flatMap(stage => stage.administrations)).toHaveLength(1);
+      const member = course.stages[0].administrations[0];
+      expect(member.amounts![0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(member.schedule?.recurrence?.anchors ?? []).toEqual([]);
+      if (fixture.kind === "medication" || fixture.kind === "thai") {
+        expect(member.schedule?.recurrence?.courseLength).toMatchObject({ value: fixture.quantity!.value });
+      } else {
+        expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
+        expect(member.anchoredLength).toBeUndefined();
+      }
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      if (fixture.kind === "activity") {
+        expect(en).toBe("Take 2 tablets orally once daily. " + fixture.instruction);
+        expect(th).toBe("รับประทานครั้งละ 2 เม็ด วันละครั้ง. " + fixture.instruction);
+      } else {
+        const action = member.syntax?.instructionGraph?.actions.find(frame => frame.predicate.lemma === "continue-treatment");
+        expect(action?.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Duration,
+          text: fixture.duration, quantity: fixture.quantity,
+          span: { start: source.indexOf(fixture.duration!), end: source.indexOf(fixture.duration!) + fixture.duration!.length } }));
+        const head = fixture.kind === "modal" ? "May continue" : "Continue";
+        expect(en).toContain(`${head} taking medication for ${fixture.enDuration}`);
+        expect(th).toContain(`กินต่อเนื่อง${fixture.thDuration}`);
+        if (fixture.kind === "modal") {
+          expect(action?.modality).toBe(AdviceModality.May);
+          expect(th).toContain("อาจกินต่อเนื่อง");
+        }
+      }
+      expect(nextDueDoses(input, query)).toEqual(dates.slice(0, fixture.days));
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: fixture.days * 2, unit: "tab" });
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
 });

@@ -4,7 +4,7 @@ import { ParserState } from "../parser-state";
 import { FhirPeriodUnit } from "../types";
 import {
   COUNT_CONNECTOR_WORDS_DATA,
-  COURSE_CONTINUATION_MODIFIERS, DURATION_LEAD_TOKENS, EVENT_ARTICLE_TOKENS,
+  COURSE_CONTINUATION_MODIFIERS, DURATION_LEAD_TOKENS, EVENT_ARTICLE_TOKENS, EVENT_OFFSET_ARTICLES,
   OCCURRENCE_COUNT_MODIFIERS, normalizeTokenLower,
   COUNT_MARKER_TOKENS_DATA,
   EVERY_INTERVAL_TOKENS_DATA,
@@ -223,19 +223,27 @@ export function followingCourseDurationHeaderAt(tokens: readonly LexToken[], sta
   const lead = tokens[start];
   if (!lead || !DURATION_LEAD_TOKENS.has(normalizeTokenLower(lead))) return undefined;
   let cursor = start + 1;
-  if (tokens[cursor] && EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(tokens[cursor]))) cursor++;
-  const modifier = tokens[cursor];
-  if (!modifier || !COURSE_CONTINUATION_MODIFIERS.has(normalizeTokenLower(modifier))) return undefined;
-  const valueIndex = cursor + 1;
+  const article = tokens[cursor] && normalizeTokenLower(tokens[cursor]);
+  const hasArticle = Boolean(article && EVENT_OFFSET_ARTICLES.has(article));
+  const articleModifiesCount = Boolean(article && hasArticle && OCCURRENCE_COUNT_MODIFIERS.has(article));
+  if (hasArticle || article && EVENT_ARTICLE_TOKENS.has(article)) cursor++;
+  const modifier = tokens[cursor] && normalizeTokenLower(tokens[cursor]);
+  const followingCourse = Boolean(modifier && COURSE_CONTINUATION_MODIFIERS.has(modifier));
+  const hasFollowingModifier = followingCourse || Boolean(modifier && OCCURRENCE_COUNT_MODIFIERS.has(modifier));
+  if (hasFollowingModifier) cursor++;
+  const hasModifier = articleModifiesCount || hasFollowingModifier;
+  const valueIndex = cursor;
   const value = tokens[valueIndex];
-  // "for the next week" names one week without repeating "one".
-  if (value && mapIntervalUnit(normalizeTokenLower(value))) {
+  // A qualified unit, such as "the next week" or "another week", names one.
+  if (hasModifier && (hasArticle || followingCourse) && value && mapIntervalUnit(normalizeTokenLower(value))) {
     return { valueIndex, tokenEnd: valueIndex + 1, implicitSingle: true };
   }
   if (!value || !(value.kind === LexKind.Number || value.kind === LexKind.NumberRange ||
       FREQUENCY_NUMBER_WORDS[normalizeTokenLower(value)] !== undefined)) return undefined;
   let unitIndex = valueIndex + 1;
-  if (tokens[unitIndex] && OCCURRENCE_COUNT_MODIFIERS.has(normalizeTokenLower(tokens[unitIndex]))) unitIndex++;
+  const trailingModifier = tokens[unitIndex] && OCCURRENCE_COUNT_MODIFIERS.has(normalizeTokenLower(tokens[unitIndex]));
+  if (!hasModifier && !trailingModifier) return undefined;
+  if (trailingModifier) unitIndex++;
   const unit = tokens[unitIndex];
   if (!unit || !mapIntervalUnit(normalizeTokenLower(unit))) return undefined;
   return { valueIndex, tokenEnd: unitIndex + 1 };
