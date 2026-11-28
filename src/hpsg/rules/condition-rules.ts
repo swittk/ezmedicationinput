@@ -9,7 +9,7 @@ import {
 } from "../../date-interpretation";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
-import { parseMedicationGuard, scopeMedicationGuardSign, type ParsedMedicationGuard } from "../constructions";
+import { guardHasMeasurement, parseMedicationGuard, scopeMedicationGuardSign, type ParsedMedicationGuard } from "../constructions";
 import {
   relationHasGrammarFeature,
   resolveActionRelationSurface
@@ -837,22 +837,14 @@ function conditionTokens(
 }
 
 
-/** Numeric comparisons own their operator phrases, including surface forms
- * that also introduce dosage caps in another grammatical position. */
-function isQuantifiedCondition(condition: MedicationCondition): boolean {
-  if (condition.kind === "measurement") return true;
-  if (condition.kind === "not") return isQuantifiedCondition(condition.condition);
-  if (condition.kind === "all" || condition.kind === "any") {
-    return condition.conditions.length > 0 && condition.conditions.every(isQuantifiedCondition);
-  }
-  return false;
-}
-
-function postfixConditionEnd(context: HpsgClauseContext, start: number): number {
+/** A selected measurement keeps its comparison inside the complete Boolean
+ * predicate, including when another daughter is a state or opaque condition. */
+function postfixConditionEnd(
+  context: HpsgClauseContext, start: number, guard: ParsedMedicationGuard | undefined
+): number {
   const first = context.tokens[start];
   if (!first) return 0;
-  const guard = medicationGuardForContext(context);
-  const comparisonEnd = guard?.start === first.sourceStart && isQuantifiedCondition(guard.condition)
+  const comparisonEnd = guard?.start === first.sourceStart && guardHasMeasurement(guard.condition)
     ? guard.end : first.sourceStart;
   let end = context.state.input.length;
   // A postfix predicate ends before the next coordinated action clause.
@@ -1000,7 +992,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return sign ? [sign] : [];
     }
     if (gap.trim() && !explicitlySequences(context, previous.span.end, lead.sourceStart)) return [];
-    const conditionEnd = postfixConditionEnd(context, start);
+    const conditionEnd = postfixConditionEnd(context, start, guard);
     const tokens = conditionTokens(context, lead.sourceStart, conditionEnd);
     if (!tokens.length) return [];
     const sourceEnd = Math.max(...tokens.map((token) => token.sourceEnd));

@@ -4648,3 +4648,50 @@ describe("current guard and postfix action ownership", () => {
     expect(JSON.stringify(parsed)).toBe(saved);
   });
 });
+
+
+describe("measurement comparisons inside mixed postfix advice guards", () => {
+  it.each([
+    { condition: "if SBP no more than 160 and dizzy", measurement: true, state: true },
+    { condition: "if SBP no more than 160", measurement: true, state: false },
+    { condition: "if SBP <= 160 and dizzy", measurement: true, state: true },
+    { condition: "if dizzy", measurement: false, state: true }
+  ])("keeps the complete $condition on Drive beside an independent medication cap", fixture => {
+    const source = "Take 1 tablet daily, maximum 2 tablets per day; Do not drive " + fixture.condition;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      const medication = members.filter(member => member.amounts?.some(amount =>
+        amount.quantity?.value === 1 && amount.quantity.unit === "tab"));
+      expect(medication).toHaveLength(1);
+      const member = medication[0];
+      expect(member.predicate).toBeUndefined();
+      expect(member.asNeeded).not.toBe(true);
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(member.limits).toHaveLength(1);
+      expect(member.limits![0]).toMatchObject({ scope: "period", amount: { value: 2, unit: "tab" },
+        period: { value: 1, unit: "d" } });
+      const graph = member.syntax!.instructionGraph!;
+      const drives = graph.actions.map((action, index) => ({ action, index }))
+        .filter(({ action }) => action.predicate.lemma === "drive");
+      expect(drives).toHaveLength(1);
+      expect(drives[0].action.polarity).toBe(AdvicePolarity.Negate);
+      const conditions = graph.relations?.filter(relation => relation.kind === AdviceRelation.If &&
+        relation.toActionIndex === drives[0].index && relation.fromActionIndex === undefined);
+      expect(conditions).toHaveLength(1);
+      expect(conditions![0].text).toBe(fixture.condition);
+      expect(source.slice(conditions![0].span!.start, conditions![0].span!.end)).toBe(fixture.condition);
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en.toLowerCase().match(/do not drive/gu)).toHaveLength(1);
+      if (fixture.measurement) { expect(en).toContain("160"); expect(th).toContain("160"); }
+      if (fixture.state) { expect(en).toContain("dizzy"); expect(th.includes("เวียนศีรษะ") || th.includes("dizzy")).toBe(true); }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+});
