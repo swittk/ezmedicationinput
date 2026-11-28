@@ -6969,8 +6969,8 @@ describe("current FHIR header and annotation ownership", () => {
 
 
 describe("fresh coded measurement and spatial target identity", () => {
-  it("retains an exact code-only SBP threshold through native and both wire consumers", () => {
-    const condition = { id: "sbp-threshold", code: { coding: [
+  it.each([undefined, "Systolic blood pressure"])("retains an exact coded SBP threshold beside label %s through native and both wire consumers", label => {
+    const condition = { id: "sbp-threshold", code: { ...(label ? { text: label } : {}), coding: [
       { system: "urn:ezmedicationinput:CodeSystem:medication-condition", code: "measurement" },
       { system: "http://loinc.org", code: "8480-6", _code: { id: "sbp-code" } }
     ] }, operation: "gt" as const, _operation: { id: "comparison" },
@@ -7006,7 +7006,8 @@ describe("fresh coded measurement and spatial target identity", () => {
 
   it("keeps authored measurement labels and unresolved foreign measurement codes", () => {
     for (const [coding, text, expected] of [
-      [{ system: "http://loinc.org", code: "8480-6" }, "clinic systolic reading", "clinic systolic reading"],
+      [{ system: "http://loinc.org", code: "8480-6" }, "clinic systolic reading", "sbp"],
+      [{ system: "urn:clinic:measurement", code: "8480-6" }, "clinic systolic reading", "clinic systolic reading"],
       [{ system: "urn:clinic:measurement", code: "8480-6" }, undefined, undefined]
     ] as const) {
       const condition = { code: { coding: [coding], ...(text ? { text } : {}) }, operation: "gt" as const,
@@ -7016,6 +7017,7 @@ describe("fresh coded measurement and spatial target identity", () => {
       const predicate = importCanonicalCourse(input).stages[0].administrations[0].predicate;
       expect(predicate).toMatchObject(expected ? { kind: "measurement", name: expected, value: 160 }
         : { kind: "text", text: "Unresolved condition" });
+      if (text) expect(predicate?.text).toBe(text);
       expect(toDosageDetails(toFhirR5Dosages(input)).step[0].component[0].condition).toEqual([condition]);
       expect(JSON.stringify(input)).toBe(before);
     }
@@ -7625,7 +7627,7 @@ describe("review814 primary quantity and precise clock-window previews", () => {
       expect(row.doseAndRate![0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
       expect(row.doseAndRate![0].extension).toContainEqual(note);
       expect(row.additionalInstruction![0].text).toBe("Otherwise hold.");
-      expect(getDosageCondition(row)).toMatchObject({ kind: "measurement", name: "SBP", operation: "gt", value: 160 });
+      expect(getDosageCondition(row)).toMatchObject({ kind: "measurement", name: "sbp", operation: "gt", value: 160 });
     }
     expect(JSON.stringify(input)).toBe(before);
   });
@@ -7644,12 +7646,15 @@ describe("review814 primary quantity and precise clock-window previews", () => {
       en: "Current: Use; Dose (ordered): 1 tablet only if SBP > 160. Otherwise hold; original directions: Take 1 tablet.",
       th: "ปัจจุบัน: ใช้; ขนาดยา (ordered): ครั้งละ 1 เม็ด เฉพาะเมื่อ SBP > 160. Otherwise hold; ข้อความเดิม: Take 1 tablet."
     };
-    for (const view of [course, fresh([row]), fresh(projectCanonicalCourse(course).fhirNext)]) {
+    for (const [view, name] of [[course, "SBP"], [fresh([row]), "SBP"],
+      [fresh(projectCanonicalCourse(course).fhirNext), "sbp"]] as const) {
       const snapshot = JSON.stringify(view);
       for (const locale of ["en", "th"] as const)
         expect(formatSig(view, "long", { locale, realizationMode: "normalized" })).toBe(expected[locale]);
       const retained = importCanonicalCourse(view).stages[0].administrations[0];
-      expect(retained.predicate).toEqual(predicate);
+      expect(retained.predicate).toMatchObject({ kind: "measurement", name, operation: "gt", value: 160, text: "SBP > 160" });
+      expect(evaluateMedicationCondition(retained.predicate!, { [name]: 170 })).toBe(true);
+      expect(evaluateMedicationCondition(retained.predicate!, { [name]: 160 })).toBe(false);
       expect(retained.text).toBe(source);
       expect(retained.amounts?.[0]).toMatchObject({ role: { coding: [{ code: "ordered" }] }, quantity: { value: 1, unit: "tab" } });
       const projected = projectCanonicalCourse(importCanonicalCourse(view)).fhir[0];
@@ -8459,4 +8464,67 @@ it.each([
     expect(wire.fhirNext.step[0].component[0].doseAndRate).toEqual(input.step[0].component[0].doseAndRate);
   }
   expect(JSON.stringify(input)).toBe(before);
+});
+
+
+describe("fresh extension field ownership", () => {
+  it.each([false, true])("retains the spatial target child independently of concept annotations: %s", annotated => {
+    const target = { ...(annotated ? { id: "target-concept" } : {}), text: "right eye", coding: [
+      { system: "http://snomed.info/sct", code: "1290032005", ...(annotated ? { _code: { id: "target-code" } } : {}) }
+    ] };
+    const child: FhirR6Extension = { id: "site-target", url: "target", valueCodeableConcept: target };
+    const site = { extension: [{ url: BODY_SITE_SPATIAL_RELATION_EXTENSION_URL, extension: [
+      { url: "relationText", valueString: "around" }, child
+    ] }] };
+    const input: FhirR6DosageInstruction = { renderedInstruction: "Apply 1 g around the right eye", step: [{ component: [{
+      site: { concept: site }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }]
+    }] }] };
+    const before = JSON.stringify(input), relation = parseBodySiteSpatialRelationExtension(site)!;
+    for (const current of [relation, cloneBodySiteSpatialRelation(relation)!]) {
+      expect(buildBodySiteSpatialRelationExtension(current)!.extension!.find(field => field.url === "target")).toEqual(child);
+    }
+    const rows = JSON.parse(JSON.stringify(toFhirR5Dosages(input)));
+    const restored = JSON.parse(JSON.stringify(toDosageDetails(rows)));
+    for (const current of [importCanonicalCourse(input), importCanonicalCourse(rows), importCanonicalCourse(restored)]) {
+      const member = current.stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "g" });
+      expect(buildBodySiteSpatialRelationExtension(member.siteSpatialRelation)!.extension!
+        .find(field => field.url === "target")).toEqual(child);
+      expect(formatCanonicalCourse(current, "long", { locale: "en", realizationMode: "normalized" })).toContain("around the right eye");
+    }
+    expect(restored.renderedInstruction).toBe(input.renderedInstruction);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(["absent", "annotated", "authored"] as const)("retains %s graph source text without inventing a string", mode => {
+    const source: FhirExtension | undefined = mode === "absent" ? undefined : mode === "annotated"
+      ? { url: "sourceText", _valueString: { id: "graph-source-note", extension: [
+          { url: "urn:clinic:source-note", valueString: "Source retained on the action" }
+        ] } }
+      : { url: "sourceText", valueString: "Swallow 1 tablet whole" };
+    const action: FhirExtension = { url: "action", extension: [
+      { url: "predicateLemma", valueString: "swallow" }, { url: "force", valueCode: AdviceForce.Instruction },
+      { url: "sourceText", valueString: "Swallow 1 tablet whole" },
+      { url: "spanStart", valueInteger: 0 }, { url: "spanEnd", valueInteger: 22 },
+      { url: "argument", extension: [
+        { url: "role", valueCode: AdviceArgumentRole.Amount }, { url: "text", valueString: "1 tablet" },
+        { url: "quantity", extension: [{ url: "value", valueDecimal: 1 }, { url: "unit", valueString: "tab" }] }
+      ] }
+    ] };
+    const marker: FhirExtension = { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: [
+      ...(source ? [source] : []), { url: "sourceLocale", valueCode: "en" }, action,
+      { url: "urn:clinic:graph-note", valueString: "Keep independent annotation" }
+    ] };
+    const before = JSON.stringify(marker), graph = parseInstructionGraphExtension([marker])!;
+    expect(graph.actions[0].sourceText).toBe("Swallow 1 tablet whole");
+    expect(graph.sourceLocale).toBe("en");
+    const projected = buildInstructionGraphExtension(graph)!;
+    expect(projected.extension!.filter(field => field.url === "sourceText")).toEqual(source ? [source] : []);
+    expect(projected.extension).toContainEqual({ url: "sourceLocale", valueCode: "en" });
+    expect(projected.extension).toContainEqual({ url: "urn:clinic:graph-note", valueString: "Keep independent annotation" });
+    const restored = parseInstructionGraphExtension(JSON.parse(JSON.stringify([projected])))!;
+    expect(restored.actions[0].sourceText).toBe("Swallow 1 tablet whole");
+    expect(restored.actions[0].args[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(JSON.stringify(marker)).toBe(before);
+  });
 });

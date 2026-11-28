@@ -779,7 +779,7 @@ export function clinicalCarrierQuantityFromFhir(
  * @param repeat Editable FHIR timing currently being lowered.
  */
 function normalizeClockFrequency(repeat: FhirTimingRepeat): void {
-  if (repeat.frequency !== undefined ||
+  if (repeat.frequency !== undefined || repeat.frequencyMax !== undefined ||
       repeat.extension?.find(item => item.url === TIMING_FREQUENCY_MIN_EXTENSION_URL)?.valueInteger !== undefined ||
       !repeat.period || !repeat.periodUnit ||
       (repeat.timeOfDay?.length ?? 0) < 2 || repeat.when?.length) return;

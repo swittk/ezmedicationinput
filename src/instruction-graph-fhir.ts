@@ -383,7 +383,7 @@ export function buildInstructionGraphExtension(
 ): FhirExtension | undefined {
   if (!graph || (!graph.actions.length && !graph.opaqueSpans?.length)) return undefined;
   const nested: FhirExtension[] = [];
-  add(nested, valueString("sourceText", graph.sourceText));
+  if (graph.sourceText) add(nested, valueString("sourceText", graph.sourceText));
   add(nested, valueCode("sourceLocale", graph.sourceLocale));
   add(nested, valueInteger("primaryAdministrationStart", graph.primaryAdministrationSpan?.start));
   add(nested, valueInteger("primaryAdministrationEnd", graph.primaryAdministrationSpan?.end));
@@ -456,7 +456,9 @@ export function buildInstructionGraphExtension(
   if (graph.sourceExtensions) for (const field of graph.sourceExtensions) {
     if (field.url === "sourceText") {
       const { valueString: _sourceText, ...annotations } = field;
-      nested[0] = { ...annotations, ...(graph.sourceText ? { valueString: graph.sourceText } : {}) };
+      const current = { ...annotations, ...(graph.sourceText ? { valueString: graph.sourceText } : {}) };
+      if (graph.sourceText) nested[0] = current;
+      else nested.push(current);
     } else if (field.url === "graphRelation") {
       // An uninterpreted relation is a complete sibling, not annotations on
       // the first recognized relation with the same repeated field name.

@@ -51,6 +51,7 @@ export interface FhirExtension {
   valueMarkdown?: string;
   _valueMarkdown?: FhirPrimitiveElement;
   valueDate?: string;
+  _valueDate?: FhirPrimitiveElement;
   valueBoolean?: boolean;
   _valueBoolean?: FhirPrimitiveElement;
   valueInteger?: number;
@@ -80,12 +81,13 @@ export interface FhirExtension {
 /** R6 Extension values retain their native datatype contracts. */
 export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity" | "valueDuration" | "valueRatio" | "valueTiming" | "valueReference" | "valueCodeableReference" |
   "valueCoding" | "valueCodeableConcept" | "valueRange" | "valueExpression" | "valuePeriod" |
-  "_valueCode" | "_valueString" | "_valueMarkdown" | "_valueDecimal" | "_valueTime" | "_valueInteger" | "_valueBoolean"> {
+  "_valueCode" | "_valueString" | "_valueMarkdown" | "_valueDecimal" | "_valueDate" | "_valueTime" | "_valueInteger" | "_valueBoolean"> {
   _valueBoolean?: FhirR6PrimitiveElement;
   _valueCode?: FhirR6PrimitiveElement;
   _valueString?: FhirR6PrimitiveElement;
   _valueMarkdown?: FhirR6PrimitiveElement;
   _valueDecimal?: FhirR6PrimitiveElement;
+  _valueDate?: FhirR6PrimitiveElement;
   _valueTime?: FhirR6PrimitiveElement;
   _valueInteger?: FhirR6PrimitiveElement;
   extension?: FhirR6Extension[];
@@ -990,6 +992,8 @@ export interface BodySiteSpatialRelation {
   targetCoding?: BodySiteCode;
   /** Complete supplied concept when one selected Coding cannot carry all its data. */
   targetConcept?: FhirR6CodeableConcept;
+  /** Annotations on the supplied target Extension, separate from its concept. */
+  targetSource?: FhirR6Extension;
   sourceText?: string;
 }
 

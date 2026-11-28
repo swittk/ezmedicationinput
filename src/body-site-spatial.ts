@@ -168,6 +168,11 @@ export function cloneBodySiteSpatialRelation(
     if (concept._text) targetConcept._text = cloneStructuredValue(concept._text);
     cloned.targetConcept = targetConcept;
   }
+  if (relation.targetSource) {
+    cloned.targetSource = { ...relation.targetSource, valueCodeableConcept: cloned.targetConcept };
+    if (relation.targetSource.extension)
+      cloned.targetSource.extension = cloneStructuredValue(relation.targetSource.extension);
+  }
   return cloned;
 }
 
@@ -186,7 +191,11 @@ export function buildBodySiteSpatialRelationExtension(
     children.push({ url: RELATION_TEXT_URL, valueString: relation.relationText });
   }
   if (relation.targetConcept) {
-    children.push({ url: TARGET_URL, valueCodeableConcept: spatialConceptForR5(relation.targetConcept) });
+    children.push({ ...relation.targetSource, url: TARGET_URL,
+      valueCodeableConcept: spatialConceptForR5(relation.targetConcept),
+      ...(relation.targetSource?.extension ? {
+        extension: quantityAnnotationExtensions(relation.targetSource.extension, "r5")
+      } : {}) } as FhirExtension);
     if (relation.targetConcept.text === undefined && relation.targetText !== undefined)
       children.push({ url: TARGET_TEXT_URL, valueString: relation.targetText });
   } else {
@@ -244,7 +253,14 @@ export function parseBodySiteSpatialRelationExtension(
   const targetCoding=selectPreferredSiteCoding(targetConcept);
   const targetText=targetConcept?.text??targetTextNode?.valueString;
   const sourceText=sourceNode?.valueString;
-  const retainedTarget = targetConcept && ((targetConcept.coding?.length ?? 0) > 1 ||
+  let targetSource: FhirR6Extension | undefined;
+  if (targetConcept && targetNode) for (const key in targetNode) {
+    if (key !== "url" && key !== "valueCodeableConcept") {
+      targetSource = targetNode;
+      break;
+    }
+  }
+  const retainedTarget = targetConcept && (targetSource || (targetConcept.coding?.length ?? 0) > 1 ||
     !targetCoding && targetConcept.coding?.length ||
     targetCoding && targetCoding.system === undefined && targetCoding._system === undefined ||
     Object.keys(targetConcept).some(key => key !== "coding" && key !== "text")) ? targetConcept : undefined;
@@ -259,6 +275,7 @@ export function parseBodySiteSpatialRelationExtension(
       ? { ...targetCoding, code: targetCoding.code }
       : undefined,
     ...(retainedTarget ? { targetConcept: retainedTarget } : {}),
+    ...(targetSource ? { targetSource } : {}),
     sourceText
   };
 }

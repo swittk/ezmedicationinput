@@ -7844,13 +7844,14 @@ describe("round60 interoperability ownership", () => {
         } },
       });
       const before = persist(clause), row = canonicalToFhir(clause);
-      expect(row.timing!.repeat!.frequency).toBe(minimum === 0 ? undefined : minimum ?? 2);
-      expect(canonicalFromFhir(row).schedule?.frequency).toBe(minimum ?? 2);
+      expect(row.timing!.repeat!.frequency).toBe(minimum === 0 ? undefined : minimum);
+      expect(row.timing!.repeat!.frequencyMax).toBe(2);
+      expect(canonicalFromFhir(row).schedule?.frequency).toBe(minimum);
       expect(row.timing!.repeat!.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
       let wire = toDosageDetails(persist([row]));
       for (let save = 0; save < 2; save++) {
         const recurrence = importCanonicalCourse(wire).stages[0].administrations[0].schedule!.recurrence!;
-        expect(recurrence.frequency).toBe(minimum ?? 2);
+        expect(recurrence.frequency).toBe(minimum);
         expect(recurrence.frequencyMax).toBe(2);
         expect(recurrence.clocks).toEqual(["08:00:00", "20:00:00"]);
         wire = toDosageDetails(persist(toFhirR5Dosages(wire)));

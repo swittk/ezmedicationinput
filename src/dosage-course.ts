@@ -752,8 +752,8 @@ function conditionFromR6(value: FhirR6DosageCondition): MedicationCondition {
   }
   problem ??= value.code?.text;
   const label = problem ?? value.code?.coding?.[0]?.display;
-  let name = problem;
-  if (name === undefined) for (const coding of value.code?.coding ?? []) {
+  let name: string | undefined;
+  for (const coding of value.code?.coding ?? []) {
     if (coding.system !== "http://loinc.org" || !coding.code) continue;
     name = CONDITION_MEASUREMENT_NAMES.get(coding.code);
     if (name !== undefined) break;

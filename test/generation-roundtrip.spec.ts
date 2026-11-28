@@ -6138,6 +6138,7 @@ describe("supported quantity-bearing annotation choices", () => {
     { name: "_valueMarkdown", wrap: quantity => ({ valueMarkdown: "Review **window**", _valueMarkdown: nested(quantity) }) },
     { name: "_valueDecimal", wrap: quantity => ({ valueDecimal: 2.5, _valueDecimal: nested(quantity) }) },
     { name: "_valueTime", wrap: quantity => ({ valueTime: "08:00:00", _valueTime: nested(quantity) }) },
+    { name: "_valueDate", wrap: quantity => ({ valueDate: "2026-12-15", _valueDate: nested(quantity) }) },
     { name: "_valueInteger", wrap: quantity => ({ valueInteger: 2, _valueInteger: nested(quantity) }) },
     { name: "_valueBoolean", wrap: quantity => ({ valueBoolean: true, _valueBoolean: nested(quantity) }) }
   ];

@@ -256,7 +256,11 @@ it("accepts typed current duration annotations and literal weekday codes from th
         // @ts-expect-error native approximate comparators are R6 only
         comparator: "~"
       } };
-      void [current, r5, invalidWeekday, invalidR5];
+      const r5Date: FhirExtension = { url: "urn:clinic:review-date", valueDate: "2026-12-15",
+        _valueDate: { id: "r5-review-date", extension: [{ url: "urn:clinic:note", valueString: "Review in clinic" }] } };
+      const r6Date: FhirR6Extension = { url: "urn:clinic:review-date", valueDate: "2026-12-15",
+        _valueDate: { id: "r6-review-date", extension: [annotation] } };
+      void [current, r5, invalidWeekday, invalidR5, r5Date, r6Date];
     `);
     execFileSync(process.execPath, [join(ROOT_DIR, "node_modules/typescript/bin/tsc"), "--noEmit", "--strict",
       "--skipLibCheck", "false", "--target", "ES2022", "--module", "ESNext", "--moduleResolution", "Bundler", entry],
