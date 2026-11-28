@@ -3615,3 +3615,114 @@ describe("negative meal complements with articles", () => {
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });
+
+
+describe("current anatomical labels and guarded infusion amounts", () => {
+  function currentViews(input: Parameters<typeof importCanonicalCourse>[0]) {
+    const native = importCanonicalCourse(input), projection = projectCanonicalCourse(native);
+    return [native, JSON.parse(JSON.stringify(projection.fhir)), JSON.parse(JSON.stringify(projection.fhirNext))];
+  }
+
+  it.each([
+    ["34338003", "ear canal", "both ear canals", "ช่องหูทั้งสองข้าง"],
+    ["34338003", "ear canals", "both ear canals", "ช่องหูทั้งสองข้าง"],
+    ["89644007", "ear canal", "left ear canal", "ช่องหูซ้าย"],
+    ["25577004", "ear canal", "right ear canal", "ช่องหูขวา"]
+  ] as const)("retains coded laterality and registered finer anatomy (%s, %s)", (code, text, english, thai) => {
+    const source = `Instill 2 drops in ${english} daily.`;
+    const coding = { system: "http://snomed.info/sct", code,
+      extension: [{ url: "urn:clinic:side-note", valueString: "retain coding annotation" }] };
+    const site = { text, coding: [coding], extension: [{ url: "urn:clinic:site-note", valueString: "retain site annotation" }] };
+    const row: FhirDosage = { text: source, method: { text: "Instill" }, site,
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } },
+      doseAndRate: [{ doseQuantity: { value: 2, unit: "drop" } }] };
+    const submitted = JSON.stringify(row);
+    for (const input of currentViews([row])) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input), output = projectCanonicalCourse(course);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }).split("; original directions:")[0])
+        .toContain(english);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }).split("; ข้อความเดิม:")[0])
+        .toContain(thai);
+      expect(output.fhir[0].site).toEqual(site);
+      expect(output.fhir[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 2, unit: "drop" });
+      expect(output.fhir[0].timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(output.fhir[0].text).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(row)).toBe(submitted);
+  });
+
+  it.each([false, true])("uses retained spatial labels without changing coding or supplied text (explicit %s)", explicit => {
+    const target = { id: "current-target", ...(explicit ? { text: "medial canthal skin" } : {}), coding: [
+      { system: "urn:clinic:anatomy", code: "medial-canthus", display: "Skin of medial canthus",
+        extension: [{ url: "urn:clinic:label-note", valueString: "retain" }] },
+      { system: "http://snomed.info/sct", code: "27887005" }
+    ], extension: [{ url: "urn:clinic:concept-note", valueString: "retain" }] };
+    const marker: FhirExtension = { url: "urn:ezmedicationinput:body-site-spatial-relation", extension: [
+      { url: "relationText", valueString: "around" }, { url: "target", valueCodeableConcept: target },
+      { url: "sourceText", valueString: "around skin of medial canthus" }
+    ] };
+    const row: FhirDosage = { method: { text: "Apply" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } }, site: { extension: [marker] } };
+    const submitted = JSON.stringify(row), label = explicit ? "medial canthal skin" : "Skin of medial canthus";
+    for (const input of currentViews([row])) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input), output = projectCanonicalCourse(course);
+      const relation = course.stages[0].administrations[0].syntax?.site?.spatialRelation;
+      expect(relation?.targetCoding).toMatchObject({ system: "http://snomed.info/sct", code: "27887005" });
+      expect(relation?.targetText).toBe(explicit ? label : undefined);
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en.toLowerCase()).toContain(`around the ${label.toLowerCase()}`);
+      expect(th).toContain(label);
+      expect(output.fhir[0].site?.extension).toEqual([marker]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(row)).toBe(submitted);
+  });
+
+  it.each([true, false])("keeps a guarded rate in the primary before independent advice (duration %s)", duration => {
+    const rowNote = { url: "urn:clinic:rate-note", valueString: "retain" };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ method: { text: "Infuse" },
+      route: { coding: [{ system: "http://snomed.info/sct", code: "47625008", display: "Intravenous route" }] },
+      doseAndRate: [{ rateQuantity: { value: 20, unit: "mL/h" } }],
+      ...(duration ? { timing: { repeat: { duration: 2, durationUnit: "h" as const } } } : {}),
+      condition: [{ code: { text: "SBP" }, operation: "gt", valueQuantity: { value: 160 } }],
+      additionalInstruction: [{ text: "Otherwise hold" }], extension: [rowNote]
+    }] }] };
+    const submitted = JSON.stringify(input);
+    for (const view of currentViews(input)) {
+      const before = JSON.stringify(view), output = projectCanonicalCourse(importCanonicalCourse(view));
+      expect(output.fhir[0].doseAndRate?.[0].rateQuantity).toMatchObject({ value: 20, unit: "mL/h" });
+      expect(output.fhir[0].extension).toContainEqual(rowNote);
+      for (const locale of ["en", "th"] as const) {
+        for (const style of ["short", "long"] as const) {
+          const text = formatSig(view, style, { locale, realizationMode: "normalized" });
+          expect(text).toContain("20 mL/h");
+          expect(text.indexOf("20 mL/h")).toBeLessThan(text.indexOf("SBP > 160"));
+          if (style === "long") {
+            expect(text.indexOf("SBP > 160")).toBeLessThan(text.indexOf("Otherwise hold"));
+            if (duration) expect(text).toContain(locale === "en" ? "2 hours" : "2 ชั่วโมง");
+          } else if (duration) expect(text).toContain("2h");
+          expect(text.match(/20 mL\/h/gu)).toHaveLength(1);
+        }
+        let calls = 0;
+        const nativeDefault = formatSig(view, "long", { locale, realizationMode: "normalized" });
+        const custom = formatSig(view, "long", { locale, realizationMode: "normalized", i18n: { inherit: locale,
+          formatLong: context => {
+            calls++;
+            expect(context.defaultText).toBe(nativeDefault);
+            expect(context.formatDefault("long")).toBe(nativeDefault);
+            expect(context.defaultText).toContain("20 mL/h");
+            expect(context.defaultText).toContain("SBP > 160");
+            expect(context.defaultText).toContain("Otherwise hold");
+            return "Clinic complete directions.";
+          }
+        } });
+        expect(custom).toBe("Clinic complete directions.");
+        expect(calls).toBe(1);
+      }
+      expect(JSON.stringify(view)).toBe(before);
+    }
+    expect(JSON.stringify(input)).toBe(submitted);
+  });
+});

@@ -846,19 +846,18 @@ function framesShareMaterialReferent(
   });
 }
 
-/** Validate shared-reference constraints declared on the existing matcher. */
+/** Select the actual witness for shared-reference constraints. */
 function matchingFramesShareReferent(
   frames: readonly AdviceFrame[],
   members: readonly AdviceMatcher[]
-): boolean {
+): AdviceFrame[] | undefined {
   const frameMatchers = members.filter(
     (item): item is AdviceMatcherFrame => "frame" in item
   );
-  if (frameMatchers.length < 2) return true;
   const options = frameMatchers.map((item) =>
     frames.filter((frame) => frameMatches(frame, item.frame))
   );
-  if (options.some((matches) => !matches.length)) return false;
+  if (options.some((matches) => !matches.length)) return undefined;
   const selected: AdviceFrame[] = [];
   const select = (index: number): boolean => {
     if (index === options.length) return true;
@@ -872,54 +871,59 @@ function matchingFramesShareReferent(
     }
     return false;
   };
-  return select(0);
+  return select(0) ? selected : undefined;
 }
 
 function matchesAdviceMatcher(
   frames: readonly AdviceFrame[],
   normalizedText: string,
-  matcher: AdviceMatcher
+  matcher: AdviceMatcher,
+  supporting?: AdviceFrame[]
 ): boolean {
   if ("allOf" in matcher) {
+    const initialLength = supporting?.length ?? 0;
     for (const item of matcher.allOf) {
-      if (!matchesAdviceMatcher(frames, normalizedText, item)) {
+      // Direct frame daughters are selected together below, retaining the
+      // exact shared-reference witness rather than all independent matches.
+      if (matcher.sharedReferent && "frame" in item) continue;
+      if (!matchesAdviceMatcher(frames, normalizedText, item, supporting)) {
+        if (supporting) supporting.length = initialLength;
         return false;
       }
     }
-    return !matcher.sharedReferent ||
-      matchingFramesShareReferent(frames, matcher.allOf);
+    if (matcher.sharedReferent) {
+      const selected = matchingFramesShareReferent(frames, matcher.allOf);
+      if (!selected) {
+        if (supporting) supporting.length = initialLength;
+        return false;
+      }
+      supporting?.push(...selected);
+    }
+    return true;
   }
   if ("anyOf" in matcher) {
     for (const item of matcher.anyOf) {
-      if (matchesAdviceMatcher(frames, normalizedText, item)) {
-        return true;
-      }
+      if (matchesAdviceMatcher(frames, normalizedText, item, supporting)) return true;
     }
     return false;
   }
   if ("not" in matcher) {
+    // A negative guard licenses the rule but never suppresses an actual action.
     return !matchesAdviceMatcher(frames, normalizedText, matcher.not);
   }
-  if ("frame" in matcher) {
+  if ("frame" in matcher || "argConcept" in matcher) {
+    let found = false;
     for (const frame of frames) {
-      if (frameMatches(frame, matcher.frame)) {
-        return true;
+      if ("frame" in matcher ? frameMatches(frame, matcher.frame) : frameHasArgConcept(frame, matcher.argConcept)) {
+        if (!supporting) return true;
+        supporting.push(frame);
+        found = true;
       }
     }
-    return false;
-  }
-  if ("argConcept" in matcher) {
-    for (const frame of frames) {
-      if (frameHasArgConcept(frame, matcher.argConcept)) {
-        return true;
-      }
-    }
-    return false;
+    return found;
   }
   for (const value of matcher.normalizedTexts) {
-    if (normalizedText === value) {
-      return true;
-    }
+    if (normalizedText === value) return true;
   }
   return false;
 }
@@ -987,28 +991,6 @@ function findRuleByCoding(system: string, code: string): AdviceCodingRule | unde
   return undefined;
 }
 
-function supportingFramesForMatcher(
-  frames: readonly AdviceFrame[],
-  matcher: AdviceMatcher
-): AdviceFrame[] {
-  if ("frame" in matcher) return frames.filter((frame) => frameMatches(frame, matcher.frame));
-  if ("argConcept" in matcher) return frames.filter((frame) => frameHasArgConcept(frame, matcher.argConcept));
-  if ("anyOf" in matcher) {
-    const branch = matcher.anyOf.find((item) => matchesAdviceMatcher(frames, "", item));
-    return branch ? supportingFramesForMatcher(frames, branch) : [];
-  }
-  if ("allOf" in matcher) {
-    if (!matchesAdviceMatcher(frames, "", matcher)) return [];
-    const supporting: AdviceFrame[] = [];
-    for (const item of matcher.allOf) {
-      supporting.push(...supportingFramesForMatcher(frames, item));
-    }
-    return supporting;
-  }
-  // Negated and text-only guards never justify suppressing an actual action.
-  return [];
-}
-
 /**
  * Retain the existing coding matcher's exact supporting action objects for
  * occurrence-aware realization. Clinical coding and wording remain with their
@@ -1020,8 +1002,9 @@ export function composedCodedAdviceActions(
 ): AdviceFrame[] {
   if (!coding?.code) return [];
   const rule = findRuleByCoding(coding.system ?? SNOMED_SYSTEM, coding.code);
-  if (!rule || !matchesAdviceMatcher(frames, "", rule.matcher)) return [];
-  const supporting = supportingFramesForMatcher(frames, rule.matcher);
+  if (!rule) return [];
+  const supporting: AdviceFrame[] = [];
+  if (!matchesAdviceMatcher(frames, "", rule.matcher, supporting)) return [];
   return supporting.filter((frame, index) => supporting.indexOf(frame) === index);
 }
 
@@ -2295,7 +2278,7 @@ export function parseAdditionalInstructions(
       continue;
     }
     const normalizedText = normalizeAdditionalInstructionKey(cleanedText);
-    const frames = parseSequenceFrames(cleanedText, segment.range, effectiveContext);
+    const frames = parseSequenceFrames(segment.text, segment.range, effectiveContext);
     const rule = normalizedText
       ? matchAdviceCodingRule(frames, normalizedText)
       : undefined;

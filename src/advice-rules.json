@@ -696,6 +696,7 @@
               "predicateLemmas": [
                 "cause"
               ],
+              "polarity": "affirm",
               "argConcepts": [
                 {
                   "conceptIds": [
@@ -776,6 +777,7 @@
               "predicateLemmas": [
                 "cause"
               ],
+              "polarity": "affirm",
               "argConcepts": [
                 {
                   "conceptIds": [
@@ -877,6 +879,7 @@
               "predicateLemmas": [
                 "cause"
               ],
+              "polarity": "affirm",
               "argConcepts": [
                 {
                   "conceptIds": [

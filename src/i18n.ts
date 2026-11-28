@@ -1,4 +1,4 @@
-import { bodySiteTextConflictsWithCoding } from "./body-site-target";
+import { bodySiteTextConflictsWithCoding, resolveBodySiteSpatialTargetText } from "./body-site-target";
 import { joinLocalizedList } from "./utils/text";
 import type { CourseLanguage } from "./localization";
 import { ENGLISH_COURSE, ENGLISH_CLAUSE_TIMING, routeCodeFromDisplayText } from "./locales/course/en";
@@ -1563,10 +1563,11 @@ const THAI_SPATIAL_TARGET_TRANSLATION_OVERRIDES: Record<string, string> = {
 function translateSpatialTargetThai(
   relation: BodySiteSpatialRelation
 ): string | undefined {
-  const normalizedTarget = normalizeBodySiteKey(relation.targetText ?? "");
+  const targetText = resolveBodySiteSpatialTargetText(relation);
+  const normalizedTarget = normalizeBodySiteKey(targetText ?? "");
   const override = THAI_SPATIAL_TARGET_TRANSLATION_OVERRIDES[normalizedTarget];
   return override ?? translateSiteThai(
-    relation.targetText,
+    targetText,
     relation.targetCoding?.code
   );
 }

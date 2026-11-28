@@ -2013,6 +2013,30 @@
       "polarity": "negate"
     },
     {
+      "parts": ["may", "not"],
+      "polarity": "negate",
+      "modality": "may",
+      "force": "warning"
+    },
+    {
+      "parts": ["might", "not"],
+      "polarity": "negate",
+      "modality": "might",
+      "force": "warning"
+    },
+    {
+      "parts": ["can", "not"],
+      "polarity": "negate",
+      "modality": "can",
+      "force": "warning"
+    },
+    {
+      "parts": ["could", "not"],
+      "polarity": "negate",
+      "modality": "could",
+      "force": "warning"
+    },
+    {
       "parts": [
         "should",
         "not"

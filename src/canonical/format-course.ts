@@ -1191,8 +1191,7 @@ export function formatCanonicalCourse(
               expressions.push((hasAmountRole(amount.role) ? amountLabel(amount, "rate", words) : "") +
                 unevaluatedExpressionText(amount.rateExpression, "rate", words));
           }
-          if (component.predicate && expressions.length && administrationHasAmountFacts(component) &&
-              !administrationOwnsSourceDirections(component, clause.instructionGraph, component.text)) {
+          if (component.predicate && expressions.length && administrationHasAmountFacts(component)) {
             (deferredDirections ??= {}).current = joinGeneratedClauses(expressions);
             expressions.length = 0;
           }

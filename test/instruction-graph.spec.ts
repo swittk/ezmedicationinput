@@ -10,7 +10,7 @@ import { buildActionExtension, buildInstructionGraphExtension, parseInstructionG
 import adviceRulesSource from "../src/advice-rules.json";
 import adviceTerminology from "../src/advice-terminology.json";
 import { setDosageCondition, withDosageEditProvenance, getDosageSourceOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
-import { buildInstructionGraph, realizeInstructionAction, instructionGraphRichPrimaryAction,
+import { buildInstructionGraph, instructionGraphAdministrationTechnique, realizeInstructionAction, instructionGraphRichPrimaryAction,
   instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose
 } from "../src/instruction-graph";
 import { formatCanonicalClause } from "../src/format";
@@ -2438,6 +2438,8 @@ describe("qualified composite technique ownership", () => {
 describe("standard coded oromucosal swish-and-swallow technique", () => {
   it("adds the complete liquid technique without changing the original swallow method", () => {
     const parsed = parsePublicSig("Swish 10 mL nystatin then swallow");
+    expect(instructionGraphAdministrationTechnique(parsed.meta.canonical.clauses[0])?.route?.text)
+      .toBe("Swish and swallow, oromucosal");
     for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
       expect(row.route?.coding).toEqual(expect.arrayContaining([
         expect.objectContaining({ system: "http://snomed.info/sct", code: "26643006" }),
@@ -2454,6 +2456,7 @@ describe("standard coded oromucosal swish-and-swallow technique", () => {
         expect.objectContaining({ system: "http://snomed.info/sct", code: "738995006" })
       );
       expect(row.doseAndRate?.[0]?.doseQuantity?.value).toBe(10);
+      expect(row.route?.text).toBe("by mouth");
       expect(fromFhirDosage(row).meta.normalized.instructionGraph?.actions
         .map(action => action.predicate.lemma)).toEqual(["swish", "swallow"]);
     }
@@ -2472,6 +2475,8 @@ describe("standard coded oromucosal swish-and-swallow technique", () => {
 describe("standard coded oromucosal swish-and-spit technique", () => {
   it("preserves both technique codes and the typed local instructions, excluding swallow or negated actions", () => {
     const parsed = parsePublicSig("Swish 10 mL for 30 seconds and spit out");
+    expect(instructionGraphAdministrationTechnique(parsed.meta.canonical.clauses[0])?.route?.text)
+      .toBe("swish and spit, oromucosal");
     for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
       expect(row.route?.coding).toEqual(expect.arrayContaining([
         expect.objectContaining({

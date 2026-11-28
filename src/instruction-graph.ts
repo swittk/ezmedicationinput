@@ -4040,10 +4040,13 @@ export function instructionGraphAdministrationTechnique(
       unqualified(action, index) && !action.args.some(arg =>
         arg.conceptId === "medication-tablet" || arg.conceptId === "medication-capsule"));
   if (!swishSpit && !swishSwallow) return undefined;
-  return { route: { text: "swish and spit, oromucosal", coding: [
-    { system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
-      code: swishSpit ? "SWISHSPIT" : "SWISHSWAL",
-      display: swishSpit ? "Swish and spit out, oromucosal" : "Swish and swallow, oromucosal" },
+  const techniqueCoding = {
+    system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+    code: swishSpit ? "SWISHSPIT" : "SWISHSWAL",
+    display: swishSpit ? "Swish and spit out, oromucosal" : "Swish and swallow, oromucosal"
+  };
+  return { route: { text: swishSpit ? "swish and spit, oromucosal" : techniqueCoding.display, coding: [
+    techniqueCoding,
     { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
       code: swishSpit ? "C38302" : "C38303",
       display: swishSpit ? "Swish and Spit Route of Administration" : "Swish and Swallow Route of Administration" }

@@ -1,11 +1,12 @@
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { bodySiteTextWithLaterality, getBodySiteText } from "./body-site-lookup";
 import { DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey } from "./maps";
-import { SNOMED_SYSTEM } from "./snomed";
+import { SNOMED_SYSTEM, SNOMED_CT_BILATERAL_QUALIFIER_CODE } from "./snomed";
 import { parseSnomedBodySiteLateralityPostcoordinationCode } from "./snomed-postcoordination";
 import {
   BodySiteCode,
   BodySiteDefinition,
+  BodySiteSpatialRelation,
   CanonicalSiteExpr,
   FhirR6CodeableConcept,
   FhirCoding,
@@ -105,9 +106,15 @@ function compatibleBodySiteText(text: string, coding: Pick<FhirCoding, "system" 
     if (!codedRefinement.lateralized) return text;
     // A paired refinement can agree with the registered paired broader site.
     const count = definition.administrationTargetCount;
-    if (count !== undefined && count > 1 && count === getBodySiteAdministrationTargetCount({
-      coding: { ...coding, code: coding.code }
-    })) return text;
+    const codedCount = getBodySiteAdministrationTargetCount({ coding: { ...coding, code: coding.code } });
+    if (count !== undefined && count > 1 && count === codedCount) return definition.text ?? text;
+    if (!textRefinement.lateralized && codedCount === 2) {
+      const pairedText = bodySiteTextWithLaterality(definition.text ?? text, SNOMED_CT_BILATERAL_QUALIFIER_CODE);
+      const paired = pairedText ? DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(pairedText)] : undefined;
+      if (paired?.coding?.code === textCode.code && paired.administrationTargetCount === codedCount) {
+        return paired.text ?? pairedText;
+      }
+    }
   }
   const canonical = definition.text ?? key;
   const unqualified = canonical?.replace(/^(?:left|right|both) /u, "");
@@ -161,6 +168,14 @@ export function resolveBodySiteTargetText(
     if (resolved) return resolved;
   }
   return text;
+}
+
+/** Realization may use a retained equivalent Coding's label without changing
+ * the selected anatomical identity or materializing text into its wire carrier. */
+export function resolveBodySiteSpatialTargetText(relation: BodySiteSpatialRelation): string | undefined {
+  return relation.targetText ?? relation.targetCoding?.display ??
+    resolveBodySiteTargetText({ coding: relation.targetCoding }) ?? relation.targetConcept?.text ??
+    relation.targetConcept?.coding?.find(coding => coding.display)?.display;
 }
 
 export function buildBodySiteAdministrationTargetCountExtension(

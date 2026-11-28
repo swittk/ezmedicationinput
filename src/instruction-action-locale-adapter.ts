@@ -225,6 +225,8 @@ function negatedAttachmentArguments(c: InstructionActionRealizationInput): {
 }
 
 const EN_NEGATED_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
+  [AdviceModality.May]: "May not ", [AdviceModality.Can]: "Cannot ",
+  [AdviceModality.Might]: "Might not ", [AdviceModality.Could]: "Could not ",
   [AdviceModality.Should]: "Should not ", [AdviceModality.Must]: "Must not "
 };
 export const EN_POSITIVE_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
@@ -593,6 +595,8 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
 }
 
 const TH_NEGATED_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
+  [AdviceModality.May]: "อาจไม่", [AdviceModality.Can]: "ไม่สามารถ",
+  [AdviceModality.Might]: "อาจไม่", [AdviceModality.Could]: "อาจไม่",
   [AdviceModality.Should]: "ไม่ควร", [AdviceModality.Must]: "ห้าม"
 };
 export const TH_POSITIVE_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {

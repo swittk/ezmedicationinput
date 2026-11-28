@@ -3,12 +3,15 @@ import { parseSig } from "./helpers/r5-parser";
 import { formatSig, fromFhirDosage, parseSig as parsePublicSig } from "../src/index";
 import {
   buildAdditionalInstructionFramesFromCoding,
+  composedCodedAdviceActions,
   __test__ as adviceTest,
   findAdditionalInstructionDefinitionByCoding,
   matchComposedAdviceCodings,
   parseAdditionalInstructions,
   realizeAdviceFramesText
 } from "../src/advice";
+import { parseInstructionActions, instructionGraphAdviceAssociation } from "../src/instruction-graph";
+import { importCanonicalCourse, projectCanonicalCourse } from "../src/index";
 import {
   AdviceArgumentRole,
   AdviceForce,
@@ -618,5 +621,102 @@ describe("next-day cause certainty ownership", () => {
     const before = JSON.stringify(current);
     expect(matchComposedAdviceCodings(current).some(definition => definition.coding?.code === "418071006")).toBe(true);
     expect(JSON.stringify(current)).toBe(before);
+  });
+});
+
+
+describe("selected advice evidence and supporting occurrences", () => {
+  it.each([
+    ["Do not crush  or chew", 0],
+    ["Do not crush\t or chew", 8],
+    ["Do not crush or chew", 8]
+  ] as const)("keeps authored offsets for selected coordinated advice: %s", (source, offset) => {
+    const instructions = parseAdditionalInstructions(source, { start: offset, end: offset + source.length });
+    const actions = parseInstructionActions(source, offset);
+    const graph = { sourceText: " ".repeat(offset) + source, actions };
+    expect(instructions).toHaveLength(1);
+    expect(instructions[0].frames.map(frame => frame.predicate.lemma)).toEqual(["crush", "chew"]);
+    for (const frame of instructions[0].frames) {
+      expect(source.slice(frame.span.start - offset, frame.span.end - offset)).toBe(frame.sourceText);
+      expect(frame.polarity).toBe(AdvicePolarity.Negate);
+    }
+    expect(instructions[0].frames[1].span).toEqual({
+      start: offset + source.indexOf("chew"), end: offset + source.length
+    });
+    // This is the production consumer of the selected row's occurrence proof.
+    expect(instructionGraphAdviceAssociation(graph, instructions[0]).actionIndices).toEqual([0, 1]);
+  });
+
+  it("binds a shared-referent code only to its successful action witness", () => {
+    const source = "Swallow the tablet whole. Do not chew. Do not chew gum.";
+    const actions = parseInstructionActions(source), saved = JSON.stringify(actions);
+    expect(matchComposedAdviceCodings(actions).map(item => item.coding?.code)).toContain("418693002");
+    expect(composedCodedAdviceActions(actions, { system: SNOMED_SYSTEM, code: "418693002" }))
+      .toEqual([actions[0], actions[1]]);
+    expect(actions[2].args).toContainEqual(expect.objectContaining({ text: "gum" }));
+    expect(JSON.stringify(actions)).toBe(saved);
+    const parsed = parsePublicSig(source), projected = projectCanonicalCourse(parsed.meta.canonical.course);
+    for (const input of [parsed.meta.canonical.course, JSON.parse(JSON.stringify(projected.fhir)),
+      JSON.parse(JSON.stringify(projected.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages[0].administrations[0].syntax?.instructionGraph?.actions).toHaveLength(3);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }).match(/do not chew gum/giu))
+        .toHaveLength(1);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("selects the first complete shared-material witness when two valid pairs exist", () => {
+    const source = "Swallow the tablet whole. Do not chew the tablet. Swallow the capsule whole. Do not chew the capsule.";
+    const actions = parseInstructionActions(source);
+    expect(actions.map(action => action.predicate.lemma)).toEqual(["swallow", "chew", "swallow", "chew"]);
+    expect(composedCodedAdviceActions(actions, { system: SNOMED_SYSTEM, code: "418693002" }))
+      .toEqual([actions[0], actions[1]]);
+  });
+
+  it.each(["418639000", "418954008", "418914006"])(
+    "requires affirmative Cause for standalone and compound warning %s", code => {
+      const template = buildAdditionalInstructionFramesFromCoding(SNOMED_SYSTEM, code)!;
+      const affirmativeSource = "May cause drowsiness", negativeSource = "May not cause drowsiness";
+      const affirmative = parseAdditionalInstructions(affirmativeSource, { start: 0, end: affirmativeSource.length })[0].frames[0];
+      const negativeRow = parseAdditionalInstructions(negativeSource, { start: 0, end: negativeSource.length })[0];
+      expect(negativeRow.coding).toBeUndefined();
+      expect(negativeRow.frames[0]).toMatchObject({ polarity: AdvicePolarity.Negate, modality: AdviceModality.May });
+      const positive = template.map(frame => frame.predicate.lemma === "cause" ? affirmative : frame);
+      const negative = template.map(frame => frame.predicate.lemma === "cause" ? negativeRow.frames[0] : frame);
+      expect(matchComposedAdviceCodings(positive).map(item => item.coding?.code)).toContain(code);
+      expect(matchComposedAdviceCodings(negative).map(item => item.coding?.code)).not.toContain(code);
+      expect(composedCodedAdviceActions(negative, { system: SNOMED_SYSTEM, code })).toEqual([]);
+    }
+  );
+
+  it.each([
+    ["May", AdviceModality.May, "May not", "อาจไม่"],
+    ["Might", AdviceModality.Might, "Might not", "อาจไม่"],
+    ["Can", AdviceModality.Can, "Cannot", "ไม่สามารถ"],
+    ["Could", AdviceModality.Could, "Could not", "อาจไม่"]
+  ] as const)("retains %s plus negation before independent conditional advice", (modal, modality, english, thai) => {
+    const source = `${modal} not cause drowsiness; do not drive or operate machinery if affected`;
+    const parsed = parsePublicSig(source), projected = projectCanonicalCourse(parsed.meta.canonical.course);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    for (const input of [parsed.meta.canonical.course, JSON.parse(JSON.stringify(projected.fhir)),
+      JSON.parse(JSON.stringify(projected.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const graph = course.stages[0].administrations[0].syntax?.instructionGraph!;
+      expect(graph.actions[0]).toMatchObject({ polarity: AdvicePolarity.Negate, modality,
+        sourceText: `${modal} not cause drowsiness`, span: { start: 0, end: `${modal} not cause drowsiness`.length } });
+      expect(graph.actions[1]).toMatchObject({ predicate: { lemma: "drive" }, polarity: AdvicePolarity.Negate });
+      expect(graph.relations).toContainEqual(expect.objectContaining({ kind: AdviceRelation.If, toActionIndex: 1, text: "if affected" }));
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain(`${english} cause drowsiness`);
+      expect(en).not.toContain("Do not cause");
+      expect(th).toContain(thai);
+      expect(en).toContain("if affected");
+      for (const row of projectCanonicalCourse(course).fhir) for (const advice of row.additionalInstruction ?? []) {
+        for (const coding of advice.coding ?? []) expect(["418639000", "418954008", "418914006"]).not.toContain(coding.code);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
   });
 });
