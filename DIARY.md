@@ -16668,3 +16668,13 @@ An event-only timing code with a nonzero or unresolved offset already selects it
 Qualified course durations reuse the existing lexical header proof, retaining their complete source spans, registered units, ranges and implicit single units. Medication continuation selects its complete medication target, Duration and typed companions without borrowing an independent activity's duration.
 
 The selected Time daughter remains available to ordinary HPSG event and clock composition while the instruction retains its full authored frame. Registered meal anchors therefore keep their configured clocks. MealState companions retain their existing relation and realization without acquiring an event anchor. Negative, conditional and modal instructions keep their existing scope. Regression coverage checks exact dates, supply, current native and FHIR facts, source and unknown annotations.
+
+## 2026-11-28 — Preserve current dose, timing and annotation ownership
+
+HPSG composition keeps period predicates, approximate infusion durations and signed decimal quantities with their existing typed owners. Negated holds retain their condition on the selected medication dose, including quantity-qualified targets compared in compatible units without rewriting authored values. Complete continuation targets and their Duration, Time and accompaniment daughters remain available to the same clinical composition. Fronted guards retain both authored alternative doses through the existing exactly-one choice model.
+
+Course previews retain whole-clause formatter punctuation, independent timing text, supplied header translations and authored manner alongside the current dose. Translation annotations are decoded at the public interchange boundary. Conditional advice is matched with its existing HPSG scope, so a condition does not acquire an unconditional clinical code.
+
+Scheduling retains explicit unknown displacement, eligible meal opportunities, upper-frequency windows, weekday exclusions and shared weekly quotas across shifted occurrences. A finite successor with authored meal anchors uses the existing first-opportunity calculation after an exact counted predecessor, retaining both complete treatment days.
+
+Current FHIR imports use recognized observation codes while retaining authored labels. Projection preserves target extension annotations and converts nested quantities in all declared primitive companions through the existing operator visitor. Known composite annotations in the current phase bridge use that same visitor while preserving declared SimpleQuantity roles. Unknown choices, source and authored quantities remain intact. The enclosing-frame selection uses a straight minimum-span loop with the established first-tie behavior.
