@@ -2752,6 +2752,8 @@ function durationStepper(
 interface ResolvedAdministrationWindow {
   administration: CanonicalAdministration;
   recurrenceOrigin: Date;
+  /** Event source-day cadence retained when its first occurrence owns the duration. */
+  clockOrigin?: Date;
   eligibleFrom: Date;
   endExclusive: Date | null;
   completionPoint?: Date;
@@ -2824,7 +2826,7 @@ function resolveAdministrationWindow(
   const implicitPredecessor = !administration.phaseStart && !administration.phaseOrigin ? ownPredecessor : undefined;
   if (implicitPredecessor?.point) successorFloor = implicitPredecessor.end;
   const implicitWindow = stage.start && !implicitPredecessor
-    ? { recurrenceOrigin: start, eligibleFrom: start }
+    ? { recurrenceOrigin: start, eligibleFrom: start, clockOrigin: undefined }
     : successorIntervalStart(administration, implicitPredecessor ? implicitPredecessor.point : predecessorPoint,
         implicitPredecessor ? implicitPredecessor.point ?? implicitPredecessor.end : start,
         timeZone, displacement, options, calendar.nominalEnd);
@@ -2918,6 +2920,7 @@ function resolveAdministrationWindow(
       administration,
       {
         recurrenceOrigin: cadence.origin,
+        clockOrigin: implicitWindow.clockOrigin,
         eligibleFrom: countOrigin,
         endExclusive: earlierDate(endExclusive, absoluteEventCycleBoundary(administration, cycleEnd) ?? null),
         countEligibilityStart,
@@ -2936,6 +2939,7 @@ function resolveAdministrationWindow(
   return {
     administration,
     recurrenceOrigin: cadence.origin,
+    clockOrigin: implicitWindow.clockOrigin,
     eligibleFrom,
     endExclusive,
     completionPoint,
@@ -3845,6 +3849,7 @@ function scheduleTreatmentRelativeCourse(
         const localOptions = { ...options } as PhaseCountOptions;
         localOptions.from = effectiveFrom;
         localOptions.orderedAt = member.recurrenceOrigin;
+        localOptions.clockOrigin = member.clockOrigin;
         localOptions.priorCount = member.priorCount;
         localOptions.eligibleFrom = member.allowanceStart;
         if (eventStatus) localOptions.explicitEventStatus = eventStatus;
@@ -4989,6 +4994,8 @@ function executionCourseWithPeriodOffsets(course: CanonicalCourse): CanonicalCou
  * eligible administration. This never becomes public options or FHIR state. */
 type PhaseCountOptions = NextDueDoseOptions & {
   countEligibilityStart?: Date;
+  /** Resolved event source-day cadence, separate from the finite duration origin. */
+  clockOrigin?: Date;
   /** Actual structural opening, independent of the nominal cadence anchor. */
   eligibleFrom?: Date;
   /** Original query floor for PRN and actual-history phase replay. */
@@ -5633,6 +5640,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   const config = resolveExecutionConfig(options, timeZone);
   const timing: CanonicalTiming | undefined = dosage.schedule;
   const repeat = executionRecurrence(timing, config);
+  const clockOrigin = (options as PhaseCountOptions).clockOrigin;
   const boundsPeriod = validateRepeatBoundsPeriod(repeat, timeZone);
   const boundsStart = boundsPeriod.start;
   if (boundsStart && boundsStart > from) {
@@ -5684,7 +5692,8 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
       config,
       effectiveOrderedAt,
       from,
-      timeZone
+      timeZone,
+      clockOrigin
     );
   }
   if (!timing || !repeat) {
@@ -5722,7 +5731,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   const dayFilter = new Set((repeat.dayOfWeek ?? []).map((day) => day.toLowerCase()));
   const enforceDayFilter = dayFilter.size > 0;
   const dayFilteredSeriesRepeat = resolveDayFilteredSeriesRepeat(repeat, enforceDayFilter);
-  const calendarDays = resolveCalendarDaySelection(repeat, baseTime, timeZone);
+  const calendarDays = resolveCalendarDaySelection(repeat, clockOrigin ?? baseTime, timeZone);
   const structuralOpening = (options as PhaseCountOptions).eligibleFrom;
   const wakingHours = generateWakingHoursIntervalSeries(
     timing,
@@ -5756,7 +5765,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   const whenCodes = repeat.anchors ?? [];
   const timeOfDayEntries = repeat.clocks ?? [];
   if (whenCodes.length > 0 || timeOfDayEntries.length > 0) {
-    const cadenceAnchor = resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from;
+    const cadenceAnchor = clockOrigin ?? resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from;
     const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter, requiresCompleteSupplyTiming(options));
     const includesImmediate = arrayIncludes(whenCodes, TimingEvent.Immediate);
     if (includesImmediate) {
@@ -5804,7 +5813,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
             results.push(iso);
           }
           return results.length >= effectiveLimit;
-        }, structuralOpening);
+        }, structuralOpening, clockOrigin);
       return results.slice(0, effectiveLimit);
     }
   }
@@ -5928,7 +5937,8 @@ function derivePriorCountFromHistory(
   config: NextDueDoseConfig,
   orderedAt: Date,
   from: Date,
-  timeZone: string
+  timeZone: string,
+  clockOrigin?: Date
 ): number {
   if (from <= orderedAt) {
     return 0;
@@ -5940,7 +5950,7 @@ function derivePriorCountFromHistory(
   const dayFilter = new Set((repeat.dayOfWeek ?? []).map((day) => day.toLowerCase()));
   const enforceDayFilter = dayFilter.size > 0;
   const dayFilteredSeriesRepeat = resolveDayFilteredSeriesRepeat(repeat, enforceDayFilter);
-  const calendarDays = resolveCalendarDaySelection(repeat, orderedAt, timeZone);
+  const calendarDays = resolveCalendarDaySelection(repeat, clockOrigin ?? orderedAt, timeZone);
   const seen = new Set<string>();
   let count = 0;
   const recordCandidate = (candidate: Date | string | null) => {
@@ -5986,7 +5996,7 @@ function derivePriorCountFromHistory(
   const whenCodes = repeat.anchors ?? [];
   const timeOfDayEntries = repeat.clocks ?? [];
   if (whenCodes.length > 0 || timeOfDayEntries.length > 0) {
-    const cadenceAnchor = resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from;
+    const cadenceAnchor = clockOrigin ?? resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from;
     const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);
     if (arrayIncludes(whenCodes, TimingEvent.Immediate)) {
       if (recordCandidate(orderedAt) && normalizedCount !== undefined && seen.size >= normalizedCount) {
@@ -6019,7 +6029,7 @@ function derivePriorCountFromHistory(
         timeZone, normalizedCount ?? 1, dayFilter, enforceDayFilter, calendarDays, at => {
           recordCandidate(at);
           return normalizedCount !== undefined && seen.size >= normalizedCount;
-        });
+        }, undefined, clockOrigin);
       return count;
     }
   }
@@ -6635,14 +6645,14 @@ function visitClockOccurrences(
   from: Date, orderedAt: Date | null, courseEnd: Date | null | undefined,
   timeZone: string, effectiveLimit: number, dayFilter: Set<string>, enforceDayFilter: boolean,
   calendarDays: CalendarDaySelection | undefined, emit: (at: Date) => boolean,
-  eligibleFrom?: Date
+  eligibleFrom?: Date, clockOrigin?: Date
 ): void {
   const fromTime = from.getTime();
   const orderedTime = orderedAt?.getTime();
   const eligibleTime = eligibleFrom?.getTime();
   const endTime = courseEnd?.getTime();
   const elapsedRange = clockOffsetRange(expanded);
-  let currentDay = firstClockAnchorDay(from, expanded, timeZone, orderedAt, elapsedRange);
+  let currentDay = firstClockAnchorDay(from, expanded, timeZone, clockOrigin ?? orderedAt, elapsedRange);
   const firstShift = expanded[0].dayShift;
   // The existing weekday-series allowance also owns explicit clocks: frequency
   // counts administrations across the selected weekday/clock opportunities.
@@ -6751,7 +6761,8 @@ function countScheduleEvents(
   limit?: number,
   explicitPriorCount = 0,
   derivePriorCount = true,
-  eligibleFrom?: Date
+  eligibleFrom?: Date,
+  clockOrigin?: Date
 ): number {
   const timing = dosage.schedule;
   const repeat = executionRecurrence(timing, config);
@@ -6768,10 +6779,10 @@ function countScheduleEvents(
   const seen = new Set<string>();
   let count = 0;
   const timeZone = config.timeZone!;
-  const calendarDays = resolveCalendarDaySelection(repeat, baseTime, timeZone);
+  const calendarDays = resolveCalendarDaySelection(repeat, clockOrigin ?? baseTime, timeZone);
   const priorCount =
     derivePriorCount && normalizedCount !== undefined && orderedAt && from > orderedAt
-      ? derivePriorCountFromHistory(dosage, timing, repeat, config, orderedAt, from, timeZone)
+      ? derivePriorCountFromHistory(dosage, timing, repeat, config, orderedAt, from, timeZone, clockOrigin)
       : explicitPriorCount;
   const countLimit =
     normalizedCount === undefined
@@ -6822,7 +6833,7 @@ function countScheduleEvents(
   const whenCodes = repeat.anchors ?? [];
   const timeOfDayEntries = repeat.clocks ?? [];
   if (whenCodes.length > 0 || timeOfDayEntries.length > 0) {
-    const cadenceAnchor = resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from;
+    const cadenceAnchor = clockOrigin ?? resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from;
     const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);
     if (arrayIncludes(whenCodes, TimingEvent.Immediate)) {
       const immediateSource = orderedAt ?? from;
@@ -6855,7 +6866,7 @@ function countScheduleEvents(
         timeZone, hardLimit, dayFilter, enforceDayFilter, calendarDays, at => {
           recordCandidate(at);
           return count >= countLimit;
-        }, eligibleFrom);
+        }, eligibleFrom, clockOrigin);
       return count;
     }
   }
@@ -8047,7 +8058,8 @@ function calculateTotalUnitsSingle(
             100000,
             options.priorCount === undefined ? Math.max(activityPriorCount, recordedPriorCount ?? 0) : suppliedPriorCount,
             derivePriorCount && !unresolvedOneTimeActivity,
-            (options as PhaseCountOptions).eligibleFrom
+            (options as PhaseCountOptions).eligibleFrom,
+            (options as PhaseCountOptions).clockOrigin
           );
   }
   if (countOnlyRange) {
@@ -8764,6 +8776,7 @@ function calculateCourseTotalUnits(
             ...options, from: member.eligibleFrom, orderedAt: member.recurrenceOrigin,
             priorCount: member.priorCount, countEligibilityStart: member.countEligibilityStart,
             eligibleFrom: member.allowanceStart,
+            clockOrigin: member.clockOrigin,
             candidateOnly: true, limit: 1
           } as PhaseCountOptions)[0];
           if (first && Date.parse(first) < end.getTime())
@@ -8849,6 +8862,7 @@ function calculateCourseTotalUnits(
       memberOptions.dosage = bounded;
       memberOptions.from = begin > queryStart ? begin : queryStart;
       memberOptions.orderedAt = member.recurrenceOrigin;
+      memberOptions.clockOrigin = member.clockOrigin;
       memberOptions.eligibleFrom = member.allowanceStart;
       memberOptions.priorCount = member.priorCount;
       memberOptions.roundToMultiple = undefined;
@@ -9114,14 +9128,31 @@ function successorIntervalStart(
   displacement: number,
   options?: NextDueDoseOptions,
   nominalCalendarEnd?: Date | null
-): Pick<ResolvedAdministrationWindow, "recurrenceOrigin" | "eligibleFrom"> {
+): Pick<ResolvedAdministrationWindow, "recurrenceOrigin" | "eligibleFrom" | "clockOrigin"> {
   const repeat = dosage.schedule?.recurrence;
-  if (predecessorPoint && repeat?.clocks?.length && !repeat.anchors?.length &&
+  const hasRecurringAnchors = repeat?.anchors?.some(event => event !== TimingEvent.Immediate);
+  if (predecessorPoint && repeat &&
+      ((repeat.clocks?.length && !repeat.anchors?.length) || hasRecurringAnchors) &&
       (repeat.courseLength || repeat.courseLengthRange || getAnchoredCourseDuration(dosage)) &&
       !repeat.calendarWindow?.start && !dosage.phaseStart && !dosage.phaseOrigin &&
       !dosage.schedule?.explicitEvents?.length) {
     const nominalPredecessor = displacement
       ? new Date(predecessorPoint.getTime() - displacement) : predecessorPoint;
+    // A recurring event clock can refine this opening. A waking window or
+    // inferred cadence keeps its existing origin and dispatch owner.
+    if (hasRecurringAnchors && isWakingHoursInterval(repeat))
+      return { recurrenceOrigin: fallback, eligibleFrom: fallback };
+    const eventDays = hasRecurringAnchors
+      ? new Set((repeat.dayOfWeek ?? []).map(day => day.toLowerCase())) : undefined;
+    const eventConfig = eventDays ? resolveExecutionConfig(options ?? {}, zone) : undefined;
+    const eventEntries = eventDays && eventConfig
+      ? resolveExplicitClockEntries(repeat, eventConfig, eventDays.size > 0) : undefined;
+    if (eventEntries && canFallbackToCadence(repeat, eventEntries, eventDays!.size > 0))
+      return { recurrenceOrigin: fallback, eligibleFrom: fallback };
+    // Event offsets retain their existing source-day grid. The first actual
+    // opportunity may belong to an earlier source day than its nominal instant.
+    const clockOrigin = hasRecurringAnchors ? fallback : undefined;
+    const cadenceAnchor = clockOrigin ?? nominalPredecessor;
     // The finite successor owns its duration from its first post-completion
     // clock. This standalone cadence query has no phase origin or predecessor,
     // so it cannot re-enter successor resolution. Actual eligibility and
@@ -9134,21 +9165,22 @@ function successorIntervalStart(
         !getTimingOccurrenceCap(repeat) && !isWakingHoursInterval(repeat) &&
         !clockAnchoredElapsedOrigin(repeat, nominalPredecessor, zone)) {
       requireConsistentTimingCode(dosage.schedule);
-      const dayFilter = new Set((repeat.dayOfWeek ?? []).map(day => day.toLowerCase()));
+      const dayFilter = eventDays ?? new Set((repeat.dayOfWeek ?? []).map(day => day.toLowerCase()));
       const enforceDayFilter = dayFilter.size > 0;
-      const config = resolveExecutionConfig(options ?? {}, zone);
-      const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);
+      const config = eventConfig ?? resolveExecutionConfig(options ?? {}, zone);
+      const expanded = eventEntries ?? resolveExplicitClockEntries(repeat, config, enforceDayFilter);
       if (expanded.length && !canFallbackToCadence(repeat, expanded, enforceDayFilter) &&
           !hasDistributedClockFrequency(repeat, expanded, enforceDayFilter)) {
         const from = new Date(nominalPredecessor.getTime() + 1);
         let first: Date | undefined;
-        visitClockOccurrences(repeat, expanded, nominalPredecessor, from, nominalPredecessor, nominalCalendarEnd,
-          zone, 1, dayFilter, enforceDayFilter, resolveCalendarDaySelection(repeat, nominalPredecessor, zone), at => {
+        visitClockOccurrences(repeat, expanded, cadenceAnchor, from, nominalPredecessor, nominalCalendarEnd,
+          zone, 1, dayFilter, enforceDayFilter, resolveCalendarDaySelection(repeat, cadenceAnchor, zone), at => {
             first = at;
             return true;
-          }, from);
+          }, from, clockOrigin);
         if (first) return {
           recurrenceOrigin: new Date(first.getTime()),
+          clockOrigin,
           eligibleFrom: displacement ? new Date(first.getTime() + displacement) : first,
         };
         return { recurrenceOrigin: fallback, eligibleFrom: fallback };
@@ -9166,6 +9198,7 @@ function successorIntervalStart(
     candidateOptions.from = new Date(predecessorPoint.getTime() + 1);
     candidateOptions.eligibleFrom = candidateOptions.from;
     candidateOptions.orderedAt = nominalPredecessor;
+    candidateOptions.clockOrigin = clockOrigin;
     candidateOptions.timeZone = zone;
     candidateOptions.priorCount = 0;
     candidateOptions.priorDoseTimes = undefined;
@@ -9185,7 +9218,7 @@ function successorIntervalStart(
     // the caller displaces only the latter and its duration fence.
     if (first) {
       const eligibleFrom = new Date(first);
-      return { recurrenceOrigin: new Date(eligibleFrom.getTime() - displacement), eligibleFrom };
+      return { recurrenceOrigin: new Date(eligibleFrom.getTime() - displacement), eligibleFrom, clockOrigin };
     }
     return { recurrenceOrigin: fallback, eligibleFrom: fallback };
   }
@@ -9247,7 +9280,7 @@ function explicitAdministrationCompletion(
 }
 function finiteAdministrationCompletion(
   dosage: CanonicalAdministration,
-  window: Pick<ResolvedAdministrationWindow, "recurrenceOrigin" | "eligibleFrom" | "endExclusive" | "countEligibilityStart">,
+  window: Pick<ResolvedAdministrationWindow, "recurrenceOrigin" | "eligibleFrom" | "endExclusive" | "countEligibilityStart" | "clockOrigin">,
   options: NextDueDoseOptions,
   zone: string,
   purpose: "exact" | "earliest" = "exact"
@@ -9263,7 +9296,7 @@ function finiteAdministrationCompletion(
   if (count === undefined) return undefined;
   const durationRange = purpose === "earliest" ? readOccurrenceDurationRange(repeat) : undefined;
   if (purpose === "earliest" && !durationRange) return undefined;
-  const { recurrenceOrigin: start, eligibleFrom, endExclusive, countEligibilityStart } = window;
+  const { recurrenceOrigin: start, clockOrigin, eligibleFrom, endExclusive, countEligibilityStart } = window;
   // The enclosing course has already supplied the predecessor/cycle context
   // and resolved this component's cadence origin. Count only this local
   // execution copy, rather than reopening it as an isolated persisted row.
@@ -9300,6 +9333,7 @@ function finiteAdministrationCompletion(
     from: future && queryFrom > eligibleFrom ? queryFrom : eligibleFrom,
     eligibleFrom,
     orderedAt: start,
+    clockOrigin,
     priorCount: undefined,
     limit: remaining,
     // The resolved window owns this gate. A positive delay alone is not a

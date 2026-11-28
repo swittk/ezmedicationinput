@@ -8085,3 +8085,91 @@ describe("current schedule windows and nominal targets", () => {
     expect(JSON.stringify(parsed)).toBe(saved);
   });
 });
+
+
+describe("finite event-anchored successors after counted loading doses", () => {
+  it.each([
+    "at 08:00 and 20:00",
+    "after breakfast and after dinner",
+    "BID after breakfast and dinner"
+  ])("keeps both complete successor days for %s", timing => {
+    const query = { orderedAt: "2026-03-06T00:00:00Z", from: "2026-03-06T00:00:00Z", timeZone: "UTC", limit: 10,
+      eventClock: { PCM: "08:00", PCV: "20:00", CM: "07:30", CV: "19:30" }, mealOffsets: { PC: 30 },
+      frequencyDefaults: { byCode: { BID: ["08:00", "20:00"] } } };
+    const expected = ["2026-03-06T20:00:00+00:00", "2026-03-07T08:00:00+00:00", "2026-03-07T20:00:00+00:00",
+      "2026-03-08T08:00:00+00:00", "2026-03-08T20:00:00+00:00"];
+    for (const excludeMonday of [false, true]) {
+      const source = "Take 1 tablet once at 20:00, then take 2 tablets " + timing + " for 2 days" +
+        (excludeMonday ? " except Mondays" : "");
+      const parsed = parseSig(source), saved = JSON.stringify(parsed);
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const before = JSON.stringify(input), course = importCanonicalCourse(input);
+        const members = course.stages.flatMap(stage => stage.administrations), [loading, successor] = members;
+        expect(members).toHaveLength(2);
+        expect(loading.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(loading.schedule?.recurrence).toMatchObject({ count: 1, clocks: ["20:00:00"] });
+        expect(successor.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+        expect(successor.schedule?.recurrence?.courseLength?.value).toBe(2);
+        expect(successor.schedule?.recurrence?.courseLength?.code ?? successor.schedule?.recurrence?.courseLength?.unit).toBe("d");
+        expect(successor.schedule?.recurrence?.count).toBeUndefined();
+        if (timing.startsWith("at")) expect(successor.schedule?.recurrence?.clocks).toEqual(["08:00:00", "20:00:00"]);
+        else expect(successor.schedule?.recurrence?.anchors).toEqual(["PCM", "PCV"]);
+        if (timing.startsWith("BID")) expect(successor.schedule?.recurrence).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+        expect(successor.excludedWeekdays).toEqual(excludeMonday ? ["mon"] : undefined);
+        expect(nextDueDoses(input, query)).toEqual(expected);
+        expect(nextDueDoses(input, { ...query, from: "2026-03-08T00:00:00Z" })).toEqual(expected.slice(3));
+        expect(nextDueDoses(input, { ...query, from: "2026-03-09T00:00:00Z" })).toEqual([]);
+        expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: 9, unit: "tab", quantityKind: "scheduled" });
+        for (const [day, totalUnits] of [["06", 1], ["07", 4], ["08", 4], ["09", 0]] as const) {
+          expect(calculateTotalUnits({ dosage: input, ...query, from: "2026-03-" + day + "T00:00:00Z", durationValue: 1, durationUnit: "d" }).totalUnits)
+            .toBe(totalUnits);
+        }
+        expect(course.instruction).toBe(source);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(parsed)).toBe(saved);
+    }
+  });
+
+
+  it.each([false, true])("retains the shifted two-day grid and counted completion (exclusion %s)", excluded => {
+    const source = "Take 1 tablet once at 23:30, then 2 tablets every 2 days 3 hours after dinner for 2 doses within 4 days, then 1 tablet once at 08:00.";
+    const successor: CanonicalAdministration = { kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }],
+      schedule: { recurrence: { count: 2, frequency: 1, period: 2, periodUnit: "d", anchors: [EventTiming["After Dinner"]],
+        courseLength: { value: 4, unit: "d" } } },
+      ...(excluded ? { excludedWeekdays: [FhirDayOfWeek.Saturday] } : {}) };
+    const native: CanonicalCourse = { kind: "course", instruction: source, stages: [
+      { administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+        schedule: { recurrence: { count: 1, clocks: ["23:30:00"] } } }] },
+      { administrations: [successor] },
+      { administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+        schedule: { recurrence: { count: 1, clocks: ["08:00:00"] } } }] }
+    ] };
+    const saved = JSON.stringify(native), query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z",
+      timeZone: "UTC", limit: 10, eventClock: { CV: "23:45" }, mealOffsets: { PCV: 180 } };
+    // Source days Jan 1/3 produce Jan 2/4 administrations. The second actual
+    // dose completes the phase before its independently clocked 08:00 successor.
+    const expected = ["2026-01-01T23:30:00+00:00", "2026-01-02T02:45:00+00:00",
+      "2026-01-04T02:45:00+00:00", "2026-01-04T08:00:00+00:00"];
+    for (const input of [native, JSON.parse(JSON.stringify(courseToR5(native))), JSON.parse(JSON.stringify(courseToR6(native)))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const retained = course.stages[1].administrations[0];
+      expect(retained.schedule?.recurrence).toMatchObject({ count: 2, frequency: 1, period: 2, periodUnit: "d", anchors: ["PCV"] });
+      expect(retained.schedule?.recurrence?.courseLength?.value).toBe(4);
+      expect(retained.schedule?.recurrence?.courseLength?.code ?? retained.schedule?.recurrence?.courseLength?.unit).toBe("d");
+      expect(retained.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(retained.excludedWeekdays).toEqual(excluded ? [FhirDayOfWeek.Saturday] : undefined);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(nextDueDoses(input, { ...query, from: "2026-01-03T00:00:00Z" })).toEqual(expected.slice(2));
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 6, unit: "tab", quantityKind: "scheduled" });
+      expect(calculateTotalUnits({ dosage: input, ...query, from: "2026-01-03T00:00:00Z", durationValue: 4, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 3, unit: "tab", quantityKind: "scheduled" });
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(native)).toBe(saved);
+  });
+});
