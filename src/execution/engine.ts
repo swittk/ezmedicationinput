@@ -858,13 +858,26 @@ function signedEventOffset(code: string, offset: number): number {
   }
   return offset;
 }
+/** An offset range supplies a point only when its authored endpoints agree.
+ * Null retains unresolved event timing; undefined retains clinic defaults. */
+function resolvedEventOffsetMinutes(repeat: CanonicalRecurrence): number | null | undefined {
+  const exact = getExactTimingOffsetMinutes(repeat);
+  if (exact !== undefined) return exact;
+  if (repeat.offsetMin === undefined && repeat.offsetMax === undefined) return undefined;
+  return repeat.offsetMin !== undefined && repeat.offsetMin === repeat.offsetMax ? repeat.offsetMin : null;
+}
+function unresolvedEventOffset(): never {
+  throw new MedicationQuantityCalculationError("timing-required",
+    "The event offset range does not specify an exact administration time.");
+}
 /**
  * Expands a single TimingEvent code into concrete wall-clock entries.
  */
 function expandTiming(code: string, config: NextDueDoseConfig, repeat: CanonicalRecurrence): ExpandedTime[] {
   const mealOffsets: MealOffsetMap = config.mealOffsets ?? {};
   const eventClock = config.eventClock ?? {};
-  const exactOffset = getExactTimingOffsetMinutes(repeat);
+  const exactOffset = resolvedEventOffsetMinutes(repeat);
+  if (exactOffset === null) return [];
   const normalized: ExpandedTime[] = [];
   // Noon names a fixed clock; other event defaults retain their frequency rules.
   const clockValue = eventClock[code] ?? (code === TimingEvent.Noon ? "12:00:00" : undefined);
@@ -983,7 +996,8 @@ const DEFAULT_WHEN_FALLBACK_CLOCKS: Record<string, string[]> = {
   [TimingEvent["After Meal"]]: ["08:30:00", "13:00:00", "19:00:00"],
 };
 function inferWhenFallbackEntries(code: string, repeat: CanonicalRecurrence): ExpandedTime[] {
-  const exactOffset = getExactTimingOffsetMinutes(repeat);
+  const exactOffset = resolvedEventOffsetMinutes(repeat);
+  if (exactOffset === null) return [];
   let fallbackClocks = DEFAULT_WHEN_FALLBACK_CLOCKS[code];
   if (exactOffset !== undefined) {
     if (code === TimingEvent["Before Meal"] || code === TimingEvent["After Meal"]) {
@@ -1011,7 +1025,7 @@ type ExplicitEventStatus = {
 };
 function unresolvedExplicitEventSupply(): never {
   throw new MedicationQuantityCalculationError("timing-required",
-    "The remaining explicit events have only year or month precision; supply calculation requires a resolved administration date.");
+    "The remaining explicit events have only year or month precision or an unresolved event offset; supply calculation requires a resolved administration date.");
 }
 function exactTimingEventOccurrences(
   timing: CanonicalTiming,
@@ -1029,6 +1043,8 @@ function exactTimingEventOccurrences(
 ): string[] | undefined {
   if (!timing.explicitEvents?.length) return undefined;
   const whenCodes = repeat?.anchors ?? [];
+  const unresolvedOffset = !!repeat && whenCodes.some(code => code !== TimingEvent.Immediate) &&
+    resolvedEventOffsetMinutes(repeat) === null;
   const expanded = repeat ? expandWhenCodes(whenCodes, config, repeat, !repeat.clocks?.length) : [];
   for (const clock of repeat?.clocks ?? []) {
     expanded.push({ time: normalizeClock(clock), dayShift: 0 });
@@ -1038,12 +1054,31 @@ function exactTimingEventOccurrences(
   const dayOfMonth = getTimingMonthDays(repeat);
   const calendarDays = dayOfMonth ? { dayOfMonth } : undefined;
   const candidates: Date[] = [];
+  const queryFrom = eventStatus?.from ?? from;
+  const queryEnd = earlierDate(courseEnd, eventStatus?.end ?? null);
+  const begin = orderedAt && orderedAt > queryFrom ? orderedAt : queryFrom;
+  // Only prove disjointness from known calendar bounds. These widened bounds
+  // are possibilities, never selected administration instants.
+  const offsetRangeMayIntersect = (start: Date | null, end: Date | null): boolean => {
+    if (queryEnd && begin >= queryEnd) return false;
+    if (!start || !end || repeat?.offsetMin === undefined || repeat.offsetMax === undefined) return true;
+    let low = Number.POSITIVE_INFINITY, high = Number.NEGATIVE_INFINITY;
+    for (const code of whenCodes) {
+      if (code === TimingEvent.Immediate) continue;
+      const a = signedEventOffset(code, repeat.offsetMin), b = signedEventOffset(code, repeat.offsetMax);
+      low = Math.min(low, a, b);
+      high = Math.max(high, a, b);
+    }
+    const opening = start.getTime() + low * 60000, closing = end.getTime() + high * 60000;
+    return closing > begin.getTime() && (!queryEnd || opening < queryEnd.getTime());
+  };
   let partialEvent = false;
+  let unresolvedOffsetEvent = false;
   for (const value of timing.explicitEvents) {
     // FHIR dateTime permits year/month precision. It names no exact dose
     // instant and must not spend an occurrence slot or become midnight.
     if (/^\d{4}(?:-\d{2})?$/u.test(value)) {
-      if ((quantityEstimation || eventStatus) && !partialEvent) {
+      if ((quantityEstimation || eventStatus || unresolvedOffset) && !partialEvent) {
         const year = Number(value.slice(0, 4));
         const wholeYear = value.length === 4;
         const month = wholeYear ? 1 : Number(value.slice(5));
@@ -1052,9 +1087,10 @@ function exactTimingEventOccurrences(
         const end = calendarBoundaryDate(timeZone,
           wholeYear || month === 12 ? year + 1 : year,
           wholeYear || month === 12 ? 1 : month + 1, 1, 0, 0, 0);
-        const queryFrom = eventStatus?.from ?? from;
-        const queryEnd = earlierDate(courseEnd, eventStatus?.end ?? null);
-        const begin = orderedAt && orderedAt > queryFrom ? orderedAt : queryFrom;
+        if (unresolvedOffset) {
+          unresolvedOffsetEvent ||= offsetRangeMayIntersect(start, end);
+          if (!expanded.length) continue;
+        }
         partialEvent = !start || !end;
         if (start && end) {
           if (!expanded.length && !calendarDays && !repeat?.dayOfWeek?.length && !eventStatus?.eligibleDate) partialEvent = end > begin &&
@@ -1103,12 +1139,14 @@ function exactTimingEventOccurrences(
         0
       );
       if (!day) continue;
+      if (unresolvedOffset) unresolvedOffsetEvent ||= offsetRangeMayIntersect(day,
+        startOfLocalDay(addLocalDays(day, 1, timeZone), timeZone));
       if (expanded.length) {
         for (const entry of expanded) {
           const target = resolveExpandedTime(day, entry, timeZone);
           if (target) candidates.push(target);
         }
-      } else {
+      } else if (!unresolvedOffset) {
         candidates.push(day);
       }
       continue;
@@ -1142,12 +1180,16 @@ function exactTimingEventOccurrences(
   // Actual records can prove that no allowance remains for unresolved dates.
   // An open non-PRN plan keeps its existing inferred-history policy; records
   // never turn a partial date into an invented administration timestamp.
-  const exhaustedPartialCount = quantityEstimation && partialEvent && countCap !== undefined && priorCount >= countCap;
+  const unresolvedEvent = partialEvent || unresolvedOffsetEvent;
+  const exhaustedPartialCount = quantityEstimation && unresolvedEvent && countCap !== undefined && priorCount >= countCap;
   const effectivePriorCount = derivePriorCount && !exhaustedPartialCount ? historicalCount : priorCount;
   const remaining =
     countCap === undefined ? limit : Math.max(0, Math.min(limit, countCap - effectivePriorCount));
-  if (eventStatus) eventStatus.possible = eventStatus.possible || partialEvent;
-  else if (quantityEstimation && partialEvent && remaining > unique.length) unresolvedExplicitEventSupply();
+  if (eventStatus) eventStatus.possible = eventStatus.possible || unresolvedEvent;
+  else if (unresolvedEvent && remaining > unique.length && (quantityEstimation || !unique.length)) {
+    if (unresolvedOffsetEvent) unresolvedEventOffset();
+    if (quantityEstimation) unresolvedExplicitEventSupply();
+  }
   return unique.slice(0, remaining).map((candidate) => formatZonedIso(candidate, timeZone));
 }
 function mergeFrequencyDefaults(
@@ -1271,7 +1313,8 @@ function resolveFrequencyCadence(
         // resolution as an explicit timing anchor, retaining the cadence.
         if (descriptor?.when?.length && descriptor.frequency === undefined && descriptor.period === undefined) {
           const entries = expandWhenCodes(descriptor.when, config, effectiveRepeat, true);
-          if (entries.some(entry => entry.dayShift !== 0 || entry.eventTime !== undefined)) {
+          if (resolvedEventOffsetMinutes(effectiveRepeat) === null ||
+              entries.some(entry => entry.dayShift !== 0 || entry.eventTime !== undefined)) {
             codeAnchors = descriptor.when;
             codeClocks = [];
           } else codeClocks = entries.map(entry => entry.time);
@@ -5616,6 +5659,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
       return exactEvents;
     }
   }
+  if (courseEnd && from >= courseEnd) return [];
   if (
     needsDerivedPriorCount &&
     effectiveOrderedAt &&
@@ -5637,9 +5681,6 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     if (requiresCompleteSupplyTiming(options))
       throw new MedicationQuantityCalculationError("timing-required",
         "The dosage has no executable frequency or dosing time for supply calculation.");
-    return [];
-  }
-  if (courseEnd && from >= courseEnd) {
     return [];
   }
   const normalizedCount = repeatOccurrenceCap(repeat);
@@ -5706,7 +5747,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   const timeOfDayEntries = repeat.clocks ?? [];
   if (whenCodes.length > 0 || timeOfDayEntries.length > 0) {
     const cadenceAnchor = resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from;
-    const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);
+    const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter, requiresCompleteSupplyTiming(options));
     const includesImmediate = arrayIncludes(whenCodes, TimingEvent.Immediate);
     if (includesImmediate) {
       const immediateOrder = orderedAt ? effectiveOrderedAt : null;
@@ -8952,10 +8993,13 @@ type ClockEntry = ExpandedTime;
 function resolveExplicitClockEntries(
   repeat: CanonicalRecurrence,
   config: NextDueDoseConfig,
-  dayFiltered: boolean
+  dayFiltered: boolean,
+  requireComplete = true
 ): ClockEntry[] {
   const when = repeat.anchors ?? [],
     clocks = repeat.clocks ?? [];
+  if (when.some(code => code !== TimingEvent.Immediate) && resolvedEventOffsetMinutes(repeat) === null &&
+      (requireComplete || !clocks.length)) unresolvedEventOffset();
   const allowFallback = !clocks.length && (dayFiltered || !repeat.frequency || !repeat.period || !repeat.periodUnit);
   const entries = expandWhenCodes(when, config, repeat, allowFallback);
   // "BID with food" specifies TWO administrations chosen from the meal

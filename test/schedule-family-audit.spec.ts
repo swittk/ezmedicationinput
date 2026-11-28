@@ -6,7 +6,8 @@ import {
   EventTiming, FhirDayOfWeek, FhirPeriodUnit, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL
 } from "../src";
 import type { CanonicalScheduleExpr, FhirDosage, FhirR6DosageInstruction, FhirR6DosageStep } from "../src";
-import { canonicalToFhir, getTimingClocks } from "../src/fhir";
+import { canonicalToFhir, getTimingClocks, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL,
+  TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL } from "../src/fhir";
 import { courseFromR6, courseToR5, courseToR6 } from "../src/adapters/canonical-course";
 import type { CanonicalAdministration, CanonicalCourse } from "../src/canonical/course";
 import { parseClauseState } from "../src/parser";
@@ -7514,6 +7515,179 @@ describe("review867 elapsed offsets from resolved event clocks", () => {
       expect(retained.renderedInstruction).toBe(source.renderedInstruction);
       expect(JSON.stringify(dosage)).toBe(before);
     }
+  });
+});
+
+
+describe("current event offset ranges retain exactness at execution", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  type Repeat = NonNullable<NonNullable<FhirDosage["timing"]>["repeat"]>;
+  const from = "2026-03-07T00:00:00Z";
+  const options = { from, orderedAt: from, timeZone: "UTC", eventClock: { CM: "08:00", HS: "22:00" }, limit: 3 };
+  const note = { url: "urn:clinic:offset-note", valueString: "keep the authored interval",
+    extension: [{ url: "urn:clinic:nested-note", valueCode: "current" }] };
+  const bounds = (low?: number, high?: number): NonNullable<Repeat["extension"]> => [
+    ...(low === undefined ? [] : [{ url: TIMING_OFFSET_MIN_EXTENSION_URL, valueDecimal: low }]),
+    ...(high === undefined ? [] : [{ url: TIMING_OFFSET_MAX_EXTENSION_URL, valueDecimal: high }]),
+  ];
+  function input(repeat: Repeat, code?: string, event?: string[]): FhirR6DosageInstruction {
+    return { renderedInstruction: "Use the current event offset, clocks and authored dose.", extension: [note],
+      step: [{ component: [{ id: "current-offset", extension: [note],
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat, ...(code ? { code: { coding: [{
+          system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code,
+          extension: [note] }] } } : {}), ...(event ? { event } : {}) },
+      }] }] };
+  }
+  function forForms(source: FhirR6DosageInstruction, verify: (dosage: Parameters<typeof nextDueDoses>[0]) => void) {
+    const original = fresh(source), native = importCanonicalCourse(source), projection = projectCanonicalCourse(native);
+    for (const dosage of [source, native, fresh(projection.fhir), fresh(projection.fhirNext)]) {
+      const before = fresh(dosage);
+      verify(dosage);
+      const current = projectCanonicalCourse(importCanonicalCourse(dosage)).fhirNext;
+      expect(current.step[0].component[0].timing).toEqual(source.step[0].component[0].timing);
+      expect(current.step[0].component[0].doseAndRate).toEqual(source.step[0].component[0].doseAndRate);
+      expect(current.step[0].component[0].extension).toEqual([note]);
+      expect(current.extension).toEqual([note]);
+      expect(current.renderedInstruction).toBe(source.renderedInstruction);
+      expect(dosage).toEqual(before);
+    }
+    expect(source).toEqual(original);
+  }
+  function timingRequired(run: () => unknown) {
+    try { run(); throw new Error("Expected unresolved timing"); }
+    catch (error) {
+      expect(error).toBeInstanceOf(MedicationQuantityCalculationError);
+      expect(error).toMatchObject({ code: "timing-required" });
+    }
+  }
+  it.each([
+    { name: "exact after meal", when: "PCM", offset: 60, low: undefined, high: undefined, code: undefined,
+      clock: "08:00", zone: "UTC", from, expected: ["2026-03-07T09:00:00+00:00", "2026-03-08T09:00:00+00:00", "2026-03-09T09:00:00+00:00"] },
+    { name: "collapsed after meal", when: "PCM", offset: undefined, low: 60, high: 60, code: undefined,
+      clock: "08:00", zone: "UTC", from, expected: ["2026-03-07T09:00:00+00:00", "2026-03-08T09:00:00+00:00", "2026-03-09T09:00:00+00:00"] },
+    { name: "collapsed zero", when: "PCM", offset: undefined, low: 0, high: 0, code: undefined,
+      clock: "08:00", zone: "UTC", from, expected: ["2026-03-07T08:00:00+00:00", "2026-03-08T08:00:00+00:00", "2026-03-09T08:00:00+00:00"] },
+    { name: "collapsed before sleep across spring DST", when: "HS", offset: undefined, low: 60, high: 60, code: undefined,
+      clock: "03:30", zone: "America/New_York", from: "2026-03-07T00:00:00-05:00",
+      expected: ["2026-03-07T02:30:00-05:00", "2026-03-08T01:30:00-05:00", "2026-03-09T02:30:00-04:00"] },
+    { name: "collapsed after sleep across spring DST", when: "PHS", offset: undefined, low: 60, high: 60, code: undefined,
+      clock: "01:30", zone: "America/New_York", from: "2026-03-07T00:00:00-05:00",
+      expected: ["2026-03-07T02:30:00-05:00", "2026-03-08T03:30:00-04:00", "2026-03-09T02:30:00-04:00"] },
+    { name: "collapsed code-derived bedtime", when: undefined, offset: undefined, low: 60, high: 60, code: "BED",
+      clock: "22:00", zone: "UTC", from,
+      expected: ["2026-03-07T21:00:00+00:00", "2026-03-08T21:00:00+00:00", "2026-03-09T21:00:00+00:00"] },
+  ])("executes $name through the existing exact event owner", fixture => {
+    const repeat: Repeat = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      ...(fixture.when ? { when: [fixture.when as EventTiming] } : {}),
+      ...(fixture.offset === undefined ? { extension: bounds(fixture.low, fixture.high) } : { offset: fixture.offset }) };
+    const source = input(repeat, fixture.code);
+    const query = { from: fixture.from, orderedAt: fixture.from, timeZone: fixture.zone,
+      eventClock: { [fixture.when === "PCM" ? "CM" : fixture.when ?? "HS"]: fixture.clock }, limit: 3 };
+    const originalQuery = fresh(query);
+    forForms(source, dosage => {
+      expect(nextDueDoses(dosage, query)).toEqual(fixture.expected);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "tab", quantityKind: "scheduled" });
+      if (fixture.when === "PCM" && (fixture.low === 60 || fixture.offset === 60))
+        expect(calculateTotalUnits({ dosage, ...query, from: "2026-03-07T08:00:00Z",
+          durationValue: 15, durationUnit: FhirPeriodUnit.Minute }).totalUnits).toBe(0);
+    });
+    expect(query).toEqual(originalQuery);
+  });
+
+  it.each([
+    { name: "after meal 30–60", low: 30, high: 60, when: "PCM", code: undefined },
+    { name: "after meal 60–90", low: 60, high: 90, when: "PCM", code: undefined },
+    { name: "before sleep 30–60", low: 30, high: 60, when: "HS", code: undefined },
+    { name: "minimum only", low: 30, high: undefined, when: "PCM", code: undefined },
+    { name: "maximum only", low: undefined, high: 60, when: "PCM", code: undefined },
+    { name: "code-derived bedtime", low: 30, high: 60, when: undefined, code: "BED" },
+  ])("keeps $name unresolved instead of scheduling zero displacement", fixture => {
+    const source = input({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      ...(fixture.when ? { when: [fixture.when as EventTiming] } : {}), extension: bounds(fixture.low, fixture.high) }, fixture.code);
+    forForms(source, dosage => {
+      timingRequired(() => nextDueDoses(dosage, options));
+      timingRequired(() => calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: FhirPeriodUnit.Day }));
+      // Conservative unresolved timing, not a numeric zero from a new interval policy.
+      if (fixture.when === "PCM") timingRequired(() => calculateTotalUnits({ dosage, ...options,
+        from: "2026-03-07T08:00:00Z", durationValue: 15, durationUnit: FhirPeriodUnit.Minute }));
+    });
+  });
+
+  it.each(["zero count", "prior count", "recorded count", "closed window"] as const)(
+    "retains independently determined %s before resolving code-derived event offsets", mode => {
+      const repeat: Repeat = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, extension: bounds(30, 60),
+        count: mode === "zero count" ? 0 : 1,
+        ...(mode === "closed window" ? { boundsPeriod: { end: "2026-03-06T23:59:59Z" } } : {}) };
+      const source = input(repeat, "BED");
+      const query = { ...options, from: "2026-03-08T00:00:00Z",
+        ...(mode === "closed window" ? { orderedAt: "2026-03-01T00:00:00Z" } : {}),
+        ...(mode === "prior count" ? { priorCount: 1 } : {}),
+        ...(mode === "recorded count" ? { priorDoseTimes: ["2026-03-07T21:15:00Z"] } : {}) };
+      forForms(source, dosage => {
+        expect(nextDueDoses(dosage, query)).toEqual([]);
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(0);
+      });
+    });
+
+  it("retains an independently exact mixed-schedule clock without counting the unresolved event", () => {
+    const source = input({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, when: ["PCM" as EventTiming],
+      extension: [...bounds(30, 60), { url: TIMING_ADDITIONAL_CLOCK_EXTENSION_URL, valueTime: "10:00:00",
+        _valueTime: { id: "authored-clock", extension: [note] }, extension: [note] }] });
+    forForms(source, dosage => {
+      expect(nextDueDoses(dosage, options)).toEqual([
+        "2026-03-07T10:00:00+00:00", "2026-03-08T10:00:00+00:00", "2026-03-09T10:00:00+00:00"]);
+      timingRequired(() => calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: FhirPeriodUnit.Day }));
+    });
+  });
+
+  it("does not apply an unresolved event displacement to an independently exact timestamp", () => {
+    const source = input({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      when: ["PCM" as EventTiming], extension: bounds(30, 60) }, undefined, ["2026-03-07T10:00:00Z"]);
+    forForms(source, dosage => {
+      expect(nextDueDoses(dosage, options)).toEqual(["2026-03-07T10:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
+    });
+  });
+
+  it("does not turn a date-only event with unresolved displacement into midnight", () => {
+    const source = input({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      when: ["PCM" as EventTiming], extension: bounds(30, 60) }, undefined, ["2026-03-07"]);
+    forForms(source, dosage => {
+      timingRequired(() => nextDueDoses(dosage, options));
+      timingRequired(() => calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: FhirPeriodUnit.Day }));
+    });
+  });
+
+  it.each(["2026-03-10", "2026-04", "2026-03-05", "2026-02"])(
+    "proves an explicit %s date range disjoint before requesting a point", event => {
+      const source = input({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        when: ["PCM" as EventTiming], extension: bounds(30, 60) }, undefined, [event]);
+      forForms(source, dosage => {
+        expect(calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(0);
+      });
+    });
+
+  it("retains possible elapsed leads into the preceding query date", () => {
+    const source = input({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      when: ["HS" as EventTiming], extension: bounds(30, 60) }, undefined, ["2026-03-10"]);
+    const query = { ...options, from: "2026-03-09T23:00:00Z", eventClock: { HS: "00:15" } };
+    forForms(source, dosage => {
+      timingRequired(() => calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Hour }));
+    });
+  });
+
+  it("counts a known timestamp beside a disjoint unresolved month", () => {
+    const source = input({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      when: ["PCM" as EventTiming], extension: bounds(30, 60) }, undefined,
+      ["2026-03-07T10:00:00Z", "2026-04"]);
+    forForms(source, dosage => {
+      expect(nextDueDoses(dosage, options)).toEqual(["2026-03-07T10:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 3, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
+    });
   });
 });
 
