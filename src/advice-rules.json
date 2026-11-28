@@ -1028,6 +1028,7 @@
                     "avoid"
                   ],
                   "polarity": "affirm",
+                  "relations": null,
                   "argConcepts": [
                     {
                       "conceptIds": [
@@ -1044,6 +1045,7 @@
                     "drink"
                   ],
                   "polarity": "negate",
+                  "relations": null,
                   "argConcepts": [
                     {
                       "conceptIds": [

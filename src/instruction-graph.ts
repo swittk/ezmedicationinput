@@ -3703,6 +3703,24 @@ function doseDefiningPrimarySpan(
   return doseOwner ? { start: doseOwner.span.start, end: doseOwner.span.end } : undefined;
 }
 
+/** The current indexed condition is part of coding evidence, while the original
+ * action objects and source spans remain untouched for graph projection. */
+function scopeAdviceCodingFrames(
+  frames: readonly AdviceFrame[],
+  relations: readonly CanonicalInstructionRelation[]
+): readonly AdviceFrame[] {
+  if (!relations.length) return frames;
+  const scoped = frames.slice();
+  for (const relation of relations) {
+    const frame = scoped[relation.toActionIndex];
+    const body = conditionRelationBody(relation.text ?? "", relation.kind);
+    scoped[relation.toActionIndex] = { ...frame, relation: relation.kind,
+      args: body ? [...frame.args, { role: AdviceArgumentRole.Free, text: body,
+        relation: relation.kind, span: relation.span }] : frame.args };
+  }
+  return scoped;
+}
+
 /**
  * HPSG-composed instruction meaning is the source of truth for structurally
  * scoped advice coding. Preliminary phrase-level coding can carry an
@@ -3711,10 +3729,17 @@ function doseDefiningPrimarySpan(
  */
 function reconcileComposedAdviceCoding(
   clause: CanonicalSigClause,
-  actionProgram: readonly AdviceFrame[]
+  actionProgram: AdviceFrame[],
+  input: string,
+  sourceLocale: string
 ): void {
   if (!actionProgram.length) return;
-  const proven = matchComposedAdviceCodings(actionProgram);
+  const relations = clause.instructionScopes?.length
+    ? conditionRelationsFromHpsgScopes(clause, input, actionProgram) : undefined;
+  const codingProgram = scopeAdviceCodingFrames(actionProgram, relations ?? []);
+  const scopedGraph: CanonicalInstructionGraph | undefined = relations?.length
+    ? { actions: actionProgram, relations, sourceText: input, sourceLocale } : undefined;
+  const proven = matchComposedAdviceCodings(codingProgram);
   const provenCodes = new Set(proven.map((definition) =>
     `${definition.coding?.system ?? SNOMED_SYSTEM}|${definition.coding?.code ?? ""}`
   ));
@@ -3791,7 +3816,9 @@ function reconcileComposedAdviceCoding(
         }
       }
       if (!coding?.code && selected.frames?.length) {
-        const definitions = matchComposedAdviceCodings(selected.frames);
+        const definitions = matchComposedAdviceCodings(relations?.length
+          ? scopeAdviceCodingFrames(selected.frames, conditionRelationsFromHpsgScopes(clause, input, selected.frames))
+          : selected.frames);
         const definition = definitions.length === 1 ? definitions[0] : undefined;
         if (definition?.coding?.code) return {
           ...selected,
@@ -3802,8 +3829,6 @@ function reconcileComposedAdviceCoding(
       }
       return selected;
     }
-    if (provenCodes.has(`${coding.system ?? SNOMED_SYSTEM}|${coding.code}`)) return instruction;
-
     // Preserve source and the correctly scoped predicate rather than retaining
     // the preliminary parser's misleading positive-coded paraphrase.
     const semantic = actionProgram.find((frame) =>
@@ -3813,6 +3838,10 @@ function reconcileComposedAdviceCoding(
         frame.predicate.lemma === candidate.predicate.lemma
       )
     );
+    const codingSemantic = semantic && codingProgram[actionProgram.indexOf(semantic)];
+    if (provenCodes.has(`${coding.system ?? SNOMED_SYSTEM}|${coding.code}`) &&
+        (!semantic || codingSemantic === semantic ||
+          composedCodedAdviceActions(codingProgram, coding).indexOf(codingSemantic!) >= 0)) return instruction;
     // A locally parsed clinical qualifier may have a complete typed
     // AdviceFrame even when it is NOT a standalone procedural graph action
     // (slowly, empty-stomach, drowsiness). Absence from the procedural graph
@@ -3825,7 +3854,7 @@ function reconcileComposedAdviceCoding(
     const retainsTypedNominal = instruction.frames?.some(provisional => {
       const argument = provisional.args.length === 1 ? provisional.args[0] : undefined;
       return argument?.conceptId && argument.normalized && provisional.polarity === semantic.polarity &&
-        provisional.modality === semantic.modality && provisional.relation === semantic.relation &&
+        provisional.modality === semantic.modality && provisional.relation === codingSemantic!.relation &&
         semantic.span.start <= provisional.span.start && provisional.span.end <= semantic.span.end &&
         semantic.args.some(candidate => candidate.role === AdviceArgumentRole.Object &&
           !candidate.conceptId && candidate.normalized === argument.normalized);
@@ -3833,8 +3862,8 @@ function reconcileComposedAdviceCoding(
     if (retainsTypedNominal) return instruction;
     return {
       ...instruction,
-      text: realizeInstructionAction(semantic, "en"),
-      i18n: { ...(instruction.i18n ?? {}), th: realizeInstructionAction(semantic, "th") },
+      text: realizeInstructionAction(semantic, "en", scopedGraph),
+      i18n: { ...(instruction.i18n ?? {}), th: realizeInstructionAction(semantic, "th", scopedGraph) },
       coding: undefined,
       frames: [semantic]
     };
@@ -3881,7 +3910,8 @@ export function buildInstructionGraph(
   }
   const actions: AdviceFrame[] = [];
   const opaqueSpans: CanonicalSourceSpan[] = [];
-  reconcileComposedAdviceCoding(clause, fullInputFrames);
+  const sourceLocale = baseLanguageTag(options?.locale) ?? inferMedicationLocale(input, "en");
+  reconcileComposedAdviceCoding(clause, fullInputFrames, input, sourceLocale);
   let primaryAdministrationSpan = canonicalPrimaryAdministrationSpan(clause, fullInputFrames);
   // A source noun between the typed administration head and its matching
   // amount belongs to that primary action's object slot. It is still retained
@@ -4066,7 +4096,7 @@ export function buildInstructionGraph(
     primaryAdministrationSpan,
     opaqueSpans: reconciledOpaque.length ? reconciledOpaque : undefined,
     sourceText: input,
-    sourceLocale: baseLanguageTag(options?.locale) ?? inferMedicationLocale(input, "en")
+    sourceLocale
   };
   const hpsgConditionRelations = conditionRelationsFromHpsgScopes(clause, input, actions);
   graph.relations = hpsgConditionRelations.length ? hpsgConditionRelations : undefined;
@@ -4591,9 +4621,10 @@ function realizeAction(
     const amountArg = defaultArguments?.amountArg ?? firstArguments[AdviceArgumentRole.Amount];
     const objectSource = normalizedInstructionSurface(objectArg.text);
     const amountSource = normalizedInstructionSurface(amountArg?.text ?? "");
-    const containsAmount = objectArg.span && amountArg?.span
-      ? objectArg.span.start <= amountArg.span.start && amountArg.span.end <= objectArg.span.end
-      : objectSource && amountSource && (" " + objectSource + " ").includes(" " + amountSource + " ");
+    const containsAmount = objectSource && amountSource &&
+      (" " + objectSource + " ").includes(" " + amountSource + " ") &&
+      (!objectArg.span || !amountArg?.span ||
+        objectArg.span.start <= amountArg.span.start && amountArg.span.end <= objectArg.span.end);
     if (containsAmount) amount = undefined;
   }
   const themeArg = objectArg && (objectArg.role === AdviceArgumentRole.Theme || objectArg.role === AdviceArgumentRole.Object)

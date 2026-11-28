@@ -357,9 +357,14 @@ export function formatCourseChoices<T>(
   words: CourseLanguage,
   separator = "; ",
   courseLabels?: ReadonlyMap<string, ReadonlyMap<string, string>>,
-  sharedGroupOf?: (member: T) => string | undefined
+  sharedGroupOf?: (member: T) => string | undefined,
+  memberFormatOverride = false
 ): string {
-  if (members.length === 1 && !choiceOf(members[0])) return render(members[0]).trim();
+  // Whole-clause overrides own punctuation; only generated members are normalized.
+  const memberText = (text: string): string => memberFormatOverride ? text : text.trim();
+  const joinMembers = (texts: readonly string[]): string => memberFormatOverride
+    ? texts.join(separator) : joinGeneratedClauses(texts, separator);
+  if (members.length === 1 && !choiceOf(members[0])) return memberText(render(members[0]));
   type RenderedMember = { text: string; sharedGroup?: string };
   const groupMembers = (items: readonly RenderedMember[]): string[] => {
     const slots: Array<RenderedMember | { group: string }> = [];
@@ -381,7 +386,7 @@ export function formatCourseChoices<T>(
       if ("text" in slot) output.push(slot.text);
       else {
         const group = groups.get(slot.group)!;
-        const body = joinGeneratedClauses(group, separator);
+        const body = joinMembers(group);
         output.push(group.length > 1 ? "(" + body + ")" : body);
       }
     }
@@ -413,9 +418,9 @@ export function formatCourseChoices<T>(
     const sharedCountAlreadyDisplayed = sharedGroup !== undefined && (branch
       ? unconditionalSharedGroups?.has(sharedGroup) === true || branch.some(item => item.sharedGroup === sharedGroup)
       : displayedSharedGroups?.has(sharedGroup) === true);
-    const text = render(member, sharedCountAlreadyDisplayed).trim();
+    const text = memberText(render(member, sharedCountAlreadyDisplayed));
     if (branch) {
-      if (text) branch.push({ text: text.replace(/[.!?]+$/u, ""), sharedGroup });
+      if (text) branch.push({ text: memberFormatOverride ? text : text.replace(/[.!?]+$/u, ""), sharedGroup });
     } else if (text) {
       slots.push({ text, sharedGroup });
       if (sharedGroup !== undefined) (displayedSharedGroups ??= new Set()).add(sharedGroup);
@@ -436,9 +441,9 @@ export function formatCourseChoices<T>(
       const grouped = branch.length > 1 ? "(" + text + ")" : text;
       body += labels ? "(" + labels.get(branchId) + ") " + grouped : grouped;
     }
-    if (body) output.push({ text: (labels ? "" : words.choicePrefix) + body + "." });
+    if (body) output.push({ text: (labels ? "" : words.choicePrefix) + body + (memberFormatOverride ? "" : ".") });
   }
-  return joinGeneratedClauses(hasSharedGroups ? groupMembers(output) : output.map(item => item.text), separator);
+  return joinMembers(hasSharedGroups ? groupMembers(output) : output.map(item => item.text));
 }
 type PreviewChoiceGroups = Map<string, { branches: Set<string>; stages: Set<number> }>;
 /** Branch labels are stable across stage headings. The choice is made once
@@ -689,6 +694,8 @@ interface AuthoredDirectionsState {
   text: string;
   rendered: boolean;
   headerRendered?: boolean;
+  /** Locale-selected authored wording, supplied by the public interchange boundary. */
+  displayText?: string;
 }
 
 /** Common clause preview; whole-course composition adds rich rates/expressions
@@ -894,6 +901,8 @@ export function formatCanonicalCourse(
   compiled?: ReadonlyMap<CanonicalAdministration, CanonicalSigClause>,
   authored?: AuthoredDirectionsState
 ): string {
+  const headerInstruction = oneOrCourse.stages.length === 0
+    ? authored?.displayText ?? oneOrCourse.instruction : oneOrCourse.instruction;
   // R6 imports preserve original text for interchange. Without an agreement
   // proof it cannot override independently editable structured dose/timing.
   // Parser-owned native courses and reconciled R5 imports retain source mode.
@@ -902,7 +911,7 @@ export function formatCanonicalCourse(
   if (!sourceReplayAllowed && oneOrCourse.instruction && oneOrCourse.stages.length === 0 &&
       !courseHasClinicalFacts(oneOrCourse)) {
     if (authored && authored.text === oneOrCourse.instruction) authored.rendered = true;
-    return oneOrCourse.instruction;
+    return headerInstruction!;
   }
   if (
     sourceReplayAllowed && oneOrCourse.instruction &&
@@ -912,12 +921,13 @@ export function formatCanonicalCourse(
       (options.realizationMode !== "normalized" && prefersSourceInstruction(oneOrCourse)))
   ) {
     if (authored && authored.text === oneOrCourse.instruction) authored.rendered = true;
-    return oneOrCourse.instruction;
+    return headerInstruction!;
   }
   if (oneOrCourse.stages.length === 0 && !oneOrCourse.safety?.limits?.length &&
       !oneOrCourse.safety?.ifExceeded && !oneOrCourse.cycleInterval &&
       oneOrCourse.cycleCount === undefined && !oneOrCourse.cycleCountUnresolved) return "";
   const environment = courseEnvironment(options);
+  const customFormatter = hasClauseFormatOverride(environment.localization, style);
   // Treatment-start offsets restart with the repeating course. Use that
   // same origin for active windows and their medication-free intervals.
   const words = environment.words;
@@ -929,7 +939,7 @@ export function formatCanonicalCourse(
     // facts using the same source/current distinction as timing-only members.
     const rendered = appendDoseLimits(repetition, oneOrCourse.safety?.limits, words, "course", oneOrCourse.safety?.ifExceeded);
     if (oneOrCourse.instruction && authored && authored.text === oneOrCourse.instruction) authored.rendered = true;
-    return oneOrCourse.instruction ? words.withAuthoredDirections(rendered, oneOrCourse.instruction) : rendered;
+    return headerInstruction ? words.withAuthoredDirections(rendered, headerInstruction) : rendered;
   }
   // A timing-only component cannot replace dose/manner directions owned only
   // by the header. Matching member text already carries those directions.
@@ -996,7 +1006,6 @@ export function formatCanonicalCourse(
       step.administrations,
       (component, sharedCountAlreadyDisplayed) => {
         const clause = compiled?.get(component) ?? clauseForAdministration(component, options);
-        const customFormatter = hasClauseFormatOverride(environment.localization, style);
         const nativeDefault = (style: "short" | "long"): string => {
           const repeat = component.schedule?.recurrence;
           const hasOffsets = repeat?.startOffset !== undefined || repeat?.endOffset !== undefined;
@@ -1051,7 +1060,8 @@ export function formatCanonicalCourse(
             const codeAgrees = !(_period === undefined && _periodMax !== undefined) &&
               timingCodeMatchesRecurrence(display.schedule.recurrence,
                 coding?.code ?? timingCode?.text);
-            const independentText = independentTimingText(timingCode?.text, display.schedule.recurrence);
+            const independentText = clause.schedule?.timingTextIsLiteral ? clause.schedule.timingText
+              : independentTimingText(timingCode?.text, display.schedule.recurrence);
             // Select a compatible event from the complete timing before the
             // display view removes cadence. Explicit events/clocks still own it.
             const eventSchedule = timingEventPreviewSchedule(clause.schedule);
@@ -1267,7 +1277,8 @@ export function formatCanonicalCourse(
       words,
       options?.separator,
       labels,
-      (member) => member.schedule?.recurrence?.sharedCount?.groupId
+      (member) => member.schedule?.recurrence?.sharedCount?.groupId,
+      customFormatter
     );
     if (step.safety)
       rendered = appendDoseLimits(rendered, step.safety.limits, words, "stage", step.safety.ifExceeded);

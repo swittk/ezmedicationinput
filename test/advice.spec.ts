@@ -17,8 +17,10 @@ import {
   AdviceForce,
   AdviceModality,
   AdvicePolarity,
-  AdviceRelation
+  AdviceRelation,
+  type AdviceFrame, type CanonicalSigClause
 } from "../src/types";
+import type { CanonicalCourse } from "../src/canonical/course";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -1198,4 +1200,128 @@ describe("detached Continue complement ownership", () => {
     expect(JSON.stringify(input)).toBe(before);
   });
 
+});
+
+
+describe("reviewed current advice source and condition coding", () => {
+  const query = { orderedAt: "2027-01-01T09:00:00Z", from: "2027-01-01T09:00:00Z", timeZone: "UTC", limit: 8 };
+  const dates = Array.from({ length: 8 }, (_, index) => `2027-01-0${index + 1}T09:00:00+00:00`);
+
+  it.each(["r5", "r6"] as const)("projects independently supplied %s source and unknown annotations", form => {
+    for (const finite of [true, false]) {
+      const tail = finite ? "Continue for 5 days on an empty stomach." : "Continue 10 minutes of walking.";
+      const source = "Take 2 tablets daily. " + tail;
+      const note = { url: "https://example.test/independent-course-note", valueString: "retain exact current input" };
+      const row = { text: source, doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          ...(finite ? { boundsDuration: { value: 5, unit: "d" } } : {}) } },
+        additionalInstruction: [{ text: tail }], extension: [note] };
+      const input = form === "r5" ? [row] : { renderedInstruction: source, step: [{ component: [row] }] };
+      const before = JSON.stringify(input), course = importCanonicalCourse(input), projected = projectCanonicalCourse(course);
+      expect(course.instruction).toBe(source);
+      expect(projected.fhir[0].text).toBe(source);
+      expect(projected.fhirNext.renderedInstruction).toBe(source);
+      expect(projected.fhirNext.step![0].component![0].text).toBe(source);
+      expect(projected.fhir[0].extension).toContainEqual(note);
+      expect(projected.fhirNext.step![0].component![0].extension).toContainEqual(note);
+      expect(course.stages[0].administrations[0].amounts![0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(nextDueDoses(input, query)).toEqual(finite ? dates.slice(0, 5) : dates);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: finite ? 10 : 16, unit: "tab" });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain(tail.slice(0, -1));
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each(["Avoid alcohol if dizzy.", "Do not drink alcohol if dizzy.",
+    "Avoid alcohol if dizzy. Avoid alcohol."])("keeps indexed alcohol conditions out of unconditional codes: %s", tail => {
+    const source = "Take 1 tablet daily. Causes drowsiness which may continue the next day. " +
+      "If affected do not drive or operate machinery. " + tail;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    const mixed = tail.endsWith(". Avoid alcohol.");
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input), projected = projectCanonicalCourse(course);
+      const member = course.stages[0].administrations[0];
+      expect(member.amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day });
+      const rows = projected.fhir[0].additionalInstruction ?? [];
+      const alcoholCodes = rows.filter(row => row.coding?.some(coding => coding.code === "419822006"));
+      expect(alcoholCodes).toHaveLength(mixed ? 1 : 0);
+      expect(rows.some(row => row.coding?.some(coding => coding.code === "418071006"))).toBe(false);
+      expect(rows.some(row => /alcohol.*if dizzy/i.test(row.text ?? "") && !row.coding?.length)).toBe(true);
+      const graph = member.syntax?.instructionGraph;
+      const edge = graph?.relations?.find(relation => relation.text === "if dizzy");
+      expect(edge?.kind).toBe(AdviceRelation.If);
+      expect(graph?.actions[edge!.toActionIndex].predicate.lemma).toBe(tail.startsWith("Do not") ? "drink" : "avoid");
+      expect(source.slice(edge!.span!.start, edge!.span!.end)).toBe("if dizzy");
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toMatch(/alcohol.*if dizzy/i);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("ถ้าเวียนศีรษะ");
+      expect(course.instruction).toBe(source);
+      expect(projected.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it("retains an independently unconditional alcohol prohibition and ordinary Avoid driving", () => {
+    for (const source of ["Take 1 tablet daily. Avoid alcohol.", "Take 1 tablet daily. Avoid driving."]) {
+      const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const before = JSON.stringify(input), course = importCanonicalCourse(input), projected = projectCanonicalCourse(course);
+        if (source.indexOf("alcohol") >= 0) {
+          expect(projected.fhir[0].additionalInstruction?.some(row =>
+            row.coding?.some(coding => coding.code === "419822006"))).toBe(true);
+        } else {
+          const drive = course.stages[0].administrations[0].syntax?.instructionGraph?.actions.find(frame => frame.predicate.lemma === "drive");
+          expect(drive?.polarity).toBe(AdvicePolarity.Negate);
+          expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toMatch(/(?:Do not|Avoid) driv/i);
+        }
+        expect(course.instruction).toBe(source);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(parsed)).toBe(saved);
+    }
+  });
+});
+
+describe("reviewed current amount coverage after object reconciliation", () => {
+  it.each([true, false])("retains the selected amount when the current object has source spans: %s", withSpans => {
+    const source = "Swallow 1 tablet of amoxicillin whole.";
+    const amountStart = source.indexOf("1 tablet"), mannerStart = source.indexOf("whole");
+    const frame: AdviceFrame = { force: AdviceForce.Sequence,
+      predicate: { lemma: "swallow", semanticClass: "ingest", display: "Swallow" },
+      span: { start: 0, end: source.length - 1 }, sourceText: source.slice(0, -1), args: [
+        { role: AdviceArgumentRole.Object, text: "1 tablet of amoxicillin", normalized: "1 tablet of amoxicillin",
+          ...(withSpans ? { span: { start: amountStart, end: mannerStart - 1 } } : {}) },
+        { role: AdviceArgumentRole.Amount, text: "1 tablet", normalized: "tab", quantity: { value: 1, unit: "tab" },
+          span: { start: amountStart, end: amountStart + 8 } },
+        { role: AdviceArgumentRole.Manner, text: "whole", normalized: "whole", conceptId: "whole",
+          i18n: { en: "whole", th: "ทั้งเม็ด" }, span: { start: mannerStart, end: mannerStart + 5 } }
+      ] };
+    const coding = { system: SNOMED_SYSTEM, code: "738995006", display: "Swallow" };
+    const syntax: CanonicalSigClause = { kind: "administration", rawText: source,
+      raw: { text: source, start: 0, end: source.length, tokenIndices: [] }, leftovers: [], evidence: [], confidence: 1,
+      dose: { value: 1, unit: "tab" }, method: { text: "Swallow", coding },
+      instructionGraph: { sourceText: source, sourceLocale: "en", actions: [frame],
+        primaryAdministrationSpan: { start: 0, end: source.length - 1 } } };
+    const native: CanonicalCourse = { kind: "course", instruction: source, stages: [{ administrations: [{
+      kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      method: { text: "Swallow", coding: [coding] }, syntax
+    }] }] };
+    const projected = projectCanonicalCourse(native);
+    for (const input of [native, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input), output = projectCanonicalCourse(course);
+      expect(course.stages[0].administrations[0].amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      const en = "Swallow amoxicillin 1 tablet whole.", th = "กลืนamoxicillin 1 เม็ดทั้งเม็ด.";
+      const retainsIndependentHeader = input !== native && !Array.isArray(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe(retainsIndependentHeader ? "Current: " + en + "; original directions: " + source : en);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe(retainsIndependentHeader ? "ปัจจุบัน: " + th + "; ข้อความเดิม: " + source : th);
+      expect(course.stages[0].administrations[0].syntax?.instructionGraph?.sourceText).toBe(source);
+      expect(course.stages[0].administrations[0].syntax?.instructionGraph?.actions[0].args).toMatchObject(frame.args);
+      expect(output.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
 });

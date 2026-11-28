@@ -477,6 +477,8 @@ export function frequencyDisplay(
       if (frequency === undefined && frequencyMax !== undefined) mode = "calendar-maximum";
       else if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency)
         mode = "calendar-range";
+      else if (frequency === undefined && periodUnit === FhirPeriodUnit.Month &&
+          (schedule?.dayOfWeek?.length ?? 0) > 1) mode = "period";
       else if (frequency === undefined && (
         periodUnit === FhirPeriodUnit.Week && (schedule?.dayOfWeek?.length ?? 0) > 1 ||
         periodUnit === FhirPeriodUnit.Month && (schedule?.dayOfMonth?.length ?? 0) > 1
@@ -1359,7 +1361,8 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage, resolved
     parts.push(describeFrequency(schedule, words)!);
   } else if (hasDailyRecurrenceAcrossClocks(schedule)) {
     parts.push("daily");
-  } else if (schedule.timingCode && !codeText && timingCodeMatchesRecurrence(schedule)) {
+  } else if (schedule.timingCode && (!codeText || isCompactIntervalTimingCode(schedule.timingCode)) &&
+      timingCodeMatchesRecurrence(schedule)) {
     const previewCode = timingPreviewCadenceCode(schedule.timingCode, schedule);
     parts.push(previewCode);
     // A composed descriptor still owns its independently selected event anchor.
@@ -1413,7 +1416,7 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage, resolved
       : stripTrailingZero(frequency!);
     parts.push(`${count}x`);
   }
-  if (timingText) parts.push(timingText);
+  if (timingText && !(codeEmitted && timingText === schedule.timingCode)) parts.push(timingText);
   const hasEventOffset = schedule.offset !== undefined || schedule.offsetMin !== undefined || schedule.offsetMax !== undefined;
   const eventSchedule = codeEmitted && !hasEventOffset ? schedule : timingEventPreviewSchedule(schedule)!;
   if (eventSchedule.when?.length) {

@@ -1,7 +1,9 @@
+import { getPrimitiveTranslation } from "./fhir-translations";
+import type { FhirR6PrimitiveElement } from "./types";
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-fhir";
 import { courseFromR5 } from "./adapters/r5-course";
 import { projectNativeR5Course } from "./adapters/r5-course";
-import { formatCanonicalCourse, formatCanonicalAdministration, prefersSourceInstruction,
+import { formatCanonicalCourse as formatNativeCourse, formatCanonicalAdministration, prefersSourceInstruction,
   joinGeneratedClauses, appendMedicationConditionText, appendMedicationExcludedDatesText,
   appendMedicationExcludedWeekdaysText, unevaluatedExpressionText,
   rateRangePreview } from "./canonical/format-course";
@@ -72,7 +74,27 @@ export type { CanonicalCourse, CanonicalStage, CanonicalAdministration,
   CanonicalDoseLimit, CanonicalMeasure, CanonicalRange, CanonicalRatio,
   CanonicalScheduleInput, CanonicalSupplyOptions } from "./canonical/course";
 export { importCanonicalCourse } from "./adapters/canonical-course";
-export { formatCanonicalCourse, formatCanonicalAdministration } from "./canonical/format-course";
+export { formatCanonicalAdministration } from "./canonical/format-course";
+/** Decode interchange annotations at the public boundary; native composition
+ * receives only the selected authored display text and retains the source. */
+export function formatCanonicalCourse(
+  course: CanonicalCourse,
+  style: "short" | "long" = "long",
+  options?: FormatBatchOptions,
+  compiled?: ReadonlyMap<CanonicalAdministration, CanonicalSigClause>,
+  authored?: Parameters<typeof formatNativeCourse>[4]
+): string {
+  if (!course.stages.length && course.instruction) {
+    const translated = getPrimitiveTranslation(course.provenance?.data._renderedInstruction as
+      FhirR6PrimitiveElement | undefined, options?.locale);
+    if (translated) {
+      authored ??= { text: course.instruction, rendered: false };
+      authored.displayText = translated;
+    }
+  }
+  return formatNativeCourse(course, style, options, compiled, authored);
+}
+
 export function projectCanonicalCourse(course: CanonicalCourse, options?: ParseOptions): {
   fhir: FhirDosage[]; fhirNext: FhirR6DosageInstruction
 } {
@@ -1393,11 +1415,8 @@ export function fromFhir(
   if (!items.length && r5Rows.length) {
     const text = native.instruction ?? "";
     const clause = createEmptyCanonicalClause(text);
-    const structured = native.safety || native.cycleInterval || native.cycleCount !== undefined ||
-      native.cycleCountUnresolved || native.stages.length;
     items.push({ fhir: r5Rows[0],
-      shortText: structured ? shortText : text,
-      longText: structured ? longText : text, warnings: [],
+      shortText, longText, warnings: [],
       meta: { consumedTokens: [], normalized: {}, canonical: { clauses: [clause] } } });
   }
   const primary = items[0] ?? fromFhirDosage({

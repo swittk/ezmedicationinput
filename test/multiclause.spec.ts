@@ -5661,3 +5661,42 @@ describe("reviewed dotted-unit sentence onset", () => {
     expect(JSON.stringify(parsed)).toBe(saved);
   });
 });
+
+
+describe("reviewed whole-clause callback punctuation", () => {
+  it.each(["short", "long"] as const)("retains exact %s override text in shared groups and choice branches", style => {
+    const member = (clock: string, branchId?: string): CanonicalAdministration => ({
+      kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      ...(branchId ? { choice: { groupId: "dose-choice", branchId } } : {}),
+      schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        clocks: [clock], sharedCount: { groupId: "shared-four", count: 4 } } }
+    });
+    for (const withChoice of [false, true]) {
+      const native: CanonicalCourse = { kind: "course", stages: [{ administrations: [
+        member("08:00:00", withChoice ? "a" : undefined), member("20:00:00", withChoice ? "a" : undefined),
+        ...(withChoice ? [member("18:00:00", "b")] : [])
+      ] }] };
+      const projected = projectCanonicalCourse(native);
+      for (const input of [native, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+        const before = JSON.stringify(input), calls: string[] = [];
+        const texts: Record<string, string> = { "08:00:00": "Take 1 tablet at 8 a.m.",
+          "20:00:00": "Take 1 tablet at 8 p.m.", "18:00:00": "Clinic: take 1 tablet at 6 p.m.!" };
+        const override = (context: SigFormatContext) => {
+          const clock = context.clause.schedule!.timeOfDay![0]; calls.push(clock);
+          expect(context.clause.schedule?.sharedCount?.count).toBe(4);
+          expect(context.defaultText).toContain("4");
+          expect(context.formatDefault("short")).toContain("4");
+          expect(context.formatDefault("long")).toContain("4");
+          return texts[clock];
+        };
+        const text = formatSig(input, style, { locale: "en", realizationMode: "normalized",
+          i18n: style === "long" ? { formatLong: override } : { formatShort: override } });
+        expect(calls).toEqual(withChoice ? ["08:00:00", "20:00:00", "18:00:00"] : ["08:00:00", "20:00:00"]);
+        expect(text).toContain("(Take 1 tablet at 8 a.m.; Take 1 tablet at 8 p.m.)");
+        if (withChoice) expect(text).toContain(texts["18:00:00"]);
+        else expect(text).toBe("(Take 1 tablet at 8 a.m.; Take 1 tablet at 8 p.m.)");
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    }
+  });
+});

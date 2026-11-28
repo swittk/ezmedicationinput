@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { FhirR6DosageInstruction } from "../src";
-import { formatParseBatch, parseInstructionActions, importCanonicalCourse, projectCanonicalCourse, FhirPeriodUnit, EventTiming } from "../src";
+import type { FhirR6DosageInstruction, CanonicalCourse } from "../src";
+import { formatParseBatch, parseInstructionActions, importCanonicalCourse, projectCanonicalCourse, FhirPeriodUnit, FhirDayOfWeek, EventTiming } from "../src";
 import { buildInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { retainDraftSteps } from "../src/adapters/canonical-course";
 import { AdviceArgumentRole, AdvicePolarity } from "../src/types";
@@ -4185,5 +4185,143 @@ describe("QOD preview preserves civil versus elapsed cadence across DST", () => 
     expect(saved.fhir[0].text).toBe(authored.text);
     expect(projectCanonicalCourse(importCanonicalCourse(fresh(saved.fhirNext))).fhir[0].text).toBe(authored.text);
     expect(saved.fhir[0].timing).toEqual(row.timing);
+  });
+});
+
+
+describe("reviewed current preview timing and header ownership", () => {
+  const note = { url: "https://example.test/current-preview-note", valueString: "retain current metadata" };
+  const query = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC", limit: 2 };
+  const views = (current: FhirR6DosageInstruction) => [importCanonicalCourse(current),
+    JSON.parse(JSON.stringify(toFhirR5Dosages(current))), JSON.parse(JSON.stringify(current))];
+
+  it.each(["display", "text"] as const)("retains independent timing %s with a period-end offset", labelKind => {
+    const current: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], extension: [note],
+      timing: { repeat: { frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Week,
+        endOffset: { value: 1, unit: "d" } }, code: labelKind === "display"
+          ? { coding: [{ display: "after dialysis" }] } : { text: "after dialysis" } }
+    }] }] };
+    for (const input of views(current)) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages[0].administrations[0].amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(course.stages[0].administrations[0].schedule?.recurrence).toMatchObject({
+        frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Week, endOffset: { value: 1, unit: "d" }
+      });
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        const text = formatSig(input, style, { locale, realizationMode: "normalized" });
+        expect(text).toContain("after dialysis");
+        expect(text).toContain(locale === "en" ? "3 administrations per 1 week" : "ให้ยา 3 ครั้งต่อช่วง 1 สัปดาห์");
+        expect(text).toContain(locale === "en" ? "final 1 day" : "1 วันสุดท้าย");
+      }
+      const projected = projectCanonicalCourse(course);
+      expect(projected.fhir[0].timing?.code).toEqual(current.step![0].component![0].timing!.code);
+      expect(projected.fhir[0].extension).toContainEqual(note);
+      expect(projected.fhirNext.step![0].component![0].extension).toContainEqual(note);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("uses the current translated text-only course header in both batch and item previews", () => {
+    const source = "Call the clinic for directions", thai = "โทรหาคลินิกเพื่อขอคำแนะนำ";
+    const primitive = { id: "current-header", extension: [
+      { url: "http://hl7.org/fhir/StructureDefinition/translation", extension: [
+        { url: "lang", valueCode: "th" }, { url: "content", valueString: thai }
+      ] }, note
+    ] };
+    const current: FhirR6DosageInstruction = { renderedInstruction: source,
+      _renderedInstruction: primitive, step: [] };
+    for (const input of views(current)) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages).toEqual([]);
+      expect(course.instruction).toBe(source);
+      const projected = projectCanonicalCourse(course);
+      expect(projected.fhirNext.renderedInstruction).toBe(source);
+      expect(projected.fhirNext._renderedInstruction).toEqual(primitive);
+      for (const locale of ["en", "th"]) {
+        const expected = locale === "th" ? thai : source;
+        for (const style of ["short", "long"] as const)
+          expect(formatSig(input, style, { locale, realizationMode: "normalized" })).toBe(expected);
+        const batch = fromFhir(projected.fhirNext, { locale });
+        expect(batch.shortText).toBe(expected); expect(batch.longText).toBe(expected);
+        expect(batch.items).toHaveLength(1);
+        expect(batch.items[0].shortText).toBe(expected); expect(batch.items[0].longText).toBe(expected);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([
+    { days: [FhirDayOfWeek.Monday, FhirDayOfWeek.Thursday], frequency: undefined,
+      en: "every 1 month on Monday and Thursday", th: "ทุก 1 เดือน ในวันจันทร์ และ วันพฤหัสบดี",
+      due: ["2027-01-04T00:00:00+00:00", "2027-01-07T00:00:00+00:00"], total: 2 },
+    { days: [FhirDayOfWeek.Monday], frequency: undefined,
+      en: "once monthly on Monday", th: "เดือนละครั้ง ในวันจันทร์",
+      due: ["2027-01-04T00:00:00+00:00", "2027-02-01T00:00:00+00:00"], total: 1 },
+    { days: [FhirDayOfWeek.Monday, FhirDayOfWeek.Thursday], frequency: 2,
+      en: "twice monthly on Monday and Thursday", th: "เดือนละ 2 ครั้ง ในวันจันทร์ และ วันพฤหัสบดี",
+      due: ["2027-01-04T00:00:00+00:00", "2027-01-07T00:00:00+00:00"], total: 2 }
+  ])("keeps monthly weekday positions separate from an authored frequency: $days/$frequency", fixture => {
+    const current: FhirR6DosageInstruction = { step: [{ component: [{ extension: [note],
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { period: 1, periodUnit: FhirPeriodUnit.Month,
+        dayOfWeek: fixture.days, ...(fixture.frequency === undefined ? {} : { frequency: fixture.frequency }) } }
+    }] }] };
+    for (const input of views(current)) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages[0].administrations[0].schedule?.recurrence?.frequency).toBe(fixture.frequency);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain(fixture.en);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain(fixture.th);
+      expect(nextDueDoses(input, query)).toEqual(fixture.due);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: fixture.total, unit: "tab" });
+      expect(projectCanonicalCourse(course).fhirNext.step![0].component![0].extension).toContainEqual(note);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("retains once-monthly wording for one selected month day", () => {
+    const native: CanonicalCourse = { kind: "course", stages: [{ administrations: [{
+      kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { period: 1, periodUnit: FhirPeriodUnit.Month, monthDays: [5] } }
+    }] }] };
+    const projected = projectCanonicalCourse(native);
+    for (const input of [native, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("once monthly");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("เดือนละครั้ง");
+      expect(nextDueDoses(input, query)).toEqual(["2027-01-05T00:00:00+00:00", "2027-02-05T00:00:00+00:00"]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([
+    { label: "while awake", hours: undefined, expectedHours: 36, short: "1 tab Q36H while awake" },
+    { label: undefined, hours: undefined, expectedHours: 36, short: "1 tab Q36H" },
+    { label: "while awake", hours: 12, expectedHours: 12, short: "1 tab Q12H while awake" }
+  ])("retains dynamic elapsed cadence alongside independent wording: $short", fixture => {
+    const current: FhirR6DosageInstruction = { step: [{ component: [{ extension: [note],
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
+        code: { coding: [{ code: "Q36H" }], ...(fixture.label ? { text: fixture.label } : {}) },
+        ...(fixture.hours ? { repeat: { frequency: 1, period: fixture.hours, periodUnit: FhirPeriodUnit.Hour } } : {})
+      }
+    }] }] };
+    for (const input of views(current)) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(formatSig(input, "short", { locale: "en", realizationMode: "normalized" })).toBe(fixture.short);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain(`every ${fixture.expectedHours} hours`);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain(`ทุก ${fixture.expectedHours} ชั่วโมง`);
+      if (fixture.label) for (const locale of ["en", "th"])
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toContain(fixture.label);
+      if (fixture.hours) {
+        expect(course.stages[0].administrations[0].schedule?.recurrence)
+          .toMatchObject({ frequency: 1, period: 12, periodUnit: FhirPeriodUnit.Hour });
+        expect(nextDueDoses(input, query)).toEqual(["2027-01-01T00:00:00+00:00", "2027-01-01T12:00:00+00:00"]);
+      } else expect(course.stages[0].administrations[0].schedule?.recurrence).toBeUndefined();
+      const output = projectCanonicalCourse(course);
+      expect(output.fhir[0].timing?.code).toEqual(current.step![0].component![0].timing!.code);
+      expect(output.fhirNext.step![0].component![0].extension).toContainEqual(note);
+      expect(JSON.stringify(input)).toBe(before);
+    }
   });
 });
