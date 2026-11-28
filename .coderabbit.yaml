@@ -29,6 +29,10 @@ reviews:
     # Pinned upstream reference data; handwritten FHIR definitions, public
     # types and the suites checking this contract remain selected.
     - "!fhir/r6/official-snapshot1-20261113-contract.json"
+    # Beta release metadata only: package.json changes only version.
+    # Dependencies, scripts, exports and published-file rules are unchanged.
+    # Remove this exclusion if any non-version package field changes.
+    - "!package.json"
     - "!package-lock.json"
   path_instructions:
     - path: "**/*"
