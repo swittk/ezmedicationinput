@@ -1910,6 +1910,8 @@ describe("cycle-day eligibility is not an unrestricted bedtime schedule", () => 
       expect(calculateTotalUnits({ dosage, ...base, durationValue: 84, durationUnit: FhirPeriodUnit.Day }).totalUnits)
         .toBe(30);
       const times = nextDueDoses(dosage, { ...base, limit: 100 });
+      const current = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(current.route?.coding).toContainEqual(expect.objectContaining({ system: "http://snomed.info/sct", code: "16857009" }));
       expect(times).toHaveLength(30);
       expect(times[0]).toContain("2026-11-16T22:00:00");
       expect(times[times.length - 1]).toContain("2027-01-20T22:00:00");
@@ -2441,7 +2443,7 @@ it("keeps an independently supplied OR condition beside its authored administrat
       .toBe("กลืน 1 เม็ดทั้งเม็ด เฉพาะเมื่อ SBP > 160 หรือ dizziness.");
     const clause = importCanonicalCourse(input).stages[0].administrations[0];
     expect(clause.predicate).toMatchObject({ kind: "any", conditions: [
-      { kind: "measurement", value: 160 }, { kind: "state", name: "dizziness", expected: true }
+      { kind: "measurement", name: "SBP", operation: "gt", value: 160 }, { kind: "state", name: "dizziness", expected: true }
     ] });
   }
   expect(parseInstructionGraphExtension(row.extension)?.sourceText).toBe(directions);

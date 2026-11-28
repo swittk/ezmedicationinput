@@ -424,13 +424,17 @@ export function courseFromPartialParallel(
           datedReplacement = true;
         }
         if (!dependsOnPrevious && index > 0 && a.schedule?.explicitEvents?.length) {
-          // Retain only the calendar replacement edges already selected by
-          // normalization; an unrelated explicit event creates no dependency.
+          // A precise event on this selected successor track owns a cut that
+          // precedingCalendarDay cannot express. Retain the relation, leaving
+          // the exact instant to execution; an authored predecessor event list
+          // still owns its completion rather than becoming a recurrence cut.
+          const exactEventOpening = a.schedule.explicitEvents.every(event => event.length > 10);
           if (!calendarPredecessors) {
             calendarPredecessors = [];
             for (let parent = priorStart; parent < priorEnd; parent++) {
-              if (track.phases[index - 1].members[parent - priorStart].boundsEndBasis !== "next-phase-start") continue;
               const previous = administrations[parent];
+              if (track.phases[index - 1].members[parent - priorStart].boundsEndBasis !== "next-phase-start" &&
+                  (!exactEventOpening || previous.schedule?.explicitEvents?.length)) continue;
               previous.phasePredecessors ??= [];
               calendarPredecessors.push(previous.sourceMember!);
             }

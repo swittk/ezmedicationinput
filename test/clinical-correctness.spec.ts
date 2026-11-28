@@ -3636,7 +3636,7 @@ describe("round52 source-only and repeated-window preview ownership", () => {
     "does not promise an unproved no-dose window for %s", (variant) => {
       const boundary = (value: number) => ({ contextCode: { coding: [{
         system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
-      }] }, offsetDuration: { value, unit: "d" } });
+      }] }, offsetDuration: { value, unit: "d", system: "http://unitsofmeasure.org", code: "d" } });
       const component = () => [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
         timing: { repeat: { frequency: 1, period: 1, periodUnit: "d", timeOfDay: ["12:30:00"] } } }];
       const first = variant === "implicit-first";
@@ -3676,7 +3676,7 @@ describe("round79 current clinical preview ownership", () => {
   const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
   const boundary = (days: number) => ({
     contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
-    offsetDuration: { value: days, unit: "d", code: "d" }
+    offsetDuration: { value: days, unit: "d", system: "http://unitsofmeasure.org", code: "d" }
   });
   const component = (value: number) => ({
     doseAndRate: [{ doseQuantity: { value, unit: "mg" } }],

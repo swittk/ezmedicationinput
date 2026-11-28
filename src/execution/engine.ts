@@ -524,21 +524,38 @@ function prepareTimingCodeCadence(dosage: CanonicalAdministration): CanonicalAdm
     periodUnit = DurationUnit.Hour;
   } else {
     const daily = standardTimingCodeFrequency(coding);
-    if (daily === undefined) return dosage;
-    frequency = daily >= 1 ? daily : 1;
-    period = daily >= 1 ? 1 : 1 / daily;
-    periodUnit = DurationUnit.Day;
+    if (daily !== undefined) {
+      frequency = daily >= 1 ? daily : 1;
+      period = daily >= 1 ? 1 : 1 / daily;
+      periodUnit = DurationUnit.Day;
+    } else {
+      const descriptor = isStandardTimingCoding(coding) && coding?.code
+        ? timingPreviewDescriptor(coding.code) : undefined;
+      if (!descriptor?.period || (descriptor.periodUnit !== DurationUnit.Week &&
+          descriptor.periodUnit !== DurationUnit.Month)) return dosage;
+      frequency = descriptor.frequency ?? 1;
+      period = descriptor.period;
+      periodUnit = descriptor.periodUnit;
+    }
   }
   let daily: number | undefined;
   if (repeat && (repeat.frequency !== undefined || repeat.period !== undefined || repeat.periodUnit !== undefined)) {
-    daily = frequency * 86400 / (period * INFUSION_TIME_SECONDS[periodUnit]);
-    periodUnit = repeat.periodUnit ?? periodUnit;
-    const seconds = INFUSION_TIME_SECONDS[periodUnit];
-    if (!seconds) return dosage;
-    frequency = repeat.frequency ?? (repeat.period !== undefined
-      ? daily * repeat.period * seconds / 86400 : frequency);
-    period = repeat.period ?? frequency * 86400 / (daily * seconds);
-    if (!positiveInteger(frequency) || !positiveNumber(period)) return dosage;
+    if (periodUnit === DurationUnit.Week || periodUnit === DurationUnit.Month) {
+      // Calendar shorthand completes its own missing fields. It does not turn
+      // a month into elapsed seconds or replace independently authored cadence.
+      if (repeat.frequency !== undefined && repeat.frequency !== frequency ||
+          repeat.period !== undefined && repeat.period !== period ||
+          repeat.periodUnit !== undefined && repeat.periodUnit !== periodUnit) return dosage;
+    } else {
+      daily = frequency * 86400 / (period * INFUSION_TIME_SECONDS[periodUnit]);
+      periodUnit = repeat.periodUnit ?? periodUnit;
+      const seconds = INFUSION_TIME_SECONDS[periodUnit];
+      if (!seconds) return dosage;
+      frequency = repeat.frequency ?? (repeat.period !== undefined
+        ? daily * repeat.period * seconds / 86400 : frequency);
+      period = repeat.period ?? frequency * 86400 / (daily * seconds);
+      if (!positiveInteger(frequency) || !positiveNumber(period)) return dosage;
+    }
   }
   const cadence: CanonicalRecurrence = { frequency, period, periodUnit };
   if (daily !== undefined && !matchesDailyCodeCadence(daily, cadence)) return dosage;
@@ -1017,9 +1034,11 @@ function exactTimingEventOccurrences(
             // including skipped clocks, before declaring a window disjoint.
             while (day < stop) {
               const possible = entry ? makeZonedDateFromDay(day, timeZone, entry.time) : day;
+              const nominalDay = repeat?.dayOfWeek?.length && entry?.dayShift
+                ? addLocalDays(day, -entry.dayShift, timeZone) : day;
               if (possible && (entry ? possible >= begin : stop > begin) && possible < stop &&
                   matchesCalendarDaySelection(possible, calendarDays, timeZone) &&
-                  (!repeat?.dayOfWeek?.length || arrayIncludes(repeat.dayOfWeek, getLocalWeekday(possible, timeZone))) &&
+                  (!repeat?.dayOfWeek?.length || arrayIncludes(repeat.dayOfWeek, getLocalWeekday(nominalDay, timeZone))) &&
                   (!eventStatus?.eligibleDate || eventStatus.eligibleDate(possible))) {
                 partialEvent = true; break;
               }
@@ -1271,6 +1290,12 @@ function executionRecurrence(timing: CanonicalTiming | undefined, config: NextDu
     // An event anchor retains its signed day shift at the existing expansion
     // owner; clinic-selected clocks still have ordinary clock precedence.
     return resolved.anchors ? { ...repeat, anchors: resolved.anchors } : { ...repeat, clocks: resolved.clocks };
+  }
+  if (descriptor && isStandardTimingCoding(coding) && descriptor.period === repeat.period &&
+      descriptor.periodUnit === repeat.periodUnit && repeat.frequency === (descriptor.frequency ?? 1) &&
+      (repeat.periodUnit === DurationUnit.Week || repeat.periodUnit === DurationUnit.Month)) {
+    const clocks = resolveFrequencyCadence(timing, repeat, config, coding).clocks;
+    if (clocks.length) return { ...repeat, clocks };
   }
   if (repeat.frequency === 1 && (repeat.period !== 2 || repeat.periodUnit !== DurationUnit.Day)) return repeat;
   if (repeat.frequency && repeat.period && repeat.periodUnit === DurationUnit.Day &&
@@ -2859,13 +2884,15 @@ function datedSuccessorBoundary(
     // Its day boundary is already owned by that dependency, not by a clock
     // inferred from the event or by the predecessor's administration delay.
     if (!successor.phasePredecessors?.length) return undefined;
-    let firstDate: string | undefined;
+    let start: Date | null = null;
     for (const event of successor.schedule?.explicitEvents ?? []) {
-      if (event.length !== 10) return undefined;
-      if (!firstDate || event < firstDate) firstDate = event;
+      if (event.length < 10) return undefined;
+      // A date-only edge keeps its established civil opening. An exact event
+      // retains its instant and the same displacement as actual administration.
+      const opening = resolveRepeatBoundsPeriod({ calendarWindow: { start: event } },
+        zone, event.length === 10 ? 0 : displacement).start;
+      start = earlierDate(start, opening);
     }
-    if (!firstDate) return undefined;
-    const start = resolveRepeatBoundsStart({ calendarWindow: { start: firstDate } }, zone);
     return start && (!precedingStart || getLocalDayNumber(start, zone) >= getLocalDayNumber(precedingStart, zone))
       ? start : undefined;
   }

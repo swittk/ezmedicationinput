@@ -5835,7 +5835,7 @@ describe("review51 structural openings and clinic clocks", () => {
   });
 
   it("keeps the preceding target active until the successor's first selected weekday", () => {
-    const source = "1 drop OD daily from 2027-01-01 then 1 drop OD on Mondays from 2027-01-03; 1 drop OS daily from 2027-01-01";
+    const source = "1 drop OD daily from 2027-01-01 then 1 drop OD on Mondays from 2027-01-03; 2 drops OS daily from 2027-01-01";
     const parsed = parseSig(source), original = JSON.stringify(parsed);
     const query = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-03T00:00:00Z", timeZone: "UTC" };
     for (const dosage of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
@@ -5846,7 +5846,9 @@ describe("review51 structural openings and clinic clocks", () => {
         "2027-01-05T09:00:00+00:00"
       ]);
       expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }))
-        .toMatchObject({ totalUnits: 2, unit: "drop" });
+        .toMatchObject({ totalUnits: 3, unit: "drop" });
+      expect(calculateTotalUnits({ dosage, ...query, from: "2027-01-05T00:00:00Z",
+        durationValue: 1, durationUnit: Unit.Day })).toMatchObject({ totalUnits: 2, unit: "drop" });
       const members = importCanonicalCourse(dosage).stages.reduce<CanonicalAdministration[]>(
         (all, stage) => all.concat(stage.administrations), []);
       const monday = members.find(member => member.schedule?.recurrence?.dayOfWeek?.[0] === FhirDayOfWeek.Monday)!;
@@ -5927,5 +5929,96 @@ describe("review814 selected calendar recurrence before NEXT", () => {
     expect(parsed.meta.canonical.clauses[1].schedule?.boundsStart).toBeUndefined();
     expect(parsed.input).toBe(source);
     expect(JSON.stringify(parsed)).toBe(original);
+  });
+});
+
+
+describe("review125 timestamp replacement and shared period allowance", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+  it("cuts only the predecessor track at a selected exact timestamp", () => {
+    const source = "1 drop OD daily at 08:00, then 2 drops OD on 5 December 2026 at 20:00; 3 drops OS BID";
+    const plan = createBoundaryPlan(source), states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, source);
+    // Submit the independently typed event to the existing compiler. ISO
+    // timestamps in free SIG prose are not a lexical premise of this test.
+    const clauses = fresh(states.map(state => state.primaryClause));
+    clauses[1].schedule = { calendarEvents: clauses[1].schedule!.calendarEvents!.map(event => ({
+      ...event, fhirDateTime: "2026-12-05T20:00:00Z"
+    })) };
+    const originalClauses = fresh(clauses);
+    const parallel = buildCanonicalParallelRegimen(clauses, plan.segments, plan, graph);
+    const course = parallel.kind === "resolved" ? courseFromParallel(parallel, plan.segments.map(segment => segment.text), source)
+      : parallel.kind === "unresolved" ? courseFromPartialParallel(parallel, plan.segments.map(segment => segment.text), source)
+        : undefined;
+    expect(course).toBeDefined();
+    const projected = projectCanonicalCourse(course!);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC" };
+    for (const input of [course!, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      const before = fresh(input), current = importCanonicalCourse(input);
+      const members = current.stages.reduce<CanonicalAdministration[]>((all, stage) => all.concat(stage.administrations), []);
+      const first = members.find(member => member.amounts?.[0].quantity?.value === 1)!;
+      const successor = members.find(member => member.amounts?.[0].quantity?.value === 2)!;
+      const left = members.find(member => member.amounts?.[0].quantity?.value === 3)!;
+      expect(successor.phasePredecessors).toEqual([first.sourceMember]);
+      expect(successor.schedule?.explicitEvents).toEqual(["2026-12-05T20:00:00Z"]);
+      expect(first.schedule?.recurrence?.clocks).toEqual(["08:00:00"]);
+      expect(left.schedule?.recurrence).toMatchObject({ frequency: 2, period: 1, periodUnit: Unit.Day });
+      expect(first.target?.coding).toContainEqual(expect.objectContaining({ code: "1290032005" }));
+      expect(successor.target?.coding).toContainEqual(expect.objectContaining({ code: "1290032005" }));
+      expect(left.target?.coding).toContainEqual(expect.objectContaining({ code: "1290031003" }));
+      expect(nextDueDoses(input, { ...query, limit: 8 })).toEqual([
+        "2026-12-05T08:00:00+00:00", "2026-12-05T08:00:00+00:00",
+        "2026-12-05T20:00:00+00:00", "2026-12-05T20:00:00+00:00",
+        "2026-12-06T08:00:00+00:00", "2026-12-06T20:00:00+00:00",
+        "2026-12-07T08:00:00+00:00", "2026-12-07T20:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 15, unit: "drop" });
+      expect(calculateTotalUnits({ dosage: input, ...query, from: "2026-12-06T00:00:00Z",
+        durationValue: 1, durationUnit: Unit.Day })).toMatchObject({ totalUnits: 6, unit: "drop" });
+      expect(current.instruction).toBe(source);
+      expect(input).toEqual(before);
+    }
+    expect(clauses).toEqual(originalClauses);
+  });
+
+  it.each([false, true])("shares one period quantity allowance after a clock-specific hold (morning admitted=%s)", accepted => {
+    const source = "Take 1 tablet BID at 08:00 and 20:00, maximum 1 tablet per day. Hold the 08:00 dose if dizzy.";
+    const parsed = parseSig(source), original = fresh(parsed);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+      timeZone: "UTC", evaluateCondition: () => accepted };
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = fresh(input), members = importCanonicalCourse(input).stages[0].administrations;
+      expect(members).toHaveLength(2);
+      const morning = members.find(member => member.schedule?.recurrence?.clocks?.[0] === "08:00:00")!;
+      const evening = members.find(member => member.schedule?.recurrence?.clocks?.[0] === "20:00:00")!;
+      expect(morning.predicate).toMatchObject({ kind: "not", condition: { kind: "state", name: "dizzy", expected: true } });
+      expect(evening.predicate).toBeUndefined();
+      const shared = morning.schedule?.recurrence?.sharedCount;
+      expect(shared?.groupId).toBeTruthy();
+      expect(evening.schedule?.recurrence?.sharedCount).toEqual(shared);
+      expect(shared?.count).toBeUndefined();
+      expect(shared?.countMax).toBeUndefined();
+      for (const member of members) {
+        expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(member.limits).toContainEqual(expect.objectContaining({ scope: "period",
+          amount: expect.objectContaining({ value: 1, unit: "tab" }),
+          period: expect.objectContaining({ value: 1, unit: "d" }) }));
+      }
+      const clock = accepted ? "08:00:00" : "20:00:00";
+      expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([
+        "2026-12-01T" + clock + "+00:00", "2026-12-02T" + clock + "+00:00", "2026-12-03T" + clock + "+00:00",
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "tab", quantityKind: "maximum" });
+      expect(calculateTotalUnits({ dosage: input, ...query, from: "2026-12-01T12:00:00Z",
+        durationValue: 12, durationUnit: Unit.Hour })).toMatchObject({ totalUnits: accepted ? 0 : 1,
+          ...(accepted ? {} : { unit: "tab" }) });
+      expect(input).toEqual(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed).toEqual(original);
   });
 });

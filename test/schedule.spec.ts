@@ -6846,6 +6846,10 @@ describe("review d41 selected calendar and successor owners", () => {
             .toThrow(kind === "unequal" ? /range endpoints must resolve to the same treatment-start offset/u : /requires a treatment-start offset/u);
           else expect(calculateTotalUnits({ dosage, ...query, durationValue: 5, durationUnit: Unit.Day }))
             .toMatchObject({ totalUnits: finite ? 8 : 5, unit: "tab", quantityKind: "scheduled" });
+          if (finite && kind === "equal") for (const [day, amount] of [["01", 1], ["02", 1], ["03", 2], ["04", 2], ["05", 2]] as const) {
+            expect(calculateTotalUnits({ dosage, ...query, from: "2026-01-" + day + "T00:00:00Z",
+              durationValue: 1, durationUnit: Unit.Day })).toMatchObject({ totalUnits: amount, unit: "tab" });
+          }
           const retained = importCanonicalCourse(dosage).stages[1].administrations[0];
           expect(retained.phaseStart).toMatchObject(phaseStart);
           if (kind === "missing") expect(retained.phaseStart?.displacement?.value).toBeUndefined();
@@ -6861,4 +6865,99 @@ describe("review d41 selected calendar and successor owners", () => {
       }
     });
 
+});
+
+
+describe("review125 calendar timing codes and nominal event weekdays", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const views = (course: CanonicalCourse) => {
+    const projected = projectCanonicalCourse(course);
+    return [course, fresh(projected.fhir), fresh(projected.fhirNext)];
+  };
+  const note = { url: "https://clinic.example/current-timing-note", valueString: "retain this annotation" };
+  const system = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+  const query = { orderedAt: "2026-01-05T00:00:00Z", from: "2026-01-05T00:00:00Z", timeZone: "UTC" };
+
+  it.each([
+    ["WK", Unit.Week, 4, ["2026-01-05", "2026-01-12", "2026-01-19", "2026-01-26"]],
+    ["MO", Unit.Month, 3, ["2026-01-05", "2026-02-05", "2026-03-05"]],
+  ] as const)("executes standard %s at its configured clinic clock without changing the code-only input", (code, unit, count, dates) => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system, code, id: "current-code", extension: [note] }] } } };
+    const native = importCanonicalCourse(row), original = fresh(row);
+    const options = { ...query, frequencyDefaults: { byCode: { [code]: ["10:15:00"] } } };
+    for (const dosage of views(native)) {
+      const before = fresh(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: count }))
+        .toEqual(dates.map(date => date + "T10:15:00+00:00"));
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: count, durationUnit: unit }))
+        .toMatchObject({ totalUnits: count, unit: "tab", quantityKind: "scheduled" });
+      const current = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(current.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(current.schedule?.code).toEqual(row.timing!.code);
+      expect(current.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(current.schedule?.recurrence?.period).toBeUndefined();
+      expect(current.schedule?.recurrence?.periodUnit).toBeUndefined();
+      expect(dosage).toEqual(before);
+    }
+    expect(row).toEqual(original);
+  });
+
+  it("keeps authored positions and complete cadence authoritative over a calendar timing code", () => {
+    const base: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system, code: "MO", extension: [note] }] } } };
+    const cases: { row: FhirDosage; expected: string[] }[] = [
+      { row: { ...base, timing: { ...base.timing, event: ["2026-01-06T18:00:00Z"] } },
+        expected: ["2026-01-06T18:00:00+00:00"] },
+      { row: { ...base, timing: { ...base.timing, repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["18:00:00"] } } },
+        expected: ["2026-01-05T18:00:00+00:00", "2026-01-06T18:00:00+00:00"] },
+    ];
+    for (const { row, expected } of cases) for (const dosage of views(importCanonicalCourse(row))) {
+      const before = fresh(dosage), options = { ...query, frequencyDefaults: { byCode: { MO: ["10:15:00"] } } };
+      expect(nextDueDoses(dosage, { ...options, limit: expected.length })).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 2, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: expected.length, unit: "tab" });
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.code).toEqual(row.timing!.code);
+      expect(dosage).toEqual(before);
+    }
+    const foreign: FhirDosage = { ...base, timing: { code: { coding: [{ system: "https://clinic.example/private", code: "WK" }] } } };
+    for (const dosage of views(importCanonicalCourse(foreign))) {
+      const before = fresh(dosage), options = { ...query, frequencyDefaults: { byCode: { WK: ["10:15:00"] } } };
+      expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([]);
+      expect(() => calculateTotalUnits({ dosage, ...options, durationValue: 2, durationUnit: Unit.Week }))
+        .toThrow(expect.objectContaining({ code: "timing-required" }));
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.code).toEqual(foreign.timing!.code);
+      expect(dosage).toEqual(before);
+    }
+  });
+
+  it("keeps a shifted partial event unresolved when its nominal weekday can fall in the query window", () => {
+    const member = (event: string, offset: number): CanonicalCourse => ({ kind: "course", stages: [{ administrations: [{
+      kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab", extension: [note] } }],
+      schedule: { explicitEvents: [event], recurrence: { dayOfWeek: [FhirDayOfWeek.Monday],
+        anchors: [EventTiming["Before Sleep"]], offset } },
+    }] }] });
+    const options = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-06T23:00:00Z",
+      timeZone: "UTC", eventClock: { HS: "00:30" } };
+    for (const event of ["2026-12", "2026-12-07"]) for (const dosage of views(member(event, 60))) {
+      const before = fresh(dosage), current = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(current.schedule?.explicitEvents).toEqual([event]);
+      expect(current.schedule?.recurrence).toMatchObject({ dayOfWeek: [FhirDayOfWeek.Monday],
+        anchors: [EventTiming["Before Sleep"]], offset: 60 });
+      expect(current.amounts?.[0].quantity?.extension).toEqual([note]);
+      expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual(event === "2026-12" ? [] : ["2026-12-06T23:30:00+00:00"]);
+      if (event === "2026-12") expect(() => calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Hour }))
+        .toThrow(expect.objectContaining({ code: "timing-required" }));
+      else expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Hour }))
+        .toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: "scheduled" });
+      expect(dosage).toEqual(before);
+    }
+    // With no lead, Monday's 00:30 cannot occur inside Sunday 23:00–24:00.
+    for (const dosage of views(member("2026-12", 0))) {
+      const before = fresh(dosage);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Hour }))
+        .toMatchObject({ totalUnits: 0, unit: "tab", quantityKind: "scheduled" });
+      expect(dosage).toEqual(before);
+    }
+  });
 });
