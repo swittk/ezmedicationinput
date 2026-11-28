@@ -26,6 +26,11 @@ reviews:
     # This legacy first-clause adapter has no assertions; its clinical test
     # suites remain selected, including source and conversion correctness.
     - "!test/helpers/r5-parser.ts"
+    # Large aggregate suites remain in the full local test run. Focused
+    # clinical, terminology and distribution suites stay selected here.
+    - "!test/generation-roundtrip.spec.ts"
+    - "!test/instruction-graph.spec.ts"
+    - "!test/r6-primary.spec.ts"
     # Pinned upstream reference data; handwritten FHIR definitions, public
     # types and the suites checking this contract remain selected.
     - "!fhir/r6/official-snapshot1-20261113-contract.json"
