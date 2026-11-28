@@ -8,7 +8,7 @@ import { parseClauseSign, parseClauseState } from "../src/parser";
 import { projectHpsgSignToState } from "../src/hpsg/projection";
 import { canonicalFromFhir, canonicalToFhir, getAnchoredCourseDuration, parserStateFromFhir, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL } from "../src/fhir";
 import {
-  calculateTotalUnits, importCanonicalCourse,
+  calculateTotalUnits, importCanonicalCourse, projectCanonicalCourse,
   getEmaQuantityComparator, getMedicationInstructionAction,
   parseInstructionActions,
   getDosageCondition,
@@ -6379,6 +6379,53 @@ describe("reviewed continuing onset and dotted infusion quantities", () => {
       expect(member.additionalInstructions?.map(instruction => instruction.text)).toContain(end);
       expect(course.stages[0].end).toBeUndefined();
       expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain(end);
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+});
+
+
+describe("review b03 rate-range administration duration", () => {
+  it.each([
+    { amount: "0.05 to 0.1", ranged: true },
+    { amount: "0.1", ranged: false }
+  ])("keeps the approximate administration time on $amount mcg/kg/min", ({ amount, ranged }) => {
+    const source = `Infuse at ${amount} mcg/kg/min for ~2h`;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", status: "resolved", requiresPatientWeight: true,
+      administrationDuration: { value: 2, unit: "h", comparator: "~" }
+    });
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0].quantity).toBeUndefined();
+      if (ranged) expect(member.amounts![0].rateRange).toMatchObject({
+        low: { value: 0.05, unit: "ug/kg/min" }, high: { value: 0.1, unit: "ug/kg/min" }
+      });
+      else expect(member.amounts![0].rate).toMatchObject({ value: 0.1, unit: "ug/kg/min" });
+      expect(member.schedule?.recurrence).toMatchObject({ count: 1, occurrenceDuration: 2,
+        occurrenceDurationUnit: "h", occurrenceDurationComparator: "~" });
+      expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
+      expect(member.asNeeded).not.toBe(true);
+      const repeat = projectCanonicalCourse(course).fhir[0].timing?.repeat;
+      expect(repeat?.duration).toBeUndefined();
+      expect(repeat?.extension?.find(extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL))
+        .toMatchObject({ valueQuantity: { value: 2, system: "http://unitsofmeasure.org", code: "h",
+          extension: [{ url: "http://ema.europa.eu/fhir/extension/comparator",
+            valueCoding: { system: "http://spor.ema.europa.eu/v1/lists/100000000008", code: "100000000055" } }]
+        } });
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("approximately 2 hours");
+      expect(th).toContain("ประมาณ 2 ชั่วโมง");
+      expect(en).not.toContain("as needed");
       expect(course.instruction).toBe(source);
       expect(JSON.stringify(input)).toBe(before);
     }

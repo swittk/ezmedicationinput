@@ -3942,6 +3942,12 @@ describe("review cbb current preview ownership", () => {
       expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
       expect(member.asNeeded).not.toBe(true);
       expect(member.predicate).toBeUndefined();
+      expect(member.additionalInstructions).toContainEqual(expect.objectContaining({
+        text: "May cause dizziness if taken without food"
+      }));
+      expect(projectCanonicalCourse(course).fhir[0].additionalInstruction).toContainEqual(expect.objectContaining({
+        text: "May cause dizziness if taken without food"
+      }));
       const graph = member.syntax?.instructionGraph;
       const cause = graph?.actions.findIndex(action => action.predicate.lemma === "cause");
       expect(cause).toBeGreaterThanOrEqual(0);

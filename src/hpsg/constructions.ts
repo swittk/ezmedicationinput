@@ -787,6 +787,11 @@ export function scopeMedicationGuardSign(guard: ParsedMedicationGuard, scope: Hp
 function guardPredicateConstituent(
   context: GuardConstituentContext, tokens: Token[], start: number, end: number
 ): HpsgSign | undefined {
+  // Candidate and final predicates share the same lexical extent; the enclosing
+  // guard retains its independent source range, including a consequent delimiter.
+  while (start < end && /\s/u.test(context.source[start])) start++;
+  while (end > start && /[\s.!?;,]/u.test(context.source[end - 1])) end--;
+  if (start >= end) return undefined;
   const tokenRange = (from: number, to: number) => tokens.filter(token => token.sourceStart < to && from < token.sourceEnd);
   const atom = (from: number, to: number): HpsgSign | undefined => {
     const members = tokenRange(from, to);
@@ -958,13 +963,9 @@ export function parseMedicationGuard(
       break;
     }
   }
-  let predicateStart = lead.end, predicateEnd = end;
-  while (predicateStart < predicateEnd && /\s/u.test(source[predicateStart])) predicateStart++;
-  while (predicateEnd > predicateStart && /[\s.!?;,]/u.test(source[predicateEnd - 1])) predicateEnd--;
-  if (predicateStart >= predicateEnd) return undefined;
   const context: GuardConstituentContext = { source, range: { start: lead.start, end },
     ...(withholdingConsequent ? { withholdingConsequent } : {}) };
-  const predicate = scopedGuard ? undefined : guardPredicateConstituent(context, tokens, predicateStart, predicateEnd);
+  const predicate = scopedGuard ? undefined : guardPredicateConstituent(context, tokens, lead.end, end);
   const sign = scopedGuard ?? (predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate));
   const condition = sign?.synsem.cont.clinicalAdjunct?.condition;
   return sign && condition ? { condition, start: lead.start, markerEnd: lead.end, end, text: source.slice(lead.start, end),

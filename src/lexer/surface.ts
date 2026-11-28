@@ -60,6 +60,15 @@ function isStandaloneSurfaceChar(char: string): boolean {
   return classifySurfaceKind(char) !== undefined;
 }
 
+/** A leading decimal can follow a token boundary or an existing numeric prefix. */
+function isNumericTokenBoundary(input: string, index: number): boolean {
+  if (index < 0) return true;
+  const char = input[index];
+  return isWhitespaceChar(char) || SEPARATOR_CHARS.has(char) ||
+    char === "/" || char === "@" || char === "~" || char === "≈" ||
+    char === "≥" || char === "≤" || char === "<" || char === ">" || char === "=";
+}
+
 function isAsciiLetter(char: string): boolean {
   return (char >= "A" && char <= "Z") || (char >= "a" && char <= "z");
 }
@@ -92,10 +101,8 @@ export function isSentenceBoundaryChar(input: string, index: number): boolean {
   // 0.1 into 1, a tenfold dose error. This is a lexical boundary, not a
   // separate clinical grammar or a whole-input repair pass.
   if (/[0-9๐-๙]/u.test(after) &&
-      (/[0-9๐-๙]/u.test(before) || index === 0 || isWhitespaceChar(before) || SEPARATOR_CHARS.has(before) ||
-        before === "/" || before === "@" || before === "~" || before === "≈" ||
-        before === "≥" || before === "≤" ||
-        before === "<" || before === ">" || before === "=" ||
+      (/[0-9๐-๙]/u.test(before) || isNumericTokenBoundary(input, index - 1) ||
+        (before === "-" || before === "+") && isNumericTokenBoundary(input, index - 2) ||
         /[-–—]/u.test(before) && rangeLeft >= 0 && /[0-9๐-๙]/u.test(input[rangeLeft]))) {
     return false;
   }

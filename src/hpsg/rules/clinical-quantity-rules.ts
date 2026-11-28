@@ -531,13 +531,17 @@ function weightQuantity(
           requiresPatientWeight: true
         }, { range: { ...range }, unit: `${scalar.unit}/kg` }, undefined, WEIGHT_WARNING);
     }
-    // Keep a period total pending until its ordinary division daughter composes.
-    // No later token is inspected or claimed by this quantity constituent.
+    // A pending total leaves its later division daughter to composition; an
+    // independently licensed rate owns the same trailing duration as a scalar rate.
     const total = !clinicalRateHeadAt(context, phraseStart, expression.end, false, denominator.value).rateSpecific;
+    const duration = total ? undefined : durationAfter(context, expression.end);
+    if (duration) indices.push(...duration.indices);
     return clinicalSign(context, "hpsg.lex.clinicalQuantity.weightRangeTotal", indices, {
       representation: total ? "dose" : "rate-quantity",
       status: total ? "incomplete" : "resolved",
       numerator, denominators: [bodyMass, denominator],
+      ...(duration ? { administrationDuration: { value: duration.value, unit: duration.unit,
+        ...(duration.comparator ? { comparator: duration.comparator } : {}) } } : {}),
       ...(total ? { dailyTotal: true, reviewReason: "incomplete-weight-based-dose" as const } : {}),
       requiresPatientWeight: true
     }, total ? { unit: `${scalar.unit}/kg` } : undefined);

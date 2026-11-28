@@ -595,12 +595,12 @@ function parseBodySiteFeatures(
 
   // A registered finer site can retain its part and coded nominal head
   // without borrowing that head's code for the complete anatomical phrase.
-  const directDefinition = words.length > 1
+  const partRelation = words.length > 1 ? normalizeBodySiteRelation(firstWord) : undefined;
+  const registeredPart = partRelation && BODY_SITE_SPATIAL_RELATION_CODINGS.has(partRelation);
+  const directDefinition = words.length > 1 &&
+      (registeredPart || firstWord === "left" || firstWord === "right")
     ? lookupDefinitionForCanonical(normalized, customSiteMap) : undefined;
-  const partRelation = directDefinition && !directDefinition.coding?.code
-    ? normalizeBodySiteRelation(firstWord) : undefined;
-  if (directDefinition && partRelation &&
-      BODY_SITE_SPATIAL_RELATION_CODINGS.has(partRelation)) {
+  if (directDefinition && !directDefinition.coding?.code && partRelation && registeredPart) {
     const wholeText = words.slice(1).join(" ");
     const wholeCanonical = normalizeBodySiteKey(wholeText);
     const wholeDefinition = lookupDefinitionForCanonical(wholeCanonical, customSiteMap);

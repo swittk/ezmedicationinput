@@ -92,7 +92,8 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
     if (!frame) continue;
     // A registered action word inside the typed predicate is not its consequent.
     const guard = medicationGuardForContext(context);
-    if (guard && guard.start === token.sourceStart && frame.span.start < guard.end) continue;
+    if (guard && guard.start === token.sourceStart &&
+          guard.start <= frame.span.start && frame.span.start < guard.end) continue;
     const definition = frameActionDefinition(frame, context.options);
     const procedural = frame.polarity === AdvicePolarity.Negate || definition?.adviceClauseHead ||
       definition?.procedural && !definition.primaryAdministrationHead;

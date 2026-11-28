@@ -4686,6 +4686,7 @@ describe("measurement comparisons inside mixed postfix advice guards", () => {
       const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
       const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
       expect(en.toLowerCase().match(/do not drive/gu)).toHaveLength(1);
+      expect(en).toContain("Do not drive " + fixture.condition);
       if (fixture.measurement) { expect(en).toContain("160"); expect(th).toContain("160"); }
       if (fixture.state) { expect(en).toContain("dizzy"); expect(th.includes("เวียนศีรษะ") || th.includes("dizzy")).toBe(true); }
       expect(JSON.stringify(input)).toBe(before);
@@ -5300,5 +5301,111 @@ describe("qualified meal-state adjunct ownership", () => {
     expect(frame?.sourceText).toBe("after a light meal");
     if (form === "r6") expect(projected.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(input)).toBe(before);
+  });
+});
+
+
+describe("review b03 complete guard and consequent boundaries", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+  it.each([".", ","])("keeps a fronted measurement before a %s-delimited dose", delimiter => {
+    const source = `If SBP < 100 mmHg${delimiter} Take 1 tablet`;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    const guard = parseMedicationGuard(source)!;
+    expect(guard.condition).toMatchObject({ kind: "measurement", name: "sbp", operation: "lt",
+      value: 100, unit: "mmHg", text: "SBP < 100 mmHg" });
+    // Clinical predicate trimming does not rewrite the independently owned source extent.
+    expect(guard.text).toBe(source.slice(0, delimiter === "." ? source.indexOf("Take") : source.indexOf(",")));
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject({ kind: "measurement", name: "sbp", operation: "lt",
+        value: 100, unit: "mmHg", text: "SBP < 100 mmHg" });
+      expect(members[0].asNeeded).not.toBe(true);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("only if SBP < 100 mmHg");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("SBP < 100 mmHg");
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([
+    { tail: "", anchored: false }, { tail: ", contact your doctor", anchored: false },
+    { tail: "", anchored: true }, { tail: ", contact your doctor", anchored: true }
+  ])("keeps a preceding dose hold (anchored=$anchored, advice=$tail)", ({ tail, anchored }) => {
+    const source = "Take 1 tablet" + (anchored ? " at 08:00 daily for 2 days" : " daily") +
+      "; do not take the morning dose if SBP < 100 mmHg" + tail;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      if (anchored) {
+        expect(member.predicate).toMatchObject({ kind: "not", condition: {
+          kind: "measurement", name: "sbp", operation: "lt", value: 100, unit: "mmHg"
+        } });
+        expect(member.schedule?.recurrence).toMatchObject({ clocks: ["08:00:00"], courseLength: { value: 2 } });
+        expect(member.schedule?.recurrence?.courseLength?.code ?? member.schedule?.recurrence?.courseLength?.unit).toBe("d");
+        const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC", limit: 3 };
+        for (const sbp of [90, 110]) {
+          const evaluateCondition = (condition: NonNullable<typeof member.predicate>) => evaluateMedicationCondition(condition, { sbp });
+          expect(nextDueDoses(input, { ...query, evaluateCondition })).toEqual(sbp < 100 ? [] : [
+            "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00"
+          ]);
+          expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "d", evaluateCondition }))
+            .toMatchObject({ totalUnits: sbp < 100 ? 0 : 2, unit: "tab" });
+        }
+      } else {
+        // A daily cadence alone does not bind an authored morning-dose target.
+        expect(member.predicate).toEqual({ kind: "text", text: source });
+      }
+      expect(member.asNeeded).not.toBe(true);
+      const graph = member.syntax!.instructionGraph!;
+      const hold = graph.actions.findIndex(action => action.predicate.lemma === "take" && action.polarity === AdvicePolarity.Negate);
+      expect(hold).toBeGreaterThanOrEqual(0);
+      const conditions = graph.relations?.filter(relation => relation.kind === AdviceRelation.If && relation.toActionIndex === hold);
+      expect(conditions).toHaveLength(1);
+      expect(conditions![0].text).toBe("if SBP < 100 mmHg");
+      if (tail) {
+        const contact = graph.actions.findIndex(action => action.predicate.lemma === "call");
+        expect(contact).toBeGreaterThanOrEqual(0);
+        expect(graph.relations?.some(relation => relation.kind === AdviceRelation.If && relation.toActionIndex === contact)).not.toBe(true);
+      }
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(en).toContain("SBP < 100 mmHg");
+      expect(en).not.toContain("only if SBP < 100 mmHg");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("SBP < 100 mmHg");
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each(["-.5", "-0.5"])("keeps the signed decimal threshold %s", number => {
+    const source = `Take 1 tablet only if weight change < ${number} kg`;
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      expect(members[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(members[0].predicate).toMatchObject({ kind: "measurement", name: "weight change",
+        operation: "lt", value: -0.5, unit: "kg" });
+      expect(members[0].asNeeded).not.toBe(true);
+      for (const locale of ["en", "th"])
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toContain("weight change < -0.5 kg");
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
   });
 });
