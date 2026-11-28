@@ -374,7 +374,7 @@ path. Native clinical course remains the sole internal authority:
 
 - adapters/r5-course.ts emits strict R5 fields and complete retained edit
   metadata directly from native facts.
-- adapters/r5-import.ts reconciles live R5 rows directly. It may decode an
+- adapters/r5-course.ts reconciles live R5 rows directly. It may decode an
   R6-shaped historical *source snapshot* embedded in an older R5 extension,
   but does not construct a new R6 processing intermediate.
 - adapters/canonical-course.ts imports/projects current R6 independently.

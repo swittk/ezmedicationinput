@@ -1,5 +1,5 @@
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-fhir";
-import { courseFromR5 } from "./adapters/r5-import";
+import { courseFromR5 } from "./adapters/r5-course";
 import { projectNativeR5Course } from "./adapters/r5-course";
 import { formatCanonicalCourse, formatCanonicalAdministration, prefersSourceInstruction,
   joinGeneratedClauses, appendMedicationConditionText, appendMedicationExcludedDatesText,

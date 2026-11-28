@@ -3,7 +3,7 @@ import { nextDayOnsetAt } from "../src/hpsg/rule-context";
 import { describe,expect,it } from "vitest";
 import retainedCourseProfile from "../fhir/r5/medication-r6-course-details.json";
 import { R5_SOURCE_ONLY_MAXIMUM_URL,administrationFromR5,courseFromR6,courseToR5,courseToR6 } from "../src/adapters/canonical-course";
-import { R6_DRAFT_STEPS_SOURCE_URL } from "../src/adapters/r6-editable-metadata";
+import { R6_DRAFT_STEPS_SOURCE_URL } from "../src/adapters/canonical-course";
 import { buildAdditionalInstructionFramesFromCoding } from "../src/advice";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL } from "../src/body-site-spatial";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";

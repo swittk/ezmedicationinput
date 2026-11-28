@@ -2632,15 +2632,15 @@ describe("canonical course architecture", () => {
       return modules.filter(module => /(?:dosage-course|adapters\/|\/fhir(?:$|\.))/u.test(module));
     };
     for (const source of [
-      'import { administrationFromR5 } from "../adapters/r5-import";',
-      'import "../adapters/r5-import";',
-      'const adapter = import("../adapters/r5-import");',
-      'export * from "../adapters/r5-import";',
-      'import adapter = require("../adapters/r5-import");',
-      'const adapter = require("../adapters/r5-import");'
-    ]) expect(forbiddenModuleSpecifiers(source)).toEqual(["../adapters/r5-import"]);
-    expect(forbiddenModuleSpecifiers(`const text = 'from "../adapters/r5-import"';`)).toEqual([]);
-    expect(forbiddenModuleSpecifiers(`const text = 'require("../adapters/r5-import")';`)).toEqual([]);
+      'import { administrationFromR5 } from "../adapters/r5-course";',
+      'import "../adapters/r5-course";',
+      'const adapter = import("../adapters/r5-course");',
+      'export * from "../adapters/r5-course";',
+      'import adapter = require("../adapters/r5-course");',
+      'const adapter = require("../adapters/r5-course");'
+    ]) expect(forbiddenModuleSpecifiers(source)).toEqual(["../adapters/r5-course"]);
+    expect(forbiddenModuleSpecifiers(`const text = 'from "../adapters/r5-course"';`)).toEqual([]);
+    expect(forbiddenModuleSpecifiers(`const text = 'require("../adapters/r5-course")';`)).toEqual([]);
     const wireBoundaryAccesses = (text: string) => {
       const source = ts.createSourceFile("boundary.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
       const accesses: string[] = [];
@@ -2691,7 +2691,7 @@ describe("canonical course architecture", () => {
   });
   it("R5 import/export are independent native adapters, never complete R6 intermediate workflows",()=>{
     const writer=readFileSync(new URL("../src/adapters/r5-course.ts",import.meta.url),"utf8");
-    const reader=readFileSync(new URL("../src/adapters/r5-import.ts",import.meta.url),"utf8");
+    const reader=readFileSync(new URL("../src/adapters/r5-course.ts",import.meta.url),"utf8");
     const calledFunctions = (text: string): string[] => {
       const source = ts.createSourceFile("adapter.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
       const { imports, namespaces } = importedCallNames(source);

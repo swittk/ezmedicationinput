@@ -1,5 +1,5 @@
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-fhir";
-import {courseFromR5} from "./adapters/r5-import";
+import {courseFromR5} from "./adapters/r5-course";
 import { getTimingClocks, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL } from "./fhir";
 import {courseFromR6,courseToR6,administrationFromR6,administrationToR5,selectR5Maximum,r5MaximumDoseBasis,periodMaximumToR5,type R5MaximumSelection} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";

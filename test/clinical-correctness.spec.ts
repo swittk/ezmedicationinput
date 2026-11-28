@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FhirR6DosageInstruction } from "../src";
 import { formatParseBatch, parseInstructionActions, importCanonicalCourse, FhirPeriodUnit, EventTiming } from "../src";
 import { buildInstructionGraphExtension } from "../src/instruction-graph-fhir";
-import { retainDraftSteps } from "../src/adapters/r6-editable-metadata";
+import { retainDraftSteps } from "../src/adapters/canonical-course";
 import { AdviceArgumentRole, AdvicePolarity } from "../src/types";
 import { calculateTotalUnits, formatSig, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays, setDosageExcludedWeekdays, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition, RouteCode } from "../src";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";

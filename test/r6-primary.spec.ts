@@ -2,7 +2,7 @@ import type { CanonicalCourse } from "../src/canonical/course";
 import { parseAdditionalInstructions } from "../src/advice";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL, parseBodySiteSpatialRelationExtension, buildBodySiteSpatialRelationExtension } from "../src/body-site-spatial";
 import { encodeR6SourceMetadata, decodeR6SourceMetadata } from "../src/dosage-course";
-import { R6_SCOPED_SAFETY_MODIFIER_URL, retainedSingleStepSafety } from "../src/adapters/r6-editable-metadata";
+import { R6_SCOPED_SAFETY_MODIFIER_URL, retainedSingleStepSafety } from "../src/adapters/canonical-course";
 import { ENGLISH_COURSE } from "../src/locales/course/en";
 import { decodeR5RetainedFields, encodeR5RetainedFields, DOSAGE_DETAILS_R5_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
 import { equalStructuredValues, cloneStructuredValue } from "../src/stable-structure";

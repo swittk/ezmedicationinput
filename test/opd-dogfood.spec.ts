@@ -1,8 +1,8 @@
 import { describe,expect,it } from "vitest";
 import { formatSig,fromFhirDosage,importCanonicalCourse,nextDueDoses,projectCanonicalCourse,RouteCode } from "../src";
 import { boundaryToWire,courseFromR6,courseToR6,R5_SOURCE_ONLY_MAXIMUM_URL } from "../src/adapters/canonical-course";
-import { courseFromR5 } from "../src/adapters/r5-import";
-import { R6_DRAFT_STEPS_SOURCE_URL,R6_SCOPED_SAFETY_MODIFIER_URL,R6_SINGLE_STEP_SAFETY_SOURCE_URL } from "../src/adapters/r6-editable-metadata";
+import { courseFromR5 } from "../src/adapters/r5-course";
+import { R6_DRAFT_STEPS_SOURCE_URL,R6_SCOPED_SAFETY_MODIFIER_URL,R6_SINGLE_STEP_SAFETY_SOURCE_URL } from "../src/adapters/canonical-course";
 import type { CanonicalCourse } from "../src/canonical/course";
 import { numericAdministrationLimits } from "../src/canonical/course";
 import { COURSE_CYCLE_COUNT_EXTENSION_URL,decodeR5RetainedFields,decodeR6SourceMetadata,DOSAGE_ALTERNATIVE_CHOICE_URL,DOSAGE_CONDITION_R5_URL,DOSAGE_DETAILS_R5_URL,DOSAGE_EXCLUDED_DATES_R5_URL,DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,DOSAGE_RECONCILIATION_SOURCE_URL,DOSAGE_RECONCILIATION_WARNING_URL,DOSAGE_RENDERED_INSTRUCTION_R5_URL,dosageMatchesSavedProjection,encodeR5RetainedFields,encodeR6SourceMetadata,getCourseCycleCount,getDosageCondition,getDosageExcludedDates,getDosageSourceTextAgreement,isRenderedInstructionMarker,PARALLEL_COMPONENT_PHASE_ORIGIN_URL,readRetainedField,retainField,setCourseCycleCount,setDosageAlternativeChoice,setDosageCondition,setDosageExcludedDates,setDosageExcludedWeekdays,toEzDosages,withDosageEditProvenance } from "../src/dosage-course";
