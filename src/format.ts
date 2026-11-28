@@ -1262,12 +1262,11 @@ export function independentTimingText(
   if (!code || TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined ||
       authoredCountTimingText(code, recurrence)) return undefined;
   const lower = code.toLowerCase();
-  if (timingPreviewDescriptor(code) || intervalTimingPreviewDescriptor(code) &&
-      timingCodeMatchesRecurrence(recurrence ?? {}, code)) return undefined;
+  if (timingPreviewDescriptor(code)) return undefined;
   if (WORD_FREQUENCIES[lower] && recurrence?.periodUnit !== undefined &&
       (recurrence.frequency !== undefined || recurrence.frequencyMax !== undefined ||
        recurrence.period !== undefined || recurrence.periodMax !== undefined)) return undefined;
-  // Unexpanded shorthand yields when a typed cadence replaces it.
+  // Compact shorthand yields when a typed cadence replaces it.
   // Otherwise retain the source label.
   return isCompactIntervalTimingCode(code) && recurrence?.periodUnit !== undefined &&
     (recurrence.period !== undefined || recurrence.periodMax !== undefined) ? undefined : code;

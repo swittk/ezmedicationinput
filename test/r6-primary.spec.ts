@@ -5310,14 +5310,59 @@ describe("round68 current preview fields", () => {
 
 
 describe("code-only compact interval previews", () => {
-  it.each(["Q36H", "Q1.5H", "Q36-48H"])("retains %s when no typed recurrence replaces it", code => {
+  it.each([
+    ["Q36H", "every 36 hours", "ทุก 36 ชั่วโมง"],
+    ["Q1.5H", "every 90 minutes", "ทุก 90 นาที"],
+    ["Q36-48H", "every 36 to 48 hours", "ทุก 36 ถึง 48 ชั่วโมง"],
+  ] as const)("expands %s while preserving the current code-only timing", (code, english, thai) => {
     const input: FhirR6DosageInstruction = { step: [{ component: [{
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
-      timing: { code: { coding: [{ code }] } },
+      timing: { code: { coding: [{ code, extension: [
+        { url: "urn:clinic:timing-note", valueString: "Retain the authored shorthand" },
+      ] }] } },
     }] }] };
-    for (const dosage of [input, JSON.parse(JSON.stringify(toFhirR5Dosages(input)))])
-      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const)
-        expect(formatSig(dosage, style, { locale, realizationMode: "normalized" }).split(code)).toHaveLength(2);
+    const original = JSON.parse(JSON.stringify(input));
+    const component = input.step![0].component[0];
+    const native = importCanonicalCourse(input);
+    const projected = projectCanonicalCourse(native);
+    for (const dosage of [input, native, JSON.parse(JSON.stringify(projected.fhir)),
+      JSON.parse(JSON.stringify(projected.fhirNext))]) {
+      const before = JSON.stringify(dosage);
+      const current = importCanonicalCourse(dosage);
+      const administration = current.stages[0].administrations[0];
+      expect(administration.amounts).toHaveLength(1);
+      expect(administration.amounts![0].quantity).toEqual({ value: 1, unit: "tab" });
+      expect(administration.schedule?.code).toEqual(component.timing!.code);
+      expect(administration.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(administration.schedule?.recurrence?.period).toBeUndefined();
+      expect(administration.schedule?.recurrence?.periodMax).toBeUndefined();
+      expect(administration.schedule?.recurrence?.periodUnit).toBeUndefined();
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        const cadence = locale === "th" ? thai : style === "short" ? code : english;
+        const rendered = formatSig(dosage, style, { locale, realizationMode: "normalized" });
+        expect(rendered.split(code)).toHaveLength(2);
+        expect(rendered.split(cadence)).toHaveLength(2);
+      }
+      const saved = projectCanonicalCourse(current);
+      for (const row of [saved.fhir[0], saved.fhirNext.step![0].component[0]]) {
+        expect(row.doseAndRate).toEqual(component.doseAndRate);
+        expect(row.timing).toEqual(component.timing);
+      }
+      expect(saved.fhirNext.renderedInstruction).toBeUndefined();
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    const source = `Take 1 tablet ${code}`;
+    const supplied: FhirR6DosageInstruction = { ...input, renderedInstruction: source };
+    const suppliedBefore = JSON.stringify(supplied);
+    const savedSource = projectCanonicalCourse(importCanonicalCourse(supplied));
+    const reopenedSource = toDosageDetails(JSON.parse(JSON.stringify(savedSource.fhir)));
+    for (const saved of [savedSource.fhirNext, reopenedSource]) {
+      expect(saved.renderedInstruction).toBe(source);
+      expect(saved.step![0].component[0].timing).toEqual(component.timing);
+      expect(saved.step![0].component[0].doseAndRate).toEqual(component.doseAndRate);
+    }
+    expect(JSON.stringify(supplied)).toBe(suppliedBefore);
+    expect(input).toEqual(original);
   });
 
   it("keeps the established Q6H wording", () => {

@@ -6799,11 +6799,11 @@ describe("review d41 selected calendar and successor owners", () => {
       const before = JSON.stringify(dosage);
       const englishText = formatSig(dosage, "long", { locale: "en" });
       expect(englishText).toContain(english);
-      expect(englishText).not.toContain(code);
+      expect(englishText.split(code)).toHaveLength(2);
       const thai = formatSig(dosage, "long", { locale: "th" });
       expect(thai).toContain(thaiNumber);
       expect(thai).toContain(code === "Q48H" ? "ชั่วโมง" : "นาที");
-      expect(thai).not.toContain(code);
+      expect(thai.split(code)).toHaveLength(2);
       expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.code).toEqual(row.timing?.code);
       expect(JSON.stringify(dosage)).toBe(before);
     }
