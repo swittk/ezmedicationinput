@@ -16645,3 +16645,14 @@ Rate-only administrations keep their observation guards and administration durat
 Selected alternatives alone determine predecessor cutoffs. Successor pauses begin at the resolved exclusive end of hour or minute phases. Event offsets apply elapsed minutes to the resolved event instant, preserving civil recurrence, actual chronological admission and ordinary equal-offset paths across daylight-saving transitions.
 
 Current FHIR projections share event-offset eligibility, retain primitive companions and unknown annotations, and preserve coded quantity identity. Equivalent count labels remain usable for calculations without changing supplied quantities. Explicit route codes retain precedence over fallback labels. Direct version adapters now keep their related import and projection owners together. Regression coverage strengthens complete quantities, weekdays, inequalities, subsecond boundaries and current native and wire behavior.
+
+
+## 2026-11-28 — Preserve constituent ownership and annotation targets
+
+Maximum composition distinguishes generic occurrences from medication counts and retains the selected predicate scope. Completed PRN and measurement predicates can license their separate limits while symptom-history counts remain with the condition. Dated starts, clock spans, compact comparative quantities and registered compound connectors retain their existing grammatical owners.
+
+Meal timing uses complete registered event nominals, including their licensed articles. Qualified and negative meal adjuncts remain complete advice instead of becoming generic positive event anchors. Medication continuation requires its selected duration and temporal arguments to account for the whole instruction; independent activity durations remain advisory with their source intact.
+
+Preview composition retains stage windows, selected dose ownership, individual rate carriers, typed advice relations and compatible finer anatomy. Civil day/week cadence wording stays distinct from elapsed hours, minutes and seconds. Scheduling preserves code-derived event clocks, bounded infusion supply, fractional predecessor ends and uncertain event-offset ranges without inventing precise administrations.
+
+The existing quantity codec projects supported annotation choices and their primitive companions to the requested FHIR version, including nested Range and Ratio endpoint annotations. SimpleQuantity remains comparator-free, Duration annotations remain non-executing, and opaque choices, authored quantities, units, source and unknown siblings remain preserved. Regression coverage checks the same current facts through native and fresh R5/R6 inputs.
