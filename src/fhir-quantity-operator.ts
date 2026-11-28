@@ -215,6 +215,42 @@ function quantityReferenceForWire(
     if (result === reference) result = { ...reference };
     result[field] = primitive;
   }
+  const identifier = reference.identifier;
+  if (identifier) {
+    const extension = identifier.extension ? quantityAnnotationExtensions(identifier.extension, target) : undefined;
+    const type = quantityConceptForWire(identifier.type, target);
+    const assigner = quantityReferenceForWire(identifier.assigner, target);
+    let period = identifier.period;
+    if (period) {
+      const extension = period.extension ? quantityAnnotationExtensions(period.extension, target) : undefined;
+      const start = quantityPrimitiveForWire(period._start, target);
+      const end = quantityPrimitiveForWire(period._end, target);
+      if (extension !== period.extension || start !== period._start || end !== period._end) period = {
+        ...period,
+        ...(extension !== period.extension ? { extension } : {}),
+        ...(start !== period._start ? { _start: start } : {}),
+        ...(end !== period._end ? { _end: end } : {})
+      };
+    }
+    let current = extension === identifier.extension && type === identifier.type &&
+      assigner === identifier.assigner && period === identifier.period ? identifier : {
+      ...identifier,
+      ...(extension !== identifier.extension ? { extension } : {}),
+      ...(type !== identifier.type ? { type } : {}),
+      ...(assigner !== identifier.assigner ? { assigner } : {}),
+      ...(period !== identifier.period ? { period } : {})
+    };
+    for (const field of ["_use", "_system", "_value"] as const) {
+      const primitive = quantityPrimitiveForWire(identifier[field], target);
+      if (primitive === identifier[field]) continue;
+      if (current === identifier) current = { ...identifier };
+      current[field] = primitive;
+    }
+    if (current !== identifier) {
+      if (result === reference) result = { ...reference };
+      result.identifier = current;
+    }
+  }
   return result;
 }
 function quantityConceptForWire(

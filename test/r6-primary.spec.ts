@@ -7765,3 +7765,46 @@ it("keeps dose-limit primitive companions in safety and legal metadata on the R5
   expect(toDosageDetails(rows).step[0].component[0].safety?.doseLimit).toEqual([limit]);
   expect(JSON.stringify(input)).toBe(before);
 });
+
+
+it.each(["Reference", "CodeableReference"] as const)("preserves typed Identifier annotations within a %s", shape => {
+  type Reference = NonNullable<FhirR6Extension["valueReference"]>;
+  const estimate: FhirR6Extension = { url: "urn:clinic:identifier-estimate", valueQuantity: {
+    value: 2, unit: "cm2", comparator: "~", _value: { id: "estimated-area" }
+  } };
+  const primitive = { id: "authored-primitive", extension: [estimate] };
+  const reference: Reference = { id: "anatomical-reference", reference: "BodyStructure/skin", identifier: {
+    id: "local-identifier", system: "urn:clinic:body-structure", value: "skin-1", use: "usual",
+    extension: [estimate], _use: primitive, _system: primitive, _value: primitive,
+    type: { text: "Local body site", extension: [estimate], _text: primitive, coding: [{
+      system: "urn:clinic:identifier-kind", code: "site", extension: [estimate], _code: primitive, _display: primitive
+    }] },
+    period: { start: "2027-01-01", end: "2028-01-01", extension: [estimate], _start: primitive, _end: primitive },
+    assigner: { reference: "Organization/clinic", extension: [estimate], _reference: primitive, _display: primitive }
+  } };
+  const annotation: FhirR6Extension = { url: "urn:clinic:anatomical-source", ...(shape === "Reference"
+    ? { valueReference: reference } : { valueCodeableReference: { reference } }) };
+  const input: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [{ doseQuantity: {
+    value: 1, unit: "g", extension: [annotation]
+  } }] }] }] };
+  const before = JSON.stringify(input), rows = toFhirR5Dosages(input);
+  const wireAnnotation = rows[0].doseAndRate![0].doseQuantity!.extension![0];
+  const wireReference = (shape === "Reference" ? wireAnnotation.valueReference : wireAnnotation.valueCodeableReference!.reference)!;
+  const identifier = wireReference.identifier!;
+  const annotations = [identifier.extension![0], identifier._use!.extension![0], identifier._system!.extension![0],
+    identifier._value!.extension![0], identifier.type!.extension![0], identifier.type!._text!.extension![0],
+    identifier.type!.coding![0].extension![0], identifier.type!.coding![0]._code!.extension![0],
+    identifier.type!.coding![0]._display!.extension![0], identifier.period!.extension![0],
+    identifier.period!._start!.extension![0], identifier.period!._end!.extension![0],
+    identifier.assigner!.extension![0], identifier.assigner!._reference!.extension![0], identifier.assigner!._display!.extension![0]];
+  expect(annotations).toHaveLength(15);
+  for (const current of annotations) {
+    expect(current.valueQuantity?.comparator).toBeUndefined();
+    expect(getEmaQuantityComparator(current.valueQuantity)).toBe("~");
+    expect(current.valueQuantity).toMatchObject({ value: 2, unit: "cm2", _value: { id: "estimated-area" } });
+  }
+  const restored = toDosageDetails(JSON.parse(JSON.stringify(rows)));
+  expect(restored.step[0].component[0].doseAndRate![0].doseQuantity!.extension).toEqual([annotation]);
+  expect(toFhirR5Dosages(JSON.parse(JSON.stringify(restored)))).toEqual(rows);
+  expect(JSON.stringify(input)).toBe(before);
+});
