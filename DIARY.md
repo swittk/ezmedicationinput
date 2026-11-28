@@ -16636,3 +16636,12 @@ Exact successor phases use the selected replacement relationship. Signed event o
 Current FHIR conversion preserves periodMax-only units, nested Quantity annotations, uninterpreted component occurrences, compatible anatomical refinements and recoverable route codings. Annotated UCUM identities compare without changing the supplied quantities.
 
 Preview composition retains ordered doses, localized appointment times, recurring weekdays and independent dilution roles. Object attachment follows the selected Site relation, and definite warning matching requires an affirmative unmodal cause on that same frame. Shared allowances appear once on each selectable path. Meaningful tests retain authored source, current structured facts and independent native and wire outcomes.
+
+
+## 2026-11-28 — Preserve selected conditions and elapsed event boundaries
+
+Rate-only administrations keep their observation guards and administration durations. Retrospective occurrence counts remain inside their condition unless an independent maximum is licensed. Complete directive prefixes establish warning boundaries, preserving the standing dose when advice refers to the next day. Native previews retain guarded rates, finer anatomical labels and the actual matched advice referents.
+
+Selected alternatives alone determine predecessor cutoffs. Successor pauses begin at the resolved exclusive end of hour or minute phases. Event offsets apply elapsed minutes to the resolved event instant, preserving civil recurrence, actual chronological admission and ordinary equal-offset paths across daylight-saving transitions.
+
+Current FHIR projections share event-offset eligibility, retain primitive companions and unknown annotations, and preserve coded quantity identity. Equivalent count labels remain usable for calculations without changing supplied quantities. Explicit route codes retain precedence over fallback labels. Direct version adapters now keep their related import and projection owners together. Regression coverage strengthens complete quantities, weekdays, inequalities, subsecond boundaries and current native and wire behavior.
