@@ -16678,3 +16678,10 @@ Course previews retain whole-clause formatter punctuation, independent timing te
 Scheduling retains explicit unknown displacement, eligible meal opportunities, upper-frequency windows, weekday exclusions and shared weekly quotas across shifted occurrences. A finite successor with authored meal anchors uses the existing first-opportunity calculation after an exact counted predecessor, retaining both complete treatment days.
 
 Current FHIR imports use recognized observation codes while retaining authored labels. Projection preserves target extension annotations and converts nested quantities in all declared primitive companions through the existing operator visitor. Known composite annotations in the current phase bridge use that same visitor while preserving declared SimpleQuantity roles. Unknown choices, source and authored quantities remain intact. The enclosing-frame selection uses a straight minimum-span loop with the established first-tie behavior.
+
+
+## 2026-11-28 — Admit shifted weekly opportunities in chronological order
+
+Shifted event opportunities retain their source-week allowance through the existing chronological queue. Scheduling and supply spend that allowance when actual instants are admitted, so a shorter horizon or later query does not select a different earlier dose. Ordinary unshifted clocks retain their direct path.
+
+Known treatment-relative boundaries accept an explicit zero offset without requiring a unit. The supplied quantity remains unchanged. Regression coverage checks exact dates and supply, retained earlier allowance, current native and fresh wire forms, authored source and unknown annotations.
