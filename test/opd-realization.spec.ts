@@ -556,6 +556,68 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
   });
 
   it.each([
+    {
+      locale: "en",
+      source: "Take 1 tablet at onset of migraine repeat after 2h if needed no more than 2 times",
+      condition: "if needed"
+    },
+    {
+      locale: "th",
+      source: "รับประทาน 1 เม็ดเมื่อเริ่มมีอาการไมเกรน กินซ้ำหลัง 2 ชั่วโมงถ้าจำเป็น ไม่เกิน 2 ครั้ง",
+      condition: "ถ้าจำเป็น"
+    }
+  ])("keeps a closed PRN condition separate from a generic occurrence ceiling ($locale)", ({ locale, source, condition }) => {
+    const parsed = parsePublicSig(source, { locale });
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    const inputs = [
+      parsed.meta.canonical.course,
+      JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))
+    ];
+    for (const input of inputs) {
+      const before = structuredClone(input);
+      const course = importCanonicalCourse(input);
+      const member = course.stages[0].administrations[0];
+      expect(course.instruction).toBe(source);
+      expect(member.amounts).toMatchObject([{ quantity: { value: 1, unit: "tab" } }]);
+      expect(member.asNeeded).toBe(true);
+      expect(member.predicate).toBeUndefined();
+      expect(member.schedule?.recurrence).toMatchObject({ countMax: 2 });
+      expect(member.schedule?.recurrence?.count).toBeUndefined();
+      expect(member.schedule?.recurrence?.occurrenceCap).toBeUndefined();
+      const graph = member.syntax?.instructionGraph;
+      expect(graph?.sourceText).toBe(source);
+      expect(graph?.actions).toMatchObject([{
+        predicate: { lemma: "repeat" },
+        relation: "after",
+        args: [{ role: "duration", quantity: { value: 2, unit: "h" } }]
+      }]);
+      expect(graph?.relations?.filter(relation => relation.kind === "if")).toEqual([
+        expect.objectContaining({ kind: "if", text: condition, toActionIndex: 0 })
+      ]);
+      const wire = projectCanonicalCourse(course);
+      expect(wire.fhir[0].asNeededFor?.[0]?.coding).toContainEqual(
+        expect.objectContaining({ code: "37796009" })
+      );
+      for (const repeat of [
+        wire.fhir[0].timing?.repeat,
+        wire.fhirNext.step?.[0]?.component?.[0]?.timing?.repeat
+      ]) {
+        expect(repeat?.countMax).toBe(2);
+        expect(repeat?.count).toBeUndefined();
+        expect(repeat?._count).toEqual({ extension: [{
+          url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+        }] });
+      }
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Take 1 tablet orally for up to 2 doses at onset of migraine; then repeat after 2 hours if needed.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("รับประทานครั้งละ 1 เม็ด ไม่เกิน 2 ครั้ง เมื่อเริ่มมีอาการไมเกรน จากนั้นทำซ้ำหลัง 2 ชั่วโมงถ้าจำเป็น.");
+      expect(input).toEqual(before);
+    }
+  });
+
+  it.each([
     ["apply 1 patch weekly x3w then 1 week off", "pause-use"],
     ["apply 1 patch weekly for 3 weeks then stop for 1 week", "stop"],
     ["take 1 tab daily x21d then 7 days off", "pause-use"],

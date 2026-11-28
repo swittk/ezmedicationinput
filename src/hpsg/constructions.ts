@@ -12,7 +12,7 @@ import { actionMatchAt } from "../instruction-graph";
 import { ACTION_DIRECTIVE_PREFIXES, normalizeTokenLower } from "./lexical-classes";
 import { contextualDoseLexicalEnd } from "./rules/core-rules";
 import { maximumDosePerPeriodAt, maximumCountLeadAt } from "./rule-context";
-import { maximumOccurrenceAt, isIndependentMaximum } from "./rules/timing-rules";
+import { maximumOccurrenceAt, isIndependentMaximum, type MaximumPredicateScope } from "./rules/timing-rules";
 import { lexicalSign, type HpsgGuardExpression, type HpsgSynsem, type HpsgPhraseRule } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
 import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, type AdviceArgument, type AdviceFrame } from "../types";
@@ -649,21 +649,20 @@ export function guardHasMeasurement(value: MedicationCondition): boolean {
     value.kind === "not" && guardHasMeasurement(value.condition);
 }
 
-/** Only the final predicate daughter can license a following bare limit. */
-function guardFinalPredicateLicensesLimit(value: HpsgGuardExpression, options?: ParseOptions): boolean | "measurement" {
+/** Only the final predicate daughter supplies scope for a following bare limit. */
+function guardFinalPredicateMaximumScope(value: HpsgGuardExpression, options?: ParseOptions): MaximumPredicateScope {
   if (value.kind === "coordination") {
     const last = value.parts[value.parts.length - 1];
-    return last !== undefined && guardFinalPredicateLicensesLimit(last, options);
+    return last ? guardFinalPredicateMaximumScope(last, options) : "unresolved";
   }
-  if (value.kind === "negation") return guardFinalPredicateLicensesLimit(value.operand, options);
-  if (value.kind !== "predicate") return false;
-  // A measurement owns its completed value; retain that typed completion
-  // when the following count uses a generic occurrence noun.
+  if (value.kind === "negation") return guardFinalPredicateMaximumScope(value.operand, options);
+  if (value.kind !== "predicate") return "unresolved";
   if (value.value.kind === "measurement") return "measurement";
   return value.value.kind === "state" && Boolean(resolveSymptomDefinition(
       value.value.name, options?.prnReasonMap, options?.symptomMap)) ||
     value.dayInvariant === true || value.value.kind === "text" &&
-      medicationConditionAtomLexeme(value.value.text).licensesBareIf === true;
+      medicationConditionAtomLexeme(value.value.text).licensesBareIf === true
+    ? "condition" : "unresolved";
 }
 
 /** Create a binary feature-structure derivation from already licensed daughters. */
@@ -953,7 +952,7 @@ export function parseMedicationGuard(
       // independent limit ownership; a period can still belong to history.
       const expression = predicate?.synsem.cont.guard?.expression;
       if (!isIndependentMaximum(lexicalContext, index, maximum,
-          expression ? guardFinalPredicateLicensesLimit(expression, options) : false)) continue;
+          expression ? guardFinalPredicateMaximumScope(expression, options) : "unresolved")) continue;
       end = capStart;
       scopedGuard = guard;
       break;

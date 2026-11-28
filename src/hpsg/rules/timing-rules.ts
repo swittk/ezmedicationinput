@@ -810,7 +810,7 @@ function exactCountCardinalValue(token: Token | undefined): number | undefined {
 export function maximumOccurrenceAt(
   context: Parameters<typeof maximumCountLeadAt>[0], start: number,
   lead = maximumCountLeadAt(context, start)
-): { tokens: Token[]; headStart: number; count: number; implicitOccurrence: boolean;
+): { tokens: Token[]; headStart: number; count: number; occurrenceScope: "generic" | "medication";
   period?: NonNullable<ReturnType<typeof maximumDosePeriodAt>> } | undefined {
   if (!lead) return undefined;
   const valueIndex = lead.headStart + lead.tokens.length;
@@ -827,10 +827,17 @@ export function maximumOccurrenceAt(
   const countTokens = explicitOccurrence ? [valueToken, occurrenceToken] : [valueToken];
   const period = compact?.period ?? maximumDosePeriodAt(context, valueIndex + countTokens.length);
   return { tokens: [...lead.tokens, ...countTokens, ...(period?.tokens ?? [])],
-    headStart: lead.headStart, count, implicitOccurrence: fusedCount !== undefined && !explicitOccurrence ||
-      Boolean(explicitOccurrence && FREQUENCY_TIMES_WORDS.has(compact?.unitSurface ?? occurrenceSurface!)),
+    headStart: lead.headStart, count,
+    occurrenceScope: fusedCount !== undefined && !explicitOccurrence ||
+      explicitOccurrence && FREQUENCY_TIMES_WORDS.has(compact?.unitSurface ?? occurrenceSurface!)
+      ? "generic" : "medication",
     ...(period ? { period } : {}) };
 }
+
+/** Evidence from the selected final predicate, without reparsing its text.
+ * An ordinary condition can still take an episode count; a measurement or
+ * lexical PRN condition has already supplied its complete complement. */
+export type MaximumPredicateScope = "unresolved" | "condition" | "measurement" | "prn";
 
 /** A comparative maximum needs a complete preceding predicate and its own
  * complete daughter. A conjunction alone cannot detach a count prefix from
@@ -839,15 +846,16 @@ export function maximumOccurrenceAt(
 export function isIndependentMaximum(
   context: Parameters<typeof maximumCountLeadAt>[0], start: number,
   maximum: NonNullable<ReturnType<typeof maximumOccurrenceAt> | ReturnType<typeof maximumDosePerPeriodAt>>,
-  completePredicate: boolean | "measurement" = false
+  predicateScope: MaximumPredicateScope = "unresolved"
 ): boolean {
   if (MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[maximum.headStart])) ||
       context.tokens.slice(start, maximum.headStart).some(token =>
         INSTRUCTION_LEADING_SEPARATORS.has(token.original))) return true;
-  // A fused count or generic occurrence noun can qualify episodes of a state.
-  // A completed measurement has already supplied its own numeric complement.
-  if (!completePredicate || "implicitOccurrence" in maximum && maximum.implicitOccurrence &&
-      completePredicate !== "measurement") return false;
+  // Generic occurrences can qualify a condition's episodes. A medication
+  // noun, closed measurement or closed PRN predicate owns a separate limit.
+  if (predicateScope === "unresolved" ||
+      "occurrenceScope" in maximum && maximum.occurrenceScope === "generic" &&
+      predicateScope === "condition") return false;
   const nextIndex = maximum.headStart + maximum.tokens.length;
   const next = nextIndex < (context.limit ?? context.tokens.length) ? context.tokens[nextIndex] : undefined;
   return !next || isPunctuation(normalizeTokenLower(next)) ||

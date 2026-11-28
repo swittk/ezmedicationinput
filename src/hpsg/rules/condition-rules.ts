@@ -892,7 +892,7 @@ function postfixConditionEnd(
       // A complete lexical PRN predicate has no comparative complement;
       // an opaque observation history can still own the following count.
       if (!isIndependentMaximum(context, index, maximum,
-          index === start + 2 && hasPrnMeaning(context.tokens[start + 1]))) continue;
+          index === start + 2 && hasPrnMeaning(context.tokens[start + 1]) ? "prn" : "unresolved")) continue;
     } else if (maximumHead.headStart !== index) continue;
     end = current.sourceStart;
     break;
