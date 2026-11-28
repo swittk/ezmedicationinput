@@ -2569,8 +2569,8 @@ function treatmentRelativeInstant(
     orderedAt = addLocalDays(orderedAt, 0, timeZone);
     sourceClock = LOCAL_DAY_START_CLOCK;
   }
-  if (!unit) throw new Error("Unsupported R6 treatment-start time unit");
   if (quantity === 0) return new Date(orderedAt.getTime());
+  if (!unit) throw new Error("Unsupported R6 treatment-start time unit");
   const result = durationStepper(duration, timeZone, orderedAt, "recurrence", sourceClock)?.(orderedAt);
   if (!result) throw new Error("Invalid R6 treatment-start offset");
   return result;

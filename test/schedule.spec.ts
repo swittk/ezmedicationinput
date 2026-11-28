@@ -5,7 +5,7 @@ import { parseSig } from "./helpers/r5-parser";
 import { TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
 import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount } from "../src/dosage-course";
 import {
-  EventTiming, FhirDosage, FhirR6DosageInstruction, NextDueDoseOptions,
+  EventTiming, FhirDosage, FhirR6DosageInstruction, FhirR6RelativeTime, NextDueDoseOptions,
   FhirPeriodUnit, FhirDayOfWeek
 } from "../src/types";
 import { normalizeClock } from "../src/execution/calendar";
@@ -6964,5 +6964,62 @@ describe("review125 calendar timing codes and nominal event weekdays", () => {
         .toMatchObject({ totalUnits: 0, unit: "tab", quantityKind: "scheduled" });
       expect(dosage).toEqual(before);
     }
+  });
+});
+
+
+describe("RelativeTime exact unitless zero boundaries", () => {
+  const contextCode = { coding: [{
+    system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+  }] };
+  const day = { unit: "day", code: "d", system: "http://unitsofmeasure.org" };
+  const note = { url: "https://example.org/current-boundary-note", valueString: "Retain boundary source" };
+  const source = "Take 2 tablets daily at 08:00; start and stop relative to treatment start.";
+  const query = { orderedAt: "2026-11-21T12:00:00Z", from: "2026-11-21T12:00:00Z", timeZone: "UTC", limit: 5 };
+  const fixture = (offsetDuration: FhirR6RelativeTime["offsetDuration"]): FhirR6DosageInstruction => ({
+    renderedInstruction: source,
+    step: [{ start: { contextCode, ...(offsetDuration ? { offsetDuration } : {}), extension: [note] },
+      end: { contextCode, offsetDuration: { ...day, value: 2 } },
+      component: [{ timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00"] } },
+        doseAndRate: [{ doseQuantity: { value: 2, unit: "tab", extension: [note] } }] }],
+    }],
+  });
+  const cases: { label: string; offset: FhirR6RelativeTime["offsetDuration"]; error?: RegExp }[] = [
+    { label: "unitless zero", offset: { value: 0 } },
+    { label: "coded zero days", offset: { ...day, value: 0 } },
+    { label: "absent offset", offset: undefined, error: /requires a treatment-start offset/u },
+    { label: "missing magnitude", offset: day, error: /requires a treatment-start offset/u },
+    { label: "positive unitless offset", offset: { value: 1 }, error: /Unsupported R6 treatment-start time unit/u },
+  ];
+
+  it.each(cases)("executes only an exact known boundary: $label", ({ offset, error }) => {
+    const current = fixture(offset), original = JSON.stringify(current);
+    const native = importCanonicalCourse(current), projected = projectCanonicalCourse(native);
+    const forms = [current, native, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))];
+    for (const dosage of forms) {
+      const before = JSON.stringify(dosage);
+      if (error) {
+        expect(() => nextDueDoses(dosage, query)).toThrow(error);
+        expect(() => calculateTotalUnits({ dosage, ...query, durationValue: 4, durationUnit: Unit.Day })).toThrow(error);
+      } else {
+        expect(nextDueDoses(dosage, query)).toEqual([
+          "2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00",
+        ]);
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 4, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: 4, unit: "tab", quantityKind: "scheduled" });
+        expect(formatSig(dosage, "long", { locale: "en" })).toContain("From treatment start until 2 days after treatment start");
+        expect(formatSig(dosage, "long", { locale: "th" })).toContain("ตั้งแต่เริ่มการรักษา");
+      }
+      const retained = projectCanonicalCourse(importCanonicalCourse(dosage)).fhirNext;
+      expect(retained.renderedInstruction).toBe(source);
+      expect(retained.step![0].start?.offsetDuration).toEqual(offset);
+      expect(retained.step![0].start?.extension).toEqual([note]);
+      expect(retained.step![0].end).toEqual(current.step![0].end);
+      expect(retained.step![0].component[0].doseAndRate![0].doseQuantity)
+        .toEqual(current.step![0].component[0].doseAndRate![0].doseQuantity);
+      expect(retained.step![0].component[0].timing?.repeat).toEqual(current.step![0].component[0].timing?.repeat);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    expect(JSON.stringify(current)).toBe(original);
   });
 });
