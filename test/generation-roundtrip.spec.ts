@@ -6181,7 +6181,7 @@ describe("supported quantity-bearing annotation choices", () => {
         expect(component.timing!.repeat!.duration).toBeUndefined();
         expect(component.timing!.repeat!.boundsDuration).toBeUndefined();
         expect(calculateTotalUnits({ dosage: view, orderedAt: "2027-01-01T08:00:00Z", from: "2027-01-01T08:00:00Z",
-          timeZone: "UTC", durationValue: 3, durationUnit: "d" }).totalUnits).toBe(6);
+          timeZone: "UTC", durationValue: 3, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(6);
         expect(view).toEqual(viewBefore);
       }
       expect(input).toEqual(before);
