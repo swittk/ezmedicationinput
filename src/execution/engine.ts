@@ -206,13 +206,18 @@ interface ExpandedTime {
 }
 function exactEventClock(time: string, minutes: number): ExpandedTime {
   const shifted = applyOffset(time, minutes);
-  return minutes ? { ...shifted, eventTime: time, elapsedOffsetMinutes: minutes } : shifted;
+  if (minutes) {
+    shifted.eventTime = time;
+    shifted.elapsedOffsetMinutes = minutes;
+  }
+  return shifted;
 }
 /** Source-day ownership stays civil; only an authored event offset is elapsed. */
 function resolveExpandedTime(day: Date, entry: ExpandedTime, zone: string): Date | null {
   if (entry.eventTime !== undefined) {
     const event = makeZonedDateFromDay(day, zone, entry.eventTime);
-    return event ? new Date(event.getTime() + entry.elapsedOffsetMinutes! * 60000) : null;
+    if (event) event.setTime(event.getTime() + entry.elapsedOffsetMinutes! * 60000);
+    return event;
   }
   const targetDay = entry.dayShift ? addLocalDays(day, entry.dayShift, zone) : day;
   return makeZonedDateFromDay(targetDay, zone, entry.time);
@@ -6547,7 +6552,11 @@ function firstClockAnchorDay(
   const shift = entries[entries.length - 1]?.dayShift ?? 0;
   // Unshifted clocks need only the query's civil date. Their consumers bound
   // each instant and use addLocalDays to normalize the following date.
-  if (!elapsedRange && shift === 0 && entries[0]?.dayShift === 0) return from;
+  // Nonpositive offsets cannot bring an earlier source day into the query.
+  // A later order floor keeps the existing normalized/clamped path below.
+  if (shift === 0 && entries[0]?.dayShift === 0 &&
+      (!elapsedRange || (elapsedRange.high === 0 &&
+        (!orderedAt || orderedAt.getTime() <= from.getTime())))) return from;
   const day = startOfLocalDay(from, zone);
   if (!elapsedRange && shift <= 0) return day;
   let first = shift > 0 ? addLocalDays(day, -shift, zone) : day;
