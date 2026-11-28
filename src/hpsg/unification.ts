@@ -460,6 +460,16 @@ function mergeStructuredFeature<T>(left: T | undefined, right: T | undefined): T
   return equalStructuredValues(left, right) ? left : undefined;
 }
 
+/** Partition the selected dose range without manufacturing a scalar endpoint. */
+function divideDoseRange(
+  range: NonNullable<HpsgDoseFeature["range"]>, count: number
+): NonNullable<HpsgDoseFeature["range"]> {
+  return {
+    low: range.low === undefined ? undefined : range.low / count,
+    high: range.high === undefined ? undefined : range.high / count,
+  };
+}
+
 function mergeDose(
   left: HpsgDoseFeature | undefined,
   right: HpsgDoseFeature | undefined
@@ -550,10 +560,7 @@ function mergeDose(
     } else if (rangedActiveDose && range && unit) {
       // Divide the authored active range. A carrier preparation also divides
       // its separate volume; an independent flow rate keeps its numerator.
-      range = {
-        low: range.low === undefined ? undefined : range.low / divisionCount,
-        high: range.high === undefined ? undefined : range.high / divisionCount,
-      };
+      range = divideDoseRange(range, divisionCount);
       clinicalQuantity = { ...clinicalQuantity, dividedDoseCount: divisionCount,
         ...(clinicalQuantity.rateNumerator ? { rateNumerator: {
           ...clinicalQuantity.rateNumerator, value: clinicalQuantity.rateNumerator.value / divisionCount
@@ -901,7 +908,7 @@ export function unifySynsem(
   let schedule = mergeSchedule(left.head.schedule, right.head.schedule);
   if (schedule === undefined && left.head.schedule && right.head.schedule) return undefined;
   // A stated period total divided into N doses is not N repetitions of the
-  // undivided scalar. The division complement licenses a typed period total,
+  // undivided amount. The division complement licenses a typed period total,
   // and the resulting schedule represents the individual administrations.
   // Ordinary "30 mg daily" has no division complement and stays untouched.
   // A resolved weight-based dose (mg/kg) needs the same projection when its
@@ -912,24 +919,31 @@ export function unifySynsem(
   if (dose?.divisionCount !== undefined &&
       (!quantity || (quantity.representation === "dose" && quantity.status === "resolved" &&
         !quantity.denominators.some(term => term.dimension === "time"))) &&
-      dose.value !== undefined && dose.unit &&
+      (dose.value !== undefined || dose.range !== undefined) && dose.unit &&
       schedule && (schedule.frequency ?? 1) === 1 && schedule.period !== undefined && schedule.periodUnit) {
-    const category = getUnitCategory(dose.unit);
-    const dimension: HpsgClinicalQuantityDimension = category === "other"
-      ? (dose.unit === "[iU]" ? "biologic-activity" : "administration-unit")
-      : category;
-    const projectedDose = { value: dose.value / dose.divisionCount, unit: dose.unit,
-      ...(dose.comparator ? { comparator: dose.comparator } : {}) };
-    dose = { ...dose, value: projectedDose.value, clinicalQuantity: {
-      ...quantity,
-      representation: "dose", status: "resolved",
-      numerator: quantity?.numerator ?? { value: dose.value, unit: dose.unit, dimension,
-        ...(dose.comparator ? { comparator: dose.comparator } : {}) },
-      denominators: [...(quantity?.denominators ?? []),
-        { value: schedule.period, unit: schedule.periodUnit, dimension: "time" }],
-      dailyTotal: true, dividedDoseCount: dose.divisionCount, projectedDose
-    } };
-    schedule = { ...schedule, frequency: dose.divisionCount, timingCode: undefined };
+    const divisionCount = dose.divisionCount;
+    if (dose.value !== undefined) {
+      const category = getUnitCategory(dose.unit);
+      const dimension: HpsgClinicalQuantityDimension = category === "other"
+        ? (dose.unit === "[iU]" ? "biologic-activity" : "administration-unit")
+        : category;
+      const projectedDose = { value: dose.value / dose.divisionCount, unit: dose.unit,
+        ...(dose.comparator ? { comparator: dose.comparator } : {}) };
+      dose = { ...dose, value: projectedDose.value, clinicalQuantity: {
+        ...quantity,
+        representation: "dose", status: "resolved",
+        numerator: quantity?.numerator ?? { value: dose.value, unit: dose.unit, dimension,
+          ...(dose.comparator ? { comparator: dose.comparator } : {}) },
+        denominators: [...(quantity?.denominators ?? []),
+          { value: schedule.period, unit: schedule.periodUnit, dimension: "time" }],
+        dailyTotal: true, dividedDoseCount: dose.divisionCount, projectedDose
+      } };
+    } else if (dose.range) {
+      // The projected range and recurrence own the completed division.
+      // Consume its complement before a later independent rate can attach.
+      dose = { ...dose, range: divideDoseRange(dose.range, divisionCount), divisionCount: undefined };
+    }
+    schedule = { ...schedule, frequency: divisionCount, timingCode: undefined };
   }
   // An independently owned rate may already have divided the separate dose.
   // Its count applies to the authored total's schedule, never the rate period.

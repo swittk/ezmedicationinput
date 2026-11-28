@@ -3763,13 +3763,15 @@ describe("round59 glued qualified fraction words", () => {
 
 
 describe("round60 divided ranges beside independent infusion rates", () => {
-  it("divides the authored daily volume range while retaining the independent flow rate", () => {
-    const source = "Infuse 100–200 mL daily in 2 divided doses at 30 mL/hr";
+  it.each([
+    "Infuse 100–200 mL daily in 2 divided doses at 30 mL/hr",
+    "Infuse 100–200 mL at 30 mL/hr daily in 2 divided doses"
+  ])("divides the authored daily volume range while retaining the independent flow rate: %s", source => {
     const parsed = parsePublicSig(source);
     expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ range: { low: 50, high: 100 }, unit: "mL" });
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
-      representation: "rate-quantity", numerator: { value: 30, unit: "mL" },
-      dividedDoseCount: 2, denominators: [{ value: 1, unit: "h" }],
+      representation: "rate-quantity", status: "resolved", numerator: { value: 30, unit: "mL" },
+      denominators: [{ value: 1, unit: "h" }],
     });
     const values = [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
       JSON.parse(JSON.stringify(parsed.fhirNext)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))];
@@ -3784,6 +3786,8 @@ describe("round60 divided ranges beside independent infusion rates", () => {
         .toMatchObject({ totalUnits: 200, unit: "mL", quantityKind: "maximum" });
       expect(JSON.stringify(input)).toBe(before);
     }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
     const scalar = parsePublicSig("Infuse 100 mL daily in 2 divided doses at 30 mL/hr");
     expect(scalar.meta.canonical.course!.stages[0].administrations[0].amounts)
       .toMatchObject([{ quantity: { value: 50, unit: "mL" }, rate: { value: 30, unit: "mL/h" } }]);
@@ -5912,5 +5916,71 @@ describe("authored divided totals beside independent rates", () => {
       expect(JSON.stringify(input)).toBe(before);
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+});
+
+
+describe("divided dose ranges over an authored period", () => {
+  const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  it.each([
+    { cadence: "daily", period: 1, periodUnit: FhirPeriodUnit.Day, guarded: true,
+      due: ["2026-01-01T08:00:00+00:00", "2026-01-01T14:00:00+00:00", "2026-01-01T20:00:00+00:00"] },
+    { cadence: "daily", period: 1, periodUnit: FhirPeriodUnit.Day, guarded: false,
+      due: ["2026-01-01T08:00:00+00:00", "2026-01-01T14:00:00+00:00", "2026-01-01T20:00:00+00:00"] },
+    { cadence: "every 24 hours", period: 24, periodUnit: FhirPeriodUnit.Hour, guarded: true,
+      due: ["2026-01-01T00:00:00+00:00", "2026-01-01T08:00:00+00:00", "2026-01-01T16:00:00+00:00"] },
+  ])("partitions each endpoint once ($cadence, guarded=$guarded)", ({ cadence, period, periodUnit, guarded, due }) => {
+    const source = "Give 30–60 mg " + cadence + " by mouth in 3 divided doses" +
+      (guarded ? " only if SBP > 100, maximum 60 mg per day" : "");
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ range: { low: 10, high: 20 }, unit: "mg" });
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), members = importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0].range).toMatchObject({
+        low: { value: 10, unit: "mg" }, high: { value: 20, unit: "mg" }
+      });
+      expect(member.amounts![0].quantity).toBeUndefined();
+      expect(member.amounts![0].rate).toBeUndefined();
+      expect(member.amounts![0].rateRatio).toBeUndefined();
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 3, period, periodUnit });
+      expect(member.schedule?.recurrence?.count).toBeUndefined();
+      expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
+      expect(member.asNeeded).not.toBe(true);
+      if (guarded) {
+        expect(member.predicate).toMatchObject({ kind: "measurement", name: "sbp", operation: "gt", value: 100 });
+        expect(member.limits).toHaveLength(1);
+        expect(member.limits![0]).toMatchObject({
+          scope: "period", amount: { value: 60, unit: "mg" }, period: { value: 1, unit: "d" }
+        });
+        expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day,
+          evaluateCondition: () => false })).toMatchObject({ totalUnits: 0, unit: "mg" });
+      } else {
+        expect(member.predicate).toBeUndefined();
+        expect(member.limits).toBeUndefined();
+      }
+      expect(nextDueDoses(input, { ...query, limit: 3, evaluateCondition: () => true })).toEqual(due);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day,
+        evaluateCondition: () => true })).toMatchObject({ totalUnits: 60, unit: "mg", quantityKind: "maximum" });
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("10 to 20 mg");
+      expect(th).toContain("10");
+      expect(th).toContain("20");
+      expect(th).toContain("มิลลิกรัม");
+      if (guarded) {
+        expect(en).toContain("SBP > 100");
+        expect(th).toContain("100");
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].rawText).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
   });
 });
