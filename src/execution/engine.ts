@@ -6641,8 +6641,13 @@ function visitClockOccurrences(
         const zoned = resolved ? resolved[index] : resolveExpandedTime(currentDay, expanded[index], timeZone);
         if (!zoned) continue;
         const at = zoned.getTime();
+        if (endTime !== undefined && at >= endTime) {
+          // This branch already emits in order; only a queue may retain earlier events.
+          if (!pending) return;
+          continue;
+        }
         if (orderedTime !== undefined && at < orderedTime ||
-            eligibleTime !== undefined && at < eligibleTime || endTime !== undefined && at >= endTime) continue;
+            eligibleTime !== undefined && at < eligibleTime) continue;
         if (selectedTimes) {
           if (selectedTimes.has(at) || selectedTimes.size >= weeklyFrequency!) continue;
           selectedTimes.add(at);
