@@ -7808,3 +7808,41 @@ it.each(["Reference", "CodeableReference"] as const)("preserves typed Identifier
   expect(toFhirR5Dosages(JSON.parse(JSON.stringify(restored)))).toEqual(rows);
   expect(JSON.stringify(input)).toBe(before);
 });
+
+describe("unchanged condition bridge cycles", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([false, true])("keeps an unchanged coded measurement stable with unit=%s", hasUnit => {
+    const condition = {
+      id: "current-pressure-condition",
+      code: { coding: [
+        { system: "urn:clinic:observation", code: "pressure", display: "Blood pressure reading" },
+        { system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }
+      ] },
+      operation: "gt" as const,
+      valueQuantity: { value: 160, ...(hasUnit ? { unit: "mmHg" } : {}) },
+      extension: [{ url: "urn:clinic:condition-note", valueString: "Use the recorded measurement" }]
+    };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{
+      condition: [condition], doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } }
+    }] }] };
+    const before = fresh(input), first = fresh(toFhirR5Dosages(input));
+    let rows = first;
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const restored = toDosageDetails(fresh(rows));
+      const predicate = importCanonicalCourse(restored).stages[0].administrations[0].predicate!;
+      expect(predicate).toMatchObject({
+        kind: "measurement", name: "sbp", operation: "gt", value: 160, text: "Blood pressure reading"
+      });
+      expect("unit" in predicate ? predicate.unit : undefined).toBe(hasUnit ? "mmHg" : undefined);
+      expect(evaluateMedicationCondition(predicate, { sbp: 170 })).toBe(true);
+      expect(evaluateMedicationCondition(predicate, { sbp: 160 })).toBe(false);
+      expect(restored.step[0].component[0].condition).toEqual([condition]);
+      expect(restored.extension?.filter(item => item.url.endsWith("medication-course-reconciliation-source")) ?? []).toEqual([]);
+      const next = fresh(toFhirR5Dosages(restored));
+      expect(next).toEqual(first);
+      rows = next;
+    }
+    expect(input).toEqual(before);
+  });
+});

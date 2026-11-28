@@ -2628,17 +2628,18 @@ function encodeFields(
   value: object, shape: BridgeShape, snapshot = false, preserveQuantityWire = false
 ): FhirExtension[] {
   const children: FhirExtension[] = [];
-  // A safety policy's meaning is independent of source object insertion order.
-  // Use its declared field order; keep unfamiliar source fields after it.
-  const keys = shape === SAFETY ? Object.keys(SAFETY) : Object.keys(value);
-  if (shape === SAFETY) for (const key of Object.keys(value))
-    if (!Object.prototype.hasOwnProperty.call(SAFETY, key)) keys.push(key);
+  // Safety policies and predicates have a declared semantic field order.
+  // Keep generated bridges stable and unfamiliar source fields after them.
+  const orderedFields = shape === SAFETY || shape === PREDICATE;
+  const keys = Object.keys(orderedFields ? shape : value);
+  if (orderedFields) for (const key of Object.keys(value))
+    if (!Object.prototype.hasOwnProperty.call(shape, key)) keys.push(key);
   const source = value as Record<string, unknown>;
   for (let key of keys) {
     if (key.startsWith("_")) {
       const scalar = key.slice(1), field = shape[scalar];
       if (field && !field.repeated && bridgePrimitiveCompanion(field.value)) {
-        if (Object.prototype.hasOwnProperty.call(source, scalar) || shape === SAFETY) continue;
+        if (Object.prototype.hasOwnProperty.call(source, scalar) || orderedFields) continue;
         key = scalar;
       }
     }
