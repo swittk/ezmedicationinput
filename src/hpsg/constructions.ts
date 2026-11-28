@@ -915,7 +915,8 @@ export function parseMedicationGuard(
       const predicate = guardPredicateConstituent(context, tokens, lead.end, consequentStart);
       const guard = predicate && MEDICATION_GUARD_HEAD.combine(context, marker, predicate);
       const condition = guard?.synsem.cont.clinicalAdjunct?.condition;
-      if (!condition || doseEnd === undefined && !guardHasMeasurement(condition)) continue;
+      if (!condition || doseEnd === undefined &&
+          !predicate?.synsem.cont.guard?.licensesBareIf && !guardHasMeasurement(condition)) continue;
       end = consequentStart;
       scopedGuard = guard;
       break;

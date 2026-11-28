@@ -312,7 +312,7 @@ function activeDoseInCarrierOverTime(
   const qualifiedCarrier = carrierValueToken.kind === LexKind.Number ? undefined :
     doseComparatorNumberAt(context.tokens, carrierStart, context.limit, normalizeTokenLower(carrierValueToken));
   const attachedCarrier = !qualifiedCarrier && carrierValueToken.kind !== LexKind.Number
-    ? attachedNumberUnitAt(carrierValueToken.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
+    ? attachedNumberUnitAt((carrierValueToken.canonical ?? carrierValueToken.lower).replace(/[{};]+|\.+$/gu, "")) : undefined;
   const plainCarrier = !qualifiedCarrier && !attachedCarrier
     ? plainClinicalNumberAt(context, carrierStart) : undefined;
   const carrierNumber = qualifiedCarrier?.value ?? plainCarrier?.value ?? attachedCarrier?.value;

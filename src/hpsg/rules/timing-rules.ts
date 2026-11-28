@@ -64,6 +64,7 @@ import {
   compactDurationParts,
   compactIntervalParts,
   EVENT_ARTICLE_TOKENS,
+  INSTRUCTION_NOMINAL_ARTICLES,
   EVENT_OFFSET_ARTICLES,
   EVENT_OFFSET_FRACTIONS,
   EVENT_OFFSET_MAXIMUM_LEAD_SEQUENCES,
@@ -842,7 +843,9 @@ export function isIndependentMaximum(
   if (MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[maximum.headStart])) ||
       context.tokens.slice(start, maximum.headStart).some(token =>
         INSTRUCTION_LEADING_SEPARATORS.has(token.original))) return true;
-  if (!completePredicate) return false;
+  // An implicit count can still qualify episodes of the predicate. Only an
+  // explicit maximum head or separator above establishes its own dose scope.
+  if (!completePredicate || "implicitOccurrence" in maximum && maximum.implicitOccurrence) return false;
   const nextIndex = maximum.headStart + maximum.tokens.length;
   const next = nextIndex < (context.limit ?? context.tokens.length) ? context.tokens[nextIndex] : undefined;
   return !next || isPunctuation(normalizeTokenLower(next)) ||
@@ -1621,7 +1624,8 @@ function isNegatedEventComplement(context: HpsgClauseContext, index: number): bo
   let relation = context.tokens[index - 1];
   if (!relation) return false;
   let lower = normalizeTokenLower(relation);
-  if (EVENT_ARTICLE_TOKENS.has(lower) || DOSE_FRACTION_ARTICLES.has(lower)) {
+  if (EVENT_ARTICLE_TOKENS.has(lower) || DOSE_FRACTION_ARTICLES.has(lower) ||
+      INSTRUCTION_NOMINAL_ARTICLES.has(lower)) {
     relation = context.tokens[index - 2];
     if (!relation) return false;
     lower = normalizeTokenLower(relation);

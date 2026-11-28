@@ -6003,12 +6003,11 @@ describe("divided dose ranges over an authored period", () => {
       const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
       const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
       expect(en).toContain("10 to 20 mg");
-      expect(th).toContain("10");
-      expect(th).toContain("20");
-      expect(th).toContain("มิลลิกรัม");
+      expect(th).toMatch(/(?:^|[^\d.])10 ถึง 20 มิลลิกรัม(?=\s|[.;]|$)/u);
       if (guarded) {
         expect(en).toContain("SBP > 100");
-        expect(th).toContain("100");
+        expect(th).toMatch(/\bSBP > 100(?![\d.])/u);
+        expect(th).not.toMatch(/\bSBP\s*(?:<|<=|>=)\s*100\b/u);
       }
       expect(JSON.stringify(input)).toBe(before);
     }
@@ -6256,4 +6255,64 @@ describe("weighted ranges with explicit period division", () => {
     expect(JSON.stringify(parsed)).toBe(saved);
   });
 
+});
+
+
+describe("review867 canonical attached carrier quantities", () => {
+  it("uses the registered canonical carrier token while preserving its source", () => {
+    const original = getMedicationLexerLocalePack("en");
+    let hits = 0;
+    registerMedicationLexerLocalePack({ locale: "en", apply: (tokens, input) => {
+      const current = original?.apply(tokens, input) ?? tokens;
+      const result: typeof current[number][] = [];
+      for (let index = 0; index < current.length; index++) {
+        const token = current[index], next = current[index + 1];
+        if (token.original === "50" && next?.lower === "clinicml" && token.sourceEnd === next.sourceStart) {
+          const sourceText = input.slice(token.sourceStart, next.sourceEnd);
+          result.push({ ...next, index: result.length, original: sourceText, lower: sourceText.toLowerCase(),
+            canonical: "50ml", sourceStart: token.sourceStart, sourceText });
+          index++;
+          hits++;
+        } else result.push({ ...token, index: result.length });
+      }
+      return result;
+    } });
+    try {
+      for (const carrier of ["50clinicml", "50ml"]) {
+        const source = "Infuse 2 mg in " + carrier + " over 5 minutes";
+        const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+        expect(parsed.meta.canonical.clauses).toHaveLength(1);
+        for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+          JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+          const before = JSON.stringify(input), course = importCanonicalCourse(input);
+          const members = course.stages.flatMap(stage => stage.administrations);
+          expect(members).toHaveLength(1);
+          const member = members[0];
+          expect(member.amounts).toHaveLength(1);
+          expect(member.amounts![0]).toMatchObject({
+            quantity: { value: 2, unit: "mg" },
+            rateRatio: { numerator: { value: 50, unit: "mL" }, denominator: { value: 5, unit: "min" } }
+          });
+          expect(member.amounts![0].range).toBeUndefined();
+          expect(member.schedule?.recurrence).toMatchObject({ count: 1, occurrenceDuration: 5, occurrenceDurationUnit: "min" });
+          expect(member.schedule?.recurrence?.frequency).toBeUndefined();
+          expect(member.route).toBeUndefined();
+          const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+          const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+          expect(en).toContain("2 mg");
+          expect(th).toContain("2 มิลลิกรัม");
+          expect(en).toContain("50 mL / 5 min");
+          expect(th).toContain("50 mL / 5 min");
+          expect(course.instruction).toBe(source);
+          expect(JSON.stringify(input)).toBe(before);
+        }
+        expect(parsed.fhirNext.renderedInstruction).toBe(source);
+        expect(JSON.stringify(parsed)).toBe(saved);
+      }
+      expect(hits).toBeGreaterThan(0);
+    } finally {
+      registerMedicationLexerLocalePack(original ?? { locale: "en", apply: tokens =>
+        tokens.map((token, index) => ({ ...token, index })) });
+    }
+  });
 });

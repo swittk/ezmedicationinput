@@ -4829,3 +4829,118 @@ describe("reviewed maximum-period token windows", () => {
     expect(compactMaximumPeriodAt({ tokens, limit: tokens.length }, start, tokens[start].lower)).toMatchObject({ unitSurface: "tablets", period: { period: 24, periodUnit: "h" } });
   });
 });
+
+
+describe("review867 complete guards and negative meal complements", () => {
+  it.each([
+    { source: "If systolic BP drops by 20 mmHg infuse saline at 100 mL/hr",
+      condition: { kind: "text", text: "systolic BP drops by 20 mmHg" } },
+    { source: "If systolic BP drops by 20 mmHg, infuse saline at 100 mL/hr",
+      condition: { kind: "text", text: "systolic BP drops by 20 mmHg" } },
+    { source: "If SBP < 90 infuse saline at 100 mL/hr",
+      condition: { kind: "measurement", name: "sbp", operation: "lt", value: 90, text: "SBP < 90" } }
+  ])("retains a complete observation before a rate-only administration: $source", ({ source, condition }) => {
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.predicate).toEqual(condition);
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0]).toMatchObject({ rate: { value: 100, unit: "mL/h" } });
+      expect(member.amounts![0].quantity).toBeUndefined();
+      expect(member.amounts![0].range).toBeUndefined();
+      expect(member.asNeeded).not.toBe(true);
+      expect(member.schedule?.recurrence).toBeUndefined();
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(condition.text);
+        expect(text).toContain("100 mL/h");
+      }
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([false, true])("retains a symptom-history count beside a separately stated cap (%s)", capped => {
+    const condition = "vomiting no more than twice within 24 hours";
+    const source = "Take 1 tablet only if " + condition + (capped ? ", maximum 4 doses per day" : "");
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.predicate).toMatchObject({ kind: "state", name: condition, expected: true, text: condition });
+      expect(member.asNeeded).not.toBe(true);
+      expect(member.schedule?.recurrence?.occurrenceCap).toEqual(capped ? { max: 4, period: 1, periodUnit: "d" } : undefined);
+      expect(member.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(member.schedule?.recurrence?.courseLength).toBeUndefined();
+      expect(member.limits).toBeUndefined();
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("only if " + condition);
+      expect(th).toContain("เฉพาะเมื่อ " + condition);
+      expect(en.match(/twice within 24 hours/g)).toHaveLength(1);
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([
+    "Take 1 tablet only if vomiting maximum 2 doses within 24 hours",
+    "Take 1 tablet only if vomiting, no more than twice within 24 hours"
+  ])("retains a separately authored occurrence cap after a registered state: %s", source => {
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.predicate).toMatchObject({ kind: "state", name: "vomiting", expected: true });
+      expect(member.schedule?.recurrence?.occurrenceCap).toEqual({ max: 2, period: 24, periodUnit: "h" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each(["without any food", "without food", "with food", "with any food"])(
+    "retains the polarity of a meal complement: %s", complement => {
+      const source = "Swallow 1 tablet " + complement, parsed = parsePublicSig(source);
+      const negative = complement.startsWith("without"), saved = JSON.stringify(parsed);
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const before = JSON.stringify(input), course = importCanonicalCourse(input);
+        const members = course.stages.flatMap(stage => stage.administrations);
+        expect(members).toHaveLength(1);
+        expect(members[0].amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(members[0].schedule?.recurrence?.anchors).toEqual(negative ? undefined : [EventTiming.Meal]);
+        const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+        if (negative) {
+          expect(en).toMatch(/\bwithout (?:any )?food\b/i);
+          expect(en).not.toContain("with meals");
+          expect(th).toContain("โดยไม่มี");
+          expect(th).not.toContain("พร้อมอาหาร");
+        } else {
+          expect(en).toContain("with meals");
+          expect(th).toContain("พร้อมอาหาร");
+        }
+        expect(course.instruction).toBe(source);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(parsed)).toBe(saved);
+    });
+});
