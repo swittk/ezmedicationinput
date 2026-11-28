@@ -187,11 +187,11 @@ export function clinicalRatePeriodUnit(raw: string): FhirPeriodUnit.Hour | FhirP
 
 function doseQuantityPeriodUnit(
   raw: string
-): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | FhirPeriodUnit.Week | FhirPeriodUnit.Day | undefined {
+): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | FhirPeriodUnit.Week | FhirPeriodUnit.Month | FhirPeriodUnit.Day | undefined {
   if (DAYPART_INTERVAL_TOKENS.has(raw)) return undefined;
   const unit = mapIntervalUnit(raw) ?? mapFrequencyAdverb(raw);
   return unit === FhirPeriodUnit.Hour || unit === FhirPeriodUnit.Minute ||
-    unit === FhirPeriodUnit.Week || unit === FhirPeriodUnit.Day ? unit : undefined;
+    unit === FhirPeriodUnit.Week || unit === FhirPeriodUnit.Month || unit === FhirPeriodUnit.Day ? unit : undefined;
 }
 
 function administrationCue(context: HpsgClauseContext, before: number, allowPrecedingDose = false) {
@@ -506,7 +506,8 @@ function weightQuantity(
   const denominator = suffix ? clinicalTimeDenominator(suffix, doseQuantityPeriodUnit) : undefined;
   const periodValue = denominator?.value ?? 1;
   const periodUnit = denominator?.unit;
-  if (parts.length > 3 || (suffix && !perDose && (!periodUnit || periodValue <= 0))) {
+  if (parts.length > 3 || (suffix && !perDose &&
+      (!periodUnit || periodUnit === FhirPeriodUnit.Month || periodValue <= 0))) {
     return clinicalSign(context, "hpsg.lex.clinicalQuantity.weight.unsupported", indices, {
       representation: "rate-quantity",
       status: "unsupported",
@@ -607,11 +608,12 @@ function fixedTimeQuantity(
     ...(head.marker !== undefined ? [head.marker] : []),
     ...Array.from({ length: expression.end - start }, (_, offset) => start + offset)
   ];
-  // A daily amount belongs to the dose unless an explicit rate marker or the
-  // selected method's runtime valence owns it as an infusion rate. Keep an
-  // authored elapsed 24-hour denominator distinct from a civil day.
+  // A calendar-period amount belongs to the dose unless an explicit rate
+  // marker or the selected method owns an infusion. Keep an authored elapsed
+  // 24-hour denominator distinct from a civil day.
   if (!maximum && !head.rateSpecific && (denominator.value === 1 && denominator.unit === FhirPeriodUnit.Day ||
-      denominator.value === 24 && denominator.unit === FhirPeriodUnit.Hour)) {
+      denominator.value === 24 && denominator.unit === FhirPeriodUnit.Hour ||
+      denominator.unit === FhirPeriodUnit.Week || denominator.unit === FhirPeriodUnit.Month)) {
     const dose = { ...(range ? { range } : { value }), unit: numerator.unit };
     return clinicalSign(context, "hpsg.lex.clinicalQuantity.dailyDose", indices, range ? undefined : {
       representation: "dose", status: "resolved", numerator, denominators: [], projectedDose: { value, unit: numerator.unit }

@@ -348,7 +348,7 @@ export function prefersSourceInstruction(course: CanonicalCourse): boolean {
   );
 }
 
-/** One pass organizes native choice and shared-allowance membership. */
+/** Unconditional membership owns a shared allowance across every selectable path. */
 export function formatCourseChoices<T>(
   members: readonly T[],
   render: (member: T, sharedCountAlreadyDisplayed?: boolean) => string,
@@ -388,6 +388,12 @@ export function formatCourseChoices<T>(
   };
   const slots: Array<RenderedMember | { group: string }> = [];
   const groups = new Map<string, Map<string, RenderedMember[]>>();
+  let unconditionalSharedGroups: Set<string> | undefined;
+  if (sharedGroupOf) for (const member of members) {
+    const sharedGroup = sharedGroupOf(member);
+    if (sharedGroup !== undefined && !choiceOf(member))
+      (unconditionalSharedGroups ??= new Set()).add(sharedGroup);
+  }
   let displayedSharedGroups: Set<string> | undefined;
   let hasSharedGroups = false;
   for (const member of members) {
@@ -404,7 +410,7 @@ export function formatCourseChoices<T>(
       if (!branch) branches.set(choice.branchId, (branch = []));
     }
     const sharedCountAlreadyDisplayed = sharedGroup !== undefined && (branch
-      ? branch.some(item => item.sharedGroup === sharedGroup)
+      ? unconditionalSharedGroups?.has(sharedGroup) === true || branch.some(item => item.sharedGroup === sharedGroup)
       : displayedSharedGroups?.has(sharedGroup) === true);
     const text = render(member, sharedCountAlreadyDisplayed).trim();
     if (branch) {

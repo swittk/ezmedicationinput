@@ -5547,3 +5547,67 @@ it.each([
   }
   expect(JSON.stringify(course)).toBe(before);
 });
+
+
+describe("review125 shared totals across selectable paths", () => {
+  const member = (clock: string, branchId?: string): CanonicalAdministration => ({
+    kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+    ...(branchId ? { choice: { groupId: "evening-choice", branchId } } : {}),
+    schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      clocks: [clock], sharedCount: { groupId: "one-allowance", count: 4 } } }
+  });
+  const course = (placement: "first" | "last" | "absent"): CanonicalCourse => {
+    const always = member("08:00:00"), alternatives = [member("20:00:00", "a"), member("18:00:00", "b")];
+    return { kind: "course", stages: [{ administrations: placement === "first" ? [always, ...alternatives]
+      : placement === "last" ? [...alternatives, always] : alternatives }] };
+  };
+  it.each(["first", "last", "absent"] as const)("states one allowance on each path with the unconditional member %s", placement => {
+    const note = { url: "urn:clinic:choice-allowance-note", valueString: "retain the current shared group" };
+    const current = { ...courseToR6(course(placement)), extension: [note] };
+    const inputs = [importCanonicalCourse(current), JSON.parse(JSON.stringify(toFhirR5Dosages(current))),
+      JSON.parse(JSON.stringify(current))];
+    for (const input of inputs) {
+      const before = JSON.stringify(input), imported = importCanonicalCourse(input);
+      const members = imported.stages[0].administrations;
+      expect(members).toHaveLength(placement === "absent" ? 2 : 3);
+      for (const item of members) {
+        expect(item.amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(item.schedule?.recurrence?.sharedCount).toEqual({ groupId: "one-allowance", count: 4 });
+        expect(item.schedule?.recurrence?.count).toBeUndefined();
+      }
+      expect(members.filter(item => item.choice).map(item => item.choice!.branchId)).toEqual(["a", "b"]);
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        const text = formatSig(input, style, { locale, realizationMode: "normalized" });
+        expect(text.match(/\b4\b/gu)).toHaveLength(placement === "absent" ? 2 : 1);
+        expect(text).toContain(locale === "en" ? "sharing its limits" : "ใช้ข้อจำกัดร่วมกัน");
+        expect(text).toContain(locale === "en" ? "Choose one:" : "เลือกอย่างใดอย่างหนึ่ง:");
+        if (placement !== "absent") expect(text).toContain(locale === "en" && style === "long" ? "8:00 am" : "08:00");
+        expect(text).toContain(locale === "en" && style === "long" ? "8:00 pm" : "20:00");
+        expect(text).toContain(locale === "en" && style === "long" ? "6:00 pm" : "18:00");
+      }
+      expect(courseToR6(imported).extension).toContainEqual(note);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each(["short", "long"] as const)("preserves complete defaults and actual %s callback returns across choices", style => {
+    const input = course("last"), before = JSON.stringify(input);
+    for (const locale of ["en", "th"]) {
+      const calls: string[] = [];
+      const override = (context: SigFormatContext) => {
+        const clock = context.clause.schedule?.timeOfDay?.[0] ?? "";
+        calls.push(clock);
+        expect(context.clause.schedule?.sharedCount?.count).toBe(4);
+        expect(context.defaultText).toContain("4");
+        expect(context.formatDefault("short")).toContain("4");
+        expect(context.formatDefault("long")).toContain("4");
+        return "Clinic " + clock;
+      };
+      const text = formatSig(input, style, { locale, realizationMode: "normalized",
+        i18n: style === "long" ? { formatLong: override } : { formatShort: override } });
+      expect(calls).toEqual(["20:00:00", "18:00:00", "08:00:00"]);
+      for (const clock of calls) expect(text.split("Clinic " + clock)).toHaveLength(2);
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+});

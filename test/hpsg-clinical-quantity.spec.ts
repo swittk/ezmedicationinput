@@ -5985,3 +5985,44 @@ describe("divided dose ranges over an authored period", () => {
     expect(JSON.stringify(parsed)).toBe(saved);
   });
 });
+
+
+describe("review125 weekly and monthly dose totals", () => {
+  const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  it.each([
+    { source: "Give 10 mg/week", unit: FhirPeriodUnit.Week,
+      dates: ["2026-01-01T00:00:00+00:00", "2026-01-08T00:00:00+00:00", "2026-01-15T00:00:00+00:00"] },
+    { source: "Give 10 mg/month", unit: FhirPeriodUnit.Month,
+      dates: ["2026-01-01T00:00:00+00:00", "2026-02-01T00:00:00+00:00", "2026-03-01T00:00:00+00:00"] }
+  ])("retains a dose and its calendar period rather than inventing an infusion: $source", fixture => {
+    const parsed = parsePublicSig(fixture.source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 10, unit: "mg" });
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages).toHaveLength(1);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      const member = course.stages[0].administrations[0];
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0].quantity).toMatchObject({ value: 10, unit: "mg" });
+      expect(member.amounts![0].rate).toBeUndefined();
+      expect(member.amounts![0].rateRatio).toBeUndefined();
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: fixture.unit });
+      expect(member.schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+      expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual(fixture.dates);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: fixture.unit }))
+        .toMatchObject({ totalUnits: 10, unit: "mg" });
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain("10");
+        expect(text).toContain(locale === "en" ? (fixture.unit === FhirPeriodUnit.Week ? "weekly" : "monthly")
+          : (fixture.unit === FhirPeriodUnit.Week ? "สัปดาห์" : "เดือน"));
+      }
+      expect(course.instruction).toBe(fixture.source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(fixture.source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+});
