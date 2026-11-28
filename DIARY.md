@@ -16603,3 +16603,14 @@ FHIR conversion preserves period values, quantity operators, coded measurement u
 Rich amount fragments retain punctuation supplied by their primary qualifiers. The native renderers compose sentence boundaries with the actual following instructions, including graph continuations and independent advice, while labelled quantities remain inside their current guards. Standalone fragments keep their established presentation.
 
 Removed duplicated baseline quantity tests from the date suite. The original suite and every added or strengthened clinical assertion remain intact.
+
+
+## 2026-11-28 — Preserve current dose, condition and calendar ownership
+
+Shared grammar keeps fronted measurement guards, retrospective conditions, divided totals and independent infusion rates distinct. Quantities following registered connectors and separators remain available to typed dose composition.
+
+Calendar selection precedes count admission. Weekly frequency uses the shared occurrence visitor across selected weekdays and clocks. Successor eligibility remains separate from cadence and duration origins, including clockless schedules and shifted events. Unresolved boundaries report their existing diagnostic before partial execution.
+
+Previews preserve complete current restrictions, guarded labelled amounts, inline warning conditions and event offsets. Recurring withholding keeps its selected weekdays and targets. Locale callbacks retain control of their wording, and condition ownership is established before rendering.
+
+FHIR conversion preserves coded measurement identity, strict dose limits, primitive annotations, anatomical refinements and nested Reference annotations. Generated condition bridges use their declared field order so unchanged conversions remain stable. Regression coverage checks current native and fresh wire forms, independent clinical outcomes and input immutability.
