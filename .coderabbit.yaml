@@ -31,6 +31,9 @@ reviews:
     - "!test/generation-roundtrip.spec.ts"
     - "!test/instruction-graph.spec.ts"
     - "!test/r6-primary.spec.ts"
+    # This aggregate exceeds the service per-file limit; its full local
+    # clinical qualification remains required.
+    - "!test/opd-dogfood.spec.ts"
     # Pinned upstream reference data; handwritten FHIR definitions, public
     # types and the suites checking this contract remain selected.
     - "!fhir/r6/official-snapshot1-20261113-contract.json"
