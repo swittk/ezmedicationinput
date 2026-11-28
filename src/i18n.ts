@@ -2342,7 +2342,9 @@ function formatLongThai(
   let administrationText = richGraphAdministrationText ??
     joinThaiVerbAndBody(verb, body, Boolean(qualifierSuffix));
   administrationText = composeNativePrimaryDirections(administrationText, authoredPrimary,
-    clause.clinicalAdjuncts?.condition, words, deferredDirections, clause).replace(/[.!?]+$/u, "");
+    clause.clinicalAdjuncts?.condition, words, deferredDirections, clause);
+  // Current amount fragments retain punctuation supplied by their qualifiers.
+  if (!deferredDirections?.current) administrationText = administrationText.replace(/[.!?]+$/u, "");
   // Independent graph conditions remain alongside the structured guard.
   if (primaryConditions?.length)
     administrationText = attachInstructionGraphPrimaryConditions(administrationText, primaryConditions, "th", Boolean(clause.clinicalAdjuncts?.condition));
@@ -2350,9 +2352,10 @@ function formatLongThai(
     administrationText = `${preGraphInstruction} ${sequenceSurface}${administrationText}`;
   }
   if (postFlowsFromAdministration && postGraphInstruction) {
-    administrationText = `${administrationText} ${sequenceSurface}${postGraphInstruction}`;
+    administrationText = `${administrationText.replace(/[.!?]+$/u, "")} ${sequenceSurface}${postGraphInstruction}`;
   }
-  const baseSentence = /[.!?]$/u.test(administrationText)
+  const baseSentence = (deferredDirections?.current && !trailingInstructionText &&
+    !(postFlowsFromAdministration && postGraphInstruction)) || /[.!?]$/u.test(administrationText)
     ? administrationText
     : `${administrationText}.`;
   const rendered = [leadingInstructionText, baseSentence, trailingInstructionText]

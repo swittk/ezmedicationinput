@@ -5091,8 +5091,33 @@ describe("round39 metric totals and live event identity", () => {
       const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
       expect(thai.split(/;\s*/u).filter(fragment => fragment.startsWith("ขนาดยา"))).toEqual([
         "ขนาดยาที่สั่ง: แต่ละจุด 1 ถึง 2 หยด",
-        "ขนาดยาต่อครั้ง: ครั้งละ 1 มิลลิลิตร."
+        "ขนาดยาต่อครั้ง: ครั้งละ 1 มิลลิลิตร"
       ]);
+    }
+  });
+
+  it("separates a rich current amount from following independent advice", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      site: { concept: { text: "both eyes", coding: [{ system: "http://snomed.info/sct", code: "40638003" }] } },
+      doseAndRate: [
+        { type: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/dose-rate-type", code: "ordered" }] },
+          doseRange: { low: { value: 1, unit: "drop" }, high: { value: 2, unit: "drop" } } },
+        { doseQuantity: { value: 1, unit: "mL" } }
+      ],
+      additionalInstruction: [{ text: "Otherwise hold." }]
+    }] }] };
+    const course = inputToCanonical(raw);
+    for (const input of [course, JSON.parse(JSON.stringify(courseToR5(course))),
+      JSON.parse(JSON.stringify(courseToR6(course)))]) {
+      const before = cloneStructuredValue(input);
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(english).toContain("Ordered dose: 1 to 2 drops (per administration target)");
+      expect(english).toContain("Dose: 1 mL. Otherwise hold.");
+      expect(english).not.toContain("1 mL (per administration target)");
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain("ขนาดยาที่สั่ง: แต่ละจุด 1 ถึง 2 หยด");
+      expect(thai).toContain("ขนาดยาต่อครั้ง: ครั้งละ 1 มิลลิลิตร. Otherwise hold.");
+      expect(input).toEqual(before);
     }
   });
 

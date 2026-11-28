@@ -1930,6 +1930,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       effectiveBase = `${effectiveBase.replace(/[.!?]+$/, "")}; ${sequenceSurface} ${post}`;
       if (!/[.!?]$/.test(effectiveBase)) effectiveBase += ".";
     }
+    if (deferredDirections?.current && trailingInstructionText)
+      effectiveBase = formatPatientInstructionSentence(effectiveBase)!;
     if (leadingInstructionText && effectiveBase && entersPrimaryWithThen) {
       const leading = leadingInstructionText.replace(/[.!?]+$/, "");
       return [
