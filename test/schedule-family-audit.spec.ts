@@ -7516,3 +7516,89 @@ describe("review867 elapsed offsets from resolved event clocks", () => {
     }
   });
 });
+
+
+describe("measured rates retain the coded numerator identity", () => {
+  const ucum = "http://unitsofmeasure.org";
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const query = { from: "2026-01-01T00:00:00Z", orderedAt: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  const daily = ["2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00", "2026-01-03T08:00:00+00:00"];
+  const twiceDaily = ["2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00", "2026-01-02T08:00:00+00:00"];
+  const note = { url: "urn:clinic:rate-note", valueCoding: {
+    system: "urn:clinic:annotation", code: "retain", display: "Authored quantity",
+    _display: { id: "authored-display" }
+  } };
+
+  function verify(
+    amount: NonNullable<FhirDosage["doseAndRate"]>[number],
+    ceiling: NonNullable<FhirDosage["maxDosePerAdministration"]>,
+    duration: number, durationUnit: FhirPeriodUnit,
+    expectedDue: string[], totalUnits: number, unit: string
+  ) {
+    const source = "Use the supplied infusion rate, duration, clock schedule and cumulative ceiling.";
+    const input: FhirR6DosageInstruction = { renderedInstruction: source, extension: [note],
+      step: [{ component: [{
+        doseAndRate: [amount],
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["08:00:00", "20:00:00"], duration, durationUnit } },
+        safety: { doseLimit: [{ scope: "period", valueQuantity: ceiling,
+          period: { value: 24, unit: "h", system: ucum, code: "h" } }] },
+        extension: [note]
+      }] }]
+    };
+    const original = fresh(input), native = importCanonicalCourse(input);
+    const projected = projectCanonicalCourse(native);
+    for (const dosage of [native, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+      const before = fresh(dosage);
+      expect(nextDueDoses(dosage, { ...query, limit: 3 })).toEqual(expectedDue);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 2, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits, unit });
+      const current = projectCanonicalCourse(importCanonicalCourse(dosage)).fhirNext;
+      expect(current.step[0].component[0].doseAndRate).toEqual(input.step[0].component[0].doseAndRate);
+      expect(current.step[0].component[0].timing).toEqual(input.step[0].component[0].timing);
+      expect(current.step[0].component[0].safety).toEqual(input.step[0].component[0].safety);
+      expect(current.step[0].component[0].extension).toEqual([note]);
+      expect(current.extension).toEqual([note]);
+      expect(current.renderedInstruction).toBe(source);
+      expect(dosage).toEqual(before);
+    }
+    expect(input).toEqual(original);
+  }
+
+  it.each([
+    ["U/h", "U"], ["U{enzyme}/h", "U"],
+    ["U/h", "[iU]"], ["U{enzyme}/h", "[iU]"]
+  ] as const)("measures %s without changing its relation to the %s ceiling", (code, capCode) => {
+    const matching = capCode === "U";
+    verify({ rateQuantity: { value: 50, unit: "enzyme units per hour", system: ucum, code,
+      _code: { id: "authored-rate-code", extension: [note] }, extension: [note] } },
+    { value: 150, unit: matching ? "enzyme units" : "international units", system: ucum, code: capCode,
+      _value: { id: "authored-ceiling-value" }, extension: [note] },
+    2, FhirPeriodUnit.Hour, matching ? daily : twiceDaily, matching ? 200 : 400, "U");
+  });
+
+  it("keeps the equivalent ratio's authored numerator identity and label", () => {
+    verify({ rateRatio: { numerator: { value: 50, unit: "enzyme units", system: ucum, code: "U{enzyme}",
+      _code: { id: "authored-numerator-code" }, extension: [note] },
+      denominator: { value: 1, unit: "h", system: ucum, code: "h" }, extension: [note] } },
+    { value: 150, unit: "enzyme units", system: ucum, code: "U" },
+    2, FhirPeriodUnit.Hour, daily, 200, "enzyme units");
+  });
+
+  it("retains the existing international-unit meaning of an uncoded authored U label", () => {
+    verify({ rateQuantity: { value: 50, unit: "U/h", extension: [note] } },
+      { value: 150, unit: "international units", system: ucum, code: "[iU]" },
+      2, FhirPeriodUnit.Hour, daily, 200, "[iU]");
+  });
+
+  it.each([
+    { code: "mg/h", rate: 50, duration: 2, durationUnit: FhirPeriodUnit.Hour,
+      cap: 0.15, capCode: "g", total: 200, unit: "mg" },
+    { code: "mL{solution}/min", rate: 2, duration: 30, durationUnit: FhirPeriodUnit.Minute,
+      cap: 0.09, capCode: "L", total: 120, unit: "mL" }
+  ])("compares the measured $code amount with its compatible scaled ceiling", fixture => {
+    verify({ rateQuantity: { value: fixture.rate, system: ucum, code: fixture.code, extension: [note] } },
+      { value: fixture.cap, unit: fixture.capCode, system: ucum, code: fixture.capCode },
+      fixture.duration, fixture.durationUnit, daily, fixture.total, fixture.unit);
+  });
+});

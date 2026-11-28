@@ -2147,6 +2147,12 @@ function measuredRateQuantity(
     if (per) {
       value = amount.rate.value * duration * seconds / per;
       unit = match![1];
+      if (amount.rate.system === "http://unitsofmeasure.org" && amount.rate.code) {
+        // Keep the selected numerator identity on the computed amount. Its
+        // display label alone can license a different unit interpretation.
+        code = unit;
+        system = amount.rate.system;
+      }
       if (amount.rate.code)
         unit = getDoseQuantityUnit({ system: amount.rate.system, code: unit }, false) || unit;
       comparator = amount.rate.comparator;
