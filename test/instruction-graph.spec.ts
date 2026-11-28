@@ -5,7 +5,7 @@ import { courseFromR6 } from "../src/adapters/canonical-course";
 import { AdviceArgumentRole, AdviceForce, AdviceModality, AdvicePolarity, AdviceRelation, EventTiming, FhirPeriodUnit, type AdviceFrame, type CanonicalInstructionGraph, type CanonicalAdditionalInstructionExpr, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { getMedicationLexerLocalePack, registerMedicationLexerLocalePack } from "../src/lexer/locale";
-import { getInstructionActionLocaleAdapter, registerInstructionActionLocaleAdapter } from "../src/index";
+import { getAdviceLocaleAdapter, registerAdviceLocaleAdapter, getInstructionActionLocaleAdapter, registerInstructionActionLocaleAdapter } from "../src/index";
 import { buildActionExtension, buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
 import adviceTerminology from "../src/advice-terminology.json";
@@ -6760,7 +6760,7 @@ describe("current graph realization families", () => {
 
   it.each([
     { name: "weekday and site", relation: AdviceRelation.On, time: "Mondays", site: true,
-      en: "Withhold the drops in the left eye on Monday",
+      en: "Withhold the drops in the left eye on Mondays",
       th: "งดการให้ยายาหยอดในตาซ้ายเมื่อวันจันทร์" },
     { name: "clock", relation: AdviceRelation.On, time: "08:00",
       en: "Withhold the drops at 08:00",
@@ -6827,14 +6827,82 @@ describe("current graph realization families", () => {
   it.each([
     { display: "Withhold administration", args: false, en: "Withhold administration" },
     { display: "Skip", args: true, en: "Skip the drops" },
-    { display: "Withhold administration", args: true, i18n: { en: "Omit" }, en: "Omit the drops" }
+    { display: "Withhold administration", args: true, i18n: { en: "Omit" }, en: "Omit the drops" },
+    { display: "Withhold administration", args: true, time: true, i18n: { en: "Omit" }, en: "Omit the drops on Mondays" }
   ])("preserves bare and selected Withhold labels ($en)", fixture => {
     const action: AdviceFrame = { force: AdviceForce.Sequence, polarity: AdvicePolarity.Affirm,
       predicate: { lemma: "withhold-administration", display: fixture.display,
         semanticClass: "withhold-administration", realizer: "object-duration", i18n: fixture.i18n },
       sourceText: "", span: { start: 0, end: 0 },
-      args: fixture.args ? [{ role: AdviceArgumentRole.Object, text: "the drops" }] : [] };
+      args: [
+        ...(fixture.args ? [{ role: AdviceArgumentRole.Object, text: "the drops" }] : []),
+        ...(fixture.time ? [{ role: AdviceArgumentRole.Time, text: "Mondays", normalized: "mon", relation: AdviceRelation.On }] : [])
+      ] };
     expect(realizeInstructionAction(action, "en")).toBe(fixture.en);
+  });
+
+  it("preserves a configured direct-time callback for a recurring withholding action", () => {
+    const original = getInstructionActionLocaleAdapter("en"), calls: string[][] = [];
+    const action: AdviceFrame = { force: AdviceForce.Sequence, polarity: AdvicePolarity.Affirm,
+      predicate: { lemma: "withhold-administration", display: "Withhold administration",
+        semanticClass: "withhold-administration", realizer: "object-duration" },
+      sourceText: "", span: { start: 0, end: 0 }, args: [
+        { role: AdviceArgumentRole.Object, text: "the drops" },
+        { role: AdviceArgumentRole.Time, text: "Mondays", relation: AdviceRelation.On }
+      ] };
+    registerInstructionActionLocaleAdapter({ ...original, directTime: (...args: [string]) => {
+      calls.push(args); return "CUSTOM-WEEKDAY";
+    } });
+    try {
+      expect(realizeInstructionAction(action, "en")).toBe("Withhold the drops CUSTOM-WEEKDAY");
+      expect(calls).toEqual([["Mondays"]]);
+    } finally { registerInstructionActionLocaleAdapter(original); }
+  });
+
+  it.each(["matching", "different", "other indexed action"] as const)(
+    "decides typed inline condition ownership before a registered argument joiner: %s", ownership => {
+    const action: AdviceFrame = { force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "drive", semanticClass: "activity" }, relation: AdviceRelation.If,
+      sourceText: "", span: { start: 0, end: 0 }, args: [
+        { role: AdviceArgumentRole.Object, text: "or operate machinery", normalized: "or operate machinery" },
+        { role: AdviceArgumentRole.Free, text: "affected", normalized: "affected" }
+      ] };
+    const other: AdviceFrame = { ...action, predicate: { lemma: "chew", semanticClass: "administration" },
+      args: [{ role: AdviceArgumentRole.Object, text: "the tablet", normalized: "the tablet" }, action.args[1]] };
+    const graph: CanonicalInstructionGraph = { sourceText: "", sourceLocale: "en",
+      actions: ownership === "other indexed action" ? [action, other] : [action], relations: [{
+        kind: AdviceRelation.If, toActionIndex: ownership === "other indexed action" ? 1 : 0,
+        text: ownership === "different" ? "if dizzy" : "if affected"
+      }] };
+    const views = publicViews(graph), before = JSON.stringify(graph), calls: string[][] = [];
+    const original = getAdviceLocaleAdapter("en");
+    registerAdviceLocaleAdapter({ ...original, joinArguments(texts) {
+      calls.push([...texts]); return "SELECTED " + original.joinArguments(texts);
+    } });
+    try {
+      for (const input of [views.native, JSON.parse(JSON.stringify([views.row])),
+        JSON.parse(JSON.stringify(views.course))]) {
+        const inputBefore = JSON.stringify(input); calls.length = 0;
+        const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        if (ownership === "matching") {
+          expect(text).toBe("Do not drive or operate machinery if affected.");
+          expect(calls).toEqual([]);
+        } else {
+          expect(text).toContain("Do not drive or operate machinery if SELECTED affected");
+          expect(calls).toEqual([["affected"]]);
+          if (ownership === "different") expect(text).toContain("if dizzy");
+          else expect(text).toContain("Do not chew the tablet if affected");
+        }
+        const saved = importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!;
+        expect(saved.actions).toHaveLength(graph.actions.length);
+        expect(saved.relations).toMatchObject(graph.relations!);
+        for (const [index, frame] of graph.actions.entries()) expect(saved.actions[index]).toMatchObject({
+          predicate: frame.predicate, relation: AdviceRelation.If, polarity: AdvicePolarity.Negate, args: frame.args
+        });
+        expect(JSON.stringify(input)).toBe(inputBefore);
+      }
+    } finally { registerAdviceLocaleAdapter(original); }
+    expect(JSON.stringify(graph)).toBe(before);
   });
 
   it.each([

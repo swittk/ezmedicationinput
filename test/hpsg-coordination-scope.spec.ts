@@ -3456,8 +3456,8 @@ describe("withholding target identity", () => {
       }));
       for (const locale of ["en", "th"] as const) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase();
-        const left = locale === "en" ? "withhold the drops in the left eye on monday" : "skip the drops in the left eye on mondays";
-        const right = locale === "en" ? "withhold the drops in the right eye on friday" : "skip the drops in the right eye on fridays";
+        const left = locale === "en" ? "withhold the drops in the left eye on mondays" : "skip the drops in the left eye on mondays";
+        const right = locale === "en" ? "withhold the drops in the right eye on fridays" : "skip the drops in the right eye on fridays";
         const cause = locale === "en" ? "may cause drowsiness" : "อาจทำให้ง่วงซึม";
         expect(text.split(left)).toHaveLength(2);
         expect(text.split(right)).toHaveLength(2);
@@ -3516,8 +3516,8 @@ describe("withholding target identity", () => {
         }
         for (const locale of ["en", "th"] as const) {
           const text = formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase();
-          const left = locale === "en" ? "withhold the drops in the left eye on monday" : "skip the drops in the left eye on mondays";
-          const right = locale === "en" ? "withhold the drops in the right eye on friday" : "skip the drops in the right eye on fridays";
+          const left = locale === "en" ? "withhold the drops in the left eye on mondays" : "skip the drops in the left eye on mondays";
+          const right = locale === "en" ? "withhold the drops in the right eye on fridays" : "skip the drops in the right eye on fridays";
           const prohibition = locale === "en" ? "do not drive" : "ห้าม";
           expect(text.split(left)).toHaveLength(2);
           expect(text.split(right)).toHaveLength(2);
@@ -3568,7 +3568,7 @@ describe("withholding target identity", () => {
       expect(member.patientInstruction).toBe(source.slice(source.indexOf("Skip"), -1));
       for (const locale of ["en", "th"] as const) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase();
-        const hold = locale === "en" ? "withhold the drops in the left eye on monday" : "skip the drops in the left eye on mondays";
+        const hold = locale === "en" ? "withhold the drops in the left eye on mondays" : "skip the drops in the left eye on mondays";
         const cause = locale === "en" ? "may cause drowsiness" : "อาจทำให้ง่วงซึม";
         expect(text.split(hold)).toHaveLength(3);
         expect(text.split(cause)).toHaveLength(2);
@@ -3729,7 +3729,7 @@ describe("withholding target identity", () => {
       const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
       const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
       expect(en.match(/\b(?:skip|withhold)\b/gi)).toHaveLength(1);
-      expect(en).toMatch(/(?:Skip the drops in the left eye on Mondays|On Mondays skip the drops in the left eye|Withhold the drops in the left eye on Monday)\.$/);
+      expect(en).toMatch(/(?:Skip the drops in the left eye on Mondays|On Mondays skip the drops in the left eye|Withhold the drops in the left eye on Mondays)\.$/);
       expect(th.split(advice).length - 1).toBe(1);
       expect(nextDueDoses(input, query)).toEqual(expected);
       expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))

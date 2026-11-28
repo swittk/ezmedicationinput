@@ -239,7 +239,10 @@ const CLOCK_ARGUMENT = /^[0-9]{1,2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?(?:$|\s)/
 
 /** Internal selection metadata; public locale inputs and callbacks stay unchanged. */
 type SelectedTimeInput = Pick<InstructionActionRealizationInput,
-  "locale" | "time" | "timeRelation" | "timeWasRendered"> & { selectedTime?: AdviceArgument };
+  "locale" | "time" | "timeRelation" | "timeWasRendered"> & {
+  selectedTime?: AdviceArgument;
+  frame?: AdviceFrame;
+};
 
 /** Consume the selected typed Time once; locale adapters own direct wording. */
 export function realizeTimeArgument(c: SelectedTimeInput): string | undefined {
@@ -258,9 +261,20 @@ export function realizeTimeArgument(c: SelectedTimeInput): string | undefined {
     if (!direct && !selected)
       direct = resolveMedicationInstructionConcept(value)?.role === AdviceArgumentRole.Time;
   }
-  const text = direct
-    ? getInstructionActionLocaleAdapter(c.locale).directTime?.(c.time) ?? c.time
-    : joinLocalizedTokens(c.locale, [localizeAdviceRelation(relation!, c.locale, "temporal") ?? relation, c.time]);
+  const adapter = direct ? getInstructionActionLocaleAdapter(c.locale) : undefined;
+  const selected = c.selectedTime;
+  // Recurring withholding keeps its selected plural weekday. Other heads and
+  // authored locale wording retain their existing direct-time ownership.
+  const weekday = c.frame?.predicate.lemma === "withhold-administration" &&
+    selected?.relation === AdviceRelation.On && adapter?.directTime === englishDirectTime &&
+    localizedValue(selected.i18n, c.locale) === undefined
+    ? localizedWeekdayArgument(selected.text, "en") : undefined;
+  const recurringWeekday = weekday && selected!.text.trim().toLowerCase() === weekday.toLowerCase() + "s";
+  const text = recurringWeekday
+    ? joinLocalizedTokens("en", [localizeAdviceRelation(AdviceRelation.On, "en", "temporal"), weekday + "s"])
+    : direct
+      ? adapter?.directTime?.(c.time) ?? c.time
+      : joinLocalizedTokens(c.locale, [localizeAdviceRelation(relation!, c.locale, "temporal") ?? relation, c.time]);
   if (c.timeWasRendered !== undefined) c.timeWasRendered = true;
   return text;
 }

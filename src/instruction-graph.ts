@@ -4553,7 +4553,7 @@ function realizeAction(
       if (entailed?.has(adjunct.role + "\0" + adjunct.conceptId + "\0" + adjunct.relation)) continue;
       const value = translatedArgument(adjunct, locale);
       const temporalPhrase = (adjunct.role === AdviceArgumentRole.Time && realizeTimeArgument({
-        locale, time: value, selectedTime: adjunct, timeRelation: adjunct.relation
+        locale, time: value, selectedTime: adjunct, timeRelation: adjunct.relation, frame
       })) || joinLocalizedTokens(locale, [
         localizeAdviceRelation(adjunct.relation!, locale) ?? adjunct.relation, value
       ]);
@@ -5475,11 +5475,13 @@ function inlineInstructionCondition(
   if (frame.polarity !== AdvicePolarity.Negate || !kind || !relationHasGrammarFeature(kind, "conditionScope")) return undefined;
   const arguments_ = frame.args.filter(arg => arg.role === AdviceArgumentRole.Free && arg.text.trim());
   if (!arguments_.length) return undefined;
+  // Occurrence coverage uses current argument/edge facts before any locale
+  // fragment is rendered. A custom joiner cannot decide condition ownership.
+  if (arguments_.length === 1 && actionIndex !== undefined && relations?.some(relation =>
+      relation.fromActionIndex === undefined && relation.toActionIndex === actionIndex && relation.kind === kind &&
+      conditionRelationBody(relation.text ?? "", kind) === arguments_[0].text.trim())) return undefined;
   const body = getAdviceLocaleAdapter(sourceLocale).joinArguments(arguments_.map(arg => arg.text.trim()));
   if (!body) return undefined;
-  if (actionIndex !== undefined && relations?.some(relation =>
-      relation.fromActionIndex === undefined && relation.toActionIndex === actionIndex && relation.kind === kind &&
-      conditionRelationBody(relation.text ?? "", kind) === body)) return undefined;
   const lead = localizeAdviceRelation(kind, sourceLocale) ?? kind;
   const relation: CanonicalInstructionRelation = { kind, toActionIndex: actionIndex ?? 0,
     text: getInstructionActionLocaleAdapter(sourceLocale).joinConditionLead(lead, body),
