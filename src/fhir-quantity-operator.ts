@@ -17,7 +17,7 @@
 export const DOSAGE_RECONCILIATION_SOURCE_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source";
 import type { FhirQuantity, FhirR6Quantity, FhirSimpleQuantity,
-  FhirR6SimpleQuantity, FhirR6Coding, FhirR6CodeableConcept, FhirR6Extension, FhirPrimitiveElement, FhirR6PrimitiveElement } from "./types";
+  FhirR6SimpleQuantity, FhirR6Coding, FhirR6CodeableConcept, FhirR6Reference, FhirR6Extension, FhirPrimitiveElement, FhirR6PrimitiveElement } from "./types";
 
 export const EMA_QUANTITY_COMPARATOR_EXTENSION_URL =
   "http://ema.europa.eu/fhir/extension/comparator";
@@ -166,25 +166,29 @@ export function quantityAnnotationExtensions(
     }
     const coding = quantityCodingForWire(item.valueCoding, target);
     const concept = quantityConceptForWire(item.valueCodeableConcept, target);
+    const directReference = quantityReferenceForWire(item.valueReference, target);
     let reference = item.valueCodeableReference;
     if (reference) {
       const concept = quantityConceptForWire(reference.concept, target);
+      const nestedReference = quantityReferenceForWire(reference.reference, target);
       const extension = reference.extension ? quantityAnnotationExtensions(reference.extension, target) : undefined;
-      if (concept !== reference.concept || extension !== reference.extension) reference = {
+      if (concept !== reference.concept || nestedReference !== reference.reference || extension !== reference.extension) reference = {
         ...reference,
         ...(concept !== reference.concept ? { concept } : {}),
+        ...(nestedReference !== reference.reference ? { reference: nestedReference } : {}),
         ...(extension !== reference.extension ? { extension } : {}),
       };
     }
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
     let current = quantity === item.valueQuantity && ratio === item.valueRatio &&
       range === item.valueRange && coding === item.valueCoding && concept === item.valueCodeableConcept &&
-      reference === item.valueCodeableReference && children === item.extension ? item : {
+      directReference === item.valueReference && reference === item.valueCodeableReference && children === item.extension ? item : {
       ...item, ...(quantity !== item.valueQuantity ? { valueQuantity: quantity } : {}),
       ...(ratio !== item.valueRatio ? { valueRatio: ratio } : {}),
       ...(range !== item.valueRange ? { valueRange: range } : {}),
       ...(coding !== item.valueCoding ? { valueCoding: coding } : {}),
       ...(concept !== item.valueCodeableConcept ? { valueCodeableConcept: concept } : {}),
+      ...(directReference !== item.valueReference ? { valueReference: directReference } : {}),
       ...(reference !== item.valueCodeableReference ? { valueCodeableReference: reference } : {}),
       ...(children !== item.extension ? { extension: children } : {}),
     };
@@ -198,6 +202,20 @@ export function quantityAnnotationExtensions(
     result?.push(current);
   }
   return result ?? source;
+}
+function quantityReferenceForWire(
+  reference: FhirR6Reference | undefined, target: "r5" | "r6"
+): FhirR6Reference | undefined {
+  if (!reference) return reference;
+  const extension = reference.extension ? quantityAnnotationExtensions(reference.extension, target) : undefined;
+  let result = extension === reference.extension ? reference : { ...reference, extension };
+  for (const field of ["_reference", "_type", "_display"] as const) {
+    const primitive = quantityPrimitiveForWire(reference[field], target);
+    if (primitive === reference[field]) continue;
+    if (result === reference) result = { ...reference };
+    result[field] = primitive;
+  }
+  return result;
 }
 function quantityConceptForWire(
   concept: FhirR6CodeableConcept | undefined, target: "r5" | "r6"

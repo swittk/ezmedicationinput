@@ -327,11 +327,7 @@ function restoreComponentDelta(
       fresh.siteReference = fresh.siteReference
         ? { ...delta.site.reference, ...fresh.siteReference }
         : delta.site.reference;
-      retained.site = {
-        ...delta.site,
-        ...(fresh.target ? { concept: fresh.target } : {}),
-        ...(fresh.siteReference ? { reference: fresh.siteReference } : {}),
-      };
+      retained.site = delta.site;
     } else if (
       !equalStructuredValues(
         {

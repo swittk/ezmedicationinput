@@ -2115,7 +2115,7 @@ export function getDoseQuantityUnit(
   if (quantity.system === "http://spor.ema.europa.eu/v1/lists/200000000014" && quantity.code) {
     return EMA_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
   }
-  const recognizedUnit = (label: string | undefined): string | undefined => {
+  const recognizedUnit = (label: string | undefined, explicitUcum = false): string | undefined => {
     if (!label) return undefined;
     if (label === "5.mL") return "tsp";
     if (label === "15.mL") return "tbsp";
@@ -2123,7 +2123,12 @@ export function getDoseQuantityUnit(
     const canonical = synonym ?? label;
     // Recognized lexical units retain their canonical label even if no
     // standard unit code exists; unknown opaque codes still fall through.
-    if (!getStandardDoseUnitCoding(canonical)) return synonym;
+    const standard = getStandardDoseUnitCoding(canonical);
+    if (!standard) return synonym;
+    // Clinical UCUM codes retain case-sensitive identity; display aliases
+    // remain available for lexical labels without an explicit code system.
+    if (explicitUcum && (standard.system !== "http://unitsofmeasure.org" ||
+        standard.code !== label && standard.code !== label.replace(/l(?=\/|$)/g, "L"))) return label;
     const measured = UCUM_DOSE_UNIT_CODES[canonical] ?? canonical;
     return measured === "5.mL" ? "tsp" :
       measured === "15.mL" ? "tbsp" : measured;
@@ -2137,7 +2142,7 @@ export function getDoseQuantityUnit(
   // A foreign code must not override the authored unit as a UCUM spelling.
   // Keep the existing lexical and opaque-label fallbacks for imported quantities.
   const codedUnit = !quantity.system || quantity.system === "http://unitsofmeasure.org"
-    ? recognizedUnit(code) : undefined;
+    ? recognizedUnit(code, quantity.system === "http://unitsofmeasure.org") : undefined;
   const dimensionalCode = !includeOpaqueCode && quantity.system === "http://unitsofmeasure.org"
     ? code : undefined;
   return codedUnit ?? recognizedUnit(quantity.unit) ?? dimensionalCode ?? quantity.unit ?? fallbackCode ?? "";

@@ -86,12 +86,13 @@ function retentionForAdministration(
   // A source CodeableReference may carry independent IDs/extensions, but its
   // known concept/reference are controlled by the current native facts. Do
   // not restore known fields merely because the original object had them.
-  const site = rawSite || row.site || a.siteReference
-    ? { ...rawSite, ...(row.site ? { concept: row.site } : {}),
+  const concept = rawSite ? a.target : row.site;
+  const site = rawSite || concept || a.siteReference
+    ? { ...rawSite, ...(concept ? { concept } : {}),
         ...(a.siteReference ? { reference: a.siteReference } : {}) }
     : undefined;
   if (site) {
-    if (!row.site) delete site.concept;
+    if (!concept) delete site.concept;
     if (!a.siteReference) delete site.reference;
   }
   const recurrence = a.schedule?.recurrence;

@@ -751,12 +751,14 @@ function conditionFromR6(value: FhirR6DosageCondition): MedicationCondition {
     if (problem !== undefined) break;
   }
   problem ??= value.code?.text;
-  let name = problem ?? value.code?.coding?.[0]?.display;
+  const label = problem ?? value.code?.coding?.[0]?.display;
+  let name = problem;
   if (name === undefined) for (const coding of value.code?.coding ?? []) {
     if (coding.system !== "http://loinc.org" || !coding.code) continue;
     name = CONDITION_MEASUREMENT_NAMES.get(coding.code);
     if (name !== undefined) break;
   }
+  name ??= label;
   if (problem && value.valueBoolean !== undefined &&
       (!value.operation || value.operation === "eq" || value.operation === "ne")) {
     for (const coding of value.code?.coding ?? []) {
@@ -771,7 +773,7 @@ function conditionFromR6(value: FhirR6DosageCondition): MedicationCondition {
       kind: "measurement", name, operation: value.operation as "gt" | "ge" | "lt" | "le" | "eq" | "ne",
       value: value.valueQuantity.value,
       unit: value.valueQuantity.unit ?? (getDoseQuantityUnit(value.valueQuantity, false) || undefined),
-      text: value.text ?? name
+      text: value.text ?? label ?? name
     };
   }
   // Keep the actual condition in native fields/the retained course. A human
@@ -2391,6 +2393,20 @@ interface BridgeField {
 }
 type BridgeShape = Readonly<Record<string, BridgeField>>;
 
+/** Companion slots of the scalar choices declared by the typed bridge. */
+function bridgePrimitiveCompanion(value: ValueField | undefined) {
+  switch (value) {
+    case "valueString": return "_valueString" as const;
+    case "valueCode": return "_valueCode" as const;
+    case "valueInteger": return "_valueInteger" as const;
+    case "valueBoolean": return "_valueBoolean" as const;
+    case "valueDecimal": return "_valueDecimal" as const;
+    case "valueMarkdown": return "_valueMarkdown" as const;
+    case "valueTime": return "_valueTime" as const;
+    default: return undefined;
+  }
+}
+
 const ELEMENT: BridgeShape = {
   id: { value: "valueString" },
   extension: { extension: true, repeated: true },
@@ -2617,10 +2633,20 @@ function encodeFields(
   const keys = shape === SAFETY ? Object.keys(SAFETY) : Object.keys(value);
   if (shape === SAFETY) for (const key of Object.keys(value))
     if (!Object.prototype.hasOwnProperty.call(SAFETY, key)) keys.push(key);
-  for (const key of keys) {
-    const part = (value as Record<string, unknown>)[key];
-    if (part === undefined) continue;
+  const source = value as Record<string, unknown>;
+  for (let key of keys) {
+    if (key.startsWith("_")) {
+      const scalar = key.slice(1), field = shape[scalar];
+      if (field && !field.repeated && bridgePrimitiveCompanion(field.value)) {
+        if (Object.prototype.hasOwnProperty.call(source, scalar) || shape === SAFETY) continue;
+        key = scalar;
+      }
+    }
+    const part = source[key];
     const field = Object.prototype.hasOwnProperty.call(shape, key) ? shape[key] : undefined;
+    const primitiveField = field && !field.repeated ? bridgePrimitiveCompanion(field.value) : undefined;
+    const companion = primitiveField ? source[`_${key}`] : undefined;
+    if (part === undefined && companion === undefined) continue;
     if (!field) {
       children.push({ url: "retainedField", extension: [
         { url: "name", valueString: key }, retainField("value", part)
@@ -2655,7 +2681,12 @@ function encodeFields(
         children.push({ url: key, valueQuantity:
           (snapshot ? cloneStructuredValue(quantity) : quantity) as FhirQuantity | undefined });
       } else if (field.value) {
-        children.push({ url: key, [field.value]: snapshot ? cloneStructuredValue(item) : item });
+        let child: FhirExtension = { url: key,
+          ...(item !== undefined ? { [field.value]: item } : {}),
+          ...(companion !== undefined ? { [primitiveField!]: companion } : {}) };
+        if (companion !== undefined && !preserveQuantityWire)
+          child = quantityAnnotationExtensions([child], "r5")[0] as FhirExtension;
+        children.push(snapshot ? cloneStructuredValue(child) : child);
       }
     }
   }
@@ -2715,9 +2746,17 @@ function decodeFields(
         if (quantity) value = { ...cloneStructuredValue(quantity),
           ...(comparator ? { comparator } : {}) };
       }
-    } else if (field.value) value = cloneStructuredValue(
-      child[field.value] ?? (field.legacyValue ? child[field.legacyValue] : undefined)
-    );
+    } else if (field.value) {
+      const primaryCompanion = !field.repeated ? bridgePrimitiveCompanion(field.value) : undefined;
+      const selected = child[field.value] !== undefined || primaryCompanion && child[primaryCompanion] !== undefined
+        ? field.value : field.legacyValue ?? field.value;
+      value = cloneStructuredValue(child[selected]);
+      const primitiveField = !field.repeated ? bridgePrimitiveCompanion(selected) : undefined;
+      if (primitiveField && child[primitiveField] !== undefined) {
+        const current = preserveQuantityWire ? child : quantityAnnotationExtensions([child], "r6")[0];
+        result[`_${child.url}`] = cloneStructuredValue(current[primitiveField]);
+      }
+    }
     if (value === undefined) continue;
     if (field.repeated) ((result[child.url] ??= []) as unknown[]).push(value);
     else result[child.url] = value;

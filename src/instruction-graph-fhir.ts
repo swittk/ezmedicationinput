@@ -141,11 +141,11 @@ function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | unde
       break;
     }
     if (source.url === "coding" && source.valueCoding) {
-      const current = index >= 0 ? parts[index].valueCoding : undefined, old = source.valueCoding;
+      const current = index >= 0 ? parts[index].valueCoding : undefined, old = wireCoding(source.valueCoding);
       // A replacement may retain code identity while changing its display or
       // primitive metadata. Preserve the full displaced Coding as inactive source.
       if (!current || !equalStructuredValues(current, old)) {
-        parts.push({ ...source, url: "sourceCoding" });
+        parts.push({ ...source, url: "sourceCoding", valueCoding: old });
         continue;
       }
     }

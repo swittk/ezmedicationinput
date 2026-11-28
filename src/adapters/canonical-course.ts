@@ -1499,8 +1499,8 @@ export function selectR5Maximum(
 
 /** Shared wire serializer for current maxima and retained R5 edit baselines. */
 export function periodMaximumToR5(amount: CanonicalMeasure, period: CanonicalMeasure, source?: object): FhirRatio {
-  const { scope: _scope, valueQuantity: _amount, valueInteger: _count, _valueInteger: _countMetadata,
-    valueExpression: _expression, period: _period, text: _text,
+  const { scope: _scope, _scope: _scopeMetadata, valueQuantity: _amount, valueInteger: _count, _valueInteger: _countMetadata,
+    valueExpression: _expression, period: _period, text: _text, _text: _textMetadata,
     numerator: _numerator, denominator: _denominator, ...metadata
   } = (source ?? {}) as Record<string, unknown>;
   return { ...metadata, numerator: generalQuantityForR5(amount), denominator: simpleQuantityForR5(period) };
@@ -1841,10 +1841,12 @@ function administrationToWire(
         ? quantityAnnotationExtensions([elementSpatial], "r5")[0] as FhirExtension
         : buildBodySiteSpatialRelationExtension(a.siteSpatialRelation);
       if (spatial) concept = { ...concept, extension: [...(concept?.extension ?? []), spatial] };
-    } else if (target === "r6" && elementSpatial && conceptSpatial && a.provenance?.format === "r5") {
-      // The R5 concept carries the same relation that the retained R6 Element
-      // already owns. Restore that location without emitting a second copy.
-      const extension = concept!.extension!.filter(e => e.url !== BODY_SITE_SPATIAL_RELATION_EXTENSION_URL);
+    } else if (target === "r6" && elementSpatial && conceptSpatial && a.provenance?.format === "r5" &&
+        !oldSite?.concept?.extension?.some(e => e.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL) &&
+        equalStructuredValues(conceptSpatial, quantityAnnotationExtensions([elementSpatial], "r5")[0])) {
+      // Remove only the R5 projection's copy of the wrapper relation. An
+      // independently authored concept relation keeps its own location.
+      const extension = concept!.extension!.filter(e => e !== conceptSpatial);
       concept = { ...concept };
       if (extension.length) concept.extension = extension;
       else delete concept.extension;
