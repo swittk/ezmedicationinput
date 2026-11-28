@@ -4441,7 +4441,7 @@ it("round76 retains a daily cumulative volume ceiling under the infusion head", 
 
 
 describe("round77 clocked coded course endings", () => {
-  it.each(["10:00", "8:30pm"])("retains the authored %s without inventing a dated end", clock => {
+  it.each([["10:00", "10:00"], ["8:30pm", "20:30"]])("retains the authored %s without inventing a dated end", (clock, normalizedClock) => {
     const ending = "until " + clock + " next visit";
     const parsed = parsePublicSig("Take 1 tablet daily " + ending);
     const instruction = parsed.meta.canonical.clauses[0].additionalInstructions![0];
@@ -4453,7 +4453,7 @@ describe("round77 clocked coded course endings", () => {
         const sentences = formatSig(input, "long", { locale, realizationMode: "normalized" }).split(/\.\s+/u);
         expect(sentences[0]).toMatch(locale === "en" ? /once daily/u : /วันละ(?:\s*1\s*)?ครั้ง/u);
         expect(sentences[0]).not.toContain(clock);
-        expect(sentences[1]).toContain(clock);
+        expect(sentences[1]).toContain(locale === "th" ? normalizedClock : clock);
         expect(sentences[1]).toMatch(locale === "en" ? /appointment|visit/iu : /นัดครั้งถัดไป/u);
       }
       const administration = importCanonicalCourse(input).stages[0].administrations[0];
@@ -4517,7 +4517,8 @@ describe("round78 next-day onset and complete clinical cap ownership", () => {
           expect(sentences[0]).toMatch(locale === "en" ? /once daily/u : /วันละ(?:\s*1\s*)?ครั้ง/u);
           expect(sentences[0]).not.toContain("8 AM");
           expect(sentences[1]).toContain(locale === "en" ? "appointment" : "นัดครั้งถัดไป");
-          expect(sentences[1].includes("8 AM")).toBe(clocked);
+          expect(sentences[1].includes("8 AM")).toBe(clocked && locale === "en");
+          if (clocked && locale === "th") expect(sentences[1]).toContain("เวลา 08:00");
         }
       }
     });

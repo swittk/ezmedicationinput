@@ -1,5 +1,5 @@
 import { getInstructionActionLocaleAdapter } from "../../instruction-action-locale-adapter";
-import { joinLocalizedTokens } from "../../locale-realization";
+import { joinLocalizedTokens, localizedTimeArgument } from "../../locale-realization";
 import { clinicalRateHeadAt, clinicalRatePeriodUnit, volumeOrMassTerm } from "./clinical-quantity-rules";
 import { frameActionDefinition } from "../../instruction-graph";
 import { courseContinuationDurationAt } from "../lexical-classes";
@@ -3482,8 +3482,12 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
     // The terminology identifies the end event; its authored clock is a
     // separate typed complement, retained without inventing a calendar date.
     const sourceClock = context.state.input.slice(endClock.tokens[0].sourceStart, endClock.tokens[endClock.tokens.length - 1].sourceEnd);
-    for (const locale of Object.keys(i18n)) i18n[locale] = joinLocalizedTokens(locale, [i18n[locale],
-      getInstructionActionLocaleAdapter(locale).directTime?.(sourceClock) ?? sourceClock]);
+    for (const locale of Object.keys(i18n)) {
+      const localizedClock = endClock.event ? localizedTimeArgument(endClock.event, locale) ?? sourceClock
+        : endClock.value ?? sourceClock;
+      i18n[locale] = joinLocalizedTokens(locale, [i18n[locale],
+        getInstructionActionLocaleAdapter(locale).directTime?.(localizedClock) ?? localizedClock]);
+    }
   }
   return lexicalSign({
     type: 'instruction-sign',

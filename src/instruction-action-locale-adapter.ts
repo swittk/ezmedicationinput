@@ -265,8 +265,8 @@ export function realizeTimeArgument(c: SelectedTimeInput): string | undefined {
   const selected = c.selectedTime;
   // Recurring withholding keeps its selected plural weekday. Other heads and
   // authored locale wording retain their existing direct-time ownership.
-  const weekday = c.frame?.predicate.lemma === "withhold-administration" &&
-    selected?.relation === AdviceRelation.On && adapter?.directTime === englishDirectTime &&
+  const weekday = c.frame?.predicate.lemma === "withhold-administration" && selected &&
+    relation === AdviceRelation.On && adapter?.directTime === englishDirectTime &&
     localizedValue(selected.i18n, c.locale) === undefined
     ? localizedWeekdayArgument(selected.text, "en") : undefined;
   const recurringWeekday = weekday && selected!.text.trim().toLowerCase() === weekday.toLowerCase() + "s";
@@ -784,8 +784,9 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
         (c.definition?.code === "apply" || c.definition?.code === "reapply")) {
       return `${prefix}${c.label.toLowerCase()} to ${c.site}`;
     }
-    if (object && relationHasGrammarFeature(c.frame.relation, "negatedObjectAttachment")) {
-      const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
+    const objectRelation = object ? instructionFrameSiteRelation(c.frame) : undefined;
+    if (objectRelation && relationHasGrammarFeature(objectRelation, "negatedObjectAttachment")) {
+      const relation = localizeAdviceRelation(objectRelation, c.locale) ?? objectRelation;
       const attachment = negatedAttachmentArguments(c);
       return `${prefix}${c.label.toLowerCase()}${attachment.theme ? ` ${attachment.theme}` : ""} ${relation} ${attachment.target}`;
     }
@@ -879,8 +880,9 @@ const TH_ADAPTER: InstructionActionLocaleAdapter = {
     const relationTarget = c.activity ?? c.time;
     const prefix = (c.frame.modality && TH_NEGATED_MODALITY_PREFIX[c.frame.modality]) ?? "ห้าม";
     if (completeAction) return prefix + completeAction;
-    if (object && relationHasGrammarFeature(c.frame.relation, "negatedObjectAttachment")) {
-      const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
+    const objectRelation = object ? instructionFrameSiteRelation(c.frame) : undefined;
+    if (objectRelation && relationHasGrammarFeature(objectRelation, "negatedObjectAttachment")) {
+      const relation = localizeAdviceRelation(objectRelation, c.locale) ?? objectRelation;
       const attachment = negatedAttachmentArguments(c);
       return `${prefix}${c.label}${attachment.theme ?? ""}${relation}${attachment.target}`;
     }

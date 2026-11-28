@@ -244,7 +244,8 @@ interface AdviceFrameMatcher {
   relations?: AdviceRelation[];
   force?: AdviceForce;
   polarity?: AdvicePolarity;
-  modality?: AdviceModality;
+  /** null requires an unmodal frame; an omitted constraint accepts either. */
+  modality?: AdviceModality | null;
   argConcepts?: AdviceArgConceptMatcher[];
   argLiterals?: { roles: AdviceArgumentRole[]; value: string }[];
 }
@@ -255,7 +256,7 @@ interface AdviceFrameMatcherSource {
   relations?: string[];
   force?: string;
   polarity?: string;
-  modality?: string;
+  modality?: string | null;
   argConcepts?: AdviceArgConceptMatcherSource[];
   argLiterals?: { roles: string[]; value: string }[];
 }
@@ -639,7 +640,8 @@ function buildAdviceFrameMatcher(source: AdviceFrameMatcherSource): AdviceFrameM
     relations: relations.length ? relations : undefined,
     force: source.force ? mapAdviceForce(source.force) : undefined,
     polarity: mapAdvicePolarity(source.polarity),
-    modality: source.modality ? requiredEnumValue<AdviceModality>(AdviceModality, source.modality, "advice modality") : undefined,
+    modality: source.modality === null ? null
+      : source.modality ? requiredEnumValue<AdviceModality>(AdviceModality, source.modality, "advice modality") : undefined,
     argConcepts: argConcepts.length ? argConcepts : undefined,
     argLiterals: source.argLiterals?.map(argument => ({ roles: argument.roles.map(mapAdviceArgumentRole), value: argument.value }))
   };
@@ -732,7 +734,7 @@ function frameMatches(frame: AdviceFrame, matcher: AdviceFrameMatcher): boolean 
   )) {
     return false;
   }
-  if (matcher.modality && frame.modality !== matcher.modality) return false;
+  if (matcher.modality !== undefined && frame.modality !== (matcher.modality ?? undefined)) return false;
   for (const literal of matcher.argLiterals ?? []) {
     if (!frame.args.some(argument => literal.roles.indexOf(argument.role) >= 0 &&
         (argument.normalized ?? argument.text) === literal.value)) return false;

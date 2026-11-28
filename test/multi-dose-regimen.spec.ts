@@ -2534,9 +2534,13 @@ describe("round 53: saved graph and calendar realization ownership", () => {
         for (const locale of ["en", "th"]) {
           const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
           expect(text.match(locale === "en" ? /10 mL/gu : /10 มิลลิลิตร/gu)).toHaveLength(1);
+          expect(text).toContain(locale === "en" ? "to 10 mL" : "ไปยัง10 มิลลิลิตร");
           if (kind !== "legacy-to") {
             expect(text.match(locale === "en" ? /saline/gu : /น้ำเกลือ/gu)).toHaveLength(1);
             expect(text.match(locale === "en" ? /1 mL/gu : /1 มิลลิลิตร/gu)).toHaveLength(1);
+            expect(text).toContain(locale === "en"
+              ? kind === "unmarked-material" ? "1 mL of saline" : "1 mL with saline"
+              : kind === "unmarked-material" ? "น้ำเกลือ 1 มิลลิลิตร" : "1 มิลลิลิตรพร้อมน้ำเกลือ");
           }
         }
         expect(JSON.stringify(input)).toBe(before);

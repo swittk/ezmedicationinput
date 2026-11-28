@@ -1949,7 +1949,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     return [leadingInstructionText, effectiveBase, effectiveTrailing].filter(Boolean).join(" ").trim();
   };
   if (!body) {
-    if (!authoredPrimary && !hasCalendarQualifiers && !trailingInstructionText && !leadingInstructionText && !primaryConditions?.length)
+    if (!deferredDirections?.current && !authoredPrimary && !hasCalendarQualifiers && !trailingInstructionText && !leadingInstructionText && !primaryConditions?.length)
       return condition ? appendClinicalConditionText(`${verb}.`, condition, words) : `${verb}.`;
     return hasExplicitMethod ? compose(`${verb}.`) : compose("");
   }

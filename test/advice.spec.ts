@@ -596,3 +596,27 @@ describe("complete drowsiness composite meaning", () => {
     expect(JSON.stringify(separate)).toBe(saved);
   });
 });
+
+
+describe("next-day cause certainty ownership", () => {
+  it.each([
+    [undefined, undefined, true], [undefined, AdvicePolarity.Affirm, true],
+    [AdviceModality.May, AdvicePolarity.Affirm, false],
+    [undefined, AdvicePolarity.Negate, false], [AdviceModality.May, AdvicePolarity.Negate, false]
+  ] as const)("matches only affirmative unmodal causes (%s, %s)", (modality, polarity, expected) => {
+    const template = buildAdditionalInstructionFramesFromCoding(SNOMED_SYSTEM, "418071006")!;
+    const frames = template.map(frame => frame.predicate.lemma === "cause" ? { ...frame, modality, polarity } : frame);
+    const before = JSON.stringify(frames);
+    expect(matchComposedAdviceCodings(frames).some(definition => definition.coding?.code === "418071006")).toBe(expected);
+    expect(JSON.stringify(frames)).toBe(before);
+  });
+
+  it("keeps certainty scoped to the matched cause when another modal cause is present", () => {
+    const frames = buildAdditionalInstructionFramesFromCoding(SNOMED_SYSTEM, "418071006")!;
+    const cause = frames.find(frame => frame.predicate.lemma === "cause")!;
+    const current = [{ ...cause, modality: AdviceModality.May }, ...frames];
+    const before = JSON.stringify(current);
+    expect(matchComposedAdviceCodings(current).some(definition => definition.coding?.code === "418071006")).toBe(true);
+    expect(JSON.stringify(current)).toBe(before);
+  });
+});

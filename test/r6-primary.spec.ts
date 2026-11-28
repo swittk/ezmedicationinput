@@ -19,7 +19,7 @@ import {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getBodySiteText, buildBodySiteAdministrationTargetCountExtension, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
   type FormatOptions, type FhirR6DoseLimit, type FhirR6Extension, type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
-  EventTiming, FhirPeriodUnit, RouteCode, AdviceRelation, AdviceArgumentRole, AdviceForce, AdvicePolarity, type CanonicalInstructionGraph, parseInstructionActions, cloneBodySiteSpatialRelation
+  EventTiming, FhirPeriodUnit, RouteCode, AdviceRelation, AdviceArgumentRole, AdviceForce, AdvicePolarity, type CanonicalInstructionGraph, parseInstructionActions, realizeInstructionGraph, cloneBodySiteSpatialRelation
 } from "../src/index";
 import {
   canonicalFromFhir, canonicalToFhir, parserStateFromFhir, BODY_SITE_RESTRICTION_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, getTimingClocks,
@@ -8067,4 +8067,116 @@ it("applies an annotated UCUM drop ceiling to maximum planned supply", () => {
     expect(row.maxDosePerPeriod).toEqual([maximum]);
   }
   expect(JSON.stringify(input)).toBe(before);
+});
+
+
+describe("current appointment and ordered-dose previews", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([
+    ["until the next appointment at noon", "ตอนเที่ยง"],
+    ["until the next appointment at 8 AM", "เวลา 08:00"],
+    ["until 8 AM the next appointment", "เวลา 08:00"],
+    ["until the next appointment", "นัดครั้งถัดไป"]
+  ])("localizes the typed ending without creating recurring clocks: %s", (ending, thaiTime) => {
+    const source = "Take 1 tablet daily " + ending, parsed = parseSig(source);
+    const instruction = parsed.meta.canonical.clauses[0].additionalInstructions![0];
+    expect(instruction.coding?.code).toBe("1287351008");
+    expect(instruction.text).toBe(ending === "until the next appointment" ? "Until next appointment" : ending);
+    expect(instruction.evidence?.[0].spans?.[0].text).toBe(ending);
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = fresh(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(member.schedule?.recurrence?.clocks).toBeUndefined();
+      expect(member.schedule?.recurrence?.calendarWindow).toBeUndefined();
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain(thaiTime);
+      expect(thai).not.toMatch(/\bnoon\b|\bAM\b/);
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(english.toLowerCase()).toContain(ending === "until the next appointment" ? "until next appointment" : ending.toLowerCase());
+      expect(input).toEqual(before);
+    }
+  });
+
+  it.each([true, false])("keeps an ordered shampoo amount without other compact body fields: %s", hasDose => {
+    const method = { text: "Shampoo", coding: [{ system: "http://snomed.info/sct", code: "420606003", display: "Shampoo" }] };
+    const amount = { type: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/dose-rate-type", code: "ordered" }] },
+      doseQuantity: { value: 5, unit: "mL" } };
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ method,
+      ...(hasDose ? { doseAndRate: [amount] } : {})
+    }] }] };
+    const before = fresh(source), native = importCanonicalCourse(source), projection = projectCanonicalCourse(native);
+    for (const input of [native, fresh(projection.fhir), fresh(projection.fhirNext)]) {
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(english).toContain("Shampoo");
+      expect(thai).toContain("สระผม");
+      if (hasDose) {
+        expect(english).toContain("5 mL");
+        expect(thai).toContain("5 มิลลิลิตร");
+      } else {
+        expect(english).toBe("Shampoo.");
+        expect(thai).not.toContain("5");
+      }
+      const current = courseToR6(importCanonicalCourse(input)).step[0].component[0];
+      expect(current.method).toEqual(method);
+      expect(current.doseAndRate).toEqual(hasDose ? [amount] : undefined);
+    }
+    expect(source).toEqual(before);
+  });
+});
+
+
+describe("current prohibition and recurring Time ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const views = (graph: CanonicalInstructionGraph) => {
+    const wire: FhirR6DosageInstruction = { step: [{ component: [{ extension: [buildInstructionGraphExtension(graph)!] }] }] };
+    const native = importCanonicalCourse(wire), projected = projectCanonicalCourse(native);
+    return [native, fresh(projected.fhir), fresh(projected.fhirNext)];
+  };
+  it.each([false, true])("keeps inherited Time separate from a prohibition target with Site=%s", hasSite => {
+    const source = hasSite ? "Do not apply patch on left arm at bedtime" : "Do not take the tablet at bedtime";
+    const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en", actions: [{
+      force: AdviceForce.Instruction, polarity: AdvicePolarity.Negate, relation: AdviceRelation.On,
+      predicate: { lemma: hasSite ? "apply" : "take", semanticClass: "administration" },
+      args: [
+        { role: AdviceArgumentRole.Object, text: hasSite ? "patch" : "the tablet", i18n: { th: hasSite ? "แผ่นยา" : "ยาเม็ด" } },
+        ...(hasSite ? [{ role: AdviceArgumentRole.Site, text: "left arm", relation: AdviceRelation.On, i18n: { th: "แขนซ้าย" } }] : []),
+        { role: AdviceArgumentRole.Time, text: "bedtime", normalized: "HS" }
+      ], sourceText: source, span: { start: 0, end: source.length }
+    }] };
+    const before = fresh(graph);
+    const texts = [
+      [realizeInstructionGraph(graph, "en")!, realizeInstructionGraph(graph, "th")!],
+      ...views(graph).map(input => [formatSig(input, "long", { locale: "en", realizationMode: "normalized" }),
+        formatSig(input, "long", { locale: "th", realizationMode: "normalized" })])
+    ];
+    for (const [english, thai] of texts) {
+      expect(english).toContain(hasSite ? "apply patch on left arm" : "take the tablet");
+      expect(english).toContain("at bedtime");
+      expect(english).not.toContain("on the tablet");
+      expect(thai).toContain(hasSite ? "บนแขนซ้าย" : "ยาเม็ด");
+      expect(thai).toContain("ก่อนนอน");
+      expect(thai).not.toContain("บนยาเม็ด");
+    }
+    expect(graph).toEqual(before);
+  });
+
+  it.each(["Monday", "Mondays"])("retains inherited On and the selected weekday number: %s", weekday => {
+    const source = "Withhold medication on " + weekday;
+    const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en", actions: [{
+      force: AdviceForce.Instruction, relation: AdviceRelation.On,
+      predicate: { lemma: "withhold-administration", semanticClass: "administration" },
+      args: [{ role: AdviceArgumentRole.Object, text: "medication", i18n: { th: "ยา" } },
+        { role: AdviceArgumentRole.Time, text: weekday, normalized: "Monday" }],
+      sourceText: source, span: { start: 0, end: source.length }
+    }] };
+    const before = fresh(graph), texts = [realizeInstructionGraph(graph, "en")!,
+      ...views(graph).map(input => formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))];
+    for (const text of texts) {
+      expect(text).toContain("on " + weekday);
+      if (weekday === "Monday") expect(text).not.toContain("Mondays");
+    }
+    expect(graph).toEqual(before);
+  });
 });

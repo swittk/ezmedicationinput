@@ -995,6 +995,8 @@
         "allOf": [
           {
             "frame": {
+              "polarity": "affirm",
+              "modality": null,
               "predicateLemmas": [
                 "cause"
               ],
