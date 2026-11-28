@@ -1628,8 +1628,8 @@ describe("HPSG weekly cadence and exact weekday alternatives", () => {
       timeZone: "Asia/Bangkok", limit: 3
     })).toEqual([
       "2026-10-22T09:00:00+07:00",
-      "2026-10-26T09:00:00+07:00",
-      "2026-10-29T09:00:00+07:00"
+      "2026-10-29T09:00:00+07:00",
+      "2026-11-05T09:00:00+07:00"
     ]);
   });
 
@@ -1650,13 +1650,13 @@ describe("HPSG weekly cadence and exact weekday alternatives", () => {
       from, orderedAt: from, timeZone: "Asia/Bangkok", limit: 3
     })).toEqual([
       "2026-10-22T09:00:00+07:00",
-      "2026-10-26T09:00:00+07:00",
-      "2026-10-29T09:00:00+07:00"
+      "2026-10-29T09:00:00+07:00",
+      "2026-11-05T09:00:00+07:00"
     ]);
     expect(calculateTotalUnits({
       dosage, from, orderedAt: from, timeZone: "Asia/Bangkok",
       durationValue: 14, durationUnit: "d"
-    })).toMatchObject({ totalUnits: 4, unit: "tab" });
+    })).toMatchObject({ totalUnits: 2, unit: "tab" });
   });
 
   it("retains compatible explicit twice-weekly meaning", () => {

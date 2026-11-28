@@ -62,6 +62,7 @@ import {
   NEXT_DAY_SCHEDULE_RULE,
   NEXT_DAY_ONSET_RULE,
   compactDurationParts,
+  compactIntervalParts,
   EVENT_ARTICLE_TOKENS,
   EVENT_OFFSET_ARTICLES,
   EVENT_OFFSET_FRACTIONS,
@@ -518,13 +519,13 @@ export function compactIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
         score: 15
       })];
     }
-    const rangeMatch = lower.match(/^q([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?)([a-z]+)$/);
-    if (rangeMatch) {
-      const unit = mapIntervalUnit(rangeMatch[3]);
+    const interval = compactIntervalParts(lower);
+    if (interval?.periodMax !== undefined) {
+      const unit = mapIntervalUnit(interval.unitSurface);
       if (!unit) {
         return [];
       }
-      const range = normalizePeriodRange(parseFloat(rangeMatch[1]), parseFloat(rangeMatch[2]), unit);
+      const range = normalizePeriodRange(interval.period, interval.periodMax, unit);
       return [
         lexicalSign({
           type: "schedule-sign",
@@ -546,8 +547,7 @@ export function compactIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
       ];
     }
 
-    const match = lower.match(/^q([0-9]+(?:\.[0-9]+)?)([a-z]+)$/);
-    if (!match) {
+    if (!interval) {
       const splitQuantity = lower.match(/^q([0-9]+(?:\.[0-9]+)?)$/);
       const next = context.tokens[start + 1];
       const nextUnit = next && !context.state.consumed.has(next.index)
@@ -570,7 +570,7 @@ export function compactIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
         })
       ];
     }
-    const unit = mapIntervalUnit(match[2]);
+    const unit = mapIntervalUnit(interval.unitSurface);
     if (!unit) {
       return [];
     }
@@ -580,7 +580,7 @@ export function compactIntervalRule(): HpsgLexicalRule<HpsgClauseContext> {
         rule: "hpsg.lex.schedule.compactInterval",
         tokens,
         synsem: {
-          head: { schedule: buildPeriodScheduleFeature(parseFloat(match[1]), unit) },
+          head: { schedule: buildPeriodScheduleFeature(interval.period, unit) },
           valence: {},
           cont: { clauseKind: "administration" }
         },

@@ -1,6 +1,7 @@
 import { EventTiming, FhirDayOfWeek, FhirPeriodUnit, type ParseOptions } from "./types";
 import { TIMING_ABBREVIATIONS } from "./maps";
-import { INTERVAL_UNIT_TOKENS_DATA } from "./hpsg/lexical-classes";
+import { compactIntervalParts, INTERVAL_UNIT_TOKENS_DATA } from "./hpsg/lexical-classes";
+import { mapIntervalUnit, normalizePeriodValue, normalizePeriodRange } from "./hpsg/timing-lexicon";
 
 /** Exact standard timing identities shared by native compilation and wire
  * projection. Local codes remain text unless this vocabulary recognizes them. */
@@ -19,8 +20,8 @@ export function isStandardTimingCoding(coding: { system?: string; code?: string 
 
 /** Existing compact interval vocabulary applies to text and systemless codes. */
 export function isCompactIntervalTimingCode(code: string): boolean {
-  const interval = /^q[0-9]+(?:\.[0-9]+)?(?:-[0-9]+(?:\.[0-9]+)?)?([a-z]+)$/iu.exec(code);
-  return Boolean(interval && INTERVAL_UNIT_TOKENS_DATA.has(interval[1].toLowerCase()));
+  const interval = compactIntervalParts(code);
+  return Boolean(interval && INTERVAL_UNIT_TOKENS_DATA.has(interval.unitSurface));
 }
 
 /** Existing clinical preview abbreviations include shorthand such as QHS
@@ -123,11 +124,20 @@ export function timingPreviewDescriptor(code: string) {
 
 /** Human previews also recognize existing SIG shorthand without treating it
  * as a standard FHIR timing identity or changing its structured projection. */
-export function intervalTimingPreviewDescriptor(code: string): { period: number; periodUnit: FhirPeriodUnit } | undefined {
+export function intervalTimingPreviewDescriptor(code: string): { period: number; periodMax?: number; periodUnit: FhirPeriodUnit } | undefined {
   const descriptor = timingPreviewDescriptor(code);
-  if (!descriptor?.period || !descriptor.periodUnit || descriptor.when?.length || (descriptor.frequency ?? 1) !== 1)
-    return undefined;
-  return descriptor as typeof descriptor & { period: number; periodUnit: FhirPeriodUnit };
+  if (descriptor?.period && descriptor.periodUnit && !descriptor.when?.length && (descriptor.frequency ?? 1) === 1)
+    return descriptor as typeof descriptor & { period: number; periodUnit: FhirPeriodUnit };
+  const interval = compactIntervalParts(code);
+  if (!interval) return undefined;
+  const unit = mapIntervalUnit(interval.unitSurface);
+  if (!unit) return undefined;
+  if (interval.periodMax !== undefined) {
+    const range = normalizePeriodRange(interval.period, interval.periodMax, unit);
+    return { period: range.low, periodMax: range.high, periodUnit: range.unit };
+  }
+  const normalized = normalizePeriodValue(interval.period, unit);
+  return { period: normalized.value, periodUnit: normalized.unit };
 }
 
 export interface TimingSummaryOptions {

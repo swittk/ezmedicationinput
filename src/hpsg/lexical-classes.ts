@@ -514,6 +514,21 @@ export const CALENDAR_MONTH_DAY_FRAMES = source.calendarMonthDayFrames;
 export const RANGE_CONNECTORS = setOf(source.rangeConnectors);
 export const DURATION_LEAD_TOKENS = getAdviceRelationCanonicalSetByGrammarFeature("durationLead");
 
+/** Complete compact interval token shared by grammar and timing preview.
+ * Consumers retain the existing unit admission and cadence normalization. */
+export function compactIntervalParts(surface: string): {
+  period: number;
+  periodMax?: number;
+  unitSurface: string;
+} | undefined {
+  const match = /^q([0-9]+(?:\.[0-9]+)?)(?:-([0-9]+(?:\.[0-9]+)?))?([a-z]+)$/iu.exec(surface);
+  return match ? {
+    period: Number(match[1]),
+    ...(match[2] === undefined ? {} : { periodMax: Number(match[2]) }),
+    unitSurface: match[3].toLowerCase()
+  } : undefined;
+}
+
 /** Shared source-lexical reading of an unspaced headed duration NP.
  * HPSG schedule and procedural action grammar consume the same daughter.
  * No semantic meaning is assigned until each consumer licenses the unit. */

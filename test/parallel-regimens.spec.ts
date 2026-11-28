@@ -5264,6 +5264,11 @@ describe("dated replacement with several target members", () => {
     const query = { orderedAt: "2026-12-04T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 4 };
     for (const dosage of [parsed, parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
       const members = importCanonicalCourse(dosage).stages.flatMap(stage => stage.administrations);
+      expect(members.filter(member => member.schedule?.recurrence?.clocks?.includes("08:00:00"))
+        .map(member => ({ eye: member.target?.coding?.find(coding => coding.system === "http://snomed.info/sct")?.code,
+          dose: member.amounts?.[0]?.quantity?.value, unit: member.amounts?.[0]?.quantity?.unit,
+          clocks: member.schedule?.recurrence?.clocks })))
+        .toEqual([{ eye: "40638003", dose: 1, unit: "drop", clocks: ["08:00:00"] }]);
       expect(members.filter(member => member.schedule?.recurrence?.clocks?.includes("20:00:00"))
         .map(member => ({ eye: member.target?.coding?.find(coding => coding.system === "http://snomed.info/sct")?.code,
           dose: member.amounts?.[0]?.quantity?.value, unit: member.amounts?.[0]?.quantity?.unit,

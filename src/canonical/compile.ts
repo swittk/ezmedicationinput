@@ -774,7 +774,8 @@ export function courseFromAdministrations(
           // Leave the elapsed delay on that member so its grid moves with it.
           !a.schedule?.recurrence?.calendarWindow &&
           !a.schedule?.recurrence?.clocks?.length &&
-          !a.schedule?.recurrence?.anchors?.length
+          !a.schedule?.recurrence?.anchors?.length &&
+          !a.schedule?.explicitEvents?.length
       )
     ) {
       // A delay stated in minutes/hours is elapsed time, including full 24h

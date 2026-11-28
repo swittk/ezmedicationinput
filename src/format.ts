@@ -484,7 +484,11 @@ export function frequencyDisplay(
         mode = "code";
         break;
       default:
-        codePeriod = intervalTimingPreviewDescriptor(timingCode);
+        const interval = intervalTimingPreviewDescriptor(timingCode);
+        if (interval?.periodMax !== undefined)
+          return { mode: "period", countPrefix, period: interval.period, periodMax: interval.periodMax,
+            periodUnit: interval.periodUnit, rangeEnd: interval.periodMax !== interval.period ? interval.periodMax : undefined };
+        codePeriod = interval;
         if (codePeriod) mode = "code-period";
     }
   }
@@ -1258,12 +1262,13 @@ export function independentTimingText(
   if (!code || TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined ||
       authoredCountTimingText(code, recurrence)) return undefined;
   const lower = code.toLowerCase();
-  if (timingPreviewDescriptor(code)) return undefined;
+  if (timingPreviewDescriptor(code) || intervalTimingPreviewDescriptor(code) &&
+      timingCodeMatchesRecurrence(recurrence ?? {}, code)) return undefined;
   if (WORD_FREQUENCIES[lower] && recurrence?.periodUnit !== undefined &&
       (recurrence.frequency !== undefined || recurrence.frequencyMax !== undefined ||
        recurrence.period !== undefined || recurrence.periodMax !== undefined)) return undefined;
-  // Compact interval shorthand yields only when a typed cadence replaces it.
-  // Otherwise retain the existing code when no preview descriptor expands it.
+  // Unexpanded shorthand yields when a typed cadence replaces it.
+  // Otherwise retain the source label.
   return isCompactIntervalTimingCode(code) && recurrence?.periodUnit !== undefined &&
     (recurrence.period !== undefined || recurrence.periodMax !== undefined) ? undefined : code;
 }

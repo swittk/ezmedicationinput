@@ -2220,6 +2220,10 @@ describe("Thai additive and clock-target phase adjustments", () => {
       expect(clocks(dosage, "2026-11-02")).toEqual(["08:00", "20:00"]);
       expect(clocks(dosage, "2026-11-09")).toEqual(["08:00", "20:00"]);
       expect(clocks(dosage, "2026-11-16")).toEqual([]);
+      for (const [clock, amount] of [["08:00:00", 1], ["20:00:00", 0.5]] as const)
+        expect(calculateTotalUnits({ dosage, ...base, from: "2026-11-09T" + clock + "+07:00",
+          durationValue: 1, durationUnit: FhirPeriodUnit.Hour }))
+          .toMatchObject({ totalUnits: amount, unit: "tab" });
       expect(calculateTotalUnits({ dosage, ...base, from: base.orderedAt,
         durationValue: 14, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(24.5);
     }

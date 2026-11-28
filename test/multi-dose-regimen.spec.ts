@@ -60,7 +60,6 @@ import { buildBodySiteSpatialRelationExtension } from "../src/body-site-spatial"
 import { getQuantityComparator } from "../src/fhir-quantity-operator";
 import { simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 import { resolveSigLocalization } from "../src/i18n";
-import type { SigFormatContext } from "../src/i18n";
 import { registerSigLocalization } from "../src/i18n";
 import { parseInstructionActions } from "../src/instruction-graph";
 import { realizeInstructionAction } from "../src/instruction-graph";
@@ -4473,6 +4472,13 @@ describe("shared administration totals in current previews", () => {
     expect(members.every(value => value.schedule?.recurrence?.count === undefined)).toBe(true);
     for (const input of [course, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
       const before = JSON.stringify(input);
+      const current = importCanonicalCourse(input).stages[0].administrations;
+      const morning = current.filter(value => value.schedule?.recurrence?.clocks?.includes("08:00:00"));
+      const evening = current.filter(value => value.schedule?.recurrence?.clocks?.includes("20:00:00"));
+      expect(morning).toHaveLength(1);
+      expect(evening).toHaveLength(1);
+      expect(morning[0].excludedWeekdays).toEqual(["mon"]);
+      expect(evening[0].excludedWeekdays ?? []).toEqual([]);
       for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
         const text = formatSig(input, style, { locale, realizationMode: "normalized" });
         expect(text.match(/\b4\b/gu)).toHaveLength(1);
