@@ -1,5 +1,5 @@
 import { EVENT_TIMING_TOKENS } from "./maps";
-import { EVENT_ARTICLE_TOKENS, FIXED_EVENT_PHRASES } from "./hpsg/lexical-classes";
+import { INSTRUCTION_NOMINAL_ARTICLES, FIXED_EVENT_PHRASES } from "./hpsg/lexical-classes";
 import { EventTiming } from "./types";
 
 export interface EventTimingExpression {
@@ -18,7 +18,7 @@ export function resolveEventTimingExpression(
   start = 0,
   endExclusive = parts.length
 ): EventTimingExpression | undefined {
-  const articleLength = EVENT_ARTICLE_TOKENS.has(parts[start] ?? "") ? 1 : 0;
+  const articleLength = INSTRUCTION_NOMINAL_ARTICLES.has(parts[start] ?? "") ? 1 : 0;
   const nominalStart = start + articleLength;
   const available = Math.max(0, Math.min(endExclusive, parts.length) - nominalStart);
   if (!available) return undefined;
