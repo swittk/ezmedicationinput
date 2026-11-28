@@ -2644,8 +2644,9 @@ function encodeFields(
       }
     }
     const part = source[key];
+    if (part === undefined && source[`_${key}`] === undefined) continue;
     const field = Object.prototype.hasOwnProperty.call(shape, key) ? shape[key] : undefined;
-    const primitiveField = field && !field.repeated ? bridgePrimitiveCompanion(field.value) : undefined;
+    const primitiveField = field?.value && !field.repeated ? bridgePrimitiveCompanion(field.value) : undefined;
     const companion = primitiveField ? source[`_${key}`] : undefined;
     if (part === undefined && companion === undefined) continue;
     if (!field) {
@@ -2658,8 +2659,10 @@ function encodeFields(
       children.push({ url: "emptyArray", valueCode: key });
       continue;
     }
-    const values = field.repeated && Array.isArray(part) ? part : [part];
-    for (const item of values) {
+    const values = field.repeated && Array.isArray(part) ? part : undefined;
+    const count = values ? values.length : 1;
+    for (let index = 0; index < count; index++) {
+      const item = values ? values[index] : part;
       if (field.extension) {
         const extension = preserveQuantityWire ? item as FhirR6Extension :
           quantityAnnotationExtensions([item as FhirR6Extension], "r5")[0];
