@@ -6,6 +6,8 @@ import { preferredTimingCoding as executionTimingCoding, timingCodeMeaning, timi
 import {
   pad,
   normalizeClock,
+  parseClockParts,
+  ClockParts,
   getTimeParts,
   getOffset,
   calendarOffsetTransition,
@@ -202,12 +204,14 @@ interface ExpandedTime {
   dayShift: number;
   /** An authored event offset is elapsed from its resolved local event. */
   eventTime?: string;
+  eventClock?: ClockParts;
   elapsedOffsetMinutes?: number;
 }
 function exactEventClock(time: string, minutes: number): ExpandedTime {
   const shifted = applyOffset(time, minutes);
   if (minutes) {
     shifted.eventTime = time;
+    shifted.eventClock = parseClockParts(time);
     shifted.elapsedOffsetMinutes = minutes;
   }
   return shifted;
@@ -215,7 +219,7 @@ function exactEventClock(time: string, minutes: number): ExpandedTime {
 /** Source-day ownership stays civil; only an authored event offset is elapsed. */
 function resolveExpandedTime(day: Date, entry: ExpandedTime, zone: string): Date | null {
   if (entry.eventTime !== undefined) {
-    const event = makeZonedDateFromDay(day, zone, entry.eventTime);
+    const event = makeZonedDateFromDay(day, zone, entry.eventClock!);
     if (event) event.setTime(event.getTime() + entry.elapsedOffsetMinutes! * 60000);
     return event;
   }

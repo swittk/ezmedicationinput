@@ -317,20 +317,34 @@ export function calendarBoundaryDate(
     ? shifted : null;
 }
 
-/** Convenience wrapper around makeZonedDate for day-level math. */
-export function makeZonedDateFromDay(base: Date, timeZone: string, clock: string): Date | null {
-  const { year, month, day } = getTimeParts(base, timeZone);
+export interface ClockParts {
+  hour: number;
+  minute: number;
+  second: number;
+  milliseconds: number;
+}
+
+/** Decode a clock once for reuse by the existing civil-date constructor. */
+export function parseClockParts(clock: string): ClockParts {
   const parts = clock.split(":");
   const secondText = parts[2] ?? "0";
   const point = secondText.indexOf(".");
-  const second = Number(point < 0 ? secondText : secondText.slice(0, point));
-  const exact = makeZonedDate(timeZone, year, month, day, Number(parts[0] ?? 0), Number(parts[1] ?? 0), second);
-  if (exact && point >= 0) {
-    // Read digits directly: floating subtraction can turn .123 into .122999.
-    // Truncation keeps .9996 within its authored second and calendar date.
-    const milliseconds = Number((secondText.slice(point + 1, point + 4) + "00").slice(0, 3));
-    if (milliseconds) exact.setTime(exact.getTime() + milliseconds);
-  }
+  // Read digits directly: floating subtraction can turn .123 into .122999.
+  // Truncation keeps .9996 within its authored second and calendar date.
+  return {
+    hour: Number(parts[0] ?? 0),
+    minute: Number(parts[1] ?? 0),
+    second: Number(point < 0 ? secondText : secondText.slice(0, point)),
+    milliseconds: point < 0 ? 0 : Number((secondText.slice(point + 1, point + 4) + "00").slice(0, 3)),
+  };
+}
+
+/** Convenience wrapper around makeZonedDate for day-level math. */
+export function makeZonedDateFromDay(base: Date, timeZone: string, clock: string | ClockParts): Date | null {
+  const { year, month, day } = getTimeParts(base, timeZone);
+  const { hour, minute, second, milliseconds } = typeof clock === "string" ? parseClockParts(clock) : clock;
+  const exact = makeZonedDate(timeZone, year, month, day, hour, minute, second);
+  if (exact && milliseconds) exact.setTime(exact.getTime() + milliseconds);
   return exact;
 }
 
