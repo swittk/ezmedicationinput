@@ -5088,3 +5088,81 @@ describe("reviewed explicit clock and canonical connector ownership", () => {
     }
   });
 });
+
+describe("article-scoped clinical meal events", () => {
+  it.each([
+    ["after a meal", EventTiming["After Meal"], "after meals"],
+    ["before a meal", EventTiming["Before Meal"], "before meals"],
+    ["with a meal", EventTiming.Meal, "with meals"],
+    ["after the evening meal", EventTiming["After Dinner"], "after dinner"],
+    ["before the morning meal", EventTiming["Before Breakfast"], "before breakfast"],
+    ["after the noon meal", EventTiming["After Lunch"], "after lunch"]
+  ] as const)("composes %s without detaching the relation", (tail, event, wording) => {
+    const source = "Take 1 tablet daily " + tail;
+    const result = parsePublicSig(source);
+    expect(result.meta.canonical.course?.instruction).toBe(source);
+    expect(result.meta.canonical.clauses[0].schedule).toMatchObject({
+      frequency: 1, period: 1, periodUnit: "d", when: [event]
+    });
+    expect(result.meta.canonical.clauses[0].leftovers).toEqual([]);
+    expect(result.fhir[0].timing?.repeat?.when).toEqual([event]);
+    expect(result.fhir[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    const before = JSON.stringify([result.fhir, result.fhirNext]);
+    for (const value of [result.meta.canonical.course!,
+      JSON.parse(JSON.stringify(result.fhir)), JSON.parse(JSON.stringify(result.fhirNext))]) {
+      const text = formatSig(value, "long", { locale: "en" });
+      expect(text).toContain(wording);
+      expect(text).toContain("1 tablet");
+      expect(text).toContain("once daily");
+      expect(text).not.toMatch(/\bUse\b|\bTake with a\b/u);
+    }
+    expect(JSON.stringify([result.fhir, result.fhirNext])).toBe(before);
+  });
+
+  it("uses registered canonical articles and event vocabulary without rewriting source", () => {
+    const original = getMedicationLexerLocalePack("th")!;
+    const vocabulary: Record<string, string> = { apres: "after", un: "a", repas: "meal" };
+    registerMedicationLexerLocalePack({
+      locale: "th",
+      apply: (tokens, input) => original.apply(tokens, input).map((token, index) =>
+        vocabulary[token.lower] ? { ...token, index, canonical: vocabulary[token.lower] } : token)
+    });
+    try {
+      const source = "รับประทาน 1 เม็ด วันละครั้ง apres un repas";
+      const result = parsePublicSig(source);
+      expect(result.meta.canonical.course?.instruction).toBe(source);
+      expect(result.fhir[0].timing?.repeat?.when).toEqual([EventTiming["After Meal"]]);
+      expect(result.fhir[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      for (const value of [result.meta.canonical.course!,
+        JSON.parse(JSON.stringify(result.fhir)), JSON.parse(JSON.stringify(result.fhirNext))])
+        expect(formatSig(value, "long", { locale: "en" })).toContain("once daily after meals");
+    } finally {
+      registerMedicationLexerLocalePack(original);
+    }
+  });
+
+  it("retains the signed relation and duration of an article-scoped event offset", () => {
+    const result = parsePublicSig("Take 1 tablet daily 30 minutes after a meal");
+    expect(result.meta.canonical.clauses[0].schedule).toMatchObject({
+      when: [EventTiming["After Meal"]], offset: 30, frequency: 1, period: 1, periodUnit: "d"
+    });
+    expect(result.fhir[0].timing?.repeat).toMatchObject({
+      when: [EventTiming["After Meal"]], offset: 30
+    });
+    for (const value of [result.meta.canonical.course!,
+      JSON.parse(JSON.stringify(result.fhir)), JSON.parse(JSON.stringify(result.fhirNext))])
+      expect(formatSig(value, "long", { locale: "en" })).toContain("30 minutes after meals");
+  });
+
+  it("does not schedule a meal noun owned by negative accompaniment", () => {
+    const result = parsePublicSig("Take 1 tablet daily without a meal");
+    expect(result.fhir[0].timing?.repeat?.when).toBeUndefined();
+    for (const value of [result.meta.canonical.course!,
+      JSON.parse(JSON.stringify(result.fhir)), JSON.parse(JSON.stringify(result.fhirNext))]) {
+      const text = formatSig(value, "long", { locale: "en" });
+      expect(text).toContain("without");
+      expect(text).not.toContain("with meals");
+      expect(text).toContain("1 tablet");
+    }
+  });
+});

@@ -3358,7 +3358,7 @@ export function isScheduleLead(context: HpsgClauseContext, index: number): boole
     const next = context.tokens[index + 1];
     const nextLower = next ? normalizeTokenLower(next) : "";
     return (
-      EVENT_TIMING_TOKENS[nextLower] !== undefined ||
+      resolveEventTimingExpression(eventExpressionPartsAt(context, index + 1).parts) !== undefined ||
       FOOD_EVENT_ALIASES.has(nextLower) ||
       SLEEP_EVENT_ALIASES.has(nextLower) ||
       WAKE_EVENT_ALIASES.has(nextLower)

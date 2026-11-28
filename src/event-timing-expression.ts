@@ -1,5 +1,5 @@
 import { EVENT_TIMING_TOKENS } from "./maps";
-import { FIXED_EVENT_PHRASES } from "./hpsg/lexical-classes";
+import { EVENT_ARTICLE_TOKENS, FIXED_EVENT_PHRASES } from "./hpsg/lexical-classes";
 import { EventTiming } from "./types";
 
 export interface EventTimingExpression {
@@ -7,7 +7,7 @@ export interface EventTimingExpression {
   length: number;
 }
 
-export const MAX_EVENT_TIMING_EXPRESSION_PARTS = Math.max(
+export const MAX_EVENT_TIMING_EXPRESSION_PARTS = 1 + Math.max(
   1,
   ...Array.from(FIXED_EVENT_PHRASES.keys()).map((phrase) => phrase.split(/\s+/u).length)
 );
@@ -18,12 +18,15 @@ export function resolveEventTimingExpression(
   start = 0,
   endExclusive = parts.length
 ): EventTimingExpression | undefined {
-  const available = Math.max(0, Math.min(endExclusive, parts.length) - start);
-  const longest = Math.min(MAX_EVENT_TIMING_EXPRESSION_PARTS, available);
+  const articleLength = EVENT_ARTICLE_TOKENS.has(parts[start] ?? "") ? 1 : 0;
+  const nominalStart = start + articleLength;
+  const available = Math.max(0, Math.min(endExclusive, parts.length) - nominalStart);
+  if (!available) return undefined;
+  const longest = Math.min(MAX_EVENT_TIMING_EXPRESSION_PARTS - 1, available);
   for (let length = longest; length >= 2; length -= 1) {
-    const timing = FIXED_EVENT_PHRASES.get(parts.slice(start, start + length).join(" "));
-    if (timing) return { timing, length };
+    const timing = FIXED_EVENT_PHRASES.get(parts.slice(nominalStart, nominalStart + length).join(" "));
+    if (timing) return { timing, length: length + articleLength };
   }
-  const direct = EVENT_TIMING_TOKENS[parts[start] ?? ""];
-  return direct ? { timing: direct, length: 1 } : undefined;
+  const direct = EVENT_TIMING_TOKENS[parts[nominalStart] ?? ""];
+  return direct ? { timing: direct, length: 1 + articleLength } : undefined;
 }

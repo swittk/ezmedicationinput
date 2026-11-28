@@ -1462,7 +1462,9 @@
     "upon"
   ],
   "eventArticleTokens": [
-    "the"
+    "the",
+    "a",
+    "an"
   ],
   "instructionNominalArticles": [
     "the",
@@ -1474,7 +1476,10 @@
     "early morning": "Early Morning",
     "meal morning": "Breakfast",
     "meal noon": "Lunch",
-    "meal evening": "Dinner"
+    "meal evening": "Dinner",
+    "morning meal": "Breakfast",
+    "noon meal": "Lunch",
+    "evening meal": "Dinner"
   },
   "mealRelationTokens": {
     "ac": "before",
