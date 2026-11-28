@@ -226,11 +226,12 @@ export function sourceRangeAttachmentClass(
   end: number
 ): HpsgAttachmentClass {
   const frames = getProceduralFrames(context);
-  const enclosing = frames
-    .filter((frame) => frame.span.start <= start && end <= frame.span.end)
-    .sort((left, right) =>
-      (left.span.end - left.span.start) - (right.span.end - right.span.start)
-    )[0];
+  let enclosing: AdviceFrame | undefined;
+  for (const frame of frames) {
+    if (frame.span.start > start || end > frame.span.end) continue;
+    if (!enclosing || frame.span.end - frame.span.start < enclosing.span.end - enclosing.span.start)
+      enclosing = frame;
+  }
   if (!enclosing) {
     // A bare cadence such as "daily" scopes the medication, even when a
     // preceding auxiliary covering step is locally procedural. Only an
