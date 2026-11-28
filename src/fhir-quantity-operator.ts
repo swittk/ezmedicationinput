@@ -200,7 +200,10 @@ export function quantityAnnotationExtensions(
       ...(reference !== item.valueCodeableReference ? { valueCodeableReference: reference } : {}),
       ...(children !== item.extension ? { extension: children } : {}),
     };
-    for (const field of extensionPrimitiveFields) {
+    for (const key of Object.keys(item)) {
+      if (key[0] !== "_") continue;
+      const field = key as typeof extensionPrimitiveFields[number];
+      if (extensionPrimitiveFields.indexOf(field) < 0) continue;
       const primitive = quantityPrimitiveForWire(item[field], target);
       if (primitive === item[field]) continue;
       if (current === item) current = { ...item };
@@ -289,7 +292,10 @@ export function quantityCodingForWire(
   if (!coding) return coding;
   const extension = coding.extension ? quantityAnnotationExtensions(coding.extension, target) : undefined;
   let result = extension === coding.extension ? coding : { ...coding, extension };
-  for (const field of codingPrimitiveFields) {
+  for (const key of Object.keys(coding)) {
+    if (key[0] !== "_") continue;
+    const field = key as typeof codingPrimitiveFields[number];
+    if (codingPrimitiveFields.indexOf(field) < 0) continue;
     const primitive = quantityPrimitiveForWire(coding[field], target);
     if (primitive === coding[field]) continue;
     if (result === coding) result = { ...coding };
