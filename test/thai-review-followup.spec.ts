@@ -1,7 +1,7 @@
 import { getCourseCycleCount, setCourseCycleCount } from "../src/dosage-course";
-import { toDosageDetails, toFhirR5Dosages, parseSig as reviewParseSig, parseSig as parsePublicSig, parseInstructionActions, importCanonicalCourse, type FhirExtension, type FhirR6DosageInstruction, buildInstructionGraphExtension, parseInstructionGraphExtension, AdviceForce, AdviceArgumentRole, AdviceRelation, type CanonicalInstructionGraph } from "../src/index";
+import { toDosageDetails, toFhirR5Dosages, parseSig as reviewParseSig, parseSig as parsePublicSig, parseInstructionActions, importCanonicalCourse, projectCanonicalCourse, type CanonicalCourse, type FhirExtension, type FhirR6DosageInstruction, buildInstructionGraphExtension, parseInstructionGraphExtension, AdviceForce, AdviceArgumentRole, AdviceRelation, type CanonicalInstructionGraph } from "../src/index";
 import { getQuantityComparator } from "../src/fhir-quantity-operator";
-import { getPrimitiveTranslation } from "../src/fhir-translations";
+import { getPrimitiveTranslation, buildTranslationPrimitiveElement } from "../src/fhir-translations";
 import { type ParseOptions } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { formatSig } from "../src/index";
@@ -527,5 +527,61 @@ describe("review814 quantified patch wording across conditional orders", () => {
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(fixture.source);
     expect(JSON.stringify(parsed)).toBe(before);
+  });
+});
+
+
+describe("current coded patch Apply wording", () => {
+  const edqm = "http://standardterms.edqm.eu";
+  const currentViews = (row: FhirDosage): Array<CanonicalCourse | FhirDosage[] | FhirR6DosageInstruction> => {
+    const native = importCanonicalCourse([row]);
+    const projected = projectCanonicalCourse(native);
+    return [native, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))];
+  };
+
+  it.each([
+    { name: "code-only patch", quantity: { value: 1, system: edqm, code: "15036000" },
+      english: "Apply 1 patch once daily.", thai: "แปะครั้งละ 1 แผ่นแปะ วันละครั้ง." },
+    { name: "displayed patch", quantity: { value: 1, unit: "patch", system: edqm, code: "15036000" },
+      english: "Apply 1 patch once daily.", thai: "แปะครั้งละ 1 แผ่นแปะ วันละครั้ง." },
+    { name: "code-only volume", quantity: { value: 1, system: "http://unitsofmeasure.org", code: "mL" },
+      english: "Apply 1 mL once daily.", thai: "ทาครั้งละ 1 มิลลิลิตร วันละครั้ง." }
+  ])("uses the typed $name without changing its quantity or cadence", fixture => {
+    const row: FhirDosage = { method: { text: "Apply" },
+      doseAndRate: [{ doseQuantity: fixture.quantity }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } } };
+    const original = structuredClone(row);
+    for (const input of currentViews(row)) {
+      const before = structuredClone(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(fixture.english);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(fixture.thai);
+      const current = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(current.amounts?.[0].quantity).toEqual(fixture.quantity);
+      expect(current.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day });
+      expect(projectCanonicalCourse(importCanonicalCourse(input)).fhir[0].doseAndRate?.[0].doseQuantity).toEqual(fixture.quantity);
+      expect(input).toEqual(before);
+    }
+    expect(row).toEqual(original);
+  });
+
+  it.each(["text", "display", "configured"] as const)("preserves selected Thai Apply wording from %s", selected => {
+    const translation = buildTranslationPrimitiveElement({ th: "ติด" })!;
+    const method: NonNullable<FhirDosage["method"]> = selected === "display"
+      ? { coding: [{ system: SNOMED, code: "738991002", display: "Apply", _display: translation }] }
+      : { text: "Apply", ...(selected === "text" ? { _text: translation } : {}) };
+    const row: FhirDosage = { method, doseAndRate: [{ doseQuantity: { value: 1, system: edqm, code: "15036000" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } } };
+    const options: ParseOptions = selected === "configured" ? { instructionActionMap: { apply: {
+      code: "apply", display: "Apply", semanticClass: "administration", i18n: { th: "ติด" }
+    } } } : {};
+    const original = structuredClone(row);
+    for (const input of currentViews(row)) {
+      const before = structuredClone(input);
+      expect(formatSig(input, "long", { ...options, locale: "th", realizationMode: "normalized" }))
+        .toBe("ติดครั้งละ 1 แผ่นแปะ วันละครั้ง.");
+      expect(projectCanonicalCourse(importCanonicalCourse(input)).fhir[0].method).toEqual(method);
+      expect(input).toEqual(before);
+    }
+    expect(row).toEqual(original);
   });
 });

@@ -23,7 +23,7 @@ import {
   frequencyDisplay, registeredMethodManner
 } from "./format";
 import { findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
-import { TH_POSITIVE_MODALITY_PREFIX } from "./instruction-action-locale-adapter";
+import { selectThaiApplyLabel, TH_POSITIVE_MODALITY_PREFIX } from "./instruction-action-locale-adapter";
 import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
 import {
@@ -882,21 +882,17 @@ function resolveThaiMethodVerb(
   const localizedManner = manner && localizedValue(manner.i18n, "th");
   if (localizedManner) return translatedDisplay ?? localizedManner;
 
-  if (resolvedMethod) return localizedValue(resolvedMethod.i18n, "th") ?? resolvedMethod.display;
+  if (translatedDisplay) return translatedDisplay;
+  const unit = clause.dose?.unitIdentity ?? clause.dose?.unit;
+  if (resolvedMethod) {
+    const label = localizedValue(resolvedMethod.i18n, "th") ?? resolvedMethod.display;
+    return selectThaiApplyLabel(resolvedMethod.code, label, unit) ?? label;
+  }
   const methodText = clause.method?.text?.trim();
   if (methodText) {
-    const overridden = THAI_METHOD_TEXT_VERBS[methodText];
-    if (overridden) {
-      return overridden;
-    }
-    const localizedAction = resolveMedicationInstructionAction(methodText)?.i18n?.th?.trim();
-    if (localizedAction) {
-      return localizedAction;
-    }
-  }
-
-  if (translatedDisplay) {
-    return translatedDisplay;
+    const definition = resolveMedicationInstructionAction(methodText);
+    const label = THAI_METHOD_TEXT_VERBS[methodText] ?? definition?.i18n?.th?.trim();
+    if (label) return selectThaiApplyLabel(definition?.code, label, unit) ?? label;
   }
 
   return grammar.verb;

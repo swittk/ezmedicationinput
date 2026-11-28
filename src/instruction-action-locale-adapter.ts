@@ -811,6 +811,20 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
   continuationText(text, understood) { return understood ? lowerInitial(text) : text; }
 };
 
+// Thai selects the stock Apply verb from the already resolved dosage form.
+// Explicit labels remain with the caller that selected them.
+export function selectThaiApplyLabel(
+  actionCode: string | undefined,
+  label: string,
+  unit?: string,
+  args?: readonly AdviceArgument[]
+): string | undefined {
+  if (actionCode !== "apply" || label !== getMedicationInstructionAction("apply")?.i18n?.th) return undefined;
+  const patch = unit === "patch" || args?.some(arg =>
+    (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) && arg.conceptId === "patch");
+  return patch ? getMedicationInstructionAction("apply_patch")?.i18n?.th : undefined;
+}
+
 const TH_ADAPTER: InstructionActionLocaleAdapter = {
   locale: "th",
   directTime: thaiDirectTime,
@@ -828,10 +842,7 @@ const TH_ADAPTER: InstructionActionLocaleAdapter = {
     const classifier = whole && (unit === "tab" || unit === "cap")
       ? INSTRUCTION_QUANTITY_UNIT_LABELS.get(unit)?.locales?.th?.one
       : undefined;
-    const patch = input.frame.predicate.lemma === "apply" && (unit === "patch" || input.frame.args.some(arg =>
-      (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) && arg.conceptId === "patch"));
-    const patchLabel = patch && input.label === getMedicationInstructionAction("apply")?.i18n?.th
-      ? getMedicationInstructionAction("apply_patch")?.i18n?.th : undefined;
+    const patchLabel = selectThaiApplyLabel(input.frame.predicate.lemma, input.label, unit, input.frame.args);
     const realized = classifier || patchLabel
       ? { ...input, ...(classifier ? { manner: `ทั้ง${classifier}` } : {}), ...(patchLabel ? { label: patchLabel } : {}) }
       : input;
