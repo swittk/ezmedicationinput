@@ -95,8 +95,11 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
     const definition = frameActionDefinition(frame, context.options);
     const procedural = frame.polarity === AdvicePolarity.Negate ||
       definition?.procedural && !definition.primaryAdministrationHead;
-    const undosedAction = definition && frame.args.length > 0 && !frame.args.some(argument =>
-      argument.role === AdviceArgumentRole.Amount || argument.role === AdviceArgumentRole.Site);
+    // A registered rate administration owns its duration even when the action
+    // graph has no scalar Amount daughter. The rate quantity is selected by HPSG.
+    const undosedAction = definition && !definition.administrationDurationIntroducers?.length &&
+      frame.args.length > 0 && !frame.args.some(argument =>
+        argument.role === AdviceArgumentRole.Amount || argument.role === AdviceArgumentRole.Site);
     if (undosedAction && !procedural) {
       // A dose nominal can precede its verb in a fronted conditional. It is
       // still an administration daughter, not part of the condition/advice.

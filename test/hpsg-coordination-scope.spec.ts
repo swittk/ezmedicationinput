@@ -4944,3 +4944,83 @@ describe("review867 complete guards and negative meal complements", () => {
       expect(JSON.stringify(parsed)).toBe(saved);
     });
 });
+
+
+describe("guarded rate administration duration ownership", () => {
+  it.each([
+    { source: "If SBP < 90, infuse saline at 100 mL/hr over 2 hours.", duration: true,
+      condition: { kind: "measurement", name: "sbp", operation: "lt", value: 90, text: "SBP < 90" } },
+    { source: "If SBP < 90 infuse saline at 100 mL/hr over 2 hours.", duration: true,
+      condition: { kind: "measurement", name: "sbp", operation: "lt", value: 90, text: "SBP < 90" } },
+    { source: "If SBP < 90, infuse saline at 100 mL/hr.", duration: false,
+      condition: { kind: "measurement", name: "sbp", operation: "lt", value: 90, text: "SBP < 90" } },
+    { source: "Infuse saline at 100 mL/hr over 2 hours.", duration: true, condition: undefined },
+    { source: "If SBP < 90, infuse at 100 mL/hr over 2 hours.", duration: true,
+      condition: { kind: "measurement", name: "sbp", operation: "lt", value: 90, text: "SBP < 90" } },
+    { source: "If systolic BP drops by 20 mmHg, infuse saline at 100 mL/hr over 2 hours.", duration: true,
+      condition: { kind: "text", text: "systolic BP drops by 20 mmHg" } },
+    { source: "If systolic BP drops by 20 mmHg infuse saline at 100 mL/hr over 2 hours.", duration: true,
+      condition: { kind: "text", text: "systolic BP drops by 20 mmHg" } }
+  ])("retains the selected rate, guard and administration duration: $source", ({ source, condition, duration }) => {
+    const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(1);
+      const member = members[0];
+      expect(member.method?.text).toBe("Infuse");
+      expect(member.predicate).toEqual(condition);
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0].rate).toMatchObject({ value: 100, unit: "mL/h" });
+      expect(member.amounts![0].quantity).toBeUndefined();
+      expect(member.amounts![0].range).toBeUndefined();
+      expect(member.asNeeded).not.toBe(true);
+      const recurrence = member.schedule?.recurrence;
+      if (duration) expect(recurrence).toMatchObject({ count: 1, occurrenceDuration: 2, occurrenceDurationUnit: "h" });
+      else expect(recurrence?.occurrenceDuration).toBeUndefined();
+      expect(recurrence?.frequency).toBeUndefined();
+      expect(recurrence?.period).toBeUndefined();
+      expect(recurrence?.courseLength).toBeUndefined();
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain("100 mL/h");
+        if (condition) expect(text).toContain(condition.text);
+        if (duration) expect(text).toContain(locale === "en" ? "2 hours" : "2 ชั่วโมง");
+      }
+      expect(course.instruction).toBe(source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each([
+    ["if nauseated, take with food", "If nauseated, take with food."],
+    ["if nauseated, contact the doctor", "If nauseated, call doctor."]
+  ])("keeps undosed conditional counseling separate: %s", (advice, expected) => {
+      const source = `Take 1 tablet daily; ${advice}.`;
+      const parsed = parsePublicSig(source), saved = JSON.stringify(parsed);
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const before = JSON.stringify(input), course = importCanonicalCourse(input);
+        const members = course.stages.flatMap(stage => stage.administrations);
+        expect(members).toHaveLength(1);
+        expect(members[0].amounts).toHaveLength(1);
+        expect(members[0].amounts![0].quantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(members[0].predicate).toBeUndefined();
+        expect(members[0].asNeeded).not.toBe(true);
+        expect(members[0].schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+        expect(members[0].schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+          .toContain(expected);
+        expect(course.instruction).toBe(source);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(parsed.fhirNext.renderedInstruction).toBe(source);
+      expect(JSON.stringify(parsed)).toBe(saved);
+    }
+  );
+});
