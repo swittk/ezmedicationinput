@@ -16596,3 +16596,10 @@ Previews place labelled and ranged quantities with the primary dose and its guar
 Count ceilings bound supply without inventing administration times. Shared allowances belong to one stage occurrence across member start dates. Terminal ranged supply can use later eligible opportunities while dependent courses retain chronological completion. Calendar-selected predecessors keep contextual NEXT, and daily institution clocks remain inside their typed waking window.
 
 FHIR conversion preserves period values, quantity operators, coded measurement units, translation datatypes and unknown annotations. Calendar bounds and member-relative course lengths retain their distinct origins. Code-derived event offsets keep their valid extension carrier. Clinical assertions cover complete dates, guards, laterality, quantities and wording across native and fresh wire forms.
+
+
+## 2026-11-28 — Retain rich primary fragment boundaries
+
+Rich amount fragments retain punctuation supplied by their primary qualifiers. The native renderers compose sentence boundaries with the actual following instructions, including graph continuations and independent advice, while labelled quantities remain inside their current guards. Standalone fragments keep their established presentation.
+
+Removed duplicated baseline quantity tests from the date suite. The original suite and every added or strengthened clinical assertion remain intact.
