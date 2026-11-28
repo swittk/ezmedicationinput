@@ -3,6 +3,7 @@ import {
   BodySiteDefinition,
   EventTiming,
   FhirDayOfWeek,
+  type FhirCoding,
   FhirPeriodUnit,
   PrnReasonDefinition,
   RouteCode,
@@ -89,6 +90,16 @@ export const ROUTE_TEXT = objectFromEntries(
 export const ROUTE_BY_SNOMED = objectFromEntries(
   ROUTE_SNOMED_ENTRIES.map(([routeCode, meta]) => [meta.code, routeCode])
 ) as Record<SNOMEDCTRouteCodes, RouteCode>;
+
+/** Select the first registered route, retaining all original Codings on their owner. */
+export function routeCodeFromCodings(codings: readonly Pick<FhirCoding, "system" | "code">[] | undefined): RouteCode | undefined {
+  for (const coding of codings ?? []) {
+    if (!coding.code || coding.system && coding.system !== SNOMED_SYSTEM) continue;
+    const route = ROUTE_BY_SNOMED[coding.code as SNOMEDCTRouteCodes];
+    if (route) return route;
+  }
+  return undefined;
+}
 
 export interface RouteSynonym {
   code: RouteCode;

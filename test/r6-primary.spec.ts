@@ -7975,3 +7975,96 @@ describe("review d41 current primary and event offset previews", () => {
     expect(source).toEqual(before);
   });
 });
+
+
+describe("current FHIR annotation and coding ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([["89644007", "left ear canal", "ช่องหูซ้าย"], ["25577004", "right ear canal", "ช่องหูขวา"]])(
+    "combines an unqualified canal with compatible coded side %s", (code, english, thai) => {
+      const site = { concept: { text: "ear canal", coding: [{ system: "http://snomed.info/sct", code }],
+        extension: [{ url: "urn:clinic:site-detail", valueString: "retain" }] } };
+      const input: FhirR6DosageInstruction = { step: [{ component: [{ site,
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }] }] }] };
+      const before = fresh(input), native = importCanonicalCourse(input), projected = projectCanonicalCourse(native);
+      for (const value of [native, fresh(projected.fhir), fresh(projected.fhirNext)]) {
+        expect(formatSig(value, "long", { locale: "en", realizationMode: "normalized" })).toContain(english);
+        expect(formatSig(value, "long", { locale: "th", realizationMode: "normalized" })).toContain(thai);
+        expect(courseToR6(importCanonicalCourse(value)).step[0].component[0].site).toEqual(site);
+      }
+      expect(input).toEqual(before);
+    }
+  );
+
+  it.each([undefined, 1])("retains a compact period maximum and its unit with minimum %s", period => {
+    const clause = canonicalFromFhir({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] });
+    clause.schedule = { period, periodMax: 3, periodUnit: FhirPeriodUnit.Day };
+    const before = fresh(clause), row = canonicalToFhir(clause);
+    expect(row.timing?.repeat).toMatchObject({ periodMax: 3, periodUnit: FhirPeriodUnit.Day });
+    expect(row.timing?.repeat?.period).toBe(period);
+    expect(canonicalFromFhir(fresh(row)).schedule).toMatchObject({ periodMax: 3, periodUnit: FhirPeriodUnit.Day });
+    expect(clause).toEqual(before);
+  });
+
+  it("converts nested Quantity operators inside direct Period annotations", () => {
+    const estimate: FhirR6Extension = { url: "urn:clinic:period-estimate", valueQuantity: {
+      value: 2, unit: "cm2", comparator: "~", _value: { id: "estimated-area" }
+    } };
+    const period = { id: "authored-period", start: "2027-01-01", end: "2028-01-01", extension: [estimate],
+      _start: { id: "start-note", extension: [estimate] }, _end: { id: "end-note", extension: [estimate] } };
+    const annotation: FhirR6Extension = { url: "urn:clinic:observed-period", valuePeriod: period };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [{ doseQuantity: {
+      value: 1, unit: "g", _value: { id: "dose-primitive", extension: [annotation] }
+    } }] }] }] };
+    const before = fresh(input), rows = fresh(toFhirR5Dosages(input));
+    const current = rows[0].doseAndRate![0].doseQuantity!._value!.extension![0].valuePeriod!;
+    expect(current).toMatchObject({ id: period.id, start: period.start, end: period.end });
+    for (const item of [current.extension![0], current._start!.extension![0], current._end!.extension![0]]) {
+      expect(item.valueQuantity?.comparator).toBeUndefined();
+      expect(getEmaQuantityComparator(item.valueQuantity)).toBe("~");
+      expect(item.valueQuantity?._value).toEqual({ id: "estimated-area" });
+    }
+    expect(toDosageDetails(rows).step[0].component[0].doseAndRate![0].doseQuantity!._value)
+      .toEqual(input.step[0].component[0].doseAndRate![0].doseQuantity!._value);
+    const plain: FhirR6Extension = { url: "urn:clinic:plain-period", valuePeriod: { start: period.start, end: period.end } };
+    expect(quantityAnnotationExtensions([plain], "r5")[0]).toBe(plain);
+    expect(input).toEqual(before);
+  });
+
+  it.each([undefined, "123456789"])("finds a recognized route after an unrecognized Coding %s", code => {
+    const route = { coding: [
+      { id: "route-source", system: "http://snomed.info/sct", code, _code: { id: "unavailable-code" } },
+      { system: "http://snomed.info/sct", code: "78421000", display: "Intramuscular route" }
+    ] };
+    const input: FhirDosage = { route, doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }] };
+    const before = fresh(input);
+    expect(canonicalFromFhir(input).route?.code).toBe(RouteCode["Intramuscular route"]);
+    expect(parserStateFromFhir(input).primaryClause.route?.code).toBe(RouteCode["Intramuscular route"]);
+    expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("intramuscular");
+    const native = importCanonicalCourse(input), projected = projectCanonicalCourse(native);
+    expect(projected.fhir[0].route).toEqual(route);
+    expect(projected.fhirNext.step[0].component[0].route).toEqual(route);
+    expect(input).toEqual(before);
+  });
+});
+
+
+it("applies an annotated UCUM drop ceiling to maximum planned supply", () => {
+  const ucum = "http://unitsofmeasure.org";
+  const dose = { value: 1, system: ucum, code: "[drp]", _code: { id: "authored-dose-unit" } };
+  const maximum = { numerator: { value: 1, system: ucum, code: "[drp]{ophthalmic}", _code: { id: "authored-cap-unit" } },
+    denominator: { value: 24, unit: "h", system: ucum, code: "h" } };
+  const input: FhirDosage = { asNeeded: true, doseAndRate: [{ doseQuantity: dose }],
+    timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00", "20:00:00"] } },
+    maxDosePerPeriod: [maximum] };
+  const before = JSON.stringify(input), native = importCanonicalCourse(input), projected = projectCanonicalCourse(native);
+  for (const value of [native, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+    const total = calculateTotalUnits({ dosage: value, from: "2026-01-01T00:00:00Z", timeZone: "UTC",
+      durationValue: 1, durationUnit: FhirPeriodUnit.Day });
+    expect(total.totalUnits).toBe(1);
+    expect(total.quantityKind).toBe("maximum");
+    const row = projectCanonicalCourse(importCanonicalCourse(value)).fhir[0];
+    expect(row.doseAndRate![0].doseQuantity).toEqual(dose);
+    expect(row.maxDosePerPeriod).toEqual([maximum]);
+  }
+  expect(JSON.stringify(input)).toBe(before);
+});

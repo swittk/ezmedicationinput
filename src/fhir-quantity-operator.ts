@@ -17,7 +17,7 @@
 export const DOSAGE_RECONCILIATION_SOURCE_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source";
 import type { FhirQuantity, FhirR6Quantity, FhirSimpleQuantity,
-  FhirR6SimpleQuantity, FhirR6Coding, FhirR6CodeableConcept, FhirR6Reference, FhirR6Extension, FhirPrimitiveElement, FhirR6PrimitiveElement } from "./types";
+  FhirR6SimpleQuantity, FhirR6Period, FhirR6Coding, FhirR6CodeableConcept, FhirR6Reference, FhirR6Extension, FhirPrimitiveElement, FhirR6PrimitiveElement } from "./types";
 
 export const EMA_QUANTITY_COMPARATOR_EXTENSION_URL =
   "http://ema.europa.eu/fhir/extension/comparator";
@@ -164,6 +164,7 @@ export function quantityAnnotationExtensions(
         ...(extension !== range.extension ? { extension } : {})
       };
     }
+    const period = quantityPeriodForWire(item.valuePeriod, target);
     const coding = quantityCodingForWire(item.valueCoding, target);
     const concept = quantityConceptForWire(item.valueCodeableConcept, target);
     const directReference = quantityReferenceForWire(item.valueReference, target);
@@ -181,11 +182,12 @@ export function quantityAnnotationExtensions(
     }
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
     let current = quantity === item.valueQuantity && ratio === item.valueRatio &&
-      range === item.valueRange && coding === item.valueCoding && concept === item.valueCodeableConcept &&
+      range === item.valueRange && period === item.valuePeriod && coding === item.valueCoding && concept === item.valueCodeableConcept &&
       directReference === item.valueReference && reference === item.valueCodeableReference && children === item.extension ? item : {
       ...item, ...(quantity !== item.valueQuantity ? { valueQuantity: quantity } : {}),
       ...(ratio !== item.valueRatio ? { valueRatio: ratio } : {}),
       ...(range !== item.valueRange ? { valueRange: range } : {}),
+      ...(period !== item.valuePeriod ? { valuePeriod: period } : {}),
       ...(coding !== item.valueCoding ? { valueCoding: coding } : {}),
       ...(concept !== item.valueCodeableConcept ? { valueCodeableConcept: concept } : {}),
       ...(directReference !== item.valueReference ? { valueReference: directReference } : {}),
@@ -202,6 +204,20 @@ export function quantityAnnotationExtensions(
     result?.push(current);
   }
   return result ?? source;
+}
+function quantityPeriodForWire(
+  period: FhirR6Period | undefined, target: "r5" | "r6"
+): FhirR6Period | undefined {
+  if (!period) return period;
+  const extension = period.extension ? quantityAnnotationExtensions(period.extension, target) : undefined;
+  const start = quantityPrimitiveForWire(period._start, target);
+  const end = quantityPrimitiveForWire(period._end, target);
+  return extension === period.extension && start === period._start && end === period._end ? period : {
+    ...period,
+    ...(extension !== period.extension ? { extension } : {}),
+    ...(start !== period._start ? { _start: start } : {}),
+    ...(end !== period._end ? { _end: end } : {})
+  };
 }
 function quantityReferenceForWire(
   reference: FhirR6Reference | undefined, target: "r5" | "r6"
@@ -220,18 +236,7 @@ function quantityReferenceForWire(
     const extension = identifier.extension ? quantityAnnotationExtensions(identifier.extension, target) : undefined;
     const type = quantityConceptForWire(identifier.type, target);
     const assigner = quantityReferenceForWire(identifier.assigner, target);
-    let period = identifier.period;
-    if (period) {
-      const extension = period.extension ? quantityAnnotationExtensions(period.extension, target) : undefined;
-      const start = quantityPrimitiveForWire(period._start, target);
-      const end = quantityPrimitiveForWire(period._end, target);
-      if (extension !== period.extension || start !== period._start || end !== period._end) period = {
-        ...period,
-        ...(extension !== period.extension ? { extension } : {}),
-        ...(start !== period._start ? { _start: start } : {}),
-        ...(end !== period._end ? { _end: end } : {})
-      };
-    }
+    const period = quantityPeriodForWire(identifier.period, target);
     let current = extension === identifier.extension && type === identifier.type &&
       assigner === identifier.assigner && period === identifier.period ? identifier : {
       ...identifier,

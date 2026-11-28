@@ -47,7 +47,7 @@ import { getQuantityDurationUnit } from "./unit-lexicon";
 import { joinCanonicalPrnReasonTexts } from "./prn";
 import { parseSnomedFindingSitePostcoordinationCode } from "./snomed-postcoordination";
 import {
-  ROUTE_BY_SNOMED,
+  routeCodeFromCodings,
   ROUTE_SNOMED,
   ROUTE_TEXT,
   findPrnReasonDefinitionByCoding,
@@ -92,8 +92,7 @@ import {
   FhirTiming,
   FhirTimingRepeat,
   FhirR6TimingRepeat,
-  RouteCode,
-  SNOMEDCTRouteCodes
+  RouteCode
 } from "./types";
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
@@ -1917,8 +1916,8 @@ export function serializeCanonicalSchedule(
     repeat.frequencyMax = schedule.frequencyMax;
     hasRepeat = true;
   }
-  if (schedule?.period !== undefined && schedule.periodUnit) {
-    repeat.period = schedule.period;
+  if (schedule?.periodUnit && (schedule.period !== undefined || schedule.periodMax !== undefined)) {
+    if (schedule.period !== undefined) repeat.period = schedule.period;
     repeat.periodUnit = schedule.periodUnit;
     hasRepeat = true;
   }
@@ -2230,12 +2229,7 @@ export function deserializeCanonicalContext(
   const rawText = dosage.text ?? "";
   const clause = createEmptyCanonicalClause(rawText);
   clause.instructionGraph = parseInstructionGraphExtension(dosage.extension);
-  let routeCode: RouteCode | undefined;
-
-  const routeCoding = dosage.route?.coding?.find((code) => code.system === SNOMED_SYSTEM);
-  if (routeCoding?.code) {
-    routeCode = ROUTE_BY_SNOMED[routeCoding.code as SNOMEDCTRouteCodes];
-  }
+  const routeCode = routeCodeFromCodings(dosage.route?.coding);
   const routeText = dosage.route?.text ?? (!routeCode
     ? dosage.route?.coding?.find(coding => coding.display)?.display : undefined);
   if (routeCode || routeText) {
@@ -2672,14 +2666,10 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
     state.when.push(...whenValues);
   }
 
-  const routeCoding = dosage.route?.coding?.find((code) => code.system === SNOMED_SYSTEM);
-  if (routeCoding?.code) {
-    // Translate SNOMED codings back into the simplified enum for round-trip fidelity.
-    const mapped = ROUTE_BY_SNOMED[routeCoding.code as SNOMEDCTRouteCodes];
-    if (mapped) {
-      state.routeCode = mapped;
-      state.routeText = ROUTE_TEXT[mapped];
-    }
+  const routeCode = routeCodeFromCodings(dosage.route?.coding);
+  if (routeCode) {
+    state.routeCode = routeCode;
+    state.routeText = ROUTE_TEXT[routeCode];
   }
 
   if (siteCoding?.code) {

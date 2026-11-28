@@ -16,10 +16,10 @@ import type {
 } from "./course";
 import { hasAmountRole, administrationHasAmountFacts, administrationHasDatedStart, earliestCalendarOpening } from "./course";
 import type { CanonicalParallelRegimen, RegimenPosition } from "../regimen/parallel-course";
-import { bodySiteTextConflictsWithCoding, getBodySiteAdministrationTargetCount } from "../body-site-target";
+import { resolveBodySiteTargetText, getBodySiteAdministrationTargetCount } from "../body-site-target";
 import { getBodySiteText } from "../body-site-lookup";
 import {
-  ROUTE_BY_SNOMED, ROUTE_SNOMED, getDoseQuantityUnit,
+  routeCodeFromCodings, getDoseQuantityUnit,
   DEFAULT_PRN_REASON_DEFINITIONS, findPrnReasonDefinitionByCoding, normalizePrnReasonKey
 } from "../maps";
 import { SNOMED_SYSTEM } from "../snomed";
@@ -684,14 +684,7 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     if (reason !== prn.reason || reasons !== prn.reasons)
       result.prn = Object.assign({}, prn, { reason, reasons });
   }
-  let routeCode:RouteCode|undefined;
-  for(const coding of a.route?.coding??[]){
-    if(!coding.code || coding.system && coding.system!=="http://snomed.info/sct")continue;
-    routeCode=ROUTE_BY_SNOMED[coding.code as keyof typeof ROUTE_BY_SNOMED]??
-      (!coding.system && Object.prototype.hasOwnProperty.call(ROUTE_SNOMED,coding.code)
-        ?coding.code as RouteCode:undefined);
-    if(routeCode)break;
-  }
+  const routeCode = routeCodeFromCodings(a.route?.coding);
   if(a.route){
     const routeText = a.route.text ?? (!routeCode
       ? a.route.coding?.find(coding => coding.display)?.display : undefined);
@@ -712,11 +705,10 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     // A failed whole-row source proof does not invalidate a live site's
     // qualified text. Only an exact known contradictory label licenses
     // replacing it; a coarse code keeps the authored lateralized anatomy.
-    const staleText = a.provenance?.sourceTextVerified === false && a.target.text &&
-      bodySiteTextConflictsWithCoding(a.target.text, targetCode);
-    const text=targetCode?.code && (!a.target.text || staleText)
-      ? getBodySiteText(targetCode) ?? a.target.text ?? targetCode.display ?? a.siteReference?.display
-      : a.target.text ?? a.siteReference?.display;
+    const resolvedText = a.provenance?.sourceTextVerified === false
+      ? resolveBodySiteTargetText(a.target) : a.target.text;
+    const text = resolvedText ?? (targetCode?.code ? getBodySiteText(targetCode) ?? targetCode.display : undefined) ??
+      a.siteReference?.display;
     // A decoded restriction belongs to the live site, independently of
     // whether its optional text was supplied or derived from that code.
     result.site=Object.assign({},changedCode?undefined:base?.site,{text,administrationTargetCount:a.targetCount});

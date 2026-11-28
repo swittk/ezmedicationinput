@@ -37,12 +37,12 @@ export function normalizeAdministrationTargetCount(value: number | undefined): n
 }
 
 /** Declared anatomical refinements, independent of their localized labels. */
-const BODY_SITE_REFINEMENTS: Readonly<Record<string, { broader: string; lateralized?: true }>> = {
+const BODY_SITE_REFINEMENTS: Readonly<Record<string, { broader: string; lateralized?: true; unqualified?: string }>> = {
   "181178004": { broader: "117590005" }, // External auditory canal -> ear-related structure.
   "34338003": { broader: "117590005", lateralized: true }, // Both ears.
   "40638003": { broader: "81745001", lateralized: true }, // Both eyes.
-  "368588007": { broader: "89644007", lateralized: true }, // Left auditory canal -> left ear.
-  "368566007": { broader: "25577004", lateralized: true }, // Right auditory canal -> right ear.
+  "368588007": { broader: "89644007", lateralized: true, unqualified: "181178004" }, // Left auditory canal -> left ear.
+  "368566007": { broader: "25577004", lateralized: true, unqualified: "181178004" }, // Right auditory canal -> right ear.
   "723608007": { broader: "1797002", lateralized: true }, // Left anterior naris -> naris.
   "723609004": { broader: "1797002", lateralized: true }, // Right anterior naris -> naris.
   "244506005": { broader: "1797002" }, // Anterior nares -> naris.
@@ -58,28 +58,43 @@ function refinesBodySite(code: string, broader: string): boolean {
   return false;
 }
 
+function bodySiteCodeForComparison(coding: Pick<FhirCoding, "system" | "code">): string | undefined {
+  if (!coding.code) return undefined;
+  const postcoordinated = parseSnomedBodySiteLateralityPostcoordinationCode(coding.code);
+  const text = postcoordinated ? getBodySiteText(coding as BodySiteCode) : undefined;
+  return text ? DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(text)]?.coding?.code ?? coding.code : coding.code;
+}
+
+function combinedBodySiteRefinement(textCode: string, codedCode: string | undefined): string | undefined {
+  for (const code in BODY_SITE_REFINEMENTS) {
+    const refinement = BODY_SITE_REFINEMENTS[code];
+    if (refinement.unqualified === textCode && refinement.broader === codedCode) return code;
+  }
+  return undefined;
+}
+
 /** Compare exact stock site labels only. A lateralized label can refine its
  * registered unqualified anatomy; a different code alone is not a conflict. */
-export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirCoding, "system" | "code"> | undefined): boolean {
+function compatibleBodySiteText(text: string, coding: Pick<FhirCoding, "system" | "code"> | undefined): string | undefined {
   const key = normalizeBodySiteKey(text);
   const definition = DEFAULT_BODY_SITE_SNOMED[key];
   const textCode = definition?.coding;
   if (!textCode?.code || !coding?.code || textCode.code === coding.code ||
-      (textCode.system ?? SNOMED_SYSTEM) !== (coding.system ?? SNOMED_SYSTEM)) return false;
-  const postcoordinated = parseSnomedBodySiteLateralityPostcoordinationCode(coding.code);
-  const codedText = postcoordinated ? getBodySiteText(coding as BodySiteCode) : undefined;
-  const codedCode = codedText ? DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(codedText)]?.coding?.code ?? coding.code : coding.code;
-  if (textCode.code === codedCode) return false;
+      (textCode.system ?? SNOMED_SYSTEM) !== (coding.system ?? SNOMED_SYSTEM)) return text;
+  const codedCode = bodySiteCodeForComparison(coding)!;
+  if (textCode.code === codedCode) return text;
+  const combined = combinedBodySiteRefinement(textCode.code, codedCode);
+  if (combined) return getBodySiteText({ code: combined, system: coding.system }) ?? text;
   const textRefinement = BODY_SITE_REFINEMENTS[textCode.code];
   const codedRefinement = BODY_SITE_REFINEMENTS[codedCode];
-  if (refinesBodySite(textCode.code, codedCode)) return false;
+  if (refinesBodySite(textCode.code, codedCode)) return text;
   if (textRefinement && codedRefinement && textRefinement.broader === codedRefinement.broader) {
-    if (!codedRefinement.lateralized) return false;
+    if (!codedRefinement.lateralized) return text;
     // A paired refinement can agree with the registered paired broader site.
     const count = definition.administrationTargetCount;
     if (count !== undefined && count > 1 && count === getBodySiteAdministrationTargetCount({
       coding: { ...coding, code: coding.code }
-    })) return false;
+    })) return text;
   }
   const canonical = definition.text ?? key;
   const unqualified = canonical?.replace(/^(?:left|right|both) /u, "");
@@ -87,9 +102,13 @@ export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirC
     const baseCode = DEFAULT_BODY_SITE_SNOMED[unqualified]?.coding;
     if (baseCode?.code && (baseCode.code === codedCode || refinesBodySite(baseCode.code, codedCode) ||
         !codedRefinement?.lateralized && baseCode.code === codedRefinement?.broader) &&
-        (baseCode.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM)) return false;
+        (baseCode.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM)) return text;
   }
-  return true;
+  return undefined;
+}
+
+export function bodySiteTextConflictsWithCoding(text: string, coding: Pick<FhirCoding, "system" | "code"> | undefined): boolean {
+  return compatibleBodySiteText(text, coding) === undefined;
 }
 
 export function resolveBodySiteTargetText(
@@ -109,10 +128,8 @@ export function resolveBodySiteTargetText(
     : codings;
   const text = "text" in site ? site.text : undefined;
   if (text) {
-    // Match the native preview's exact-known-label conflict rule. A coarser
-    // code does not supersede authored spatial qualifiers or unfamiliar text.
-    const staleText = bodySiteTextConflictsWithCoding(text, coding);
-    if (!staleText) return text;
+    const compatible = compatibleBodySiteText(text, coding);
+    if (compatible !== undefined) return compatible;
   }
   if (coding?.code) {
     // Cache only stable default vocabulary lookups, never mutable fields.

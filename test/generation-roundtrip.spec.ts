@@ -6049,3 +6049,51 @@ describe("typed markdown source annotations", () => {
     expect(input).toEqual(before);
   });
 });
+
+
+describe("current opaque components and UCUM identity", () => {
+  it("keeps annotation-only argument components separate from literal siblings", () => {
+    const opaque: FhirExtension = { id: "unavailable-qualifier", url: "component", extension: [
+      { url: "role", valueCode: "qualifier" }, { url: "text", _valueString: { id: "missing-text", extension: [
+        { url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown" }
+      ] } }, { url: "urn:clinic:component-source", valueString: "retain" }
+    ] };
+    const literal: FhirExtension = { id: "current-qualifier", url: "component", extension: [
+      { url: "role", valueCode: "qualifier" }, { url: "text", valueString: "cold" }
+    ] };
+    const argument: FhirExtension = { url: "argument", extension: [
+      { url: "role", valueCode: "object" }, { url: "text", valueString: "water" }, opaque, literal
+    ] };
+    const marker: FhirExtension = { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: [
+      { url: "sourceText", valueString: "Mix with water" }, { url: "action", extension: [
+        { url: "force", valueCode: AdviceForce.Instruction }, { url: "predicateLemma", valueString: "mix" },
+        { url: "sourceText", valueString: "Mix with water" },
+        { url: "spanStart", valueInteger: 0 }, { url: "spanEnd", valueInteger: 14 }, argument
+      ] }
+    ] };
+    const before = JSON.stringify(marker);
+    let current = marker;
+    for (let cycle = 0; cycle < 2; cycle++) {
+      const graph = parseInstructionGraphExtension([JSON.parse(JSON.stringify(current))])!;
+      expect(graph.actions[0].args[0].components).toEqual([{ role: "qualifier", text: "cold", sourceId: "current-qualifier" }]);
+      current = buildInstructionGraphExtension(graph)!;
+      const fields = current.extension!.find(field => field.url === "action")!.extension!
+        .find(field => field.url === "argument")!.extension!;
+      expect(fields.filter(field => field.url === "component")).toHaveLength(2);
+      expect(fields).toContainEqual(opaque);
+      expect(fields).toContainEqual(literal);
+    }
+    expect(JSON.stringify(marker)).toBe(before);
+  });
+
+  it.each([
+    ["[drp]", "[drp]{ophthalmic}", 1], ["mg{drug}", "mg", 1],
+    ["U{lipase}", "U", 1], ["U", "u", null], ["[drp]", "[IU]", null], ["{left}", "{right}", null]
+  ] as const)("compares coded UCUM %s and %s without altering either", (leftCode, rightCode, expected) => {
+    const left = { system: "http://unitsofmeasure.org", code: leftCode };
+    const right = { system: "http://unitsofmeasure.org", code: rightCode };
+    const before = JSON.stringify([left, right]);
+    expect(convertQuantityValue(1, left, right)).toBe(expected);
+    expect(JSON.stringify([left, right])).toBe(before);
+  });
+});

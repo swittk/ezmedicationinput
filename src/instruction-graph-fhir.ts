@@ -128,6 +128,9 @@ function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | unde
   const activeFields = parts.length;
   let codingIndex = 0;
   for (const source of sources ?? []) {
+    // Uninterpreted repeated components retain their own occurrence; they do
+    // not annotate the first independently understood component.
+    if (source.url === "component") { parts.push(source); continue; }
     let index = -1;
     const optionalField = source.url === "normalized" || source.url === "conceptId" || source.url === "quantity";
     const translation = source.url === "translation" || source.url === "predicateTranslation";
@@ -605,7 +608,7 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
         const term=readCoding(componentCoding?.valueCoding);
         components.push({role:value,text:body,...(term?{coding:term}:{}),
           ...(entry.id?{sourceId:entry.id}:{}),...(componentSource?{sourceExtensions:componentSource}:{})});
-      }
+      } else (sourceExtensions ??= []).push(entry);
       break;
     }
     default:(sourceExtensions??=[]).push(entry);break;
