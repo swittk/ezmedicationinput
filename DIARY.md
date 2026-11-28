@@ -16614,3 +16614,5 @@ Calendar selection precedes count admission. Weekly frequency uses the shared oc
 Previews preserve complete current restrictions, guarded labelled amounts, inline warning conditions and event offsets. Recurring withholding keeps its selected weekdays and targets. Locale callbacks retain control of their wording, and condition ownership is established before rendering.
 
 FHIR conversion preserves coded measurement identity, strict dose limits, primitive annotations, anatomical refinements and nested Reference annotations. Generated condition bridges use their declared field order so unchanged conversions remain stable. Regression coverage checks current native and fresh wire forms, independent clinical outcomes and input immutability.
+
+Current method text that selects a different registered action takes precedence over a generic coded verb; same-action custom translations retain their selected wording. Code-only compact intervals retain their authored shorthand alongside expanded cadence until an independently typed period replaces it.
