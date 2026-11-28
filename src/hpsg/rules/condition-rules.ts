@@ -373,9 +373,11 @@ function withholdingDoseTarget(
   const target: NonNullable<HpsgClinicalAdjunctFeature["conditionTarget"]> = {};
   const nominalSpans: AdviceFrame["span"][] = [];
   for (const argument of frame.args) {
-    if (argument.role === AdviceArgumentRole.Amount && argument.quantity) {
+    if (argument.quantity && (argument.role === AdviceArgumentRole.Amount ||
+        (argument.role === AdviceArgumentRole.Object || argument.role === AdviceArgumentRole.Theme) &&
+          (argument.conceptId === "medication-dose" || argument.conceptId === "product"))) {
       target.dose = argument.quantity;
-      continue;
+      if (argument.role === AdviceArgumentRole.Amount) continue;
     }
     if (argument.role === AdviceArgumentRole.Site) {
       target.site = { text: argument.normalized ?? argument.text,

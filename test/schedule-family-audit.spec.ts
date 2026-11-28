@@ -7903,3 +7903,185 @@ describe("measured rates retain the coded numerator identity", () => {
       fixture.duration, fixture.durationUnit, daily, fixture.total, fixture.unit);
   });
 });
+
+
+describe("current schedule windows and nominal targets", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const note = { url: "urn:review-schedule:current-note", valueString: "retain this current annotation" };
+  const context = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC", limit: 4 };
+  const oneTablet = (recurrence: NonNullable<CanonicalAdministration["schedule"]>["recurrence"]): CanonicalCourse => ({
+    kind: "course", instruction: "Take one tablet on the supplied current schedule",
+    stages: [{ administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence } }] }]
+  });
+  const views = (course: CanonicalCourse) => {
+    const wire = projectCanonicalCourse(course).fhirNext;
+    const member = wire.step![0].component![0];
+    member.extension = [...member.extension ?? [], note];
+    const native = importCanonicalCourse(fresh(wire)), projected = projectCanonicalCourse(native);
+    return [native, fresh(projected.fhir), fresh(projected.fhirNext)];
+  };
+  const retained = (input: Parameters<typeof importCanonicalCourse>[0], before: string, source: string) => {
+    const course = importCanonicalCourse(input);
+    expect(course.instruction).toBe(source);
+    expect(JSON.stringify(projectCanonicalCourse(course).fhirNext)).toContain(note.valueString);
+    expect(JSON.stringify(input)).toBe(before);
+  };
+
+  it.each(["absent", "zero", "unknown"] as const)("distinguishes a %s treatment-day displacement", mode => {
+    const offset = mode === "absent" ? {} : { offsetDuration: mode === "zero"
+      ? { value: 0, code: "d", system: "http://unitsofmeasure.org" }
+      : { code: "d", system: "http://unitsofmeasure.org", _value: { extension: [{
+        url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown" }] } } };
+    const source = "Take one tablet daily after the supplied treatment-day start";
+    const wire: FhirR6DosageInstruction = { renderedInstruction: source, step: [{ start: {
+      contextCode: { coding: [{ system: "urn:ezmedicationinput:CodeSystem:course-phase-event", code: "treatment-day-start" }] },
+      ...offset }, component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
+        repeat: { frequency: 1, period: 1, periodUnit: "d", timeOfDay: ["09:00:00"] } } }] }] };
+    for (const input of views(importCanonicalCourse(wire))) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages[0].administrations[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      if (mode === "unknown") {
+        expect(projectCanonicalCourse(course).fhirNext.step![0].start?.offsetDuration).toMatchObject(offset.offsetDuration!);
+        expect(() => nextDueDoses(input, context)).toThrow("requires a treatment-start offset");
+        expect(() => calculateTotalUnits({ dosage: input, ...context, durationValue: 1, durationUnit: "d" }))
+          .toThrow("requires a treatment-start offset");
+      } else {
+        expect(nextDueDoses(input, { ...context, limit: 1 })).toEqual(["2027-01-01T09:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage: input, ...context, durationValue: 1, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: "scheduled" });
+      }
+      retained(input, before, source);
+    }
+  });
+
+  it.each(["range", "two", "one", "no-window"] as const)("keeps the %s daily frequency inside its event window", mode => {
+    const recurrence = { frequency: mode === "range" || mode === "one" ? 1 : 2,
+      ...(mode === "range" ? { frequencyMax: 2 } : {}), period: 1, periodUnit: FhirPeriodUnit.Day,
+      ...(mode === "no-window" ? {} : { eventWindow: { start: EventTiming.Wake, end: EventTiming["Before Sleep"] } }) };
+    const course = oneTablet(recurrence), clocks = mode === "one" ? ["10:00"] : mode === "no-window" ? ["08:00", "20:00"] : ["10:00", "14:00"];
+    const expected = ["2027-01-01", "2027-01-02", "2027-01-03", "2027-01-04"]
+      .flatMap(day => clocks.map(clock => day + "T" + clock + ":00+00:00")).slice(0, 4);
+    const query = { ...context, from: "2027-01-01T07:00:00Z", eventClock: { WAKE: "10:00", HS: "18:00" } };
+    for (const input of views(course)) {
+      const before = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.schedule?.recurrence).toMatchObject(recurrence);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: "h" }).totalUnits)
+        .toBe(mode === "no-window" ? 1 : 0);
+      expect(calculateTotalUnits({ dosage: input, ...context, eventClock: query.eventClock, durationValue: 1, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: clocks.length, unit: "tab", quantityKind: mode === "range" ? "maximum" : "scheduled" });
+      retained(input, before, course.instruction!);
+    }
+  });
+
+  it.each([
+    [1, false, ["07:30"]], [2, false, ["07:30", "17:30"]],
+    [3, false, ["07:30", "11:30", "17:30"]], [2, true, ["07:30", "11:30"]]
+  ] as const)("selects %s eligible before-meal clocks (two meals %s)", (frequency, twoMeals, clocks) => {
+    const recurrence = { frequency, period: 1, periodUnit: FhirPeriodUnit.Day, anchors: [EventTiming["Before Meal"]], offset: 30 };
+    const course = oneTablet(recurrence), eventClock = { CM: "08:00", CD: "12:00", ...(twoMeals ? {} : { CV: "18:00" }) };
+    const query = { ...context, eventClock, limit: clocks.length * 2 };
+    const expected = ["2027-01-01", "2027-01-02"].flatMap(day => clocks.map(clock => day + "T" + clock + ":00+00:00"));
+    for (const input of views(course)) {
+      const before = JSON.stringify(input);
+      expect(importCanonicalCourse(input).stages[0].administrations[0].schedule?.recurrence).toMatchObject(recurrence);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(nextDueDoses(input, { ...query, from: "2027-01-01T19:30:00Z", limit: clocks.length })).toEqual(expected.slice(clocks.length));
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: frequency, unit: "tab", quantityKind: "scheduled" });
+      expect(calculateTotalUnits({ dosage: input, ...query, from: "2027-01-01T19:30:00Z", durationValue: 1, durationUnit: "h" }).totalUnits).toBe(0);
+      retained(input, before, course.instruction!);
+    }
+  });
+
+  it.each([
+    ["before", false, 1, ["2027-01-03T23:45:00+00:00", "2027-01-10T23:45:00+00:00", "2027-01-17T23:45:00+00:00", "2027-01-24T23:45:00+00:00"]],
+    ["before", true, 1, ["2027-01-03T23:45:00+00:00", "2027-01-10T23:45:00+00:00", "2027-01-17T23:45:00+00:00", "2027-01-24T23:45:00+00:00"]],
+    ["before", false, 2, ["2027-01-03T23:45:00+00:00", "2027-01-06T23:45:00+00:00", "2027-01-10T23:45:00+00:00", "2027-01-13T23:45:00+00:00"]],
+    ["after", false, 1, ["2027-01-05T00:15:00+00:00", "2027-01-12T00:15:00+00:00", "2027-01-19T00:15:00+00:00", "2027-01-26T00:15:00+00:00"]],
+    ["after", true, 1, ["2027-01-04T12:00:00+00:00", "2027-01-11T12:00:00+00:00", "2027-01-18T12:00:00+00:00", "2027-01-25T12:00:00+00:00"]]
+  ] as const)("spends weekly allowance across %s-midnight events and clocks %s at frequency %s", (direction, mixed, frequency, expected) => {
+    const recurrence = { frequency, period: 1, periodUnit: FhirPeriodUnit.Week,
+      dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Thursday],
+      anchors: [direction === "before" ? EventTiming["Before Sleep"] : EventTiming["After Dinner"]], offset: 30,
+      ...(mixed ? { clocks: ["12:00:00"] } : {}) };
+    const course = oneTablet(recurrence), query = { ...context, orderedAt: "2027-01-03T00:00:00Z", from: "2027-01-03T00:00:00Z",
+      eventClock: direction === "before" ? { HS: "00:15" } : { CV: "23:45" } };
+    for (const input of views(course)) {
+      const before = JSON.stringify(input);
+      expect(importCanonicalCourse(input).stages[0].administrations[0].schedule?.recurrence).toMatchObject(recurrence);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      const later = { ...query, from: new Date(Date.parse(expected[0]) + 1).toISOString(), limit: 3 };
+      expect(nextDueDoses(input, later)).toEqual(expected.slice(1));
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: frequency, unit: "tab", quantityKind: "scheduled" });
+      if (frequency === 1) expect(calculateTotalUnits({ dosage: input, ...later, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(0);
+      retained(input, before, course.instruction!);
+    }
+  });
+
+  it.each(["Mondays and Wednesdays", "Wednesdays and Mondays"])("donates the shared weekday set from %s", days => {
+    const source = "Take 1 tablet at 08:00 on Mondays and Wednesdays and 2 tablets at 08:00 on " + days +
+      " for 1 week, then take 3 tablets at the same time";
+    const parsed = parseSig(source), saved = JSON.stringify(parsed);
+    const query = { ...context, orderedAt: "2027-01-04T00:00:00Z", from: "2027-01-11T00:00:00Z" };
+    for (const input of views(parsed.meta.canonical.course!)) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input), members = course.stages.flatMap(stage => stage.administrations);
+      expect(members.map(member => member.amounts?.[0].quantity)).toMatchObject([{ value: 1, unit: "tab" }, { value: 2, unit: "tab" }, { value: 3, unit: "tab" }]);
+      expect(members[1].schedule?.recurrence?.dayOfWeek).toEqual(days.startsWith("Mondays") ? ["mon", "wed"] : ["wed", "mon"]);
+      expect(members[2].schedule?.recurrence).toMatchObject({ clocks: ["08:00:00"], dayOfWeek: ["mon", "wed"] });
+      expect(nextDueDoses(input, query)).toEqual(["2027-01-11T08:00:00+00:00", "2027-01-13T08:00:00+00:00", "2027-01-18T08:00:00+00:00", "2027-01-20T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" })).toMatchObject({ totalUnits: 6, unit: "tab" });
+      retained(input, before, source);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it.each(["500 mg", "0.5 g"])("binds the equivalent %s nominal hold without rewriting either authored dose", target => {
+    const source = "Take 0.5 g at breakfast and 0.25 g at dinner; hold the " + target + " dose if dizzy";
+    const parsed = parseSig(source), saved = JSON.stringify(parsed);
+    const object = parsed.meta.canonical.clauses[1].instructionGraph?.actions[0].args[0];
+    expect(object).toMatchObject({ role: "object", conceptId: "medication-dose", text: "the " + target + " dose",
+      quantity: target === "500 mg" ? { value: 500, unit: "mg" } : { value: 0.5, unit: "g" } });
+    expect(source.slice(object!.span!.start, object!.span!.end)).toBe(object!.text);
+    for (const input of views(parsed.meta.canonical.course!)) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input), [breakfast, dinner] = course.stages[0].administrations;
+      expect(breakfast.amounts?.[0].quantity).toMatchObject({ value: 0.5, unit: "g" });
+      expect(dinner.amounts?.[0].quantity).toMatchObject({ value: 0.25, unit: "g" });
+      expect(breakfast.predicate).toMatchObject({ kind: "not", condition: { kind: "state", name: "dizzy" } });
+      expect(dinner.predicate).toBeUndefined();
+      for (const dizzy of [false, true]) {
+        const query = { ...context, limit: 2, eventClock: { CM: "08:00", CV: "18:00" },
+          evaluateCondition: (condition: { kind: string }) => condition.kind === "not" ? !dizzy : dizzy };
+        expect(nextDueDoses(input, query)).toEqual(dizzy ? ["2027-01-01T18:00:00+00:00", "2027-01-02T18:00:00+00:00"]
+          : ["2027-01-01T08:00:00+00:00", "2027-01-01T18:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: dizzy ? 0.25 : 0.75, unit: "g" });
+      }
+      retained(input, before, source);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+
+  it("retains the positive weekday domain when a targeted exclusion removes every selected day", () => {
+    const source = "Take 1 tablet at 08:00 and 20:00 on Mondays. Skip the 08:00 dose on Mondays.";
+    const parsed = parseSig(source), saved = JSON.stringify(parsed), query = { ...context,
+      orderedAt: "2027-01-04T00:00:00Z", from: "2027-01-04T00:00:00Z" };
+    for (const input of views(parsed.meta.canonical.course!)) {
+      const before = JSON.stringify(input), members = importCanonicalCourse(input).stages[0].administrations;
+      expect(members).toHaveLength(2);
+      const morning = members.find(member => member.schedule?.recurrence?.clocks?.[0] === "08:00:00")!;
+      const evening = members.find(member => member.schedule?.recurrence?.clocks?.[0] === "20:00:00")!;
+      expect(morning.schedule?.recurrence).toMatchObject({ clocks: ["08:00:00"], dayOfWeek: ["mon"] });
+      expect(evening.schedule?.recurrence).toMatchObject({ clocks: ["20:00:00"], dayOfWeek: ["mon"] });
+      expect(morning.excludedWeekdays).toEqual(["mon"]);
+      expect(evening.excludedWeekdays).toBeUndefined();
+      expect(nextDueDoses(input, query)).toEqual(["2027-01-04T20:00:00+00:00", "2027-01-11T20:00:00+00:00", "2027-01-18T20:00:00+00:00", "2027-01-25T20:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 7, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: "scheduled" });
+      retained(input, before, source);
+    }
+    expect(JSON.stringify(parsed)).toBe(saved);
+  });
+});

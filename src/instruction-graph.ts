@@ -1399,14 +1399,18 @@ const OBJECT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     relationHasGrammarFeature(c.relation, "timeComplement")
       ? argumentFromParts(parts, relIndex + 1, c.relationTargetEnd, input, AdviceArgumentRole.Time, options)
       : undefined;
-  return { args: parsedArgs(
-    objectEnd > argumentStart
-      ? argumentFromParts(parts, argumentStart, objectEnd, input,
-        c.definition.argumentParser === "bare-duration" ? undefined : AdviceArgumentRole.Object, options)
-      : undefined,
-    duration,
-    localTime
-  ) };
+  let object = objectEnd > argumentStart
+    ? argumentFromParts(parts, argumentStart, objectEnd, input,
+      c.definition.argumentParser === "bare-duration" ? undefined : AdviceArgumentRole.Object, options)
+    : undefined;
+  if (object && c.definition.argumentParserConfig?.medicationConditionEffect) {
+    const measured = quantifiedEntityArgument(parts, argumentStart, objectEnd, input, offset,
+      AdviceArgumentRole.Object, options, object);
+    if (measured?.quantity && (measured.conceptId === "medication-dose" || measured.conceptId === "product")) {
+      object = measured;
+    }
+  }
+  return { args: parsedArgs(object, duration, localTime) };
 };
 function configuredConceptIndex(parts: Lexeme[], start: number, end: number,
   concepts: readonly string[] | undefined): number {

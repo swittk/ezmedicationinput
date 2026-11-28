@@ -3062,6 +3062,10 @@ describe("round34 successor and member origins", () => {
         durationValue: 7, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(6);
       expect(calculateTotalUnits({ dosage, ...context, from: "2026-11-26T00:00:00Z",
         durationValue: 5, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(5);
+      expect(calculateTotalUnits({ dosage, ...context, from: "2026-11-28T00:00:00Z",
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 2, unit: "tab" });
+      expect(calculateTotalUnits({ dosage, ...context, from: "2026-11-30T00:00:00Z",
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 3, unit: "tab" });
       expect(JSON.stringify(dosage)).toBe(before);
     }
   });

@@ -1,4 +1,5 @@
 import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
+import { convertQuantityValue } from '../utils/units';
 import { withMedicationSourceI18n } from '../locale-detection';
 import {
   selectHpsgCoordinationScopeConstruction,
@@ -1228,8 +1229,11 @@ function matchesConditionTarget(
 ): boolean {
   const dose = target.dose && target.dose.comparator === undefined && clause.dose?.comparator !== undefined
     ? { ...clause.dose, comparator: undefined } : clause.dose;
-  return (!target.dose || sameDose(dose, target.dose)) &&
-    (!target.site || sameSite(clause.site, target.site));
+  const matchingDose = !target.dose || sameDose(dose, target.dose) ||
+    dose?.value !== undefined && target.dose.value !== undefined && !dose.range && !target.dose.range &&
+      dose.comparator === target.dose.comparator &&
+      convertQuantityValue(dose.value, dose, target.dose) === target.dose.value;
+  return matchingDose && (!target.site || sameSite(clause.site, target.site));
 }
 
 /**
@@ -1562,7 +1566,8 @@ export function scopeMedicationConditionTargets(
           if (recipient.schedule) {
             const days = recipient.schedule.dayOfWeek ?? [FhirDayOfWeek.Monday, FhirDayOfWeek.Tuesday,
               FhirDayOfWeek.Wednesday, FhirDayOfWeek.Thursday, FhirDayOfWeek.Friday, FhirDayOfWeek.Saturday, FhirDayOfWeek.Sunday];
-            recipient.schedule.dayOfWeek = days.filter(day => adjunct.excludedWeekdays!.indexOf(day) < 0);
+            const remaining = days.filter(day => adjunct.excludedWeekdays!.indexOf(day) < 0);
+            recipient.schedule.dayOfWeek = remaining.length ? remaining : days;
           }
         }
         if (excludedDates?.length) adjunct.excludedDates = [...new Set([...(adjunct.excludedDates ?? []), ...excludedDates])];

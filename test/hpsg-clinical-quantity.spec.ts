@@ -6377,6 +6377,7 @@ describe("reviewed continuing onset and dotted infusion quantities", () => {
       expect(member.schedule?.recurrence?.anchors).toBeUndefined();
       expect(member.schedule?.recurrence?.clocks).toBeUndefined();
       expect(member.additionalInstructions?.map(instruction => instruction.text)).toContain(end);
+      expect(member.phaseEnd).toMatchObject({ anchor: "unresolved", description: end });
       expect(course.stages[0].end).toBeUndefined();
       expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain(end);
       expect(course.instruction).toBe(source);

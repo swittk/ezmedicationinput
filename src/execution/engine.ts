@@ -2554,7 +2554,7 @@ function treatmentRelativeInstant(
     if (low.getTime() !== high.getTime()) throw new Error(unresolved);
     return low;
   }
-  const quantity = duration?.value ?? (dayStart ? 0 : undefined);
+  const quantity = duration ? duration.value : dayStart ? 0 : undefined;
   const unit = duration ? getQuantityDurationUnit(duration) : dayStart ? DurationUnit.Day : undefined;
   if (
     !knownAnchor ||
@@ -5350,7 +5350,7 @@ function intervalEventWindow(repeat: CanonicalRecurrence | undefined):
   if (!repeat || (repeat.clocks?.length ?? 0) !== 0) return undefined;
   const interval = usesIntervalCadence(repeat);
   const typed = getTimingEventWindow(repeat);
-  if (typed && (interval || repeat.frequency === 1 && usesClockWindowCadence(repeat))) return typed;
+  if (typed && (interval || usesClockWindowCadence(repeat))) return typed;
   if (!interval) return undefined;
   // The legacy WAKE-plus-interval shorthand remains limited to subday units.
   if (repeat.periodUnit !== DurationUnit.Second && repeat.periodUnit !== DurationUnit.Minute &&
@@ -5461,7 +5461,7 @@ function generateWakingHoursIntervalSeries(
             if (candidate && candidate >= from && (!orderedAt || candidate >= orderedAt) &&
                 (!courseEnd || candidate < courseEnd)) results.push(formatZonedIso(candidate, timeZone));
           }
-        } else if (clockWindow && repeat.frequency! > 1 && repeat.period === 1 && repeat.periodUnit === DurationUnit.Day) {
+        } else if ((clockWindow || window) && repeat.frequency! > 1 && repeat.period === 1 && repeat.periodUnit === DurationUnit.Day) {
           // The authored window bounds the same evenly distributed frequency
           // plan as any elapsed period; institution clocks cannot escape it.
           const generated = generateFrequencyPerPeriodSeries(wake, from, limit - results.length,
@@ -6649,8 +6649,7 @@ function visitClockOccurrences(
   // Shifted anchors retain their chronological merge policy. When every
   // possible opportunity fits, the ordinary clock walk needs no quota state.
   const frequency = repeat.periodUnit === DurationUnit.Week &&
-    (enforceDayFilter || calendarDays !== undefined) &&
-    firstShift === 0 && expanded[expanded.length - 1].dayShift === 0
+    (enforceDayFilter || calendarDays !== undefined)
     ? positiveInteger(repeat.frequency) : undefined;
   const weeklyFrequency = frequency !== undefined &&
     frequency < (enforceDayFilter ? dayFilter.size : 7) * expanded.length ? frequency : undefined;
@@ -9015,12 +9014,9 @@ function resolveExplicitClockEntries(
       (requireComplete || !clocks.length)) unresolvedEventOffset();
   const allowFallback = !clocks.length && (dayFiltered || !repeat.frequency || !repeat.period || !repeat.periodUnit);
   const entries = expandWhenCodes(when, config, repeat, allowFallback);
-  // "BID with food" specifies TWO administrations chosen from the meal
-  // context, not every breakfast/lunch/dinner. An exclusion weekday used
-  // to force enumeration of three C/AC/PC meal clocks and thereby inflate
-  // the prescribed BID dose count. Fall back to the exact frequency's
-  // configured clocks when an unspecific meal window has more candidates
-  // than the explicitly prescribed daily frequency.
+  // An unspecific meal anchor supplies eligible opportunities. The authored
+  // daily frequency selects evenly across those existing clocks, retaining
+  // their event offsets rather than replacing them with institution clocks.
   if (
     when.length === 1 &&
     clocks.length === 0 &&
@@ -9030,6 +9026,15 @@ function resolveExplicitClockEntries(
     repeat.frequency !== undefined &&
     entries.length !== repeat.frequency
   ) {
+    const frequency = positiveInteger(repeat.frequency);
+    if (frequency !== undefined && frequency < entries.length) {
+      if (frequency === 1) return [entries[0]];
+      const selected: ClockEntry[] = [];
+      for (let index = 0; index < frequency; index++) {
+        selected.push(entries[Math.round((entries.length - 1) * index / (frequency - 1))]);
+      }
+      return selected;
+    }
     return [];
   }
   for (const clock of clocks) entries.push({ time: normalizeClock(clock), dayShift: 0 });

@@ -657,7 +657,9 @@ export function scopeSequentialPhaseSemantics(
     };
     const cadenceKeys = Object.keys(cadence) as (keyof typeof cadence)[];
     const sharedCadence = schedules.every(schedule => cadenceKeys.every(key =>
-      equalStructuredValues(schedule?.[key], cadence[key])));
+      key === "dayOfWeek" && schedule?.dayOfWeek !== undefined && cadence.dayOfWeek !== undefined
+        ? sameSet(schedule.dayOfWeek, cadence.dayOfWeek)
+        : equalStructuredValues(schedule?.[key], cadence[key])));
     // The target-transition construction may carry an omitted administration
     // method only when the entire predecessor phase agrees on the typed head.
     const sourceMethods = prior.map(index => states[index]?.primaryClause.method);
