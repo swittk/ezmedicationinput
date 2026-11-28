@@ -104,6 +104,7 @@ import {
 } from "./regimen/parallel-course";
 import {
   applyCoordinatedCadenceScopes, composeCoordinatedTimingAnchors,
+  materializeTypedContinueCourseDuration,
   scopeTrailingSharedDuration,
   scopeTrailingSharedNegativeInstructions, scopeMedicationConditionTargets
 } from "./regimen/coordination-scope";
@@ -728,7 +729,10 @@ function scopeCoordinatedSegmentStates(
   segments: ReturnType<typeof parseSigSegments>,
   input: string
 ): void {
-  if (!boundaryPlan.relations.length) return;
+  if (!boundaryPlan.relations.length) {
+    for (const state of states) materializeTypedContinueCourseDuration(state.primaryClause);
+    return;
+  }
   applyCoordinatedCadenceScopes(
     states.map((state, index) => ({
       state,
@@ -1488,9 +1492,11 @@ function fromFhirDosageInternal(
   const native = nativeStage?.administrations[0];
   const nativeDisplayCourse: CanonicalCourse | undefined =
     nativeCourse?.cycleInterval || nativeCourse?.cycleCount !== undefined ? nativeCourse : native &&
-    (nativeCourse?.safety || nativeStage?.count !== undefined || nativeStage?.countUnresolved) ? {
+    (nativeCourse?.safety || nativeStage?.start || nativeStage?.end ||
+      nativeStage?.count !== undefined || nativeStage?.countUnresolved) ? {
     kind: "course", safety: nativeCourse?.safety,
     stages: [{ administrations: [native], safety: nativeStage?.safety,
+      start: nativeStage?.start, end: nativeStage?.end,
       count: nativeStage?.count, countUnresolved: nativeStage?.countUnresolved }],
   } : undefined;
   if (unverified && native?.provenance) native.provenance.sourceTextVerified = false;

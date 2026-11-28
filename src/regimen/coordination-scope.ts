@@ -8,6 +8,7 @@ import {
 import { grammaticalTrailingInstructionScope, hasAdministrationAdjunct } from './grammar';
 import { findUnparsedTokenGroups } from '../parser';
 import { buildInstructionCoverage } from '../instruction-graph';
+import { relationHasGrammarFeature } from '../relation-terminology';
 import { ParserState } from '../parser-state';
 import { AdviceArgumentRole, AdvicePolarity, FhirDayOfWeek, FhirPeriodUnit } from '../types';
 import { MEAL_TIMING_BY_RELATION } from '../hpsg/lexical-classes';
@@ -508,15 +509,19 @@ function instructionDurationUnit(unit: string | undefined): FhirPeriodUnit | und
  * contribution before coordination selection so the ordinary course-bound
  * construction can distribute it; no instruction wording is reparsed here.
  */
-function materializeTypedContinueCourseDuration(clause: CanonicalSigClause): void {
+export function materializeTypedContinueCourseDuration(clause: CanonicalSigClause): void {
   if (hasCourseDuration(clause.schedule)) return;
   const actions = clause.instructionGraph?.actions;
   if (!actions?.length) return;
   const dose = evidenceBounds(clause, 'dose');
-  for (const action of actions) {
+  for (let index = 0; index < actions.length; index++) {
+    const action = actions[index];
     if (action.predicate.lemma !== 'continue-treatment' ||
         action.predicate.semanticClass !== 'course' ||
-        action.polarity === AdvicePolarity.Negate ||
+        action.polarity === AdvicePolarity.Negate || action.modality !== undefined ||
+        action.relation && relationHasGrammarFeature(action.relation, 'conditionScope') ||
+        clause.instructionGraph?.relations?.some(relation => relation.toActionIndex === index &&
+          relationHasGrammarFeature(relation.kind, 'conditionScope')) ||
         dose && action.span.start < dose.end) continue;
     const duration = action.args.find(argument =>
       argument.role === AdviceArgumentRole.Duration && argument.span

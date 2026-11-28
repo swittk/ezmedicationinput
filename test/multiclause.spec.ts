@@ -5620,7 +5620,9 @@ describe("review125 shared totals across selectable paths", () => {
       const text = formatSig(input, style, { locale, realizationMode: "normalized",
         i18n: style === "long" ? { formatLong: override } : { formatShort: override } });
       expect(calls).toEqual(["20:00:00", "18:00:00", "08:00:00"]);
-      for (const clock of calls) expect(text.split("Clinic " + clock)).toHaveLength(2);
+      expect(text).toBe(locale === "en"
+        ? "Choose one: Clinic 20:00:00 or Clinic 18:00:00; Clinic 08:00:00"
+        : "เลือกอย่างใดอย่างหนึ่ง: Clinic 20:00:00 หรือ Clinic 18:00:00; Clinic 08:00:00");
     }
     expect(JSON.stringify(input)).toBe(before);
   });

@@ -493,18 +493,14 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
           relationHasSemanticClass(vehicleRelation, "locative"))
         ? localizeAdviceRelation(vehicleRelation, c.locale) ?? vehicleRelation
         : "with";
-      const timeSemanticRelation = c.timeRelation;
-      const timeRelation = timeSemanticRelation &&
-        (relationHasSemanticClass(timeSemanticRelation, "temporal") || timeSemanticRelation === AdviceRelation.In)
-        ? localizeAdviceRelation(timeSemanticRelation, c.locale) ?? timeSemanticRelation : "at";
-      if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
+      const time = realizeTimeArgument(c);
       let companionsText = "";
       if (additionalCompanions) for (const arg of additionalCompanions) {
         const { amount, text } = instructionCompanionContent(c, arg);
         const relation = localizeAdviceRelation(arg.relation!, c.locale) ?? arg.relation;
         if (amount || text) companionsText += ` ${relation} ${amount ?? ""}${amount && text ? " " : ""}${text ?? ""}`;
       }
-      return `${c.label}${themeText}${substance || substanceAmount ? ` ${materialRelation} ${amountText}${substance ?? ""}` : ""}${companionsText}${c.time ? ` ${timeRelation} ${c.time}` : ""}`;
+      return `${c.label}${themeText}${substance || substanceAmount ? ` ${materialRelation} ${amountText}${substance ?? ""}` : ""}${companionsText}${time ? ` ${time}` : ""}`;
     }
     case "site-relation": {
       const object = siteRelationObject(c);
@@ -653,11 +649,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
           : themeText ? "กับ" : vehicleRelation === AdviceRelation.With ? "ด้วย" : "";
       const substanceText = substance || substanceAmount
         ? `${materialRelation}${substance ?? ""}${substanceAmount ? (substance ? amountSeparator : "") + substanceAmount : ""}` : "";
-      const timeSemanticRelation = c.timeRelation;
-      const timeRelation = timeSemanticRelation &&
-        (relationHasSemanticClass(timeSemanticRelation, "temporal") || timeSemanticRelation === AdviceRelation.In)
-        ? localizeAdviceRelation(timeSemanticRelation, c.locale) ?? timeSemanticRelation : " เวลา ";
-      if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
+      const time = realizeTimeArgument(c);
       let companionsText = "";
       if (additionalCompanions) for (const arg of additionalCompanions) {
         const { amount, text } = instructionCompanionContent(c, arg);
@@ -666,7 +658,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
             ? localizeAdviceRelation(arg.relation!, c.locale) ?? arg.relation : "กับ";
         if (amount || text) companionsText += `${relation}${text ?? ""}${text && amount ? " " : ""}${amount ?? ""}`;
       }
-      return `${c.label}${themeText}${substanceText}${companionsText}${c.time ? `${timeRelation}${c.time}` : ""}`;
+      return `${c.label}${themeText}${substanceText}${companionsText}${time ?? ""}`;
     }
     case "site-relation": {
       const object = siteRelationObject(c);

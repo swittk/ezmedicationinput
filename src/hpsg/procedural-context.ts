@@ -79,6 +79,7 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
           context.state.input.slice(candidate.span.end, token.sourceStart).trim()) continue;
       const definition = frameActionDefinition(candidate, context.options);
       if (candidate.polarity !== AdvicePolarity.Negate &&
+          !definition?.adviceClauseHead &&
           !(definition?.procedural && !definition.primaryAdministrationHead)) continue;
       if (!frame || candidate.span.end > frame.span.end) {
         frame = candidate;
@@ -93,7 +94,7 @@ function conditionalAdviceOwners(context: HpsgClauseContext): Map<number, Advice
     const guard = medicationGuardForContext(context);
     if (guard && guard.start === token.sourceStart && frame.span.start < guard.end) continue;
     const definition = frameActionDefinition(frame, context.options);
-    const procedural = frame.polarity === AdvicePolarity.Negate ||
+    const procedural = frame.polarity === AdvicePolarity.Negate || definition?.adviceClauseHead ||
       definition?.procedural && !definition.primaryAdministrationHead;
     // A registered rate administration owns its duration even when the action
     // graph has no scalar Amount daughter. The rate quantity is selected by HPSG.

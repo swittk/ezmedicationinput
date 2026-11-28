@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseSig } from "./helpers/r5-parser";
-import { formatSig, fromFhirDosage, parseSig as parsePublicSig } from "../src/index";
+import { formatSig, fromFhirDosage, parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits, FhirPeriodUnit } from "../src/index";
 import {
   buildAdditionalInstructionFramesFromCoding,
   composedCodedAdviceActions,
@@ -719,4 +719,73 @@ describe("selected advice evidence and supporting occurrences", () => {
       expect(JSON.stringify(input)).toBe(before);
     }
   });
+});
+
+
+describe("review cbb complete relation and directive ownership", () => {
+  it.each(["a meal", "a light meal"])("keeps %s as a complete typed meal-state daughter", meal => {
+    const source = `After ${meal}`;
+    for (const allowFreeTextFallback of [false, true]) {
+      const rows = parseAdditionalInstructions(source, { start: 17, end: 17 + source.length }, { allowFreeTextFallback });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].frames).toEqual([expect.objectContaining({
+        relation: AdviceRelation.After, sourceText: source,
+        span: { start: 17, end: 17 + source.length },
+        args: [expect.objectContaining({ role: AdviceArgumentRole.MealState, text: meal, conceptId: "meal" })]
+      })]);
+    }
+    const unknown = "After a light meal instruction that remains opaque";
+    expect(parseAdditionalInstructions(unknown, { start: 0, end: unknown.length }, { allowFreeTextFallback: false })).toEqual([]);
+  });
+
+  it("retains the qualified light-meal wording through current native and wire advice", () => {
+    const note = { url: "urn:clinic:qualified-meal-note", valueString: "preserve" };
+    const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      additionalInstruction: [{ text: "After a light meal", extension: [note] }] };
+    const submitted = JSON.stringify(row), native = importCanonicalCourse(row), projected = projectCanonicalCourse(native);
+    for (const view of [native, JSON.parse(JSON.stringify(projected.fhir)), JSON.parse(JSON.stringify(projected.fhirNext))]) {
+      const before = JSON.stringify(view), current = projectCanonicalCourse(importCanonicalCourse(view));
+      expect(current.fhir[0].additionalInstruction?.[0]).toMatchObject(row.additionalInstruction[0]);
+      for (const locale of ["en", "th"]) expect(formatSig(view, "long", { locale })).toContain("a light meal");
+      expect(JSON.stringify(view)).toBe(before);
+    }
+    expect(JSON.stringify(row)).toBe(submitted);
+  });
+
+  it.each([".", ";", ",", "!", "?"])("retains the Continue duration after the directive boundary %s", separator => {
+    const source = `Take 1 tablet daily${separator} Continue for 7 days.`;
+    const actions = parseInstructionActions(source);
+    const action = actions.find(frame => frame.predicate.lemma === "continue-treatment");
+    expect(action).toBeDefined();
+    expect(action?.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Duration,
+      quantity: expect.objectContaining({ value: 7, unit: "d" }) }));
+    expect(source.slice(action!.span.start, action!.span.end)).toBe(action!.sourceText);
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ duration: 7, durationUnit: "d" });
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    for (const view of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(view);
+      expect(formatSig(view, "long", { locale: "en", realizationMode: "normalized" })).toContain("7 days");
+      expect(formatSig(view, "long", { locale: "th", realizationMode: "normalized" })).toContain("7 วัน");
+      const query = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC", limit: 10 };
+      expect(nextDueDoses(view, query).map(value => value.slice(0, 10)))
+        .toEqual(["2027-01-01", "2027-01-02", "2027-01-03", "2027-01-04", "2027-01-05", "2027-01-06", "2027-01-07"]);
+      expect(calculateTotalUnits({ dosage: view, ...query, durationValue: 10, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 7, unit: "tab" });
+      expect(JSON.stringify(view)).toBe(before);
+    }
+  });
+
+  it.each(["May continue for 7 days.", "Continue for 7 days if symptoms persist."])(
+    "keeps qualified course advice from imposing an unconditional finite bound: %s", advice => {
+      const source = "Take 1 tablet daily. " + advice, parsed = parsePublicSig(source);
+      expect(parsed.meta.canonical.clauses[0].schedule?.duration).toBeUndefined();
+      for (const view of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const before = JSON.stringify(view);
+        expect(formatSig(view, "long", { locale: "en", realizationMode: "normalized" })).toContain("7 days");
+        expect(nextDueDoses(view, { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC", limit: 10 })).toHaveLength(10);
+        expect(JSON.stringify(view)).toBe(before);
+      }
+    });
 });

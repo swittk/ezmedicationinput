@@ -241,7 +241,8 @@ interface AdviceArgConceptMatcher {
 interface AdviceFrameMatcher {
   predicateLemmas?: string[];
   predicateSemanticClasses?: string[];
-  relations?: AdviceRelation[];
+  /** null requires no selected relation; omitted accepts either. */
+  relations?: AdviceRelation[] | null;
   force?: AdviceForce;
   polarity?: AdvicePolarity;
   /** null requires an unmodal frame; an omitted constraint accepts either. */
@@ -253,7 +254,7 @@ interface AdviceFrameMatcher {
 interface AdviceFrameMatcherSource {
   predicateLemmas?: string[];
   predicateSemanticClasses?: string[];
-  relations?: string[];
+  relations?: string[] | null;
   force?: string;
   polarity?: string;
   modality?: string | null;
@@ -637,7 +638,7 @@ function buildAdviceFrameMatcher(source: AdviceFrameMatcherSource): AdviceFrameM
     predicateSemanticClasses: source.predicateSemanticClasses
       ? source.predicateSemanticClasses.slice()
       : undefined,
-    relations: relations.length ? relations : undefined,
+    relations: source.relations === null ? null : relations.length ? relations : undefined,
     force: source.force ? mapAdviceForce(source.force) : undefined,
     polarity: mapAdvicePolarity(source.polarity),
     modality: source.modality === null ? null
@@ -739,6 +740,7 @@ function frameMatches(frame: AdviceFrame, matcher: AdviceFrameMatcher): boolean 
     if (!frame.args.some(argument => literal.roles.indexOf(argument.role) >= 0 &&
         (argument.normalized ?? argument.text) === literal.value)) return false;
   }
+  if (matcher.relations === null && (frame.relation || frame.args.some(argument => argument.relation))) return false;
   if (matcher.relations) {
     let relationMatched = false;
     for (const relation of matcher.relations) {

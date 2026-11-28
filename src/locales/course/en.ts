@@ -1,6 +1,7 @@
 /** English course wording. Clinical scope and date arithmetic are supplied
  * by the canonical formatter; this module owns words and English inflection. */
 import { RouteCode } from "../../types";
+import { DEFAULT_ROUTE_SYNONYMS } from "../../maps";
 import type { CourseLanguage } from "../../localization";
 import { joinLocalizedList } from "../../utils/text";
 
@@ -128,6 +129,8 @@ export function routeCodeFromDisplayText(text: string | undefined, includeOtic: 
   if (!normalized) {
     return undefined;
   }
+  const registered = DEFAULT_ROUTE_SYNONYMS[normalized]?.code;
+  if (registered && (includeOtic || registered !== RouteCode["Otic route"])) return registered;
   if (normalized.includes("nasal")) {
     return RouteCode["Nasal route"];
   }

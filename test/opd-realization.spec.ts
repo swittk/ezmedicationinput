@@ -3702,7 +3702,9 @@ describe("current anatomical labels and guarded infusion amounts", () => {
           if (style === "long") {
             expect(text.indexOf("SBP > 160")).toBeLessThan(text.indexOf("Otherwise hold"));
             if (duration) expect(text).toContain(locale === "en" ? "2 hours" : "2 ชั่วโมง");
+            else expect(text).not.toContain(locale === "en" ? "2 hours" : "2 ชั่วโมง");
           } else if (duration) expect(text).toContain("2h");
+          else expect(text).not.toContain("2h");
           expect(text.match(/20 mL\/h/gu)).toHaveLength(1);
         }
         let calls = 0;
@@ -3724,5 +3726,220 @@ describe("current anatomical labels and guarded infusion amounts", () => {
       expect(JSON.stringify(view)).toBe(before);
     }
     expect(JSON.stringify(input)).toBe(submitted);
+  });
+});
+
+describe("review cbb current preview ownership", () => {
+  const note = { url: "urn:clinic:current-preview-note", valueString: "retain current metadata" };
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const views = (input: Parameters<typeof importCanonicalCourse>[0]) => {
+    const course = importCanonicalCourse(input), projected = projectCanonicalCourse(course);
+    return [course, fresh(projected.fhir), fresh(projected.fhirNext)] as const;
+  };
+
+  it.each([undefined, 2])("retains a current stage window in single-row previews with count %s", count => {
+    const boundary = (value: number) => ({
+      contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+      offsetDuration: { value, code: "d", unit: "d" }
+    });
+    const input: FhirR6DosageInstruction = {
+      renderedInstruction: "Take one tablet daily within the stated treatment window.", extension: [note],
+      step: [{ start: boundary(4), end: boundary(8), ...(count === undefined ? {} : { count }),
+        component: [{ extension: [note], doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } } }] }]
+    };
+    const submitted = fresh(input);
+    for (const view of views(input)) {
+      const before = fresh(view), projected = projectCanonicalCourse(importCanonicalCourse(view));
+      expect(projected.fhirNext.step[0].start).toEqual(input.step[0].start);
+      expect(projected.fhirNext.step[0].end).toEqual(input.step[0].end);
+      expect(projected.fhirNext.step[0].count).toBe(count);
+      expect(projected.fhirNext.extension).toContainEqual(note);
+      expect(projected.fhirNext.renderedInstruction).toBe(input.renderedInstruction);
+      for (const locale of ["en", "th"]) {
+        const result = fromFhirDosage(projected.fhir[0], { locale, realizationMode: "normalized" });
+        for (const text of [result.shortText, result.longText]) {
+          expect(text).toContain(locale === "en" ? "4 days" : "4 วัน");
+          expect(text).toContain(locale === "en" ? "8 days" : "8 วัน");
+          if (count !== undefined) expect(text).toContain(locale === "en" ? "phase 2 times" : "ระยะนี้รวม 2 ครั้ง");
+        }
+      }
+      expect(view).toEqual(before);
+    }
+    expect(input).toEqual(submitted);
+  });
+
+  it.each([false, true])("keeps an earlier preparation amount tied to its own material (matching dose %s)", matching => {
+    const source = matching ? "Measure 1 tablet; swallow whole." : "Measure 100 mL of water; swallow whole.";
+    const actions = parseInstructionActions(source);
+    const graph = { sourceText: source, sourceLocale: "en", actions,
+      primaryAdministrationSpan: actions.find(action => action.predicate.lemma === "swallow")!.span };
+    const row: FhirDosage = { text: source, method: { text: "Swallow" },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      extension: [note, buildInstructionGraphExtension(graph)!] };
+    const submitted = fresh(row);
+    for (const view of views(row)) {
+      const before = fresh(view), course = importCanonicalCourse(view), projected = projectCanonicalCourse(course);
+      expect(course.stages[0].administrations[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      const currentGraph = course.stages[0].administrations[0].syntax?.instructionGraph;
+      expect(currentGraph?.sourceText).toBe(source);
+      expect(currentGraph?.actions[0].args.find(argument => argument.role === AdviceArgumentRole.Amount)?.quantity)
+        .toMatchObject(matching ? { value: 1, unit: "tab" } : { value: 100, unit: "mL" });
+      const en = formatSig(view, "long", { locale: "en", realizationMode: "normalized" }).split("; original directions:")[0];
+      const th = formatSig(view, "long", { locale: "th", realizationMode: "normalized" }).split("; ข้อความเดิม:")[0];
+      expect(en).toContain("1 tablet"); expect(th).toContain("1 เม็ด");
+      expect(en).toMatch(/Swallow (?:1 tablet )?whole/u);
+      if (!matching) { expect(en).toContain("100 mL"); expect(th).toContain("100 มิลลิลิตร"); }
+      expect(projected.fhir[0].text).toBe(source);
+      expect(projected.fhir[0].extension).toContainEqual(note);
+      expect(view).toEqual(before);
+    }
+    expect(row).toEqual(submitted);
+  });
+
+  it("keeps the named carrier on its own ratio beside an independent calculated drug rate", () => {
+    const row: FhirDosage = {
+      text: "Infuse 20 mg in 100 mL saline over 30 minutes. Calculated drug rate 40 mg per hour.",
+      method: { text: "Infuse" }, extension: [note, {
+        url: "urn:ezmedicationinput:StructureDefinition:medication-infusion-carrier-material",
+        extension: [{ url: "material", valueString: "saline" }]
+      }],
+      doseAndRate: [
+        { doseQuantity: { value: 20, unit: "mg" }, rateRatio: {
+          numerator: { value: 100, unit: "mL" }, denominator: { value: 30, unit: "min" } } },
+        { type: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/dose-rate-type", code: "calculated" }] },
+          rateRatio: { numerator: { value: 40, unit: "mg" }, denominator: { value: 1, unit: "h" } } }
+      ]
+    };
+    const submitted = fresh(row);
+    for (const view of views(row)) {
+      const before = fresh(view), projected = projectCanonicalCourse(importCanonicalCourse(view));
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        const text = formatSig(view, style, { locale, realizationMode: "normalized" });
+        expect(text).toContain("100 mL saline / 30 min");
+        expect(text).toContain("40 mg / 1 h");
+        expect(text).not.toContain("40 mg saline");
+      }
+      expect(projected.fhir[0].doseAndRate).toEqual(row.doseAndRate);
+      for (const extension of row.extension ?? [])
+        expect(projected.fhir[0].extension?.filter(value => value.url === extension.url)).toEqual([extension]);
+      expect(projected.fhir[0].text).toBe(row.text);
+      expect(view).toEqual(before);
+    }
+    expect(row).toEqual(submitted);
+  });
+
+  it.each([
+    { code: "15054000", unit: undefined, expected: "tab" },
+    { code: "15054000", unit: "clinic tablets", expected: "clinic tablets" },
+    { code: "clinic-unit", unit: undefined, expected: "clinic-unit" }
+  ])("realizes the current limit unit $code without rewriting its supplied Quantity", ({ code, unit, expected }) => {
+    const quantity = { value: 2, system: "http://standardterms.edqm.eu", code, ...(unit ? { unit } : {}), extension: [note] };
+    const input: FhirR6DosageInstruction = { step: [{
+      safety: { doseLimit: [{ scope: "period", valueQuantity: quantity, period: { value: 1, code: "d", unit: "d" } }] },
+      component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } } }]
+    }] };
+    const submitted = fresh(input);
+    for (const view of views(input)) {
+      const before = fresh(view), projected = projectCanonicalCourse(importCanonicalCourse(view));
+      expect((projected.fhirNext.safety ?? projected.fhirNext.step[0].safety)?.doseLimit?.[0].valueQuantity).toEqual(quantity);
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        const text = formatSig(view, style, { locale, realizationMode: "normalized" });
+        expect(text).toContain("2 " + expected + " / 1 d");
+        if (code === "15054000") expect(text).not.toContain("15054000");
+      }
+      expect(view).toEqual(before);
+    }
+    expect(input).toEqual(submitted);
+  });
+
+  it("realizes a current registered text-only SL route without changing the route or source", () => {
+    const input: FhirR6DosageInstruction = { renderedInstruction: "Take one tablet SL daily.",
+      step: [{ component: [{ route: { text: "SL", extension: [note] },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } } }] }] };
+    const submitted = fresh(input);
+    for (const view of views(input)) {
+      const before = fresh(view), projected = projectCanonicalCourse(importCanonicalCourse(view));
+      expect(formatSig(view, "long", { locale: "en", realizationMode: "normalized" })).toContain("sublingual");
+      expect(formatSig(view, "long", { locale: "th", realizationMode: "normalized" })).toContain("ใต้ลิ้น");
+      expect(projected.fhirNext.step[0].component[0].route).toEqual(input.step[0].component[0].route);
+      expect(projected.fhirNext.renderedInstruction).toBe(input.renderedInstruction);
+      expect(view).toEqual(before);
+    }
+    expect(input).toEqual(submitted);
+  });
+
+  it("keeps a modal adverse-effect condition off the standing dose and retains its complete predicate", () => {
+    const source = "Take 1 tablet daily. May cause dizziness if taken without food.";
+    const parsed = parseCompleteSig(source);
+    for (const view of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      const before = fresh(view), course = importCanonicalCourse(view), member = course.stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(member.asNeeded).not.toBe(true);
+      expect(member.predicate).toBeUndefined();
+      const graph = member.syntax?.instructionGraph;
+      const cause = graph?.actions.findIndex(action => action.predicate.lemma === "cause");
+      expect(cause).toBeGreaterThanOrEqual(0);
+      expect(graph?.relations).toContainEqual(expect.objectContaining({
+        kind: AdviceRelation.If, toActionIndex: cause, text: "if taken without food"
+      }));
+      const en = formatSig(view, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(view, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("May cause dizziness if taken without food");
+      expect(en).not.toContain("as needed");
+      expect(en).not.toContain("Take without food");
+      expect(th).toContain("taken without food");
+      expect(course.instruction).toBe(source);
+      expect(view).toEqual(before);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each(["Avoid alcohol", "Do not drink alcohol"])("retains only the unqualified alcohol code for %s", directive => {
+    for (const qualified of [true, false]) {
+      const source = "Take 1 tablet daily. " + directive + (qualified ? " before taking this medicine." : ".");
+      const parsed = parseCompleteSig(source);
+      for (const view of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+        const before = fresh(view), course = importCanonicalCourse(view), projected = projectCanonicalCourse(course);
+        const codes = projected.fhir.flatMap(row => row.additionalInstruction ?? []).flatMap(row => row.coding ?? []).map(coding => coding.code);
+        if (qualified) expect(codes).not.toContain("419822006");
+        else expect(codes).toContain("419822006");
+        const en = formatSig(view, "long", { locale: "en", realizationMode: "normalized" });
+        const th = formatSig(view, "long", { locale: "th", realizationMode: "normalized" });
+        if (qualified) { expect(en).toContain("before taking this medicine"); expect(th).toContain("taking this medicine"); }
+        expect(course.stages[0].administrations[0].amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(course.instruction).toBe(source);
+        expect(view).toEqual(before);
+      }
+    }
+  });
+
+  it.each(["Monday", "08:00"])("realizes a current relationless Mix Time %s through the shared locale owner", time => {
+    const source = `Mix with water ${time === "Monday" ? "on" : "at"} ${time}.`;
+    const frame: AdviceFrame = { force: AdviceForce.Instruction, predicate: { lemma: "mix" },
+      args: [{ role: AdviceArgumentRole.Substance, text: "water", conceptId: "water" },
+        { role: AdviceArgumentRole.Time, text: time, normalized: time }],
+      span: { start: 0, end: source.length }, sourceText: source };
+    const graph = { sourceText: source, sourceLocale: "en", actions: [frame] };
+    const row: FhirDosage = { text: source, extension: [note, buildInstructionGraphExtension(graph)!] };
+    const submitted = fresh(row);
+    for (const view of views(row)) {
+      const before = fresh(view), course = importCanonicalCourse(view), projected = projectCanonicalCourse(course);
+      const current = course.stages[0].administrations[0].syntax?.instructionGraph;
+      expect(current?.actions[0].args.find(argument => argument.role === AdviceArgumentRole.Time))
+        .toMatchObject({ text: time, normalized: time });
+      const en = formatSig(view, "long", { locale: "en", realizationMode: "normalized" }).split("; original directions:")[0];
+      const th = formatSig(view, "long", { locale: "th", realizationMode: "normalized" }).split("; ข้อความเดิม:")[0];
+      expect(en).toContain(time === "Monday" ? "on Monday" : "at 08:00");
+      expect(th).toContain(time === "Monday" ? "วันจันทร์" : "เวลา 08:00");
+      expect(en).not.toContain("at Monday");
+      expect(projected.fhir[0].text).toBe(source);
+      expect(projected.fhir[0].extension).toContainEqual(note);
+      expect(view).toEqual(before);
+    }
+    expect(row).toEqual(submitted);
   });
 });

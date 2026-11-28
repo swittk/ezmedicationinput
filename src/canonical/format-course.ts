@@ -565,7 +565,7 @@ function previewCourseWindows(
 function formatDoseLimits(limits: readonly CanonicalDoseLimit[], words: CourseLanguage): string {
   let rendered = "";
   const readable = (quantity: CanonicalMeasure): string => {
-    const unit = quantity.unit ?? quantity.code;
+    const unit = quantity.unit ?? getDoseQuantityUnit(quantity);
     const value = quantity.value !== undefined && Number.isFinite(quantity.value)
       ? String(quantity.value) : words.unspecified;
     return (quantity.comparator ?? "") + value + (unit ? " " + unit : "");
@@ -1160,7 +1160,9 @@ export function formatCanonicalCourse(
             const denominator = amount.rateRatio?.denominator;
             const numeratorUnit = numerator?.unit ?? numerator?.code;
             const denominatorUnit = denominator?.unit ?? denominator?.code;
-            const carrierMaterial = component.syntax?.clinicalQuantity?.carrierMaterial?.text;
+            // The existing carrier quantity belongs to the first dose/rate entry.
+            const carrierMaterial = amountIndex === 0
+              ? component.syntax?.clinicalQuantity?.carrierMaterial?.text : undefined;
             const hasNumerator = numerator?.value !== undefined || Boolean(numeratorUnit);
             const hasDenominator = denominator?.value !== undefined || Boolean(denominatorUnit);
             if (hasNumerator || hasDenominator) {

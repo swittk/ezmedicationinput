@@ -179,7 +179,7 @@ function resultativeLeadAt(
 
 function actionAtDirectiveBoundary(parts: Lexeme[], index: number): boolean {
   const previous = parts[index - 1];
-  return !previous || /^[,;.!?:]$/u.test(key(previous)) ||
+  return !previous || /^[,;.!?:]$/u.test(previous.original) ||
     ACTION_SEQUENCE_MARKERS.has(key(previous)) || ACTION_COORDINATION_CONNECTORS.has(key(previous));
 }
 
@@ -5190,7 +5190,7 @@ function inferPrimaryOwnership(
     if (overlaps && overlap === undefined) { overlap = index; overlapArgument = amountIndex; }
     if (primary && action.span.end > primary.start) continue;
     const amount = action.args[amountIndex];
-    const ownsAmount = !theme || (theme.span && amount.span
+    const ownsAmount = !theme ? !primary || quantityCoveredByDose(amount, clause.dose) : (theme.span && amount.span
       ? theme.span.start <= amount.span.start && amount.span.end <= theme.span.end
       : quantityCoveredByDose(theme, amount.quantity) || !theme.relation &&
         sourceAmountLabelOffset(theme.text ?? "", amount.text ?? "") >= 0);

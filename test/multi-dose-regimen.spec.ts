@@ -4490,6 +4490,14 @@ describe("shared administration totals in current previews", () => {
         expect(text).toMatch(locale === "en" && style === "long" ? /8:00 am/u : /08:00/u);
         expect(text).toMatch(locale === "en" && style === "long" ? /8:00 pm/u : /20:00/u);
         expect(text).toContain(locale === "en" ? "except Monday" : "ยกเว้นวันจันทร์");
+        const memberTexts = text.split("; ");
+        expect(memberTexts).toHaveLength(2);
+        const morningClock = locale === "en" && style === "long" ? "8:00 am" : "08:00";
+        const eveningClock = locale === "en" && style === "long" ? "8:00 pm" : "20:00";
+        const morningText = memberTexts.find(part => part.includes(morningClock));
+        const eveningText = memberTexts.find(part => part.includes(eveningClock));
+        expect(morningText).toContain(locale === "en" ? "except Monday" : "ยกเว้นวันจันทร์");
+        expect(eveningText).not.toContain(locale === "en" ? "except Monday" : "ยกเว้นวันจันทร์");
       }
       expect(JSON.stringify(input)).toBe(before);
     }
